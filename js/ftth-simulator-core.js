@@ -2393,8 +2393,27 @@
   }
 
   function getHandholeSidebarTitle(node) {
-    /* AB_LM_Holes card: hole/pole ID only — never prefix with nested closure (C01 FH10). */
-    return formatHandholeShortLabel(node);
+    /*
+     * AB_LM_Holes evaluation title only — must mirror the map label for this entity.
+     * Standalone handhole: "H1". Handhole + closure: "H1 C1" (same pairing as map).
+     * Uses getNodeLabelEntries (map label source) so panel and map stay synchronized.
+     */
+    if (!node) return formatHandholeShortLabel(node);
+    var entries = getNodeLabelEntries(node);
+    var mapText = (entries && entries[0] && entries[0].text) ? String(entries[0].text) : '';
+    if (!mapText) return formatHandholeShortLabel(node);
+
+    /* Map stores paired names as H1C1 / FH1C1 — show as "H1 C1" / "FH1 C1". */
+    var paired = mapText.match(/^(H\d+|FH\d+)C(\d+)$/i);
+    if (paired) {
+      var holePart = paired[1].toUpperCase();
+      if (holePart.indexOf('FH') === 0) holePart = 'FH' + holePart.slice(2);
+      else holePart = 'H' + holePart.slice(1);
+      return holePart + ' C' + String(parseInt(paired[2], 10));
+    }
+
+    /* Standalone map label (H1, FH10, FAT10, etc.). */
+    return mapText;
   }
 
   function estimateCableLabelBoxPx(label) {
