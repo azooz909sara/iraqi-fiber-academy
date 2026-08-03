@@ -1686,6 +1686,9 @@
         hit = {
           type: pathEl.getAttribute('data-path-type'),
           id: pathEl.getAttribute('data-path-id'),
+          segIndex: pathEl.getAttribute('data-seg-index') != null
+            ? Number(pathEl.getAttribute('data-seg-index'))
+            : null,
         };
       } else {
         var xyPick = svgCoords(e);
@@ -1777,7 +1780,12 @@
               var dy = upEv.clientY - pick.y;
               if (Math.hypot(dx, dy) < 6) {
                 var resolved = pick.hit
-                  ? { kind: 'path', type: pick.hit.type, id: pick.hit.id }
+                  ? {
+                      kind: 'path',
+                      type: pick.hit.type,
+                      id: pick.hit.id,
+                      segIndex: pick.hit.segIndex,
+                    }
                   : b()?.resolveMapPick?.(upEv.clientX, upEv.clientY);
                 b()?.applyMapPick?.(resolved, upEv);
               }
@@ -1800,7 +1808,13 @@
           if (pathHit) {
             e.preventDefault();
             e.stopPropagation();
-            b()?.selectPath?.(pathHit.type, pathHit.id, true, { segIndex: pathHit.segIndex });
+            /* Same map-pick path as Hand tool — isolates yellow highlight + Evaluation. */
+            b()?.applyMapPick?.({
+              kind: 'path',
+              type: pathHit.type,
+              id: pathHit.id,
+              segIndex: pathHit.segIndex,
+            }, e);
             return;
           }
         }

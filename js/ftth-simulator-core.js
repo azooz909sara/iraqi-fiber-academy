@@ -2983,8 +2983,21 @@
     if (pick.kind === 'path') {
       var segmentToolsActive = getActiveCanvasTool() === 'vertex' || getActiveCanvasTool() === 'cut' ||
         !!Sim.pathEdit?.vertexToolActive || !!Sim.pathEdit?.splitToolActive;
-      selectPath(pick.type, pick.id, false, {
+      var pathType = pick.type;
+      var pathId = pick.id;
+      /* Select/Hand map picks on a cable over a trench resolve to the host excavation
+         so Evaluation isolates that trench + its exact in-trench cables. */
+      if (!segmentToolsActive && pathType === 'fiber') {
+        var cable = findPathByRef({ type: 'fiber', id: pathId });
+        var host = cable ? resolveTrenchForCable(cable) : null;
+        if (host?.id) {
+          pathType = 'excavation';
+          pathId = host.id;
+        }
+      }
+      selectPath(pathType, pathId, false, {
         segIndex: segmentToolsActive && pick.segIndex != null ? pick.segIndex : null,
+        fromSidebar: false,
       });
       return true;
     }
@@ -9646,6 +9659,22 @@
     var excavations = getExcavationsLinkedToNode(node);
     var cables = sortCablesForLaneOrder(getCablesLinkedToNode(node));
 
+    /* Path focus isolates Evaluation to that excavation/cable and its in-trench cables. */
+    if (focus.kind === 'excavation' && focus.pathId) {
+      var focusedEx = excavations.filter(function (ex) { return ex.id === focus.pathId; });
+      if (!focusedEx.length) {
+        var aloneEx = findPathByRef({ type: 'excavation', id: focus.pathId });
+        if (aloneEx) focusedEx = [aloneEx];
+      }
+      excavations = focusedEx;
+      cables = sortCablesForLaneOrder(getCablesOnTrench(focus.pathId) || []);
+    } else if (focus.kind === 'cable' && focus.pathId) {
+      var focusedCable = findPathByRef({ type: 'fiber', id: focus.pathId });
+      cables = focusedCable ? [focusedCable] : [];
+      var hostTrench = focusedCable ? resolveTrenchForCable(focusedCable) : null;
+      excavations = hostTrench ? [hostTrench] : [];
+    }
+
     var holeActive = focus.kind === 'node' || focus.kind === 'pole' ||
       focus.anchorNodeId === node.id || focus.nodeId === node.id;
     var holesHtml = renderHandholeSidebarCard(node, holeActive);
@@ -9699,7 +9728,8 @@
       renderSidebarSection('AB_LM_Holes', holesHtml, 'No handhole', 'holes') +
       renderSidebarSection('AB_LM_Excavation', excavHtml, 'No excavation', 'excav', { collapsible: true, sectionKey: 'excav' }) +
       renderSidebarSection('AB_LM_Cabel', cableHtml, 'No cables', 'cable', { collapsible: true, sectionKey: 'cable' }) +
-      renderFiberDesignSidebarSection(getFiberDesignSidebarNodeId()) +
+      /* Map-isolated path view: omit Fiber Design (parent/global) section. */
+      (Sim.ui.pathHighlightFromSidebar ? renderFiberDesignSidebarSection(getFiberDesignSidebarNodeId()) : '') +
       '</div>';
   }
 
@@ -9707,22 +9737,26 @@
     var meta = getPathSidebarMeta(Sim.selectedPath);
     if (!meta) return '<p class="prop-panel__hint text-slate-500 text-[11px]">Path not found.</p>';
     var path = meta.path;
+    var pathType = Sim.selectedPath.type;
+    var prevFocus = Sim.ui.topologyTreeFocus || {};
+    var focus = {
+      kind: pathType === 'fiber' ? 'cable' : 'excavation',
+      pathType: pathType,
+      pathId: path.id,
+      anchorNodeId: prevFocus.anchorNodeId || null,
+    };
+    Sim.ui.topologyTreeFocus = focus;
+
+    /* Map clicks: isolated path + in-trench cables only — never jump to parent handhole inventory. */
+    if (!Sim.ui.pathHighlightFromSidebar) {
+      return renderOrphanPathSidebar(path, pathType, focus);
+    }
+
     var anchorNode = getSidebarAnchorHandholeNode();
     if (anchorNode) {
-      return renderThreeSectionSidebar(anchorNode);
+      return renderThreeSectionSidebar(anchorNode, focus);
     }
-    anchorNode = resolvePrimaryHandholeForPath(Sim.selectedPath.type, path);
-    if (anchorNode) {
-      if (!Sim.ui.topologyTreeFocus) {
-        Sim.ui.topologyTreeFocus = {
-          kind: Sim.selectedPath.type === 'fiber' ? 'cable' : 'excavation',
-          pathType: Sim.selectedPath.type,
-          pathId: path.id,
-        };
-      }
-      return renderThreeSectionSidebar(anchorNode);
-    }
-    return renderOrphanPathSidebar(path, Sim.selectedPath.type);
+    return renderOrphanPathSidebar(path, pathType, focus);
   }
 
   function renderCablesInlineSection(node, heading) {
@@ -10095,10 +10129,8 @@
     }
 
     var html = renderSidebarHeader();
-    var anchorNode = getSidebarAnchorHandholeNode();
-    if (Sim.selectedPath && anchorNode) {
-      html += renderNodePropertyContent(anchorNode);
-    } else if (Sim.selectedPath) {
+    /* Selected path always owns Evaluation content (blocks parent-hole inventory jumps). */
+    if (Sim.selectedPath) {
       html += renderPathPropertyContent();
     } else if (Sim.selectedNodeId) {
       html += renderNodePropertyContent(findNode(Sim.selectedNodeId));
@@ -11527,7 +11559,12 @@
     var stored = Sim.ui?.handPathPick;
     if (Sim.ui) Sim.ui.handPathPick = null;
     if (stored?.hit?.type && stored?.hit?.id) {
-      return applyMapPick({ kind: 'path', type: stored.hit.type, id: stored.hit.id }, e);
+      return applyMapPick({
+        kind: 'path',
+        type: stored.hit.type,
+        id: stored.hit.id,
+        segIndex: stored.hit.segIndex,
+      }, e);
     }
     var clientX = e?.clientX;
     var clientY = e?.clientY;
