@@ -47,8 +47,6 @@
       labelFontSize: 11,
       labelColor: '#ffffff',
       mapRotationEnabled: false,
-      toolLabelZoomMin: 100,
-      cableLabelZoomMin: 300,
     },
     counters: {
       handhole: 0,
@@ -211,10 +209,6 @@
   var SPLITTER_VARIANTS = ['1x2', '1x4', '1x8', '1x16', '2x4', '2x8', '2x16'];
 
   var TOOLBOX = EQUIPMENT.concat(LM_HOLES_TOOLS);
-
-  function clampLabelZoomPct(pct, fallback) {
-    return global.FTTHSimulatorSettings.clampLabelZoomPct(pct, fallback);
-  }
 
   function loadPersistedSettings() {
     global.FTTHSimulatorSettings.loadPersistedSettings();
@@ -2343,45 +2337,60 @@
     });
   }
 
-  function formatHandholeShortLabel(node) {
-    if (!node) return '—';
-    var raw = node.autoName || node.fatSystemName || '';
+  function extractClosureNumber(node) {
+    if (!node) return '';
+    if (node.closureName) {
+      var paired = String(node.closureName).match(/C(\d+)/i);
+      if (paired) return String(parseInt(paired[1], 10));
+    }
+    if (node.hasClosure && node.closureCount != null) {
+      return String(parseInt(node.closureCount, 10) || 0);
+    }
+    return '';
+  }
+
+  /**
+   * Single canvas/sidebar identity for a map component.
+   * Handhole: H5 | Handhole+Closure: H5 C3 | FAT HH: FH5 | FAT pole: FAT5 only.
+   */
+  function resolveComponentMapLabel(node) {
+    if (!node) return '';
     if (node.type === 'handhole') {
-      var directH = String(raw).match(/^H(\d+)$/i);
-      if (directH) return 'H' + String(parseInt(directH[1], 10));
-      var embeddedH = String(raw).match(/H(\d+)/i);
-      if (embeddedH) return 'H' + String(parseInt(embeddedH[1], 10));
+      var hName = node.autoName ? String(node.autoName) : '';
+      if (!hName) return '';
+      if (node.hasClosure) {
+        var cNum = extractClosureNumber(node);
+        return cNum ? (hName + ' C' + cNum) : hName;
+      }
+      return hName;
     }
     if (node.type === 'fat_handhole') {
-      /* Keep FH prefix — must match map label (e.g. FH12), never strip to H12. */
-      var directFh = String(raw).match(/^FH(\d+)$/i);
-      if (directFh) return 'FH' + String(parseInt(directFh[1], 10));
-      if (node.autoName && /^FH/i.test(String(node.autoName))) {
-        return String(node.autoName);
+      if (node.hasFatPole && node.fatSystemName) return String(node.fatSystemName);
+      var fhName = node.autoName ? String(node.autoName) : '';
+      if (!fhName) return '';
+      if (node.hasClosure) {
+        var fhC = extractClosureNumber(node);
+        return fhC ? (fhName + ' C' + fhC) : fhName;
       }
-      var embeddedFh = String(raw).match(/FH(\d+)/i);
-      if (embeddedFh) return 'FH' + String(parseInt(embeddedFh[1], 10));
+      return fhName;
     }
-    return raw || getNodeAsBuiltCode(node);
+    if (node.type === 'pole_foundation') {
+      return String(node.poleName || node.autoName || '');
+    }
+    if (node.type === 'fdt') return getFdtCabinetCode(node);
+    if (node.type === 'olt') return 'OLT';
+    return node.autoName ? String(node.autoName) : '';
+  }
+
+  function formatHandholeShortLabel(node) {
+    if (!node) return '—';
+    return resolveComponentMapLabel(node) || '—';
   }
 
   function formatClosureShortLabel(node) {
     if (!node) return '';
-    if (node.closureName) {
-      var cn = String(node.closureName);
-      var paired = cn.match(/^H\d+C(\d+)$/i);
-      if (paired) return 'C' + String(parseInt(paired[1], 10)).padStart(2, '0');
-      var direct = cn.match(/^C(\d+)$/i);
-      if (direct) return 'C' + String(parseInt(direct[1], 10)).padStart(2, '0');
-      var embedded = cn.match(/C(\d+)/i);
-      if (embedded) return 'C' + String(parseInt(embedded[1], 10)).padStart(2, '0');
-      return cn;
-    }
-    if (node.hasClosure && (node.type === 'handhole' || node.type === 'fat_handhole')) {
-      var count = node.closureCount || 1;
-      return 'C' + String(parseInt(count, 10)).padStart(2, '0');
-    }
-    return '';
+    var n = extractClosureNumber(node);
+    return n ? ('C' + n) : '';
   }
 
   function getHandholePropertyLabel(node) {
@@ -2393,27 +2402,10 @@
   }
 
   function getHandholeSidebarTitle(node) {
-    /*
-     * AB_LM_Holes evaluation title only — must mirror the map label for this entity.
-     * Standalone handhole: "H1". Handhole + closure: "H1 C1" (same pairing as map).
-     * Uses getNodeLabelEntries (map label source) so panel and map stay synchronized.
-     */
-    if (!node) return formatHandholeShortLabel(node);
-    var entries = getNodeLabelEntries(node);
-    var mapText = (entries && entries[0] && entries[0].text) ? String(entries[0].text) : '';
-    if (!mapText) return formatHandholeShortLabel(node);
-
-    /* Map stores paired names as H1C1 / FH1C1 — show as "H1 C1" / "FH1 C1". */
-    var paired = mapText.match(/^(H\d+|FH\d+)C(\d+)$/i);
-    if (paired) {
-      var holePart = paired[1].toUpperCase();
-      if (holePart.indexOf('FH') === 0) holePart = 'FH' + holePart.slice(2);
-      else holePart = 'H' + holePart.slice(1);
-      return holePart + ' C' + String(parseInt(paired[2], 10));
+    if (node && node.type === 'pole_foundation') {
+      return resolveComponentMapLabel(node) || 'Pole';
     }
-
-    /* Standalone map label (H1, FH10, FAT10, etc.). */
-    return mapText;
+    return resolveComponentMapLabel(node) || '—';
   }
 
   function estimateCableLabelBoxPx(label) {
@@ -2622,17 +2614,15 @@
 
   function isUnifiedTrenchMapHighlighted(trenchId) {
     if (!trenchId) return false;
+    /* Isolated excavation selection wins over handhole topology fan-out. */
+    if (Sim.selectedPath?.type === 'excavation') {
+      return Sim.selectedPath.id === trenchId;
+    }
     if (Sim.topologyHighlight?.paths?.length) {
       for (var i = 0; i < Sim.topologyHighlight.paths.length; i++) {
         var ref = Sim.topologyHighlight.paths[i];
         if (ref.type === 'excavation' && ref.id === trenchId) return true;
       }
-    }
-    if (!Sim.selectedPath) return false;
-    if (Sim.selectedPath.type === 'excavation' && Sim.selectedPath.id === trenchId) {
-      if (Sim.ui.pathHighlightFromSidebar) return true;
-      if (Sim.selectedPath.segIndex == null) return true;
-      return false;
     }
     return false;
   }
@@ -2882,8 +2872,16 @@
 
   function findNodeBySnapLabel(label) {
     if (!label) return null;
+    var want = String(label);
     for (var i = 0; i < Sim.nodes.length; i++) {
-      if (getNodeSnapLabel(Sim.nodes[i]) === label) return Sim.nodes[i];
+      var node = Sim.nodes[i];
+      if (!node) continue;
+      if (getNodeSnapLabel(node) === want) return node;
+      if (node.autoName && String(node.autoName) === want) return node;
+      if (node.poleName && String(node.poleName) === want) return node;
+      if (node.fatSystemName && String(node.fatSystemName) === want) return node;
+      /* Closure names identify the host handhole, not a separate node. */
+      if (node.closureName && String(node.closureName) === want) return node;
     }
     return null;
   }
@@ -2899,6 +2897,7 @@
     if (!node) return '—';
     if (node.type === 'handhole') return node.autoName || 'HH';
     if (node.type === 'fat_handhole') return node.autoName || node.fatSystemName || 'FH';
+    if (node.type === 'pole_foundation') return node.poleName || node.autoName || 'P';
     if (node.type === 'fdt') return getFdtCabinetCode(node);
     if (node.autoName) return node.autoName;
     return node.type.toUpperCase();
@@ -2936,7 +2935,7 @@
       var dist = Math.hypot(xy.x - center.x, xy.y - center.y);
       if (dist > nodeHitRadius(node)) return;
       var rank = nodePickPriority(node);
-      if (rank > bestRank || (rank === bestRank && dist < bestDist)) {
+      if (dist < bestDist - 0.5 || (Math.abs(dist - bestDist) <= 0.5 && rank > bestRank)) {
         bestRank = rank;
         bestDist = dist;
         bestId = node.id;
@@ -2982,7 +2981,11 @@
       return true;
     }
     if (pick.kind === 'path') {
-      selectPath(pick.type, pick.id, true, { segIndex: pick.segIndex });
+      var segmentToolsActive = getActiveCanvasTool() === 'vertex' || getActiveCanvasTool() === 'cut' ||
+        !!Sim.pathEdit?.vertexToolActive || !!Sim.pathEdit?.splitToolActive;
+      selectPath(pick.type, pick.id, false, {
+        segIndex: segmentToolsActive && pick.segIndex != null ? pick.segIndex : null,
+      });
       return true;
     }
     return false;
@@ -3025,13 +3028,23 @@
     });
   }
 
-  function pickBestNodeIdFromCandidates(ids) {
+  function pickBestNodeIdFromCandidates(ids, clientX, clientY) {
+    var xy = (clientX != null && clientY != null) ? pointerToWorkspaceXY(clientX, clientY) : null;
     var bestId = null;
+    var bestDist = Infinity;
     var bestRank = -1;
     ids.forEach(function (id) {
       var node = findNode(id);
+      if (!node) return;
       var rank = nodePickPriority(node);
-      if (rank > bestRank) {
+      var dist = Infinity;
+      if (xy) {
+        var center = global.FTTHDrawingEngine?.getDeviceSnapCenter?.(node) || getNodeCenterXY(node);
+        if (center) dist = Math.hypot(xy.x - center.x, xy.y - center.y);
+      }
+      /* Nearest asset wins so a pole/handhole is not overridden by a neighbor with a closure. */
+      if (dist < bestDist - 0.5 || (Math.abs(dist - bestDist) <= 0.5 && rank > bestRank)) {
+        bestDist = dist;
         bestRank = rank;
         bestId = id;
       }
@@ -3070,7 +3083,7 @@
     if (geoId && ids.indexOf(geoId) < 0) ids.push(geoId);
 
     if (!ids.length) return null;
-    return pickBestNodeIdFromCandidates(ids);
+    return pickBestNodeIdFromCandidates(ids, clientX, clientY);
   }
 
   function cablePassesThroughNode(cable, node) {
@@ -3253,17 +3266,33 @@
   }
 
   function mapShortLabel(node, key) {
-    if (key === 'unified' && node.fatSystemName) return node.fatSystemName;
-    if (key === 'closure' && node.closureName) return node.closureName;
-    if (key === 'primary' && node.autoName) return node.autoName;
-    return '';
+    if (!node) return '';
+    var full = resolveComponentMapLabel(node);
+    if (key === 'unified' && node.type === 'fat_handhole' && node.hasFatPole) return full;
+    if (key === 'closure') return formatClosureShortLabel(node);
+    if (key === 'primary') return full;
+    return full;
   }
 
   function getNodeAutoLabel(node) {
-    if (!node) return '';
-    if (node.type === 'fat_handhole' && node.hasFatPole && node.fatSystemName) return node.fatSystemName;
-    if (node.autoName) return node.autoName;
-    return node.closureName || '';
+    return resolveComponentMapLabel(node);
+  }
+
+  function getNodeLabelEntries(node) {
+    if (!node) return [];
+    var text = resolveComponentMapLabel(node);
+    if (!text) return [];
+    var cls = 'equipment';
+    var key = 'primary';
+    if (node.type === 'handhole') cls = 'handhole';
+    else if (node.type === 'fat_handhole' && node.hasFatPole) {
+      cls = 'fat-system';
+      key = 'unified';
+    } else if (node.type === 'fat_handhole') cls = 'fat-handhole';
+    else if (node.type === 'fdt') cls = 'fdt';
+    else if (node.type === 'olt') cls = 'olt';
+    else if (node.type === 'pole_foundation') cls = node.hasPole ? 'pole' : 'foundation';
+    return [{ key: key, text: text, cls: cls }];
   }
 
   /** Read-only snapshot for LabelManager plugin — does not mutate Sim state. */
@@ -3956,6 +3985,11 @@
 
   function isPathInTopologyHighlight(pathType, pathId) {
     if (!Sim.topologyHighlight || !pathType || !pathId) return false;
+    /* Individual path selection isolates canvas highlight from topology fan-out. */
+    if (Sim.selectedPath &&
+        (Sim.selectedPath.type === 'excavation' || Sim.selectedPath.type === 'fiber')) {
+      return false;
+    }
     var paths = Sim.topologyHighlight.paths || [];
     for (var i = 0; i < paths.length; i++) {
       if (paths[i].type === pathType && paths[i].id === pathId) return true;
@@ -3965,40 +3999,47 @@
 
   function pathEndpointTouchesNode(path, node) {
     if (!path || !node) return false;
-    var snapLabel = getNodeSnapLabel(node);
+    var identityLabels = [];
+    if (node.autoName) identityLabels.push(String(node.autoName));
+    if (node.poleName) identityLabels.push(String(node.poleName));
+    if (node.type === 'fat_handhole' && node.fatSystemName) {
+      identityLabels.push(String(node.fatSystemName));
+    }
     var ct = path.connectedTo || {};
-    if (snapLabel && (ct.start === snapLabel || ct.end === snapLabel)) return true;
-    if (snapLabel && (path.associatedHandholeLabels || []).indexOf(snapLabel) >= 0) return true;
+    var i;
+    for (i = 0; i < identityLabels.length; i++) {
+      var snapLabel = identityLabels[i];
+      if (ct.start === snapLabel || ct.end === snapLabel) return true;
+    }
     if ((path.associatedHandholeNodeIds || []).indexOf(node.id) >= 0) return true;
-    var center = getNodeCenterXY(node);
+    var snaps = path.snapLabels || [];
+    if (snaps.length && identityLabels.length) {
+      var endSnaps = [snaps[0], snaps[snaps.length - 1]];
+      for (i = 0; i < endSnaps.length; i++) {
+        if (endSnaps[i] && identityLabels.indexOf(String(endSnaps[i])) >= 0) return true;
+      }
+    }
+    var center = global.FTTHDrawingEngine?.getDeviceSnapCenter?.(node) || getNodeCenterXY(node);
     if (!center || !path.points || path.points.length < 2) return false;
     var cs = Sim.layout?.cellSize || 50;
     var tol = cs * 0.55;
     var ends = [0, path.points.length - 1];
-    for (var i = 0; i < ends.length; i++) {
+    for (i = 0; i < ends.length; i++) {
       var pt = path.points[ends[i]];
       if (pt && Math.hypot(pt[0] - center.x, pt[1] - center.y) <= tol) return true;
     }
     return false;
   }
 
+  /** Strict: only excavations whose ends are linked to this node (not mid-path near-misses). */
   function excavationPassesThroughNode(path, node) {
-    if (!path || !node) return false;
-    if (pathEndpointTouchesNode(path, node)) return true;
-    var center = getNodeCenterXY(node);
-    if (!center || !path.points) return false;
-    var cs = Sim.layout?.cellSize || 50;
-    var tol = cs * 0.55;
-    for (var j = 0; j < path.points.length; j++) {
-      var pt = path.points[j];
-      if (pt && Math.hypot(pt[0] - center.x, pt[1] - center.y) <= tol) return true;
-    }
-    return false;
+    return pathEndpointTouchesNode(path, node);
   }
 
   function getExcavationsLinkedToNode(node) {
+    if (!node) return [];
     return (Sim.excavationPaths || []).filter(function (path) {
-      return excavationPassesThroughNode(path, node);
+      return pathEndpointTouchesNode(path, node);
     });
   }
 
@@ -6362,9 +6403,10 @@
 
   function getNodeSnapLabel(node) {
     if (!node) return null;
-    if (node.type === 'fat_handhole' && node.hasFatPole && node.fatSystemName) return node.fatSystemName;
+    /* Snap connectivity uses base IDs — not composite "H5 C3" display text. */
+    if (node.type === 'pole_foundation') return node.poleName || node.autoName || null;
     if (node.autoName) return node.autoName;
-    if (node.closureName) return node.closureName;
+    if (node.type === 'fat_handhole' && node.hasFatPole && node.fatSystemName) return node.fatSystemName;
     return null;
   }
 
@@ -6539,7 +6581,11 @@
         Sim.hoveredPath.segIndex != null) {
       return Sim.hoveredPath.segIndex;
     }
-    if (Sim.selectedPath &&
+    /* Segment overlay only while vertex/cut tools need a specific segment. */
+    var segmentToolsActive = getActiveCanvasTool() === 'vertex' || getActiveCanvasTool() === 'cut' ||
+      !!Sim.pathEdit?.vertexToolActive || !!Sim.pathEdit?.splitToolActive;
+    if (segmentToolsActive &&
+        Sim.selectedPath &&
         Sim.selectedPath.type === pathType && Sim.selectedPath.id === pathId &&
         !Sim.ui.pathHighlightFromSidebar &&
         Sim.selectedPath.segIndex != null) {
@@ -6644,27 +6690,36 @@
     if (hasActiveDrawingStroke() || isCablePenDrawActive()) return;
     var preserveVertex = getActiveCanvasTool() === 'vertex' || Sim.pathEdit?.vertexToolActive;
     var preserveCut = getActiveCanvasTool() === 'cut' || Sim.pathEdit?.splitToolActive;
-    var anchorNode = getSidebarAnchorHandholeNode();
+    var fromSidebar = !!options.fromSidebar;
+    var anchorNode = fromSidebar ? getSidebarAnchorHandholeNode() : null;
+    /* Keep Evaluation hole context when focusing a linked path from the sidebar,
+       but always clear topology fan-out so the chosen path highlights alone. */
+    var keepSidebarAnchor = !!(fromSidebar && anchorNode);
 
-    if (!anchorNode) {
-      clearTopologyHighlight();
-      applyTopologyHighlightClasses();
+    clearTopologyHighlight();
+    applyTopologyHighlightClasses();
+    if (!keepSidebarAnchor) {
       Sim.selectedNodeId = null;
       document.querySelectorAll('.placed-node.selected').forEach(function (el) { el.classList.remove('selected'); });
+    }
+
+    var segIndex = null;
+    if ((preserveVertex || preserveCut) && options.segIndex != null) {
+      segIndex = options.segIndex;
     }
 
     Sim.selectedPath = {
       type: pathType,
       id: pathId,
-      segIndex: options.segIndex != null ? options.segIndex : null,
+      segIndex: segIndex,
     };
     Sim.ui.topologyTreeFocus = {
       kind: pathType === 'fiber' ? 'cable' : 'excavation',
       pathType: pathType,
       pathId: pathId,
-      anchorNodeId: anchorNode ? anchorNode.id : null,
+      anchorNodeId: keepSidebarAnchor ? anchorNode.id : null,
     };
-    Sim.ui.pathHighlightFromSidebar = !!options.fromSidebar;
+    Sim.ui.pathHighlightFromSidebar = fromSidebar;
     setHoveredPath(null, null);
     hideContextMenu();
 
@@ -6674,7 +6729,7 @@
     if (preserveVertex && Sim.pathEdit.selectedVertexIndex == null) Sim.pathEdit.selectedVertexIndex = 0;
 
     if (!preserveVertex && !preserveCut) {
-      if (!options.fromSidebar) {
+      if (!fromSidebar) {
         Sim.ui.sidebarEditMode = false;
       }
     }
@@ -6853,6 +6908,9 @@
       getDrawingCanvas: getDrawingCanvas,
       ensureGlobalDrawingLayer: ensureGlobalDrawingLayer,
       ensureMapLabelsLayer: ensureMapLabelsLayer,
+      bindDraggableLabels: bindDraggableLabels,
+      attachNodeLabels: attachNodeLabels,
+      resolveComponentMapLabel: resolveComponentMapLabel,
       pointerEventToCanvasXY: pointerEventToCanvasXY,
       getSVGCoordinates: getSVGCoordinates,
       pointerClientToCanvasXY: pointerClientToCanvasXY,
@@ -7133,15 +7191,19 @@
         parentTrenchHighlight = false;
       }
       var trenchMapHighlight = !!(meta && meta.trenchMapHighlight);
-      if (meta?.type === 'excavation' && activeSegIndex != null && !isSidebarExcavHighlight) {
+      /* Hover segment overlay may dim full trench; keep selected excavation fully yellow. */
+      if (meta?.type === 'excavation' && activeSegIndex != null && !isSidebarExcavHighlight && !isSelected) {
         trenchMapHighlight = false;
       }
       var useSegmentHighlight = activeSegIndex != null &&
         (meta?.type === 'fiber' || meta?.type === 'excavation') &&
-        (isSegmentHighlight || isHovered || isMapPathSelection);
+        (isSegmentHighlight || isHovered || (isMapPathSelection && !!isActiveToolEdit));
       var isMapYellowHighlight = !useSegmentHighlight && (isMapPathSelection || isNetworkHighlight ||
         trenchMapHighlight || isSidebarExcavHighlight || parentTrenchHighlight) && !isSidebarCableHighlight;
       if (isSegmentHighlight) {
+        isMapYellowHighlight = true;
+      }
+      if (meta?.type === 'excavation' && isSelected && !isActiveToolEdit && !isSidebarCableHighlight) {
         isMapYellowHighlight = true;
       }
 
@@ -7290,8 +7352,7 @@
         : (ep.cornerRadii || {});
       var trenchD = pointsToD(ep.points, renderCornerRadii);
       var excavSegIdx = getPathHighlightSegment('excavation', ep.id);
-      var trenchMapHighlight = isUnifiedTrenchMapHighlighted(ep.id) &&
-        !(excavSegIdx != null && !Sim.ui.pathHighlightFromSidebar);
+      var trenchMapHighlight = isUnifiedTrenchMapHighlighted(ep.id);
       var excavMeta = { type: 'excavation', id: ep.id, trenchMapHighlight: trenchMapHighlight };
       var excavCls = 'draw-path draw-path--excav draw-path--unified-trench excav-path-line--' + ep.kind;
       var excavStroke = excavationStrokeForKind(ep.kind);
@@ -7539,13 +7600,15 @@
   function fatPoleStackHtml(node) {
     var parts = [];
     parts.push(fatPoleHtml(node));
-    if (node && node.fatSystemName) {
-      var name = escapeSidebarHtml(node.fatSystemName);
-      parts.push(
-        '<span class="element-label element-label--fat-system field-node-label field-node-label--map ' +
-        'field-node-label--fat-system pole-label" data-label-key="unified" role="button" tabindex="-1" ' +
-        'aria-label="' + name + '">' + name + '</span>'
-      );
+    if (node && node.hasFatPole) {
+      var name = escapeSidebarHtml(resolveComponentMapLabel(node) || node.fatSystemName || '');
+      if (name) {
+        parts.push(
+          '<span class="element-label element-label--fat-system field-node-label field-node-label--map ' +
+          'field-node-label--fat-system pole-label" data-label-key="unified" role="button" tabindex="-1" ' +
+          'aria-label="' + name + '">' + name + '</span>'
+        );
+      }
     }
     return '<div class="fat-pole-stack">' + parts.join('') + '</div>';
   }
@@ -7866,59 +7929,41 @@
       });
     }
 
+    /* Only the FAT pole stack keeps an on-node label (rotates with the pole).
+       All other component IDs are rendered once by LabelManager overlay. */
     getNodeLabelEntries(node).forEach(function (entry) {
-      if (usesPoleCenterLabel(node, entry.key)) {
-        var preset = placedEl.querySelector('.fat-pole-stack .element-label[data-label-key="unified"]');
-        if (preset) {
-          preset.textContent = entry.text;
-          preset.setAttribute('aria-label', entry.text);
-          applyElementLabelStyle(preset, node, entry.key);
-          if (Sim.settings.labelFontSize) preset.style.fontSize = Sim.settings.labelFontSize + 'px';
-          if (Sim.settings.labelColor) preset.style.color = Sim.settings.labelColor;
-          var presetStack = preset.closest('.fat-pole-stack') || preset.parentElement;
-          bindLabelPointer(node, entry, preset, presetStack);
-          return;
-        }
+      if (!usesPoleCenterLabel(node, entry.key)) return;
+      var preset = placedEl.querySelector('.fat-pole-stack .element-label[data-label-key="unified"]');
+      if (preset) {
+        preset.textContent = entry.text;
+        preset.setAttribute('aria-label', entry.text);
+        applyElementLabelStyle(preset, node, entry.key);
+        preset.style.fontSize = Math.max(10, Sim.settings.labelFontSize || 11) + 'px';
+        if (Sim.settings.labelColor) preset.style.color = Sim.settings.labelColor;
+        var presetStack = preset.closest('.fat-pole-stack') || preset.parentElement;
+        bindLabelPointer(node, entry, preset, presetStack);
+        return;
       }
+      var marker = placedEl.querySelector('.fat-rigid-marker');
+      var stack = marker && marker.querySelector('.fat-pole-stack');
+      var mount = stack || marker || anchor;
       var lbl = document.createElement('span');
-      lbl.className = 'element-label element-label--' + entry.cls +
-        ' field-node-label field-node-label--map field-node-label--' + entry.cls;
-      lbl.setAttribute('data-label-key', entry.key);
+      lbl.className = 'element-label element-label--fat-system field-node-label field-node-label--map ' +
+        'field-node-label--fat-system pole-label';
+      lbl.setAttribute('data-label-key', 'unified');
       lbl.setAttribute('role', 'button');
       lbl.setAttribute('tabindex', '-1');
       lbl.setAttribute('aria-label', entry.text);
       lbl.textContent = entry.text;
-
-      var mount = anchor;
-      var dragAnchor = anchor;
-      if (usesPoleCenterLabel(node, entry.key)) {
-        var marker = placedEl.querySelector('.fat-rigid-marker');
-        var stack = marker && marker.querySelector('.fat-pole-stack');
-        if (stack) {
-          mount = stack;
-          dragAnchor = stack;
-        } else if (marker) {
-          mount = marker;
-          dragAnchor = marker;
-        }
-        if (mount) {
-          lbl.classList.add('pole-label');
-          lbl.classList.remove('field-map-entity__label--upright');
-          lbl.classList.remove('pole-label--column-spin');
-        }
-      }
-
-      if (usesPoleCenterLabel(node, entry.key) && mount.classList.contains('fat-pole-stack')) {
-        mount.insertBefore(lbl, mount.firstChild);
-      } else if (usesPoleCenterLabel(node, entry.key) && mount.classList.contains('fat-rigid-marker')) {
+      if (mount.classList.contains('fat-pole-stack') || mount.classList.contains('fat-rigid-marker')) {
         mount.insertBefore(lbl, mount.firstChild);
       } else {
         mount.appendChild(lbl);
       }
       applyElementLabelStyle(lbl, node, entry.key);
-      if (Sim.settings.labelFontSize) lbl.style.fontSize = Sim.settings.labelFontSize + 'px';
+      lbl.style.fontSize = Math.max(10, Sim.settings.labelFontSize || 11) + 'px';
       if (Sim.settings.labelColor) lbl.style.color = Sim.settings.labelColor;
-      bindLabelPointer(node, entry, lbl, dragAnchor);
+      bindLabelPointer(node, entry, lbl, mount);
     });
 
     var rigidMarker = placedEl.querySelector('.fat-rigid-marker');
@@ -7927,35 +7972,6 @@
 
   function bindDraggableLabels(placedEl, node) {
     attachNodeLabels(placedEl, node);
-  }
-
-  function getNodeLabelEntries(node) {
-    var entries = [];
-    if (node.type === 'handhole') {
-      if (node.hasClosure) {
-        var cl = mapShortLabel(node, 'closure');
-        if (cl) entries.push({ key: 'closure', text: cl, cls: 'closure' });
-      } else {
-        var hh = mapShortLabel(node, 'primary');
-        if (hh) entries.push({ key: 'primary', text: hh, cls: 'handhole' });
-      }
-    } else if (node.type === 'fat_handhole') {
-      if (node.hasFatPole && node.fatSystemName) {
-        entries.push({ key: 'unified', text: node.fatSystemName, cls: 'fat-system' });
-      } else {
-        var fhLabel = mapShortLabel(node, 'primary');
-        if (fhLabel) entries.push({ key: 'primary', text: fhLabel, cls: 'fat-handhole' });
-      }
-    } else if (node.type === 'fdt') {
-      var cab = mapShortLabel(node, 'primary');
-      if (cab) entries.push({ key: 'primary', text: cab, cls: 'fdt' });
-      if (node.fatSplitter) {
-        entries.push({ key: 'splitter', text: node.fatSplitter, cls: 'splitter' });
-      }
-    } else if (node.type === 'olt') {
-      entries.push({ key: 'primary', text: 'OLT', cls: 'olt' });
-    }
-    return entries;
   }
 
   function handholeHostHtml(node, size) {
@@ -8957,8 +8973,8 @@
       if (isQuickNestToolSelected() && isHandholeKindNode(node) && e.detail >= 2) return;
       e.stopPropagation();
       if (canPenDraw() && e.detail >= 2) return;
-      var resolvedId = pickPlacedNodeUnderPointer(e.clientX, e.clientY) || node.id;
-      onPlacedNodeClick(resolvedId, e);
+      /* Use the clicked node's own id — do not re-resolve to a neighboring closure host. */
+      onPlacedNodeClick(node.id, e);
     });
     m.addEventListener('dblclick', function (e) {
       if (tryQuickNestOnHandholeDblClick(node, e)) return;
@@ -9630,7 +9646,9 @@
     var excavations = getExcavationsLinkedToNode(node);
     var cables = sortCablesForLaneOrder(getCablesLinkedToNode(node));
 
-    var holesHtml = renderHandholeSidebarCard(node, focus.kind === 'node' || focus.anchorNodeId === node.id);
+    var holeActive = focus.kind === 'node' || focus.kind === 'pole' ||
+      focus.anchorNodeId === node.id || focus.nodeId === node.id;
+    var holesHtml = renderHandholeSidebarCard(node, holeActive);
 
     var excavHtml = '';
     excavations.forEach(function (ex) {
@@ -9736,7 +9754,8 @@
   function renderNodePropertyContent(node) {
     if (!node) return '<p class="prop-panel__hint text-slate-500 text-[11px]">Component not found.</p>';
     if (node.type === 'fat_handhole' && node.hasFatPole) {
-      return renderLmPoleUnifiedPanel(node);
+      /* Same linked excav/cable filter as handholes — pole focus still scopes to this node only. */
+      return renderThreeSectionSidebar(node);
     }
     if (node.type === 'pole_foundation') {
       return renderPoleFoundationUnifiedPanel(node);
@@ -9839,7 +9858,7 @@
     html += '<div class="flex justify-between"><dt class="text-slate-500">Element</dt><dd class="text-white font-mono">' +
       (node.hasPole ? 'Pole' : 'Pole Foundation') + '</dd></div>';
     html += '<div class="flex justify-between"><dt class="text-slate-500">Foundation</dt><dd class="text-slate-300 font-mono">' +
-      escapeSidebarHtml(node.autoName || getNodeAsBuiltCode(node)) + '</dd></div>';
+      escapeSidebarHtml(node.poleName || node.autoName || getNodeAsBuiltCode(node)) + '</dd></div>';
     html += '<div class="flex justify-between"><dt class="text-slate-500">Pole Tower</dt><dd class="text-slate-200">' +
       (node.hasPole ? 'Mounted' : 'Not mounted') + '</dd></div>';
     if (node.hasClosure) {
@@ -9853,6 +9872,14 @@
     html += '<div class="flex justify-between"><dt class="text-slate-500">Grid Cell</dt><dd class="text-white font-mono">' + node.col + ',' + node.row + '</dd></div>';
     html += '<div class="flex justify-between"><dt class="text-slate-500">Locked</dt><dd class="text-white">' + (node.locked ? 'Yes' : 'No') + '</dd></div>';
     html += '</dl>';
+    var excavHtml = '';
+    getExcavationsLinkedToNode(node).forEach(function (ex) {
+      excavHtml += renderExcavationSidebarCard(ex, false);
+    });
+    html += renderSidebarSection('AB_LM_Excavation', excavHtml, 'No excavation linked to this pole', 'excav', {
+      collapsible: true,
+      sectionKey: 'excav',
+    });
     html += renderCablesInlineSection(node, 'Cables through pole foundation');
     html += '</div>';
     return html;
@@ -10712,11 +10739,6 @@
   function applyLayoutSettingsFromStorage() {
     applyLabelFontSize();
     applyLabelColor();
-    applyLabelZoomVisibility();
-  }
-
-  function applyLabelZoomVisibility() {
-    global.FTTHSimulatorSettings.applyLabelZoomVisibility();
   }
 
   function setMapRotation(deg) {
@@ -10769,6 +10791,8 @@
       if (container) container.classList.toggle('ftth-low-zoom-performance', lowZoom);
       applyMapContainerTransform(container, wrap, panX, panY, z, rot, rotationEnabled);
       if (lbl) lbl.textContent = Math.round(z * 100) + '%';
+      if (container) container.style.setProperty('--ftth-map-zoom', String(z));
+      if (wrap) wrap.style.setProperty('--ftth-map-zoom', String(z));
       syncGisStatusBarScale();
       syncGisStatusBarZoom();
       syncGisStatusBarRotation();
@@ -11846,8 +11870,6 @@
     var panel = document.getElementById('sim-settings-panel');
     var labelSlider = document.getElementById('settings-label-size');
     var labelColor = document.getElementById('settings-label-color');
-    var toolZoomSlider = document.getElementById('settings-tool-label-zoom');
-    var cableZoomSlider = document.getElementById('settings-cable-label-zoom');
     var saveSettingsBtn = document.getElementById('settings-save');
     var rotToggle = document.getElementById('settings-map-rotation');
     var rotControls = document.getElementById('settings-rotation-controls');
@@ -11901,26 +11923,6 @@
       }
       labelColor.addEventListener('input', onLabelColorChange);
       labelColor.addEventListener('change', onLabelColorChange);
-    }
-
-    if (toolZoomSlider) {
-      toolZoomSlider.value = String(Sim.settings.toolLabelZoomMin || 100);
-      function onToolZoomChange() {
-        Sim.settings.toolLabelZoomMin = clampLabelZoomPct(toolZoomSlider.value, 100);
-        applyLabelZoomVisibility();
-      }
-      toolZoomSlider.addEventListener('input', onToolZoomChange);
-      toolZoomSlider.addEventListener('change', onToolZoomChange);
-    }
-
-    if (cableZoomSlider) {
-      cableZoomSlider.value = String(Sim.settings.cableLabelZoomMin || 300);
-      function onCableZoomChange() {
-        Sim.settings.cableLabelZoomMin = clampLabelZoomPct(cableZoomSlider.value, 300);
-        applyLabelZoomVisibility();
-      }
-      cableZoomSlider.addEventListener('input', onCableZoomChange);
-      cableZoomSlider.addEventListener('change', onCableZoomChange);
     }
 
     if (saveSettingsBtn) {
@@ -12186,15 +12188,13 @@
               y: center.y,
               radius: radius,
               type: node.type,
-              autoName: node.autoName || node.closureName || node.fatSystemName || null,
+              autoName: node.autoName || node.poleName || node.fatSystemName || null,
               isPole: node.type === 'pole_foundation' || !!(node.type === 'fat_handhole' && node.hasFatPole),
             };
           },
           getOverlayHost: getWorkspaceContainer,
           getLabelColor: function () { return Sim.settings?.labelColor || '#ffffff'; },
           getLabelFontSize: function () { return Sim.settings?.labelFontSize || 11; },
-          getToolLabelZoomMinPct: function () { return Sim.settings?.toolLabelZoomMin || 100; },
-          getCableLabelZoomMinPct: function () { return Sim.settings?.cableLabelZoomMin || 300; },
         });
       }
       if (global.FTTHFiberDesignUI?.init) {
@@ -12346,9 +12346,11 @@
     }
     var best = null;
     var bestD = Infinity;
+    var maxCells = 2.5;
     (Sim.nodes || []).forEach(function (n) {
       if (!n || n.type !== 'fat_handhole') return;
       var d = Math.hypot((n.col || 0) - (node.col || 0), (n.row || 0) - (node.row || 0));
+      if (d > maxCells) return;
       if (d < bestD) {
         bestD = d;
         best = n;
