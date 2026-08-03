@@ -7198,11 +7198,9 @@
       var isSidebarCableHighlight = isSidebarSelection && meta.type === 'fiber';
       var isSidebarExcavHighlight = isSidebarSelection && meta.type === 'excavation';
       var activeSegIndex = meta ? getPathHighlightSegment(meta.type, meta.id) : null;
-      var parentTrenchHighlight = !!(meta?.parentTrenchId &&
-        isUnifiedTrenchMapHighlighted(meta.parentTrenchId) && meta.type === 'fiber');
-      if (meta?.type === 'fiber' && activeSegIndex != null && !isSidebarCableHighlight) {
-        parentTrenchHighlight = false;
-      }
+      /* Cables never inherit yellow from a selected/highlighted host trench.
+         Cable color changes only via explicit sidebar selection (red). */
+      var parentTrenchHighlight = false;
       var trenchMapHighlight = !!(meta && meta.trenchMapHighlight);
       /* Hover segment overlay may dim full trench; keep selected excavation fully yellow. */
       if (meta?.type === 'excavation' && activeSegIndex != null && !isSidebarExcavHighlight && !isSelected) {
@@ -7211,6 +7209,10 @@
       var useSegmentHighlight = activeSegIndex != null &&
         (meta?.type === 'fiber' || meta?.type === 'excavation') &&
         (isSegmentHighlight || isHovered || (isMapPathSelection && !!isActiveToolEdit));
+      /* Sidebar / selected excavation: always full-path yellow — never segment-dim the rest. */
+      if (!isSegmentHighlight && isSelected && meta?.type === 'excavation' && !isActiveToolEdit) {
+        useSegmentHighlight = false;
+      }
       var isMapYellowHighlight = !useSegmentHighlight && (isMapPathSelection || isNetworkHighlight ||
         trenchMapHighlight || isSidebarExcavHighlight || parentTrenchHighlight) && !isSidebarCableHighlight;
       if (isSegmentHighlight) {
@@ -7218,6 +7220,10 @@
       }
       if (meta?.type === 'excavation' && isSelected && !isActiveToolEdit && !isSidebarCableHighlight) {
         isMapYellowHighlight = true;
+      }
+      /* Hard rule: cables are never map-yellow — only sidebar red or active edit color. */
+      if (meta?.type === 'fiber' && !isActiveToolEdit) {
+        isMapYellowHighlight = false;
       }
 
       var path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -7260,7 +7266,11 @@
       path.setAttribute('filter', 'none');
       path.setAttribute('stroke-linecap', 'butt');
       path.setAttribute('stroke-linejoin', 'miter');
-      var pathOpacity = opacity != null && opacity !== '' ? opacity : 1;
+      /* Selection must never dim sibling pathways — committed paths stay fully opaque. */
+      var pathOpacity = 1;
+      if (dashed || (className && className.indexOf('draw-path--draft') >= 0)) {
+        pathOpacity = opacity != null && opacity !== '' ? opacity : 0.8;
+      }
       path.setAttribute('opacity', String(pathOpacity));
       if (meta && !dashed && !hasActiveDrawingStroke() && !isCablePenDrawActive()) {
         var hit = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -9659,20 +9669,23 @@
     var excavations = getExcavationsLinkedToNode(node);
     var cables = sortCablesForLaneOrder(getCablesLinkedToNode(node));
 
-    /* Path focus isolates Evaluation to that excavation/cable and its in-trench cables. */
-    if (focus.kind === 'excavation' && focus.pathId) {
-      var focusedEx = excavations.filter(function (ex) { return ex.id === focus.pathId; });
-      if (!focusedEx.length) {
-        var aloneEx = findPathByRef({ type: 'excavation', id: focus.pathId });
-        if (aloneEx) focusedEx = [aloneEx];
+    /* Path focus isolates Evaluation only for map picks.
+       Sidebar focus keeps the full linked inventory; only the active card is marked. */
+    if (!Sim.ui.pathHighlightFromSidebar) {
+      if (focus.kind === 'excavation' && focus.pathId) {
+        var focusedEx = excavations.filter(function (ex) { return ex.id === focus.pathId; });
+        if (!focusedEx.length) {
+          var aloneEx = findPathByRef({ type: 'excavation', id: focus.pathId });
+          if (aloneEx) focusedEx = [aloneEx];
+        }
+        excavations = focusedEx;
+        cables = sortCablesForLaneOrder(getCablesOnTrench(focus.pathId) || []);
+      } else if (focus.kind === 'cable' && focus.pathId) {
+        var focusedCable = findPathByRef({ type: 'fiber', id: focus.pathId });
+        cables = focusedCable ? [focusedCable] : [];
+        var hostTrench = focusedCable ? resolveTrenchForCable(focusedCable) : null;
+        excavations = hostTrench ? [hostTrench] : [];
       }
-      excavations = focusedEx;
-      cables = sortCablesForLaneOrder(getCablesOnTrench(focus.pathId) || []);
-    } else if (focus.kind === 'cable' && focus.pathId) {
-      var focusedCable = findPathByRef({ type: 'fiber', id: focus.pathId });
-      cables = focusedCable ? [focusedCable] : [];
-      var hostTrench = focusedCable ? resolveTrenchForCable(focusedCable) : null;
-      excavations = hostTrench ? [hostTrench] : [];
     }
 
     var holeActive = focus.kind === 'node' || focus.kind === 'pole' ||

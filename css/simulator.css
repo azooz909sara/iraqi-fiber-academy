@@ -7125,7 +7125,7 @@ html:fullscreen #main-layout {
 }
 
 #global-drawing-layer path.draw-path--unified-trench.draw-path-visible {
-  opacity: 1;
+  opacity: 1 !important;
   stroke-linecap: butt;
   stroke-linejoin: round;
 }
@@ -7265,7 +7265,15 @@ body.ftth-low-zoom-performance .map-label {
 }
 
 #global-drawing-layer path.draw-path--excav.draw-path-visible {
-  opacity: 1;
+  opacity: 1 !important;
+}
+
+/* Selection highlight must not dim/fade unselected pathways. */
+#canvas-wrapper.path-edit-active #global-drawing-layer path.draw-path-visible,
+#canvas-wrapper.path-edit-active #global-drawing-layer path.draw-path--cable,
+#canvas-wrapper.path-edit-active #global-drawing-layer path.draw-path--excav,
+#global-drawing-layer path.draw-path-visible:not(.draw-path--draft) {
+  opacity: 1 !important;
 }
 
 .map-label--cable {
@@ -7670,7 +7678,7 @@ body.ftth-low-zoom-performance .map-label {
 }
 
 .draw-path-visible.draw-path--hover:not(.draw-path--map-highlight):not(.draw-path--topology-highlight):not(.draw-path--sidebar-cable-highlight) {
-  opacity: 0.92;
+  opacity: 1 !important;
 }
 
 .draw-path--active-edit {
