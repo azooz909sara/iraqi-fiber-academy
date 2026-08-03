@@ -2346,13 +2346,21 @@
   function formatHandholeShortLabel(node) {
     if (!node) return '—';
     var raw = node.autoName || node.fatSystemName || '';
-    if (node.type === 'handhole' || node.type === 'fat_handhole') {
-      var direct = String(raw).match(/^H(\d+)$/i);
-      if (direct) return 'H' + String(parseInt(direct[1], 10));
-      var fat = String(raw).match(/^FH(\d+)$/i);
-      if (fat) return 'H' + String(parseInt(fat[1], 10));
-      var embedded = String(raw).match(/H(\d+)/i);
-      if (embedded) return 'H' + String(parseInt(embedded[1], 10));
+    if (node.type === 'handhole') {
+      var directH = String(raw).match(/^H(\d+)$/i);
+      if (directH) return 'H' + String(parseInt(directH[1], 10));
+      var embeddedH = String(raw).match(/H(\d+)/i);
+      if (embeddedH) return 'H' + String(parseInt(embeddedH[1], 10));
+    }
+    if (node.type === 'fat_handhole') {
+      /* Keep FH prefix — must match map label (e.g. FH12), never strip to H12. */
+      var directFh = String(raw).match(/^FH(\d+)$/i);
+      if (directFh) return 'FH' + String(parseInt(directFh[1], 10));
+      if (node.autoName && /^FH/i.test(String(node.autoName))) {
+        return String(node.autoName);
+      }
+      var embeddedFh = String(raw).match(/FH(\d+)/i);
+      if (embeddedFh) return 'FH' + String(parseInt(embeddedFh[1], 10));
     }
     return raw || getNodeAsBuiltCode(node);
   }
@@ -2385,10 +2393,8 @@
   }
 
   function getHandholeSidebarTitle(node) {
-    var handhole = formatHandholeShortLabel(node);
-    var closure = formatClosureShortLabel(node);
-    if (closure) return closure + ' ' + handhole;
-    return handhole;
+    /* AB_LM_Holes card: hole/pole ID only — never prefix with nested closure (C01 FH10). */
+    return formatHandholeShortLabel(node);
   }
 
   function estimateCableLabelBoxPx(label) {
