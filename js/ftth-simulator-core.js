@@ -104,6 +104,9 @@
       pathHighlightFromSidebar: false,
       sidebarEditMode: false,
       sidebarCollapsed: false,
+      toolboxWidth: 250,
+      evalPanelWidth: 256,
+      sidePanelResizeBound: false,
       sidebarSectionCollapsed: { excav: false, cable: false },
       sidebarEventsBound: false,
       splitterVariant: '1x8',
@@ -10990,6 +10993,7 @@
     if (!toolbox) return;
     toolbox.classList.toggle('collapsed', !!Sim.ui.toolboxCollapsed);
     syncPanelToggleArrows();
+    syncSidePanelResizeHandles();
   }
 
   function toggleToolboxCollapsed(e) {
@@ -11009,6 +11013,7 @@
     evalPanel.classList.toggle('collapsed', !!Sim.ui.evalCollapsed);
     if (canvasMain) canvasMain.classList.toggle('eval-is-hidden', !!Sim.ui.evalCollapsed);
     syncPanelToggleArrows();
+    syncSidePanelResizeHandles();
     requestAnimationFrame(applyMapTransform);
   }
 
@@ -11021,6 +11026,7 @@
       btn.textContent = Sim.ui.sidebarCollapsed ? '▶' : '◀';
       btn.setAttribute('aria-label', Sim.ui.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
     }
+    syncSidePanelResizeHandles();
     requestAnimationFrame(applyMapTransform);
   }
 
@@ -11043,8 +11049,183 @@
     }
     applyToolboxCollapseState();
     applyEvaluationPanelCollapseState();
+    bindSidePanelResize();
     installWorkspaceViewportPivotObserver();
     Sim.ui.panelTogglesBound = true;
+  }
+
+  var SIDE_PANEL_LAYOUT_KEY = 'ftth-sidebar-layout';
+  var TOOLBOX_WIDTH_MIN = 180;
+  var TOOLBOX_WIDTH_MAX = 520;
+  var TOOLBOX_WIDTH_DEFAULT = 250;
+  var TOOLBOX_WIDTH_COLLAPSED = 60;
+  var EVAL_WIDTH_MIN = 200;
+  var EVAL_WIDTH_MAX = 520;
+  var EVAL_WIDTH_DEFAULT = 256;
+  var EVAL_WIDTH_SIDEBAR_COLLAPSED = 44;
+  var SIDE_PANEL_MIN_CANVAS = 280;
+  var sidePanelResizeState = null;
+
+  function clampSidePanelWidth(value, min, max) {
+    return Math.max(min, Math.min(max, Math.round(value)));
+  }
+
+  function getEffectiveToolboxWidth() {
+    if (Sim.ui.toolboxCollapsed) return TOOLBOX_WIDTH_COLLAPSED;
+    return Sim.ui.toolboxWidth || TOOLBOX_WIDTH_DEFAULT;
+  }
+
+  function getEffectiveEvalWidth() {
+    if (Sim.ui.evalCollapsed) return 0;
+    if (Sim.ui.sidebarCollapsed) return EVAL_WIDTH_SIDEBAR_COLLAPSED;
+    return Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT;
+  }
+
+  function getSidePanelResizeLimits(resizing) {
+    var layout = document.getElementById('main-layout');
+    var totalW = layout ? layout.clientWidth : window.innerWidth;
+    var evalW = getEffectiveEvalWidth();
+    var toolboxW = getEffectiveToolboxWidth();
+    if (resizing === 'toolbox') {
+      toolboxW = Sim.ui.toolboxWidth || TOOLBOX_WIDTH_DEFAULT;
+    } else if (resizing === 'eval') {
+      evalW = Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT;
+    }
+    return {
+      maxToolboxW: Math.min(TOOLBOX_WIDTH_MAX, totalW - evalW - SIDE_PANEL_MIN_CANVAS),
+      maxEvalW: Math.min(EVAL_WIDTH_MAX, totalW - toolboxW - SIDE_PANEL_MIN_CANVAS),
+    };
+  }
+
+  function loadSidePanelWidthsFromStorage() {
+    try {
+      var raw = localStorage.getItem(SIDE_PANEL_LAYOUT_KEY);
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      if (data && isFinite(data.toolboxWidth)) {
+        Sim.ui.toolboxWidth = clampSidePanelWidth(data.toolboxWidth, TOOLBOX_WIDTH_MIN, TOOLBOX_WIDTH_MAX);
+      }
+      if (data && isFinite(data.evalPanelWidth)) {
+        Sim.ui.evalPanelWidth = clampSidePanelWidth(data.evalPanelWidth, EVAL_WIDTH_MIN, EVAL_WIDTH_MAX);
+      }
+    } catch (err) { /* ignore */ }
+  }
+
+  function persistSidePanelWidths() {
+    try {
+      localStorage.setItem(SIDE_PANEL_LAYOUT_KEY, JSON.stringify({
+        toolboxWidth: Sim.ui.toolboxWidth || TOOLBOX_WIDTH_DEFAULT,
+        evalPanelWidth: Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT,
+      }));
+    } catch (err) { /* ignore */ }
+  }
+
+  function syncSidePanelResizeHandles() {
+    var tbHandle = document.getElementById('toolbox-resize-handle');
+    var evHandle = document.getElementById('eval-resize-handle');
+    if (tbHandle) tbHandle.hidden = !!Sim.ui.toolboxCollapsed;
+    if (evHandle) evHandle.hidden = !!Sim.ui.evalCollapsed || !!Sim.ui.sidebarCollapsed;
+  }
+
+  function applySidePanelWidths() {
+    var limits = getSidePanelResizeLimits();
+    Sim.ui.toolboxWidth = clampSidePanelWidth(
+      Sim.ui.toolboxWidth || TOOLBOX_WIDTH_DEFAULT,
+      TOOLBOX_WIDTH_MIN,
+      limits.maxToolboxW
+    );
+    Sim.ui.evalPanelWidth = clampSidePanelWidth(
+      Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT,
+      EVAL_WIDTH_MIN,
+      limits.maxEvalW
+    );
+    document.body.style.setProperty('--ftth-toolbox-width', Sim.ui.toolboxWidth + 'px');
+    document.body.style.setProperty('--ftth-eval-panel-width', Sim.ui.evalPanelWidth + 'px');
+    syncSidePanelResizeHandles();
+  }
+
+  function ensureSidePanelResizeHandle(panel, side) {
+    var handleId = side === 'toolbox' ? 'toolbox-resize-handle' : 'eval-resize-handle';
+    var existing = document.getElementById(handleId);
+    if (existing) return existing;
+    var handle = document.createElement('div');
+    handle.id = handleId;
+    handle.className = 'side-panel-resize-handle side-panel-resize-handle--' + side;
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', side === 'toolbox' ? 'Resize toolbox width' : 'Resize evaluation panel width');
+    panel.appendChild(handle);
+    return handle;
+  }
+
+  function onSidePanelResizeMove(e) {
+    if (!sidePanelResizeState) return;
+    var dx = e.clientX - sidePanelResizeState.startX;
+    var limits = getSidePanelResizeLimits(sidePanelResizeState.which);
+    if (sidePanelResizeState.which === 'toolbox') {
+      Sim.ui.toolboxWidth = clampSidePanelWidth(
+        sidePanelResizeState.startToolboxW + dx,
+        TOOLBOX_WIDTH_MIN,
+        limits.maxToolboxW
+      );
+    } else {
+      Sim.ui.evalPanelWidth = clampSidePanelWidth(
+        sidePanelResizeState.startEvalW - dx,
+        EVAL_WIDTH_MIN,
+        limits.maxEvalW
+      );
+    }
+    applySidePanelWidths();
+  }
+
+  function onSidePanelResizeEnd() {
+    if (!sidePanelResizeState) return;
+    sidePanelResizeState = null;
+    document.body.classList.remove('is-resizing-side-panel');
+    persistSidePanelWidths();
+    requestAnimationFrame(applyMapTransform);
+  }
+
+  function startSidePanelResize(which, e) {
+    sidePanelResizeState = {
+      which: which,
+      startX: e.clientX,
+      startToolboxW: Sim.ui.toolboxWidth || TOOLBOX_WIDTH_DEFAULT,
+      startEvalW: Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT,
+    };
+    document.body.classList.add('is-resizing-side-panel');
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.target.setPointerCapture) e.target.setPointerCapture(e.pointerId);
+  }
+
+  function bindSidePanelResize() {
+    if (Sim.ui.sidePanelResizeBound) return;
+    var toolbox = document.getElementById('toolbox');
+    var evalPanel = document.getElementById('evaluation-panel');
+    if (!toolbox || !evalPanel) return;
+    Sim.ui.sidePanelResizeBound = true;
+    loadSidePanelWidthsFromStorage();
+    applySidePanelWidths();
+    var tbHandle = ensureSidePanelResizeHandle(toolbox, 'toolbox');
+    var evHandle = ensureSidePanelResizeHandle(evalPanel, 'eval');
+    tbHandle.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || Sim.ui.toolboxCollapsed) return;
+      startSidePanelResize('toolbox', e);
+    });
+    evHandle.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || Sim.ui.evalCollapsed || Sim.ui.sidebarCollapsed) return;
+      startSidePanelResize('eval', e);
+    });
+    document.addEventListener('pointermove', onSidePanelResizeMove);
+    document.addEventListener('pointerup', onSidePanelResizeEnd);
+    document.addEventListener('pointercancel', onSidePanelResizeEnd);
+    window.addEventListener('resize', function () {
+      if (sidePanelResizeState) return;
+      applySidePanelWidths();
+      requestAnimationFrame(applyMapTransform);
+    });
+    syncSidePanelResizeHandles();
   }
 
   function applyLabelFontSize() {
@@ -11062,6 +11243,8 @@
   function applyLayoutSettingsFromStorage() {
     applyLabelFontSize();
     applyLabelColor();
+    loadSidePanelWidthsFromStorage();
+    applySidePanelWidths();
   }
 
   function setMapRotation(deg) {

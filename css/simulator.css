@@ -3628,13 +3628,13 @@ body.simulator-page-active #toolbox {
 }
 .layout-bar select:focus { outline: none; border-color: #00e5ff; }
 
-.side-panel--left { width: 250px; flex-shrink: 0; }
+.side-panel--left { width: var(--ftth-toolbox-width, 250px); flex-shrink: 0; }
 
 /* THE ULTIMATE LOCK - DO NOT MODIFY FURTHER */
 /* Scroll enabled + frozen layout */
 #toolbox.toolbox,
 .toolbox {
-  width: 250px !important;
+  width: var(--ftth-toolbox-width, 250px) !important;
   flex: 0 0 auto !important;
   flex-shrink: 0 !important;
   transition: none !important;
@@ -4031,7 +4031,7 @@ body.ftth-fake-fullscreen-active #pathway-properties-modal.pathway-bottom-panel.
 #simulator-container:fullscreen .pathway-bottom-panel.active,
 #simulator-container.is-fullscreen .pathway-bottom-panel.active,
 body.ftth-fake-fullscreen-active .pathway-bottom-panel.active {
-  left: calc(16rem + 20px) !important;
+  left: calc(var(--ftth-eval-panel-width, 256px) + 20px) !important;
   right: 20px !important;
 }
 
@@ -5002,6 +5002,7 @@ body.simulator-page-active {
   --ftth-shell-footer-height: 1.75rem;
   --ftth-toolbox-width: 250px;
   --ftth-toolbox-width-collapsed: 60px;
+  --ftth-eval-panel-width: 256px;
   padding-bottom: 0;
 }
 
@@ -5023,7 +5024,7 @@ body.simulator-page-active #toolbox {
   position: relative;
   flex: 0 0 auto !important;
   flex-shrink: 0 !important;
-  width: 250px !important;
+  width: var(--ftth-toolbox-width, 250px) !important;
   min-height: 0;
   max-height: 100%;
   height: 100%;
@@ -5077,11 +5078,11 @@ body.simulator-page-active #canvas-main {
 }
 
 body.simulator-page-active #evaluation-panel {
-  flex: 0 0 16rem;
+  flex: 0 0 var(--ftth-eval-panel-width, 256px);
   flex-shrink: 0;
-  width: 16rem;
-  min-width: 16rem;
-  max-width: 16rem;
+  width: var(--ftth-eval-panel-width, 256px);
+  min-width: var(--ftth-eval-panel-width, 256px);
+  max-width: var(--ftth-eval-panel-width, 256px);
   min-height: 0;
   height: 100%;
   align-self: stretch;
@@ -5572,12 +5573,12 @@ body.ftth-fake-fullscreen-active #canvas-main {
 #app-shell:-webkit-full-screen #evaluation-panel,
 #app-workspace:fullscreen #evaluation-panel,
 #app-workspace:-webkit-full-screen #evaluation-panel {
-  flex: 0 0 16rem;
+  flex: 0 0 var(--ftth-eval-panel-width, 256px);
   flex-shrink: 0;
   flex-grow: 0;
-  width: 16rem;
-  min-width: 16rem;
-  max-width: 16rem;
+  width: var(--ftth-eval-panel-width, 256px);
+  min-width: var(--ftth-eval-panel-width, 256px);
+  max-width: var(--ftth-eval-panel-width, 256px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -5688,12 +5689,12 @@ body.ftth-fake-fullscreen-active #simulator-container {
 }
 
 body.ftth-fake-fullscreen-active #evaluation-panel {
-  flex: 0 0 16rem;
+  flex: 0 0 var(--ftth-eval-panel-width, 256px);
   flex-shrink: 0;
   flex-grow: 0;
-  width: 16rem;
-  min-width: 16rem;
-  max-width: 16rem;
+  width: var(--ftth-eval-panel-width, 256px);
+  min-width: var(--ftth-eval-panel-width, 256px);
+  max-width: var(--ftth-eval-panel-width, 256px);
   height: 100%;
   min-height: 0;
   overflow: hidden;
@@ -8151,13 +8152,14 @@ body.ftth-low-zoom-performance .map-label {
 
 /* ─── Unified sidebar (Features & Properties + Evaluation) ─── */
 #evaluation-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
   flex-grow: 0;
-  width: 16rem;
-  min-width: 16rem;
-  max-width: 16rem;
+  width: var(--ftth-eval-panel-width, 256px);
+  min-width: var(--ftth-eval-panel-width, 256px);
+  max-width: var(--ftth-eval-panel-width, 256px);
   min-height: 0;
   height: 100%;
   overflow: hidden;
@@ -8225,6 +8227,48 @@ body.ftth-low-zoom-performance .map-label {
   min-width: 2.75rem !important;
   max-width: 2.75rem !important;
   overflow: hidden;
+}
+
+/* ─── Side panel width resize handles ─── */
+.side-panel-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 30;
+  touch-action: none;
+  user-select: none;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.side-panel-resize-handle--toolbox {
+  right: -4px;
+  cursor: ew-resize;
+}
+
+.side-panel-resize-handle--eval {
+  left: -4px;
+  cursor: ew-resize;
+}
+
+.side-panel-resize-handle:hover,
+.side-panel-resize-handle:active {
+  background: rgba(0, 229, 255, 0.12);
+}
+
+.side-panel-resize-handle[hidden] {
+  display: none !important;
+}
+
+body.is-resizing-side-panel {
+  cursor: ew-resize !important;
+  user-select: none;
+}
+
+body.is-resizing-side-panel #toolbox,
+body.is-resizing-side-panel #evaluation-panel {
+  transition: none !important;
 }
 
 #evaluation-panel.collapsed {
@@ -8900,8 +8944,8 @@ body.ftth-low-zoom-performance .map-label {
 .pathway-bottom-panel.active:not(.hidden) {
   position: fixed !important;
   bottom: 30px !important;
-  left: calc(16rem + 20px) !important;
-  right: calc(16rem + 20px) !important;
+  left: calc(var(--ftth-eval-panel-width, 256px) + 20px) !important;
+  right: calc(var(--ftth-toolbox-width, 250px) + 20px) !important;
   z-index: 9999 !important;
   max-height: 75vh !important;
   height: auto !important;
