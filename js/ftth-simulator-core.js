@@ -1877,13 +1877,15 @@
     return best ? formatCableSnapHit(best.payload) : null;
   }
 
-  function probeTrenchPathGuideSnap(clientX, clientY, probeX, probeY, trench, de) {
-    if (!trench) return null;
+  function probePathGuideSnap(clientX, clientY, probeX, probeY, path, pathType, de) {
+    if (!path) return null;
     var best = null;
     var vertexHitSq = getCableTrenchVertexHitSq();
     var segmentHitSq = getCableTrenchSegmentHitSq();
     var canvasTol = getCableTrenchSegmentHitCanvasTol();
     var canvasTolSq = canvasTol * canvasTol;
+    var isFiber = pathType === 'fiber';
+    var resolvedPathType = isFiber ? 'fiber' : 'excavation';
 
     function consider(priority, d2, payload) {
       if (d2 == null) return;
@@ -1892,20 +1894,24 @@
       }
     }
 
-    var pts = trench.points || [];
+    var pts = path.points || [];
     for (var j = 0; j < pts.length; j++) {
       var vtx = pts[j];
       if (!vtx) continue;
       var vtxD2 = de.screenDistSqToCanvasPoint(clientX, clientY, vtx[0], vtx[1]);
       if (vtxD2 > vertexHitSq) continue;
+      var isEndpoint = j === 0 || j === pts.length - 1;
+      var vtxKind = isFiber
+        ? (isEndpoint ? 'path-endpoint' : 'path-vertex')
+        : 'trench-vertex';
       consider(20, vtxD2, {
         x: vtx[0],
         y: vtx[1],
-        kind: 'trench-vertex',
-        pathType: 'excavation',
-        pathId: trench.id,
+        kind: vtxKind,
+        pathType: resolvedPathType,
+        pathId: path.id,
         vertexIndex: j,
-        snapKind: 'trench-vertex',
+        snapKind: vtxKind,
       });
     }
 
@@ -1920,32 +1926,79 @@
         if (cdx * cdx + cdy * cdy > canvasTolSq) continue;
         var screenD2 = de.screenDistSqToCanvasPoint(clientX, clientY, proj[0], proj[1]);
         if (screenD2 > segmentHitSq) continue;
+        var segKind = isFiber ? 'cable-segment' : 'trench-segment';
         consider(10, screenD2, {
           x: proj[0],
           y: proj[1],
-          kind: 'trench-segment',
-          pathType: 'excavation',
-          pathId: trench.id,
+          kind: segKind,
+          pathType: resolvedPathType,
+          pathId: path.id,
           segIndex: sj,
-          snapKind: 'trench-segment',
+          snapKind: segKind,
         });
       }
+    }
+
+    if (!isFiber && path.connectorSegments && global.FTTHPathwayEditor?.buildConnectorRenderPoints) {
+      var editor = global.FTTHPathwayEditor;
+      (path.connectorSegments || []).forEach(function (connSeg, connIdx) {
+        var connPts = editor.buildConnectorRenderPoints(path, connSeg) || [];
+        for (var cj = 0; cj < connPts.length; cj++) {
+          var cv = connPts[cj];
+          if (!cv) continue;
+          var connVtxD2 = de.screenDistSqToCanvasPoint(clientX, clientY, cv[0], cv[1]);
+          if (connVtxD2 <= vertexHitSq) {
+            consider(20, connVtxD2, {
+              x: cv[0],
+              y: cv[1],
+              kind: 'trench-vertex',
+              pathType: resolvedPathType,
+              pathId: path.id,
+              vertexIndex: connSeg.fromVertexIndex,
+              connectorIndex: connIdx,
+              snapKind: 'trench-vertex',
+            });
+          }
+        }
+        for (var ck = 0; ck < connPts.length - 1; ck++) {
+          var cp1 = connPts[ck];
+          var cp2 = connPts[ck + 1];
+          if (!cp1 || !cp2 || probeX == null || probeY == null) continue;
+          var cproj = projectPointToSegment(probeX, probeY, cp1[0], cp1[1], cp2[0], cp2[1]);
+          var csdx = probeX - cproj[0];
+          var csdy = probeY - cproj[1];
+          if (csdx * csdx + csdy * csdy > canvasTolSq) continue;
+          var connSegD2 = de.screenDistSqToCanvasPoint(clientX, clientY, cproj[0], cproj[1]);
+          if (connSegD2 > segmentHitSq) continue;
+          consider(10, connSegD2, {
+            x: cproj[0],
+            y: cproj[1],
+            kind: 'trench-segment',
+            pathType: resolvedPathType,
+            pathId: path.id,
+            segIndex: ck,
+            connectorIndex: connIdx,
+            snapKind: 'trench-segment',
+          });
+        }
+      });
     }
 
     return best;
   }
 
+  function probeTrenchPathGuideSnap(clientX, clientY, probeX, probeY, trench, de) {
+    return probePathGuideSnap(clientX, clientY, probeX, probeY, trench, 'excavation', de);
+  }
+
   /**
-   * Snap-to-trench-path guide: existing vertices + segment projection.
-   * Preview only — never inserts cable vertices.
+   * Snap-to-path guide: trench/cable vertices + segment projection (preview only).
    */
-  function findCableTrenchPathGuideSnap(clientX, clientY, canvasX, canvasY, preferTrenchId) {
+  function findPathGuideSnap(clientX, clientY, canvasX, canvasY, opts) {
+    opts = opts || {};
     if (clientX == null || clientY == null) return null;
     var de = global.FTTHDrawingEngine;
     if (!de?.screenDistSqToCanvasPoint) return null;
-
-    var trenches = Sim.excavationPaths || [];
-    if (!trenches.length) return null;
 
     var probeX = isFinite(canvasX) ? canvasX : null;
     var probeY = isFinite(canvasY) ? canvasY : null;
@@ -1956,6 +2009,12 @@
         probeY = probe.y;
       }
     }
+    if (probeX == null || probeY == null) return null;
+
+    var preferTrenchId = opts.preferTrenchId || null;
+    var excludeFiberId = opts.excludeFiberId || null;
+    var includeExcavation = opts.includeExcavation !== false;
+    var includeFiber = opts.includeFiber !== false;
 
     var globalBest = null;
     function mergeBest(local) {
@@ -1966,25 +2025,50 @@
       }
     }
 
-    if (preferTrenchId) {
-      var preferred = findPathByRef({ type: 'excavation', id: preferTrenchId });
-      if (preferred) {
-        mergeBest(probeTrenchPathGuideSnap(
-          clientX, clientY, probeX, probeY, preferred, de
-        ));
-        if (globalBest) return formatCableSnapHit(globalBest.payload);
+    if (includeExcavation) {
+      var trenches = Sim.excavationPaths || [];
+      if (preferTrenchId) {
+        var preferred = findPathByRef({ type: 'excavation', id: preferTrenchId });
+        if (preferred) mergeBest(probePathGuideSnap(clientX, clientY, probeX, probeY, preferred, 'excavation', de));
+      }
+      for (var ti = 0; ti < trenches.length; ti++) {
+        var trench = trenches[ti];
+        if (!trench || (preferTrenchId && trench.id === preferTrenchId)) continue;
+        mergeBest(probePathGuideSnap(clientX, clientY, probeX, probeY, trench, 'excavation', de));
       }
     }
 
-    for (var ti = 0; ti < trenches.length; ti++) {
-      var trench = trenches[ti];
-      if (!trench || (preferTrenchId && trench.id === preferTrenchId)) continue;
-      mergeBest(probeTrenchPathGuideSnap(
-        clientX, clientY, probeX, probeY, trench, de
-      ));
+    if (includeFiber) {
+      (Sim.fiberCablePaths || []).forEach(function (cable) {
+        if (!cable || (excludeFiberId && cable.id === excludeFiberId)) return;
+        mergeBest(probePathGuideSnap(clientX, clientY, probeX, probeY, cable, 'fiber', de));
+      });
     }
 
     return globalBest ? formatCableSnapHit(globalBest.payload) : null;
+  }
+
+  /**
+   * Snap-to-trench-path guide: existing vertices + segment projection.
+   * Preview only — never inserts cable vertices.
+   */
+  function findCableTrenchPathGuideSnap(clientX, clientY, canvasX, canvasY, preferTrenchId) {
+    var draft = Sim.penDraft;
+    var excludeFiberId = draft?.continueFromCable?.id || draft?.hostCableId || null;
+    return findPathGuideSnap(clientX, clientY, canvasX, canvasY, {
+      preferTrenchId: preferTrenchId,
+      excludeFiberId: excludeFiberId,
+      includeExcavation: true,
+      includeFiber: true,
+    });
+  }
+
+  /** Preview snap for excavation pen — trenches + existing cables. */
+  function findPenPathGuideSnap(clientX, clientY, canvasX, canvasY) {
+    return findPathGuideSnap(clientX, clientY, canvasX, canvasY, {
+      includeExcavation: true,
+      includeFiber: true,
+    });
   }
 
   function findCableMagneticSnapPoint(clientX, clientY, canvasX, canvasY) {
@@ -7460,6 +7544,8 @@
       findCableMagneticSnapPoint: findCableMagneticSnapPoint,
       findCableNodeMagneticSnap: findCableNodeMagneticSnap,
       findCableTrenchPathGuideSnap: findCableTrenchPathGuideSnap,
+      findPenPathGuideSnap: findPenPathGuideSnap,
+      findPathGuideSnap: findPathGuideSnap,
       getCableEffectiveSnapRadius: getCableEffectiveSnapRadius,
       CABLE_MAGNETIC_SNAP_RADIUS: 32,
       getTrenchVertexSubpathPoints: getTrenchVertexSubpathPoints,

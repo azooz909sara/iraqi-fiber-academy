@@ -1869,8 +1869,12 @@
     if (resolved.snapKind === 'handhole' || resolved.snapKind === 'device') return true;
     if (resolved.snapTarget?.kind === 'handhole' || resolved.snapTarget?.kind === 'device') return true;
     if (resolved.snapNodeId || resolved.snapTarget?.nodeId) return true;
-    if (resolved.snapTarget?.kind === 'trench-segment' || resolved.snapTarget?.kind === 'trench-vertex') return true;
-    if (resolved.snapKind === 'trench-segment' || resolved.snapKind === 'trench-vertex') return true;
+    if (resolved.snapTarget?.kind === 'trench-segment' || resolved.snapTarget?.kind === 'trench-vertex' ||
+        resolved.snapTarget?.kind === 'cable-segment' || resolved.snapTarget?.kind === 'path-vertex' ||
+        resolved.snapTarget?.kind === 'path-endpoint') return true;
+    if (resolved.snapKind === 'trench-segment' || resolved.snapKind === 'trench-vertex' ||
+        resolved.snapKind === 'cable-segment' || resolved.snapKind === 'path-vertex' ||
+        resolved.snapKind === 'path-endpoint') return true;
     return !!(resolved.snapped && b()?.isPointOnExcavationTrench?.(resolved.x, resolved.y));
   }
 
@@ -1886,7 +1890,8 @@
     if (!hit && S?.crosshair?.snapped &&
         isFinite(S.crosshair.snapX) && isFinite(S.crosshair.snapY)) {
       var chKind = S.crosshair.snapKind;
-      if (chKind === 'trench-vertex' || chKind === 'trench-segment' ||
+      if (chKind === 'trench-vertex' || chKind === 'trench-segment' || chKind === 'cable-segment' ||
+          chKind === 'path-vertex' || chKind === 'path-endpoint' ||
           chKind === 'handhole' || chKind === 'device') {
         var draftTarget = S.penDraft?.magneticSnapTarget;
         hit = {
@@ -2049,6 +2054,8 @@
     var onSnappedNode = isDeviceNodeSnap(commit);
 
     var onTrenchSnap = !!(resolved.snapTarget?.kind === 'trench-segment' ||
+      resolved.snapTarget?.kind === 'trench-vertex' ||
+      resolved.snapTarget?.kind === 'cable-segment' ||
       resolved.snapTarget?.kind === 'path-endpoint' ||
       resolved.snapTarget?.kind === 'path-vertex' ||
       (resolved.snapped && b()?.isPointOnExcavationTrench?.(resolved.x, resolved.y)));
@@ -2057,7 +2064,8 @@
     var onCrosshairSnap = !!(ch?.snapped && isFinite(ch.snapX) && isFinite(ch.snapY) &&
       (ch.snapKind === 'path-endpoint' || ch.snapKind === 'path-vertex' ||
        ch.snapKind === 'handhole' || ch.snapKind === 'device' ||
-       ch.snapKind === 'trench-segment' || ch.snapKind === 'trench-vertex'));
+       ch.snapKind === 'trench-segment' || ch.snapKind === 'trench-vertex' ||
+       ch.snapKind === 'cable-segment'));
     if (!onSnappedNode && !onTrenchSnap && !onReconnect && !onCrosshairSnap &&
         !b()?.isDrawableSurfaceXY?.(resolved.x, resolved.y)) {
       b()?.updateStatus?.('Draw on street or sidewalk only', true);
@@ -3032,7 +3040,8 @@
     var snapKind = S?.crosshair?.snapKind;
     var vertexLocked = !!(snapped && (
       snapKind === 'path-vertex' || snapKind === 'path-endpoint' ||
-      snapKind === 'trench-vertex' || snapKind === 'handhole' || snapKind === 'device'
+      snapKind === 'trench-vertex' || snapKind === 'trench-segment' ||
+      snapKind === 'cable-segment' || snapKind === 'handhole' || snapKind === 'device'
     ));
     var clickPulse = !!(S?.penClickPulseUntil && Date.now() < S.penClickPulseUntil);
     var toolClass = S?.pen?.lineMode === 'cable'
@@ -3298,18 +3307,62 @@
       snapLabel: hit.label || null,
       snapNodeId: hit.nodeId || null,
       target: {
-        kind: hit.kind || 'vertex',
+        kind: hit.kind || hit.snapKind || 'vertex',
         scope: scope,
         pathType: hit.pathType,
         pathId: hit.pathId,
         vertexIndex: hit.vertexIndex,
+        segIndex: hit.segIndex,
+        connectorIndex: hit.connectorIndex,
         end: hit.end,
         nodeId: hit.nodeId,
         label: hit.label,
+        snapKind: hit.snapKind || hit.kind,
         x: hit.x,
         y: hit.y,
       },
     };
+  }
+
+  function penSnapKindPriority(kind) {
+    if (kind === 'device' || kind === 'handhole') return 30;
+    if (kind === 'path-endpoint' || kind === 'path-vertex' || kind === 'trench-vertex') return 20;
+    if (kind === 'trench-segment' || kind === 'cable-segment') return 10;
+    return 0;
+  }
+
+  function guideSnapToHit(guide) {
+    if (!guide) return null;
+    var target = guide.target || {};
+    return {
+      x: guide.x,
+      y: guide.y,
+      kind: guide.snapKind || target.kind || 'trench-segment',
+      snapKind: guide.snapKind || target.kind,
+      pathType: target.pathType,
+      pathId: target.pathId,
+      vertexIndex: target.vertexIndex,
+      segIndex: target.segIndex,
+      connectorIndex: target.connectorIndex,
+      nodeId: guide.snapNodeId || target.nodeId,
+      label: guide.snapLabel || target.label,
+    };
+  }
+
+  function mergePenGuideWithPointerHit(guideSnap, pointerHit, clientX, clientY) {
+    if (!guideSnap && !pointerHit) return null;
+    if (!guideSnap) return pointerHit;
+    var guideHit = guideSnapToHit(guideSnap);
+    if (!pointerHit) return guideHit;
+    var guideKind = guideHit.kind;
+    var pointerKind = pointerHit.kind;
+    var guidePriority = penSnapKindPriority(guideKind);
+    var pointerPriority = penSnapKindPriority(pointerKind);
+    if (pointerPriority > guidePriority) return pointerHit;
+    if (guidePriority > pointerPriority) return guideHit;
+    var guideD2 = screenDistSqToCanvasPoint(clientX, clientY, guideHit.x, guideHit.y);
+    var pointerD2 = screenDistSqToCanvasPoint(clientX, clientY, pointerHit.x, pointerHit.y);
+    return guideD2 <= pointerD2 ? guideHit : pointerHit;
   }
 
   function screenDistSqToDevice(node, clientX, clientY) {
@@ -3508,24 +3561,19 @@
         return snapFallback(fallbackX, fallbackY);
       }
       var pointerHit = null;
-      var trenchHit = null;
+      var guideSnap = null;
+      if (mode === 'pen' && sim()?.pen?.lineMode !== 'cable') {
+        guideSnap = b()?.findPenPathGuideSnap?.(clientX, clientY, canvasX, canvasY);
+      }
       pointerHit = collectPointerSnapHit(clientX, clientY, {
         activePathOnly: !!opts.activePathOnly && mode !== 'pen',
         mode: mode,
         excludePath: opts.excludePath,
       });
-      if (trenchHit) {
-        var trenchD2 = screenDistSqToCanvasPoint(clientX, clientY, trenchHit.x, trenchHit.y);
-        var pointerD2 = pointerHit
-          ? screenDistSqToCanvasPoint(clientX, clientY, pointerHit.x, pointerHit.y)
-          : SNAP_THRESHOLD_SQ + 1;
-        if (!pointerHit || trenchD2 <= pointerD2) {
-          return makeSnapResult(trenchHit, 'trench');
-        }
-      }
-      if (pointerHit) {
-        if (pointerHit.kind === 'device') pointerHit = normalizeDeviceSnapHit(pointerHit);
-        return makeSnapResult(pointerHit, pointerHit.kind === 'device' ? 'device' : 'pointer');
+      var mergedHit = mergePenGuideWithPointerHit(guideSnap, pointerHit, clientX, clientY);
+      if (mergedHit) {
+        if (mergedHit.kind === 'device') mergedHit = normalizeDeviceSnapHit(mergedHit);
+        return makeSnapResult(mergedHit, mergedHit.kind === 'device' ? 'device' : 'pointer');
       }
     }
 
