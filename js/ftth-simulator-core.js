@@ -9725,9 +9725,16 @@
     if (pathType === 'excavation') {
       var pathActive = focus.kind === 'excavation' && focus.pathId === path.id;
       excavHtml = renderExcavationSidebarCard(path, pathActive);
-      sortCablesForLaneOrder(getCablesOnTrench(path.id) || []).forEach(function (cable) {
-        cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
-      });
+      // Use strict cable filtering via cableIds array
+      var trench = path;
+      if (trench && trench.cableIds && trench.cableIds.length > 0) {
+        var filteredCables = (Sim.fiberCablePaths || []).filter(function (cable) {
+          return trench.cableIds.indexOf(cable.id) !== -1;
+        });
+        sortCablesForLaneOrder(filteredCables).forEach(function (cable) {
+          cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
+        });
+      }
     } else if (pathType === 'fiber') {
       cableHtml = renderCableSidebarCard(path, focus.kind === 'cable' && focus.pathId === path.id);
       var trench = resolveTrenchForCable(path);
@@ -9737,13 +9744,16 @@
       }
     }
 
-    return '<div class="sidebar-sections-view">' +
-      renderSidebarSection('AB_LM_Holes', holesHtml, 'No handhole', 'holes') +
-      renderSidebarSection('AB_LM_Excavation', excavHtml, 'No excavation', 'excav', { collapsible: true, sectionKey: 'excav' }) +
-      renderSidebarSection('AB_LM_Cabel', cableHtml, 'No cables', 'cable', { collapsible: true, sectionKey: 'cable' }) +
-      /* Map-isolated path view: omit Fiber Design (parent/global) section. */
-      (Sim.ui.pathHighlightFromSidebar ? renderFiberDesignSidebarSection(getFiberDesignSidebarNodeId()) : '') +
-      '</div>';
+    // Only render sections that have content to reduce visual clutter
+    var sectionsHtml = '';
+    if (excavHtml) {
+      sectionsHtml += renderSidebarSection('AB_LM_Excavation', excavHtml, 'No excavation', 'excav', { collapsible: true, sectionKey: 'excav' });
+    }
+    if (cableHtml) {
+      sectionsHtml += renderSidebarSection('AB_LM_Cabel', cableHtml, 'No cables', 'cable', { collapsible: true, sectionKey: 'cable' });
+    }
+
+    return '<div class="sidebar-sections-view">' + sectionsHtml + '</div>';
   }
 
   function renderPathPropertyContent() {
