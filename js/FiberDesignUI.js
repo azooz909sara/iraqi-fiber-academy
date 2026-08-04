@@ -6,6 +6,8 @@
 (function (global) {
   'use strict';
 
+  var DEBUG = !!(global && global.FTTH_DEBUG);
+
   var deps = null;
   /** @type {Object<string, string>} active cable tab id per node */
   var activeCableTabByNode = Object.create(null);
@@ -537,11 +539,17 @@
   }
 
   function renderMatrixBody() {
+    if (DEBUG) {
     console.log('[FiberDesignUI] renderMatrixBody START');
+    }
     try {
       var mgr = getManager();
+      if (DEBUG) {
       console.log('[FiberDesignUI] renderMatrixBody: manager=' + (mgr ? 'found' : 'null'));
+      }
+      if (DEBUG) {
       console.log('[FiberDesignUI] renderMatrixBody: activeCabinetFilter=' + activeCabinetFilter + ', activeClosureFilter=' + activeClosureFilter + ', activeSortMode=' + activeSortMode);
+      }
 
       var rows = mgr && mgr.getSpliceMatrixRows
         ? mgr.getSpliceMatrixRows({
@@ -553,12 +561,18 @@
       // Apply sorting based on selected mode
       rows = sortRowsByMode(rows);
 
+      if (DEBUG) {
       console.log('[FiberDesignUI] renderMatrixBody: rows=' + (rows ? rows.length : 0));
+      }
       var engineBadge = '<span class="fd-float__badge">AutoFiberEngine · DFS</span>';
 
+      if (DEBUG) {
       console.log('[FiberDesignUI] renderMatrixBody: calling renderMatrixTable');
+      }
       var tableHtml = renderMatrixTable(rows);
+      if (DEBUG) {
       console.log('[FiberDesignUI] renderMatrixBody SUCCESS');
+      }
 
       return '<div class="fd-float__toolbar">' +
         '<label class="fd-float__filter-label" for="fd-matrix-cabinet-filter">Cabinet Filter</label>' +
@@ -907,30 +921,42 @@
   }
 
   function ensureMatrixWindow() {
+    if (DEBUG) {
     console.log('[FiberDesignUI] ensureMatrixWindow START');
+    }
     try {
       cleanupLegacyModalNodes();
 
       var host = getOverlayHost();
+      if (DEBUG) {
       console.log('[FiberDesignUI] ensureMatrixWindow: host=' + (host ? 'found' : 'null'));
+      }
       if (!host) {
         console.error('[FiberDesignUI] ensureMatrixWindow ERROR: host is null');
         return null;
       }
 
       if (matrixEl && matrixEl.isConnected && matrixEl.querySelector('.fd-float__body')) {
+        if (DEBUG) {
         console.log('[FiberDesignUI] ensureMatrixWindow: reusing existing matrix element');
+        }
         var existingWin = getMatrixWindow();
         if (existingWin && !existingWin._fdResizeBound) bindResizeHandles(existingWin);
+        if (DEBUG) {
         console.log('[FiberDesignUI] ensureMatrixWindow SUCCESS (reused)');
+        }
         return matrixEl;
       }
 
       matrixEl = document.getElementById('fd-float-matrix');
+      if (DEBUG) {
       console.log('[FiberDesignUI] ensureMatrixWindow: existing matrixEl by id=' + (matrixEl ? 'found' : 'null'));
+      }
       
       if (!matrixEl || !matrixEl.querySelector('.fd-float__body')) {
+        if (DEBUG) {
         console.log('[FiberDesignUI] ensureMatrixWindow: creating/initializing matrixEl');
+        }
         if (!matrixEl) {
           matrixEl = document.createElement('div');
           matrixEl.id = 'fd-float-matrix';
@@ -960,7 +986,9 @@
 
       hideMatrix();
       bindMatrixWindowEvents();
+      if (DEBUG) {
       console.log('[FiberDesignUI] ensureMatrixWindow SUCCESS');
+      }
       return matrixEl;
     } catch (e) {
       console.error('[FiberDesignUI] ensureMatrixWindow EXCEPTION:', e.message);
@@ -970,7 +998,9 @@
   }
 
   function showMatrix() {
+    if (DEBUG) {
     console.log('[FiberDesignUI] showMatrix START');
+    }
     if (!matrixEl) {
       console.error('[FiberDesignUI] showMatrix ERROR: matrixEl is null');
       return;
@@ -980,7 +1010,9 @@
     matrixEl.hidden = false;
     matrixEl.classList.add('is-open');
     matrixEl.setAttribute('aria-hidden', 'false');
+    if (DEBUG) {
     console.log('[FiberDesignUI] showMatrix SUCCESS');
+    }
   }
 
   function hideMatrix() {
@@ -995,7 +1027,9 @@
   }
 
   function openMatrix(options) {
+    if (DEBUG) {
     console.log('[FiberDesignUI] openMatrix START');
+    }
     try {
       options = options || {};
       if (!ensureMatrixWindow()) {
@@ -1027,7 +1061,9 @@
       activeClosureFilter = options.closureFilter != null ? String(options.closureFilter) : 'all';
       
       refreshMatrix();
+      if (DEBUG) {
       console.log('[FiberDesignUI] openMatrix SUCCESS');
+      }
     } catch (e) {
       console.error('[FiberDesignUI] openMatrix EXCEPTION:', e.message);
       console.error('[FiberDesignUI] openMatrix STACK:', e.stack);

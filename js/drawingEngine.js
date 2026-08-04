@@ -5,6 +5,8 @@
 (function (global) {
   'use strict';
 
+  var DEBUG = !!(global && global.FTTH_DEBUG);
+
   var SNAP_THRESHOLD = 10;
   var SNAP_THRESHOLD_SQ = SNAP_THRESHOLD * SNAP_THRESHOLD;
   var CABLE_MAGNETIC_SNAP_RADIUS = 32;
@@ -2435,7 +2437,9 @@
           return;
         }
 
+        if (DEBUG) {
         console.log('[finishPenDrawing] saving complete cable path:', pointsSnapshot.length, 'vertices', pointsSnapshot);
+        }
 
         var createdRef = null;
         var wasContinue = !!(draft.continueFromCable && draft.continueFromCable.id);
@@ -2691,6 +2695,8 @@
   }
 
   var crosshairOverMap = false;
+  var crosshairHoverRaf = 0;
+  var crosshairHoverClient = null;
 
   function getMapCanvasElement() {
     return document.getElementById('city-canvas') ||
@@ -2717,6 +2723,18 @@
       if (clientX >= gr.left && clientX <= gr.right && clientY >= gr.top && clientY <= gr.bottom) return false;
     }
     return true;
+  }
+
+  function scheduleCrosshairMapHoverCheck(clientX, clientY) {
+    crosshairHoverClient = { x: clientX, y: clientY };
+    if (crosshairHoverRaf) return;
+    crosshairHoverRaf = requestAnimationFrame(function () {
+      crosshairHoverRaf = 0;
+      var pt = crosshairHoverClient;
+      crosshairHoverClient = null;
+      if (!pt) return;
+      setCrosshairMapHover(isPointOverMapCanvas(pt.x, pt.y));
+    });
   }
 
   function isCrosshairOverMap() {
@@ -2764,7 +2782,7 @@
         if (crosshairOverMap) setCrosshairMapHover(false);
         return;
       }
-      setCrosshairMapHover(isPointOverMapCanvas(e.clientX, e.clientY));
+      scheduleCrosshairMapHoverCheck(e.clientX, e.clientY);
     }, { passive: true });
 
     document.addEventListener('mouseleave', onLeave);

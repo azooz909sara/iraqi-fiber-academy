@@ -4,6 +4,8 @@
 (function (global) {
   'use strict';
 
+  var DEBUG = !!(global && global.FTTH_DEBUG);
+
   var INDEX_KEY = 'ftth_project_index_v1';
   var MAX_RECENT = 8;
 
@@ -404,7 +406,9 @@
       updateSaveStatus('Restored');
       refreshProjectLabel();
     } catch (err) {
+      if (DEBUG) {
       console.warn('[FileMenu] Auto-restore skipped:', err);
+      }
     }
   }
 

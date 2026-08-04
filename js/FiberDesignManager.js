@@ -5,6 +5,8 @@
 (function (global) {
   'use strict';
 
+  var DEBUG = !!(global && global.FTTH_DEBUG);
+
   var deps = null;
   var nodeStore = Object.create(null);
   var matrixRows = [];
@@ -82,14 +84,18 @@
    * Throws error if tube count, tube order, fiber count, or fiber order is incorrect.
    */
   function validate48FStandard(tubes) {
+    if (DEBUG) {
     console.log('[FiberDesignManager] validate48FStandard START');
+    }
     try {
       if (!Array.isArray(tubes)) {
         console.error('[FiberDesignManager] validate48FStandard ERROR: tubes is not an array');
         throw new Error('Invalid tubes: not an array');
       }
 
+      if (DEBUG) {
       console.log('[FiberDesignManager] validate48FStandard: tube count = ' + tubes.length);
+      }
 
       // Validate tube count = 8
       if (tubes.length !== 8) {
@@ -131,7 +137,9 @@
         }
       }
 
+      if (DEBUG) {
       console.log('[FiberDesignManager] validate48FStandard SUCCESS');
+      }
       return true;
     } catch (e) {
       console.error('[FiberDesignManager] validate48FStandard EXCEPTION:', e.message);
@@ -302,11 +310,15 @@
   }
 
   function createCable(direction, options) {
+    if (DEBUG) {
     console.log('[FiberDesignManager] createCable START: direction=' + direction + ', name=' + (options.name || ''));
+    }
     try {
       options = options || {};
       var capacityF = Number(options.capacity_f) || parseCapacityFromLabel(options.name) || 12;
+      if (DEBUG) {
       console.log('[FiberDesignManager] createCable: capacityF=' + capacityF);
+      }
       var tubes = Array.isArray(options.tubes) && options.tubes.length
         ? options.tubes.map(function (t) {
           return createTube(t.tube_number, t.tube_color, t.fibers);
@@ -322,7 +334,9 @@
       //   validate48FStandard(tubes);
       // }
 
+      if (DEBUG) {
       console.log('[FiberDesignManager] createCable SUCCESS');
+      }
       return {
         id: options.id || createUuid(),
         name: options.name != null ? String(options.name) : '',
@@ -546,7 +560,9 @@
           var backboneName = String(label).trim().toUpperCase();
           if (mainBackboneNames.indexOf(backboneName) === -1) {
             mainBackboneNames.push(backboneName);
+            if (DEBUG) {
             console.log('[FiberDesignManager] Registered Main Backbone Name: ' + backboneName);
+            }
           }
         }
       }
@@ -785,7 +801,9 @@
    * Uses fixed TUBE_COLORS and FIBER_COLORS arrays - never reorders.
    */
   function createFiberPointer(capacityF) {
+    if (DEBUG) {
     console.log('[FiberDesignManager] createFiberPointer START: capacityF=' + capacityF);
+    }
     return {
       capacityF: Number(capacityF) || 48,
       globalFiberIndex: 0,
@@ -1110,7 +1128,9 @@
     var colorMapping = CAPACITY_COLOR_MAPPING[capacity];
 
     if (!colorMapping) {
+      if (DEBUG) {
       console.warn('[FiberDesignManager] No color mapping for capacity:', capacity);
+      }
       return [];
     }
 
@@ -1223,11 +1243,21 @@
               var startFiberColor = cableCursor.fiberIndex < 6 ? STANDARD_COLOR_CODE[cableCursor.fiberIndex] : 'N/A';
               var globalOffsetBefore = (cableCursor.tubeIndex * 6) + cableCursor.fiberIndex;
               
+              if (DEBUG) {
               console.log('Closure ID: ' + closureLabel);
+              }
+              if (DEBUG) {
               console.log('Main Cable ID: ' + mainCableName);
+              }
+              if (DEBUG) {
               console.log('Start Tube: ' + startTubeColor + ' (index ' + cableCursor.tubeIndex + ')');
+              }
+              if (DEBUG) {
               console.log('Start Fiber: ' + startFiberColor + ' (index ' + cableCursor.fiberIndex + ')');
+              }
+              if (DEBUG) {
               console.log('Global Fiber Offset Before: ' + globalOffsetBefore);
+              }
               
               var cableRows = generateMainCableRowsForClosure(designCable, node, cabinetNode, cableCursor, closureOrderMap[closureId]);
               matrixRows = matrixRows.concat(cableRows);
@@ -1236,9 +1266,15 @@
               var endFiberColor = cableCursor.fiberIndex < 6 ? STANDARD_COLOR_CODE[cableCursor.fiberIndex] : 'N/A';
               var globalOffsetAfter = (cableCursor.tubeIndex * 6) + cableCursor.fiberIndex;
               
+              if (DEBUG) {
               console.log('End Tube: ' + endTubeColor + ' (index ' + cableCursor.tubeIndex + ')');
+              }
+              if (DEBUG) {
               console.log('End Fiber: ' + endFiberColor + ' (index ' + cableCursor.fiberIndex + ')');
+              }
+              if (DEBUG) {
               console.log('Global Fiber Offset After: ' + globalOffsetAfter);
+              }
               
               lastNode = node;
             }
@@ -1273,9 +1309,13 @@
     });
     
     // Print closure traversal order debug
+    if (DEBUG) {
     console.log('=== CLOSURE TRAVERSAL ORDER ===');
+    }
     closureTraversalDebug.forEach(function (entry) {
+      if (DEBUG) {
       console.log(entry);
+      }
     });
   }
 
@@ -1365,7 +1405,9 @@
     // STRICT RULE: Prevent Main Cable self-splicing (continuous backbone routing)
     // If both cables have the same name, this is NOT a distribution splice
     if (fromName === toName) {
+      if (DEBUG) {
       console.log('[FiberDesignManager] buildMatrixRow: Skipping self-splice (same cable): ' + fromName);
+      }
       return null; // This is continuous backbone routing, not a splice
     }
 
@@ -1379,7 +1421,9 @@
     // STRICT RULE: Main Cable CANNOT be assigned to S-Cable columns
     // If both are Main Cables, skip this splice (invalid configuration)
     if (fromIsMain && toIsMain) {
+      if (DEBUG) {
       console.log('[FiberDesignManager] buildMatrixRow: Both cables are Main - skipping invalid splice: ' + fromName + ' <-> ' + toName);
+      }
       return null;
     }
 
@@ -2056,7 +2100,9 @@
      * Immediately scan current map state and rebuild matrix rows.
      */
     regenerate: function () {
+      if (DEBUG) {
       console.log('[FiberDesignManager] regenerate START');
+      }
       var startTime = Date.now();
       try {
         nodeStore = Object.create(null);
@@ -2064,21 +2110,33 @@
         currentCabinetCtx = null;
         mainPointers = Object.create(null); // reset per-regeneration
 
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: building topology graph');
+        }
         var graph = buildTopologyGraph();
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: graph edges = ' + graph.edges.length);
+        }
 
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: finding root cabinets');
+        }
         var roots = findRootCabinets(graph.nodeById);
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: roots count = ' + roots.length);
+        }
 
         if (!roots.length) {
+          if (DEBUG) {
           console.log('[FiberDesignManager] regenerate: no roots, processing closure nodes');
+          }
           (deps && deps.getClosureNodes ? deps.getClosureNodes() : []).forEach(function (n) {
             ensureEngineNode(n);
           });
         } else {
+          if (DEBUG) {
           console.log('[FiberDesignManager] regenerate: processing ' + roots.length + ' roots');
+          }
           roots.forEach(function (root) {
             if (!graph.adj[String(root.id)]) graph.adj[String(root.id)] = [];
             if (!graph.nodeById[String(root.id)]) graph.nodeById[String(root.id)] = root;
@@ -2087,28 +2145,42 @@
         }
 
         // FACTORY RESET: Register Main Backbone Names from Cabinet-connected cables
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: registering Main Backbone Names');
+        }
         var mapCables = getMapCables();
         var allNodes = getMapNodes();
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: map cables = ' + mapCables.length);
+        }
         registerMainBackboneNames(mapCables, allNodes);
 
         // FACTORY RESET: Generate Main Cable rows using fixed continuous traversal
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: generating Main Cable rows with fixed traversal');
+        }
         traverseMainCablePathFixed(mapCables, allNodes, roots[0]);
 
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: matrix rows before sort = ' + matrixRows.length);
+        }
         matrixRows = sortMatrixRows(matrixRows);
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: matrix rows after sort = ' + matrixRows.length);
+        }
 
         rebuildRegistries();
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: cabinets = ' + cabinetRegistry.length + ', closures = ' + closureRegistry.length);
+        }
 
         lastDesignVersion += 1;
         emitDesignChanged();
 
         var endTime = Date.now();
+        if (DEBUG) {
         console.log('[FiberDesignManager] regenerate SUCCESS: duration=' + (endTime - startTime) + 'ms, rows=' + matrixRows.length);
+        }
         return {
           ok: true,
           version: lastDesignVersion,
@@ -2131,7 +2203,9 @@
     },
 
     getMatrixRows: function (filters) {
+      if (DEBUG) {
       console.log('[FiberDesignManager] getMatrixRows START');
+      }
       try {
         var cabinetFilter = 'all';
         var closureFilter = 'all';
@@ -2141,8 +2215,12 @@
         } else if (filters != null) {
           closureFilter = String(filters);
         }
+        if (DEBUG) {
         console.log('[FiberDesignManager] getMatrixRows: cabinetFilter=' + cabinetFilter + ', closureFilter=' + closureFilter);
+        }
+        if (DEBUG) {
         console.log('[FiberDesignManager] getMatrixRows: total matrixRows = ' + matrixRows.length);
+        }
 
         var filtered = matrixRows.filter(function (r) {
           if (cabinetFilter !== 'all' && String(r.cabinet_id) !== cabinetFilter) return false;
@@ -2154,8 +2232,12 @@
           return true;
         });
 
+        if (DEBUG) {
         console.log('[FiberDesignManager] getMatrixRows: filtered rows = ' + filtered.length);
+        }
+        if (DEBUG) {
         console.log('[FiberDesignManager] getMatrixRows SUCCESS');
+        }
         return deepClone(filtered);
       } catch (e) {
         console.error('[FiberDesignManager] getMatrixRows EXCEPTION:', e.message);
@@ -2309,22 +2391,32 @@
   }
 
   function getSpliceMatrixRows(closureFilterOrOptions) {
+    if (DEBUG) {
     console.log('[FiberDesignManager] getSpliceMatrixRows START');
+    }
     try {
       if (lastDesignVersion === 0) {
+        if (DEBUG) {
         console.log('[FiberDesignManager] getSpliceMatrixRows: regenerating (version 0)');
+        }
         AutoFiberEngine.regenerate();
       }
       if (closureFilterOrOptions && typeof closureFilterOrOptions === 'object') {
+        if (DEBUG) {
         console.log('[FiberDesignManager] getSpliceMatrixRows: calling getMatrixRows with object filter');
+        }
         return AutoFiberEngine.getMatrixRows(closureFilterOrOptions);
       }
+      if (DEBUG) {
       console.log('[FiberDesignManager] getSpliceMatrixRows: calling getMatrixRows with string filter');
+      }
       var result = AutoFiberEngine.getMatrixRows({
         cabinet: 'all',
         closure: closureFilterOrOptions != null ? String(closureFilterOrOptions) : 'all',
       });
+      if (DEBUG) {
       console.log('[FiberDesignManager] getSpliceMatrixRows SUCCESS: rows=' + (result ? result.length : 0));
+      }
       return result;
     } catch (e) {
       console.error('[FiberDesignManager] getSpliceMatrixRows EXCEPTION:', e.message);

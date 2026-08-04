@@ -5,6 +5,8 @@
 (function (global) {
   'use strict';
 
+  var DEBUG = !!(global && global.FTTH_DEBUG);
+
   var FIELD_HH_GREEN = '#39ff14';
   var FIELD_HH_GREEN_FILL = 'transparent';
   /** FAT pole glyph — tight bbox; bottom of stem = anchor (no phantom padding). */
@@ -1104,7 +1106,9 @@
   function saveCableToDatabase(currentCablePoints, meta) {
     meta = meta || {};
     if (!currentCablePoints || currentCablePoints.length < 2) {
-      console.warn('[saveCableToDatabase] rejected — need at least 2 points', currentCablePoints);
+      if (DEBUG) {
+        console.warn('[saveCableToDatabase] rejected — need at least 2 points', currentCablePoints);
+      }
       return null;
     }
     var userDrawn = meta.userDrawn !== false;
@@ -1112,7 +1116,9 @@
       ? clonePathPointArray(currentCablePoints)
       : dedupeConsecutiveCablePoints(clonePathPointArray(currentCablePoints));
     if (pointsToSave.length < 2) {
-      console.warn('[saveCableToDatabase] rejected — need at least 2 distinct waypoints');
+      if (DEBUG) {
+        console.warn('[saveCableToDatabase] rejected — need at least 2 distinct waypoints');
+      }
       return null;
     }
     var pointSnapNodeIds = (meta.pointSnapNodeIds || []).slice(0, pointsToSave.length);
@@ -1120,7 +1126,9 @@
     if (!userDrawn) {
       pointsToSave = strictifyCableWaypoints(pointsToSave, pointSnapNodeIds);
       if (pointsToSave.length < 2) {
-        console.warn('[saveCableToDatabase] rejected — waypoints collapsed below 2 after trench snap');
+        if (DEBUG) {
+          console.warn('[saveCableToDatabase] rejected — waypoints collapsed below 2 after trench snap');
+        }
         return null;
       }
     }
@@ -1146,7 +1154,9 @@
     var snapResult = { points: pointsToSave, trenchPathId: preferredTrenchId || null, cornerRadii: {} };
     pointsToSave = snapResult.points || pointsToSave;
     if (pointsToSave.length < 2) {
-      console.warn('[saveCableToDatabase] rejected — path collapsed below 2 points after snap');
+      if (DEBUG) {
+        console.warn('[saveCableToDatabase] rejected — path collapsed below 2 points after snap');
+      }
       return null;
     }
     if (!trenchIds.length && snapResult.trenchPathId) trenchIds = [snapResult.trenchPathId];
@@ -1201,7 +1211,9 @@
     renderUnifiedSidebar();
     updateFieldStatusCounters();
 
-    console.log('[saveCableToDatabase] saved cable:', cableId, pointsToSave.length, 'vertices');
+    if (DEBUG) {
+      console.log('[saveCableToDatabase] saved cable:', cableId, pointsToSave.length, 'vertices');
+    }
     notifyFiberDesignTopologyChanged();
 
     return { type: 'fiber', id: cableId, cable: cableRef };
@@ -1223,14 +1235,18 @@
       }
     }
     if (!cable) {
-      console.warn('[extendCableInDatabase] cable not found', cableId);
+      if (DEBUG) {
+        console.warn('[extendCableInDatabase] cable not found', cableId);
+      }
       return null;
     }
 
     var joinEnd = meta.continueEnd === 'start' ? 'start' : 'end';
     var extPts = clonePathPointArray(extensionPoints);
     if (!extPts || extPts.length < 2) {
-      console.warn('[extendCableInDatabase] need at least 2 extension points');
+      if (DEBUG) {
+        console.warn('[extendCableInDatabase] need at least 2 extension points');
+      }
       return null;
     }
 
@@ -1334,7 +1350,9 @@
     renderUnifiedSidebar();
     updateFieldStatusCounters();
 
-    console.log('[extendCableInDatabase] extended cable:', cable.id, cable.points.length, 'vertices');
+    if (DEBUG) {
+      console.log('[extendCableInDatabase] extended cable:', cable.id, cable.points.length, 'vertices');
+    }
     notifyFiberDesignTopologyChanged();
 
     return { type: 'fiber', id: cable.id, cable: cable };
@@ -3896,7 +3914,9 @@
         });
       });
     } catch (guardErr) {
-      console.warn('[FAT rigid marker] quarantine guard install failed', guardErr);
+      if (DEBUG) {
+        console.warn('[FAT rigid marker] quarantine guard install failed', guardErr);
+      }
     }
   }
   installFatRigidMarkerQuarantineGuard();
@@ -4372,7 +4392,9 @@
         if (!isFs) btn.classList.remove('tool-selected');
       });
     } catch (err) {
-      console.warn('Fullscreen UI sync skipped:', err);
+      if (DEBUG) {
+        console.warn('Fullscreen UI sync skipped:', err);
+      }
     }
   }
 
@@ -4402,7 +4424,9 @@
           root.webkitRequestFullscreen ||
           root.msRequestFullscreen;
         if (!request) {
-          console.warn('Fullscreen API is not supported in this browser.');
+          if (DEBUG) {
+            console.warn('Fullscreen API is not supported in this browser.');
+          }
           return;
         }
         Promise.resolve(request.call(root)).then(function () {
@@ -4514,7 +4538,9 @@
 
   function handleShortcuts(e) {
     if (!e) return;
-    console.log('Key pressed:', e.key, 'Ctrl:', e.ctrlKey);
+    if (DEBUG) {
+      console.log('Key pressed:', e.key, 'Ctrl:', e.ctrlKey);
+    }
     if (isEditableShortcutTarget(e)) return;
 
     if (isCtrlUndo(e)) {
@@ -10590,7 +10616,7 @@
   function updateStatus(msg, warn) {
     var el = document.getElementById('workspace-status');
     if (el) el.textContent = msg;
-    if (warn) console.warn(msg);
+    if (warn && DEBUG) console.warn(msg);
   }
 
   function setSmartStatusHint(msg) {
@@ -10618,9 +10644,13 @@
   }
 
   function syncGisStatusBarCoords(xy) {
-    var el = document.getElementById('status-bar-coords');
+    var el = Sim.ui && Sim.ui.gisStatusBarCoordsEl;
+    if (!el) {
+      el = document.getElementById('status-bar-coords');
+      if (!Sim.ui) Sim.ui = {};
+      Sim.ui.gisStatusBarCoordsEl = el;
+    }
     if (!el) return;
-    if (!Sim.ui) Sim.ui = {};
 
     if (xy && isFinite(xy.x) && isFinite(xy.y)) {
       Sim.ui.lastKnownCanvasCoords = { x: Number(xy.x), y: Number(xy.y) };
@@ -11292,46 +11322,48 @@
         document.dispatchEvent(new CustomEvent('ftth-map-transform', {
           detail: { rotation: rot, zoom: z, panX: panX, panY: panY },
         }));
-        var zoomInner = document.getElementById('canvas-zoom-inner');
-        var rigidMarker = document.querySelector('.fat-rigid-marker');
-        var poleIcon = document.querySelector('.fat-pole-icon');
-        console.log('--- FAT RIGID MARKER AUTO-AUDIT ---', {
-          rotationDeg: rot,
-          mode: 'atomic marker — runtime quarantine guard',
-          pivot: 'marker transform-origin center center',
-          '--map-rotation': wrap ? wrap.style.getPropertyValue('--map-rotation') : '',
-          'Marker transform': rigidMarker ? getComputedStyle(rigidMarker).transform : '(n/a)',
-          'Marker origin': rigidMarker ? getComputedStyle(rigidMarker).transformOrigin : '(n/a)',
-          'Pole vs handhole center': (function () {
-            var pole = document.querySelector('.fat-pole-icon');
-            var hh = document.querySelector('.fat-handhole-base');
-            if (!pole || !hh) return '(n/a)';
-            var pr = pole.getBoundingClientRect();
-            var hr = hh.getBoundingClientRect();
-            var pcx = pr.left + pr.width / 2;
-            var pcy = pr.top + pr.height / 2;
-            var hcx = hr.left + hr.width / 2;
-            var hcy = hr.top + hr.height / 2;
-            return {
-              poleCenter: { x: Math.round(pcx * 10) / 10, y: Math.round(pcy * 10) / 10 },
-              handholeCenter: { x: Math.round(hcx * 10) / 10, y: Math.round(hcy * 10) / 10 },
-              deltaX: Math.round((pcx - hcx) * 10) / 10,
-              deltaY: Math.round((pcy - hcy) * 10) / 10,
-            };
-          })(),
-          'Upright wrapper': (function () {
-            var uw = document.querySelector('.fat-upright-wrapper');
-            return uw ? getComputedStyle(uw).transform : '(n/a)';
-          })(),
-          'Pole icon': poleIcon ? getComputedStyle(poleIcon).transform : '(n/a)',
-          'Handhole': (function () {
-            var hh = document.querySelector('.fat-handhole-base');
-            return hh ? getComputedStyle(hh).transform : '(n/a)';
-          })(),
-          'Zoom-Inner': zoomInner ? getComputedStyle(zoomInner).transform : '(n/a)',
-        });
-        if (typeof global.__FTTH_AUDIT_POLE_TRANSFORM__ === 'function') {
-          global.__FTTH_AUDIT_POLE_TRANSFORM__();
+        if (DEBUG) {
+          var zoomInner = document.getElementById('canvas-zoom-inner');
+          var rigidMarker = document.querySelector('.fat-rigid-marker');
+          var poleIcon = document.querySelector('.fat-pole-icon');
+          console.log('--- FAT RIGID MARKER AUTO-AUDIT ---', {
+            rotationDeg: rot,
+            mode: 'atomic marker — runtime quarantine guard',
+            pivot: 'marker transform-origin center center',
+            '--map-rotation': wrap ? wrap.style.getPropertyValue('--map-rotation') : '',
+            'Marker transform': rigidMarker ? getComputedStyle(rigidMarker).transform : '(n/a)',
+            'Marker origin': rigidMarker ? getComputedStyle(rigidMarker).transformOrigin : '(n/a)',
+            'Pole vs handhole center': (function () {
+              var pole = document.querySelector('.fat-pole-icon');
+              var hh = document.querySelector('.fat-handhole-base');
+              if (!pole || !hh) return '(n/a)';
+              var pr = pole.getBoundingClientRect();
+              var hr = hh.getBoundingClientRect();
+              var pcx = pr.left + pr.width / 2;
+              var pcy = pr.top + pr.height / 2;
+              var hcx = hr.left + hr.width / 2;
+              var hcy = hr.top + hr.height / 2;
+              return {
+                poleCenter: { x: Math.round(pcx * 10) / 10, y: Math.round(pcy * 10) / 10 },
+                handholeCenter: { x: Math.round(hcx * 10) / 10, y: Math.round(hcy * 10) / 10 },
+                deltaX: Math.round((pcx - hcx) * 10) / 10,
+                deltaY: Math.round((pcy - hcy) * 10) / 10,
+              };
+            })(),
+            'Upright wrapper': (function () {
+              var uw = document.querySelector('.fat-upright-wrapper');
+              return uw ? getComputedStyle(uw).transform : '(n/a)';
+            })(),
+            'Pole icon': poleIcon ? getComputedStyle(poleIcon).transform : '(n/a)',
+            'Handhole': (function () {
+              var hh = document.querySelector('.fat-handhole-base');
+              return hh ? getComputedStyle(hh).transform : '(n/a)';
+            })(),
+            'Zoom-Inner': zoomInner ? getComputedStyle(zoomInner).transform : '(n/a)',
+          });
+          if (typeof global.__FTTH_AUDIT_POLE_TRANSFORM__ === 'function') {
+            global.__FTTH_AUDIT_POLE_TRANSFORM__();
+          }
         }
       } catch (spyErr) { /* spy optional */ }
     } finally {
@@ -12251,18 +12283,26 @@
     }
     if (matrixBtn) {
       matrixBtn.addEventListener('click', function (e) {
-        console.log('[Matrix Button] CLICKED');
+        if (DEBUG) {
+          console.log('[Matrix Button] CLICKED');
+        }
         e.preventDefault();
         e.stopPropagation();
-        console.log('[Matrix Button] global.FTTHFiberDesignUI =', !!global.FTTHFiberDesignUI);
-        console.log('[Matrix Button] global.FTTHFiberDesignUI.openMatrix =', !!(global.FTTHFiberDesignUI && global.FTTHFiberDesignUI.openMatrix));
-        console.log('[Matrix Button] global.FTTHFiberDesignMatrixModal =', !!global.FTTHFiberDesignMatrixModal);
-        console.log('[Matrix Button] global.FTTHFiberDesignMatrixModal.open =', !!(global.FTTHFiberDesignMatrixModal && global.FTTHFiberDesignMatrixModal.open));
+        if (DEBUG) {
+          console.log('[Matrix Button] global.FTTHFiberDesignUI =', !!global.FTTHFiberDesignUI);
+          console.log('[Matrix Button] global.FTTHFiberDesignUI.openMatrix =', !!(global.FTTHFiberDesignUI && global.FTTHFiberDesignUI.openMatrix));
+          console.log('[Matrix Button] global.FTTHFiberDesignMatrixModal =', !!global.FTTHFiberDesignMatrixModal);
+          console.log('[Matrix Button] global.FTTHFiberDesignMatrixModal.open =', !!(global.FTTHFiberDesignMatrixModal && global.FTTHFiberDesignMatrixModal.open));
+        }
         if (global.FTTHFiberDesignUI && global.FTTHFiberDesignUI.openMatrix) {
-          console.log('[Matrix Button] Calling global.FTTHFiberDesignUI.openMatrix()');
+          if (DEBUG) {
+            console.log('[Matrix Button] Calling global.FTTHFiberDesignUI.openMatrix()');
+          }
           global.FTTHFiberDesignUI.openMatrix();
         } else if (global.FTTHFiberDesignMatrixModal && global.FTTHFiberDesignMatrixModal.open) {
-          console.log('[Matrix Button] Calling global.FTTHFiberDesignMatrixModal.open()');
+          if (DEBUG) {
+            console.log('[Matrix Button] Calling global.FTTHFiberDesignMatrixModal.open()');
+          }
           global.FTTHFiberDesignMatrixModal.open();
         } else {
           console.error('[Matrix Button] ERROR: No Matrix open function available!');
@@ -12688,7 +12728,9 @@
       syncSplicingToolbarState();
       if (global.FTTHFileMenu?.init) global.FTTHFileMenu.init();
       updateStatus('Ready — modular draw engine v6');
-      console.info('[FTTH Simulator] Shortcuts (capture): window/document/body/canvas; Ctrl+Z/Y; Esc -> #tool-select');
+      if (DEBUG) {
+        console.info('[FTTH Simulator] Shortcuts (capture): window/document/body/canvas; Ctrl+Z/Y; Esc -> #tool-select');
+      }
       if (global.FTTHLabelManager?.init) {
         global.FTTHLabelManager.init({
           getEntities: getEntities,
