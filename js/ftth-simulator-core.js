@@ -197,6 +197,16 @@
     { id: 'fat_pole', label: 'FAT Pole', color: '#808080', visual: 'fat_pole', nestOnly: true, hostType: 'fat_handhole' },
   ];
 
+  /** Live map counts on toolbox cards (cables/trenches excluded). */
+  var TOOLBOX_ASSET_COUNT_TOOLS = {
+    olt: 'OLT exchanges',
+    fdt: 'cabinets',
+    closure: 'closures',
+    handhole: 'handholes',
+    fat_handhole: 'FAT handholes',
+    fat_pole: 'poles',
+  };
+
   var PEN_TOOL_ID = 'pen_tool';
 
   var EXCAVATION_TOOLS = [
@@ -7942,6 +7952,7 @@
     global.FTTHVisibilityManager?.bindToolbox?.(box);
     global.FTTHToolboxInventory?.bindToolbox?.(box);
     global.FTTHToolboxManager?.onToolboxRendered?.(box);
+    updateToolboxAssetCounts();
   }
 
   /* ─── Field SVG icons ─── */
@@ -11103,6 +11114,85 @@
     }
   }
 
+  function countPlacedAssetByToolId(toolId) {
+    var nodes = Sim.nodes || [];
+    if (toolId === 'olt') {
+      return nodes.filter(function (n) { return n && n.type === 'olt'; }).length;
+    }
+    if (toolId === 'handhole') {
+      return nodes.filter(function (n) { return n && n.type === 'handhole'; }).length;
+    }
+    if (toolId === 'fat_handhole') {
+      return nodes.filter(function (n) { return n && n.type === 'fat_handhole'; }).length;
+    }
+    if (toolId === 'fdt') {
+      return nodes.filter(function (n) { return n && n.type === 'fdt'; }).length;
+    }
+    if (toolId === 'closure') {
+      return nodes.filter(function (n) {
+        return n && n.hasClosure && (n.type === 'handhole' || n.type === 'fat_handhole');
+      }).length;
+    }
+    if (toolId === 'fat_pole') {
+      return nodes.filter(function (n) {
+        return n && n.type === 'fat_handhole' && n.hasFatPole;
+      }).length;
+    }
+    return 0;
+  }
+
+  function ensureToolboxAssetCountBadge(el, toolId) {
+    if (!TOOLBOX_ASSET_COUNT_TOOLS[toolId]) return;
+    el.classList.add('toolbox-item--has-count');
+
+    var legacy = el.querySelector(':scope > .toolbox-asset-count[data-tool-id="' + toolId + '"]');
+    if (legacy) legacy.remove();
+
+    var ensureControls = global.FTTHVisibilityManager?.ensureToolboxControls;
+    var controls = typeof ensureControls === 'function' ? ensureControls(el) : null;
+    if (!controls) {
+      controls = el.querySelector(':scope > .toolbox-item-controls');
+      if (!controls) {
+        controls = document.createElement('div');
+        controls.className = 'toolbox-item-controls';
+        el.appendChild(controls);
+      }
+      el.classList.add('toolbox-item--has-controls');
+    }
+
+    var badge = controls.querySelector('.toolbox-asset-count[data-tool-id="' + toolId + '"]');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'toolbox-asset-count';
+      badge.dataset.toolId = toolId;
+      controls.appendChild(badge);
+    }
+
+    var audit = controls.querySelector('.toolbox-audit-btn');
+    if (audit && badge.nextElementSibling !== audit) {
+      audit.insertAdjacentElement('beforebegin', badge);
+    } else if (!audit) {
+      var eye = controls.querySelector('.toolbox-visibility-btn');
+      if (eye && badge.nextElementSibling !== eye) controls.insertBefore(badge, eye);
+    }
+
+    var count = countPlacedAssetByToolId(toolId);
+    var noun = TOOLBOX_ASSET_COUNT_TOOLS[toolId];
+    badge.textContent = String(count);
+    badge.dataset.count = String(count);
+    badge.setAttribute('aria-label', count + ' ' + noun + ' placed on map');
+  }
+
+  function updateToolboxAssetCounts() {
+    var box = document.getElementById('toolbox-items');
+    if (!box) return;
+    Object.keys(TOOLBOX_ASSET_COUNT_TOOLS).forEach(function (toolId) {
+      box.querySelectorAll('.toolbox-item[data-type="' + toolId + '"], .toolbox-card[data-type="' + toolId + '"]').forEach(function (el) {
+        ensureToolboxAssetCountBadge(el, toolId);
+      });
+    });
+  }
+
   function updateMetrics() {
     var mc = document.getElementById('metric-components');
     var mconn = document.getElementById('metric-connections');
@@ -11121,6 +11211,7 @@
     }
     Sim.metrics.fdtCount = Sim.nodes.filter(function (n) { return n.type === 'fdt'; }).length;
     updateFieldStatusCounters();
+    updateToolboxAssetCounts();
   }
 
   function syncPanelToggleArrows() {

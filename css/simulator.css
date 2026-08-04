@@ -2718,6 +2718,59 @@ body.simulator-page-active #toolbox {
 /* Toolbox */
 .toolbox-item { flex-wrap: wrap; }
 
+
+.toolbox-item--has-count {
+  position: relative;
+}
+
+.toolbox-asset-count {
+  position: static;
+  flex-shrink: 0;
+  display: inline-block;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: rgba(226, 232, 240, 0.88);
+  pointer-events: none;
+}
+
+.toolbox-asset-count[data-count="0"] {
+  opacity: 0.45;
+}
+
+.toolbox-asset-count[data-count]:not([data-count="0"]) {
+  opacity: 1;
+  color: #fff;
+}
+
+#toolbox.collapsed .toolbox-item--has-count {
+  position: relative;
+}
+
+#toolbox.collapsed .toolbox-item--has-count .toolbox-item-controls {
+  position: absolute;
+  inset: 0;
+  right: auto;
+  top: auto;
+  transform: none;
+  pointer-events: none;
+}
+
+#toolbox.collapsed .toolbox-asset-count {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  font-size: 9px;
+  font-weight: 700;
+}
 .toolbox-card {
   border-radius: 12px;
   border: 1px solid rgba(148, 163, 184, 0.22);
