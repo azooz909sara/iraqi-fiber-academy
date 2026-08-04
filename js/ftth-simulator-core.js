@@ -8527,14 +8527,12 @@
     Sim.layout = generateLayout(Sim.activeCityId);
     var L = Sim.layout;
     var grid = document.getElementById('city-grid');
-    var info = document.getElementById('grid-info');
     if (!grid) return;
     grid.style.display = 'grid';
     grid.style.gridTemplateColumns = 'repeat(' + L.cols + ', ' + L.cellSize + 'px)';
     grid.style.gridTemplateRows = 'repeat(' + L.rows + ', ' + L.cellSize + 'px)';
     grid.style.width = (L.cols * L.cellSize) + 'px';
     grid.style.height = (L.rows * L.cellSize) + 'px';
-    if (info) info.textContent = L.cols + ' × ' + L.rows + ' · FDT cap ~' + L.cfg.fdtCapacity;
 
     grid.innerHTML = '';
     removeDragDropPreviewEl();
@@ -11789,7 +11787,7 @@
   function onMapGesturePointerDown(e) {
     if (!e.target?.closest?.('#canvas-wrapper')) return;
     if (e.target.closest('#toolbox') || e.target.closest('.grid-controls') ||
-        e.target.closest('.map-tool-bar') || e.target.closest('#virtual-map-bar')) {
+        e.target.closest('.map-tool-bar')) {
       return;
     }
     var map = ensureMapGesturePointerMap();
@@ -11969,7 +11967,7 @@
     var mapEl = getMapContainerElement();
     if (!mapEl || !mapEl.contains(target)) return false;
     if (target.closest('#toolbox, .toolbox, .toolbox-item, #evaluation-panel')) return false;
-    if (target.closest('.grid-controls, #sim-settings-panel, .map-tool-bar, #virtual-map-bar, .pathway-bottom-panel, #pathway-corner-radius')) return false;
+    if (target.closest('.grid-controls, #sim-settings-panel, .map-tool-bar, .pathway-bottom-panel, #pathway-corner-radius')) return false;
     if (target.closest('button, select, input, textarea, label, a, .panel-toggle')) return false;
     if (target.closest('.placed-node, .vertex-handle, .sim-node-actions, .field-node-label')) return false;
     if (canPenDraw() || isCablePenDrawActive()) return false;
@@ -12193,7 +12191,7 @@
       /* Vertex tool blocks wheel; active cable/trench pen drawing must still zoom. */
       if (canVertexEdit() && !(canPenDraw() && Sim.penDraft?.points?.length)) return;
       if (e.target.closest('#toolbox') || e.target.closest('#property-panel') ||
-          e.target.closest('.grid-controls') || e.target.closest('#virtual-map-bar') ||
+          e.target.closest('.grid-controls') ||
           e.target.closest('#sim-settings-panel')) {
         return;
       }
@@ -12700,8 +12698,14 @@
     enableInteractions();
   }
 
+  function removeElementInfoBar() {
+    var bar = document.getElementById('virtual-map-bar');
+    if (bar) bar.remove();
+  }
+
   function boot() {
     try {
+      removeElementInfoBar();
       loadPersistedSettings();
       ensureSimulatorContainerFocusable();
       bindSimulatorGlobalEvents();

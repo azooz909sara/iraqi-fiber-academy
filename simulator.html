@@ -303,10 +303,6 @@
     }
 
     .map-tool-bar { pointer-events: auto; }
-    #virtual-map-bar {
-      position: relative;
-      z-index: 1200;
-    }
     .map-tool-btn {
       width: 30px;
       height: 28px;
@@ -733,36 +729,6 @@
 
       <!-- Virtual City grid workspace -->
       <div id="virtual-city-view" class="simulator-view simulator-view--virtual flex flex-col flex-1 min-h-0" style="display:block">
-
-      <div id="virtual-map-bar" class="virtual-map-bar virtual-map-bar--minimal px-4 py-1 border-b border-fiber-border bg-fiber-card/30 flex items-center shrink-0">
-        <span id="grid-info" class="text-[10px] font-mono text-slate-500">—</span>
-        <div id="map-layer-toggles" class="map-layer-toggles flex items-center gap-1.5 flex-wrap hidden ml-auto" aria-hidden="true">
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="autoBuildings" aria-pressed="true" title="Toggle Homes &amp; Auto Buildings">
-            <span class="map-layer-btn__swatch w-3 h-2 rounded-sm" style="background:#e8e4dc;border:1px solid #d0ccc4"></span> Homes/Buildings
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="apartments" aria-pressed="true" title="Toggle Apartments">
-            <span class="map-layer-btn__swatch w-3 h-3 rounded-sm" style="background:#d7d3cb;border:1px solid #b8b4ac"></span> Apartments
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="towers" aria-pressed="true" title="Toggle Towers">
-            <span class="map-layer-btn__swatch w-3 h-2 rounded-sm" style="background:#c4c0b8;border:1px solid #9a9690"></span> Towers
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="parks" aria-pressed="true" title="Toggle Parks">
-            <span class="map-layer-btn__swatch w-2 h-2 rounded-sm" style="background:#b8ddb0"></span> Parks
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="sidewalks" aria-pressed="true" title="Toggle Sidewalks">
-            <span class="map-layer-btn__swatch w-3 h-2 rounded-sm" style="background:#d8d4ce;border:1px solid #a8a49e"></span> Sidewalk
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="streets" aria-pressed="true" title="Toggle Streets">
-            <span class="map-layer-btn__swatch w-2 h-2 rounded-sm" style="background:#2e3238"></span> Streets
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="poi" aria-pressed="true" title="Toggle POI">
-            <span class="map-layer-btn__swatch w-2 h-2 rounded-full" style="background:#4285f4"></span> POI
-          </button>
-          <button type="button" class="map-layer-btn map-layer-btn--active" data-layer="satellite" aria-pressed="true" title="Toggle Satellite Background">
-            <span class="map-layer-btn__swatch text-[10px] leading-none">🛰️</span> Satellite
-          </button>
-        </div>
-      </div>
 
       <div id="canvas-wrapper" class="map-viewport map-container flex-1 relative">
         <!-- Fullscreen + reset zoom (zoom +/- moved to action bar) -->
