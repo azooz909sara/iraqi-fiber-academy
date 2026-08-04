@@ -5139,7 +5139,12 @@
   var WORKSPACE_MODES = { PAN: 'pan', SELECT: 'select', CUT: 'cut', VERTEX: 'vertex', MEASURE: 'measure' };
   var MEASURE_OVERLAY_COLOR = '#38bdf8';
   var MEASURE_OVERLAY_DASH = '6,4';
+  var MEASURE_PANEL_MIN_W = 220;
+  var MEASURE_PANEL_MIN_H = 160;
   var measureRedrawPending = false;
+  var measurePanelDragState = null;
+  var measurePanelResizeState = null;
+  var measurePanelWindowEventsBound = false;
 
   function getCurrentMode() {
     return Sim.currentMode || WORKSPACE_MODES.PAN;
@@ -5318,15 +5323,24 @@
     return Number(n).toFixed(1);
   }
 
+  function getMeasurePanelOverlayHost() {
+    return document.getElementById('sim-workspace-overlays') ||
+      document.getElementById('canvas-wrapper');
+  }
+
   function ensureMeasurePanel() {
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!wrap) return null;
+    var host = getMeasurePanelOverlayHost();
+    if (!host) return null;
     var existing = document.getElementById('measure-panel');
-    if (existing && !existing.querySelector('#btn-measure-undo')) {
+    if (existing && (!existing.querySelector('#btn-measure-undo') || !existing.querySelector('.measure-panel__resize'))) {
       existing.remove();
+      existing = null;
     }
-    if (document.getElementById('measure-panel')) {
-      return document.getElementById('measure-panel');
+    if (existing) {
+      if (existing.parentNode !== host) {
+        host.appendChild(existing);
+      }
+      return existing;
     }
     var panel = document.createElement('div');
     panel.id = 'measure-panel';
@@ -5355,31 +5369,158 @@
           '<button type="button" id="btn-measure-close-bottom" class="measure-panel__btn measure-panel__btn--ghost">Close</button>' +
         '</div>' +
       '</div>';
-    wrap.appendChild(panel);
+    host.appendChild(panel);
     bindMeasurePanelDrag(panel);
+    bindMeasurePanelResize(panel);
     bindMeasurePanelControls(panel);
     return panel;
   }
 
+  function getMeasurePanelHostRect() {
+    var wrap = document.getElementById('canvas-wrapper');
+    if (!wrap) {
+      return { left: 8, top: 8, width: window.innerWidth - 16, height: window.innerHeight - 16 };
+    }
+    var rect = wrap.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function measurePanelOffsetRect(panel) {
+    if (!panel) return { left: 0, top: 0, width: 0, height: 0 };
+    var rect = panel.getBoundingClientRect();
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
+  }
+
+  function clampMeasurePanelBox(left, top, width, height) {
+    var host = getMeasurePanelHostRect();
+    width = Math.max(MEASURE_PANEL_MIN_W, Math.min(width, host.width - 16));
+    height = Math.max(MEASURE_PANEL_MIN_H, Math.min(height, host.height - 16));
+    left = Math.max(host.left + 8, Math.min(left, host.left + host.width - width - 8));
+    top = Math.max(host.top + 8, Math.min(top, host.top + host.height - height - 8));
+    return { left: left, top: top, width: width, height: height };
+  }
+
+  function applyMeasurePanelBox(panel, box) {
+    if (!panel || !box) return;
+    panel.style.left = box.left + 'px';
+    panel.style.top = box.top + 'px';
+    panel.style.width = box.width + 'px';
+    panel.style.height = box.height + 'px';
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.maxHeight = 'none';
+  }
+
+  function ensureMeasurePanelWindowEvents() {
+    if (measurePanelWindowEventsBound) return;
+    measurePanelWindowEventsBound = true;
+    document.addEventListener('pointermove', onMeasurePanelPointerMove);
+    document.addEventListener('pointerup', onMeasurePanelPointerUp);
+    document.addEventListener('pointercancel', onMeasurePanelPointerUp);
+  }
+
+  function onMeasurePanelPointerMove(e) {
+    if (measurePanelResizeState) {
+      onMeasurePanelResizeMove(e);
+    } else if (measurePanelDragState) {
+      onMeasurePanelDragMove(e);
+    }
+  }
+
+  function onMeasurePanelPointerUp() {
+    onMeasurePanelResizeEnd();
+    onMeasurePanelDragEnd();
+  }
+
+  function onMeasurePanelDragMove(e) {
+    if (!measurePanelDragState) return;
+    var panel = measurePanelDragState.panel;
+    if (!panel) return;
+    var dx = e.clientX - measurePanelDragState.startX;
+    var dy = e.clientY - measurePanelDragState.startY;
+    var box = clampMeasurePanelBox(
+      measurePanelDragState.origLeft + dx,
+      measurePanelDragState.origTop + dy,
+      measurePanelDragState.width,
+      measurePanelDragState.height
+    );
+    applyMeasurePanelBox(panel, box);
+  }
+
+  function onMeasurePanelDragEnd() {
+    if (!measurePanelDragState) return;
+    if (measurePanelDragState.panel) {
+      measurePanelDragState.panel.classList.remove('is-dragging');
+    }
+    measurePanelDragState = null;
+  }
+
+  function onMeasurePanelResizeMove(e) {
+    if (!measurePanelResizeState) return;
+    var panel = measurePanelResizeState.panel;
+    if (!panel) return;
+    var dx = e.clientX - measurePanelResizeState.startX;
+    var dy = e.clientY - measurePanelResizeState.startY;
+    var edges = measurePanelResizeState.edges;
+    var left = measurePanelResizeState.origLeft;
+    var top = measurePanelResizeState.origTop;
+    var width = measurePanelResizeState.width;
+    var height = measurePanelResizeState.height;
+
+    if (edges.indexOf('e') >= 0) width = measurePanelResizeState.width + dx;
+    if (edges.indexOf('s') >= 0) height = measurePanelResizeState.height + dy;
+    if (edges.indexOf('w') >= 0) {
+      width = measurePanelResizeState.width - dx;
+      left = measurePanelResizeState.origLeft + (measurePanelResizeState.width - width);
+    }
+    if (edges.indexOf('n') >= 0) {
+      height = measurePanelResizeState.height - dy;
+      top = measurePanelResizeState.origTop + (measurePanelResizeState.height - height);
+    }
+
+    applyMeasurePanelBox(panel, clampMeasurePanelBox(left, top, width, height));
+  }
+
+  function onMeasurePanelResizeEnd() {
+    if (!measurePanelResizeState) return;
+    if (measurePanelResizeState.panel) {
+      measurePanelResizeState.panel.classList.remove('is-resizing');
+    }
+    measurePanelResizeState = null;
+  }
+
   function positionMeasurePanel(clientPt) {
     var panel = document.getElementById('measure-panel');
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!panel || !wrap) return;
-    var wrapRect = wrap.getBoundingClientRect();
-    var panelW = panel.offsetWidth || 260;
+    if (!panel) return;
+    var rect = measurePanelOffsetRect(panel);
+    var width = rect.width || MEASURE_PANEL_MIN_W;
+    var height = rect.height || 280;
     if (clientPt && typeof clientPt.clientX === 'number') {
-      var left = clientPt.clientX - wrapRect.left + 14;
-      var top = clientPt.clientY - wrapRect.top + 14;
-      left = Math.max(12, Math.min(left, wrapRect.width - panelW - 12));
-      top = Math.max(12, Math.min(top, wrapRect.height - 80));
-      panel.style.left = left + 'px';
-      panel.style.top = top + 'px';
-      panel.style.right = 'auto';
+      applyMeasurePanelBox(panel, clampMeasurePanelBox(
+        clientPt.clientX + 14,
+        clientPt.clientY + 14,
+        width,
+        height
+      ));
       return;
     }
-    panel.style.left = 'auto';
-    panel.style.right = '0.75rem';
-    panel.style.top = '3.5rem';
+    var host = getMeasurePanelHostRect();
+    applyMeasurePanelBox(panel, clampMeasurePanelBox(
+      host.left + 12,
+      host.top + 12,
+      width,
+      height
+    ));
   }
 
   function showMeasurePanel() {
@@ -5541,35 +5682,70 @@
   }
 
   function bindMeasurePanelDrag(panel) {
-    var header = panel.querySelector('.measure-panel__drag-handle');
+    var header = panel.querySelector('.measure-panel__header');
     if (!header || header.dataset.dragBound) return;
     header.dataset.dragBound = '1';
-    header.style.cursor = 'move';
-    var drag = { active: false, startX: 0, startY: 0, origLeft: 0, origTop: 0 };
+    ensureMeasurePanelWindowEvents();
     header.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return;
-      drag.active = true;
-      drag.startX = e.clientX;
-      drag.startY = e.clientY;
-      var rect = panel.getBoundingClientRect();
-      var parentRect = panel.offsetParent ? panel.offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
-      drag.origLeft = rect.left - parentRect.left;
-      drag.origTop = rect.top - parentRect.top;
-      panel.style.left = drag.origLeft + 'px';
-      panel.style.top = drag.origTop + 'px';
-      panel.style.right = 'auto';
+      if (e.target.closest('button, select, input, a')) return;
+      if (measurePanelResizeState) return;
+      var rect = measurePanelOffsetRect(panel);
+      measurePanelDragState = {
+        panel: panel,
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: rect.left,
+        origTop: rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+      panel.classList.add('is-dragging');
       header.setPointerCapture(e.pointerId);
       e.preventDefault();
       e.stopPropagation();
     });
-    header.addEventListener('pointermove', function (e) {
-      if (!drag.active) return;
-      panel.style.left = (drag.origLeft + e.clientX - drag.startX) + 'px';
-      panel.style.top = (drag.origTop + e.clientY - drag.startY) + 'px';
+  }
+
+  function bindMeasurePanelResize(panel) {
+    if (!panel || panel.dataset.resizeBound) return;
+    panel.dataset.resizeBound = '1';
+    ensureMeasurePanelWindowEvents();
+    var handles = [
+      { cls: 'measure-panel__resize measure-panel__resize--n', edges: 'n' },
+      { cls: 'measure-panel__resize measure-panel__resize--s', edges: 's' },
+      { cls: 'measure-panel__resize measure-panel__resize--e', edges: 'e' },
+      { cls: 'measure-panel__resize measure-panel__resize--w', edges: 'w' },
+      { cls: 'measure-panel__resize measure-panel__resize--ne', edges: 'ne' },
+      { cls: 'measure-panel__resize measure-panel__resize--nw', edges: 'nw' },
+      { cls: 'measure-panel__resize measure-panel__resize--se', edges: 'se' },
+      { cls: 'measure-panel__resize measure-panel__resize--sw', edges: 'sw' },
+    ];
+    handles.forEach(function (h) {
+      var el = document.createElement('div');
+      el.className = h.cls;
+      el.setAttribute('data-resize-edges', h.edges);
+      el.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        if (measurePanelDragState) return;
+        var rect = measurePanelOffsetRect(panel);
+        measurePanelResizeState = {
+          panel: panel,
+          edges: h.edges,
+          startX: e.clientX,
+          startY: e.clientY,
+          origLeft: rect.left,
+          origTop: rect.top,
+          width: rect.width,
+          height: rect.height,
+        };
+        panel.classList.add('is-resizing');
+        el.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      panel.appendChild(el);
     });
-    function endDrag() { drag.active = false; }
-    header.addEventListener('pointerup', endDrag);
-    header.addEventListener('pointercancel', endDrag);
   }
 
   function cancelMeasureMode() {
@@ -12013,7 +12189,10 @@
   function bindSettingsPanel() {
     if (Sim.ui.settingsBound) return;
     var btn = document.getElementById('btn-sim-settings');
+    var anchor = document.getElementById('sim-settings-anchor');
+    var actionBar = document.getElementById('main-action-bar');
     var panel = document.getElementById('sim-settings-panel');
+    var backdrop = document.getElementById('sim-settings-backdrop');
     var labelSlider = document.getElementById('settings-label-size');
     var labelColor = document.getElementById('settings-label-color');
     var saveSettingsBtn = document.getElementById('settings-save');
@@ -12023,12 +12202,62 @@
     var rotLeft = document.getElementById('settings-rotate-left');
     var rotRight = document.getElementById('settings-rotate-right');
     var closeBtn = document.getElementById('btn-sim-settings-close');
+    var settingsDropdownListenersBound = false;
+
+    function positionSettingsDropdown() {
+      if (!panel || !btn || !panel.classList.contains('sim-settings-panel--open')) return;
+      var rect = btn.getBoundingClientRect();
+      var gap = 4;
+      var margin = 8;
+      var panelW = panel.offsetWidth || 220;
+      var panelH = panel.offsetHeight || 320;
+      var top = rect.bottom + gap;
+      var left = rect.left;
+      if (top + panelH > window.innerHeight - margin) {
+        top = Math.max(margin, rect.top - panelH - gap);
+      }
+      if (left + panelW > window.innerWidth - margin) {
+        left = window.innerWidth - panelW - margin;
+      }
+      left = Math.max(margin, left);
+      panel.style.top = top + 'px';
+      panel.style.left = left + 'px';
+      panel.style.right = 'auto';
+    }
+
+    function bindSettingsDropdownListeners() {
+      if (settingsDropdownListenersBound) return;
+      settingsDropdownListenersBound = true;
+      window.addEventListener('resize', positionSettingsDropdown);
+      window.addEventListener('scroll', positionSettingsDropdown, true);
+    }
+
+    function unbindSettingsDropdownListeners() {
+      if (!settingsDropdownListenersBound) return;
+      settingsDropdownListenersBound = false;
+      window.removeEventListener('resize', positionSettingsDropdown);
+      window.removeEventListener('scroll', positionSettingsDropdown, true);
+    }
 
     function setSettingsPanelOpen(open) {
       if (!panel || !btn) return;
       panel.classList.toggle('sim-settings-panel--open', open);
       panel.setAttribute('aria-hidden', open ? 'false' : 'true');
       btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (anchor) anchor.classList.toggle('sim-settings-anchor--open', open);
+      if (actionBar) actionBar.classList.toggle('sim-settings-open', open);
+      if (backdrop) {
+        backdrop.classList.toggle('sim-settings-backdrop--open', open);
+        backdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+      }
+      if (open) {
+        bindSettingsDropdownListeners();
+        requestAnimationFrame(function () {
+          positionSettingsDropdown();
+        });
+      } else {
+        unbindSettingsDropdownListeners();
+      }
     }
 
     function syncRotationControlsVisibility() {
@@ -12044,9 +12273,13 @@
         setSettingsPanelOpen(!panel.classList.contains('sim-settings-panel--open'));
       });
       if (closeBtn) closeBtn.addEventListener('click', function () { setSettingsPanelOpen(false); });
+      if (backdrop) {
+        backdrop.addEventListener('click', function () { setSettingsPanelOpen(false); });
+      }
       document.addEventListener('click', function (e) {
         if (!panel.classList.contains('sim-settings-panel--open')) return;
         if (e.target.closest('#sim-settings-panel') || e.target.closest('#btn-sim-settings')) return;
+        if (e.target.closest('#sim-settings-backdrop')) return;
         setSettingsPanelOpen(false);
       });
     }

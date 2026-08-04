@@ -629,7 +629,9 @@
       <button type="button" id="btn-toolbar-cut" class="map-tool-btn action-toolbar__btn" title="Cut Tool" aria-label="Cut Tool">✂️</button>
       <button type="button" id="btn-toolbar-vertex" class="map-tool-btn action-toolbar__btn" title="Vertex Tool" aria-label="Vertex Tool">◇</button>
       <button type="button" id="btn-toolbar-delete" class="map-tool-btn action-toolbar__btn" title="Delete" aria-label="Delete">🗑️</button>
-      <button type="button" id="btn-sim-settings" class="map-tool-btn sim-settings-btn action-toolbar__btn" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="sim-settings-panel">⚙</button>
+      <div id="sim-settings-anchor" class="sim-settings-anchor">
+        <button type="button" id="btn-sim-settings" class="map-tool-btn sim-settings-btn action-toolbar__btn" title="Settings" aria-label="Settings" aria-expanded="false" aria-controls="sim-settings-panel" aria-haspopup="dialog">⚙</button>
+      </div>
       <button type="button" id="btn-refresh-workspace" class="map-tool-btn action-toolbar__btn" title="Refresh" aria-label="Refresh">🔄</button>
       <button type="button" id="btn-toolbar-splicing" class="map-tool-btn action-toolbar__btn action-toolbar__btn--text action-toolbar__btn--disabled" title="Splicing — pulse Closure markers (visual only)" aria-label="Splicing Action" aria-disabled="true">-o-</button>
       <button type="button" id="btn-toolbar-fiber-matrix" class="map-tool-btn action-toolbar__btn" title="Fiber Design Matrix (floating)" aria-label="Full Fiber Design">▦</button>
@@ -637,6 +639,65 @@
     <div class="main-action-bar__meta">
       <span id="save-status" class="save-status app-menu-bar__save-status">—</span>
       <span id="app-menu-project-name" class="app-menu-bar__project" title="Current project">Untitled Project</span>
+    </div>
+    <div id="sim-settings-backdrop" class="sim-settings-backdrop" aria-hidden="true"></div>
+    <div id="sim-settings-panel" class="sim-settings-panel" aria-hidden="true" role="dialog" aria-labelledby="sim-settings-title">
+      <div class="sim-settings-panel__header">
+        <h3 id="sim-settings-title" class="sim-settings-panel__title">Settings</h3>
+        <button type="button" id="btn-sim-settings-close" class="sim-settings-panel__close" aria-label="Close settings">×</button>
+      </div>
+      <div class="sim-settings-panel__body">
+        <div class="sim-settings-field">
+          <label for="settings-label-size" class="sim-settings-field__label">Label Size</label>
+          <div class="sim-settings-field__row">
+            <input type="range" id="settings-label-size" min="9" max="18" step="1" value="11" aria-valuemin="9" aria-valuemax="18">
+            <span id="settings-label-size-value" class="sim-settings-field__value">11px</span>
+          </div>
+        </div>
+        <div class="sim-settings-field">
+          <label for="settings-label-color" class="sim-settings-field__label">Label Color</label>
+          <div class="sim-settings-field__row">
+            <input type="color" id="settings-label-color" value="#ffffff" aria-label="Label color">
+            <span id="settings-label-color-value" class="sim-settings-field__value">#FFFFFF</span>
+          </div>
+        </div>
+        <div class="sim-settings-field">
+          <label for="settings-tool-label-zoom" class="sim-settings-field__label">Show Tool Labels From Zoom</label>
+          <div class="sim-settings-field__row">
+            <input type="range" id="settings-tool-label-zoom" min="50" max="1000" step="10" value="100" aria-valuemin="50" aria-valuemax="1000">
+            <span id="settings-tool-label-zoom-value" class="sim-settings-field__value">100%</span>
+          </div>
+        </div>
+        <div class="sim-settings-field">
+          <label for="settings-cable-label-zoom" class="sim-settings-field__label">Show Cable Labels From Zoom</label>
+          <div class="sim-settings-field__row">
+            <input type="range" id="settings-cable-label-zoom" min="50" max="1000" step="10" value="150" aria-valuemin="50" aria-valuemax="1000">
+            <span id="settings-cable-label-zoom-value" class="sim-settings-field__value">150%</span>
+          </div>
+        </div>
+        <div class="sim-settings-field sim-settings-field--save">
+          <button type="button" id="settings-save" class="sim-settings-save-btn">Save Settings</button>
+        </div>
+        <div class="sim-settings-field">
+          <label class="sim-settings-toggle" for="settings-map-rotation">
+            <span class="sim-settings-toggle__label">Enable Map Rotation</span>
+            <input type="checkbox" id="settings-map-rotation" class="sim-settings-toggle__input">
+            <span class="sim-settings-toggle__track" aria-hidden="true"></span>
+          </label>
+        </div>
+        <div id="settings-rotation-controls" class="sim-settings-field sim-settings-rotation hidden" aria-hidden="true">
+          <label for="settings-map-rotation-deg" class="sim-settings-field__label">Rotation Angle</label>
+          <div class="sim-settings-field__row">
+            <input type="range" id="settings-map-rotation-deg" min="0" max="360" step="1" value="0">
+            <span id="settings-map-rotation-value" class="sim-settings-field__value">0°</span>
+          </div>
+          <div class="sim-settings-rotation__btns">
+            <button type="button" id="settings-rotate-left" class="sim-settings-rotate-btn" title="Rotate -15°">↺ −15°</button>
+            <button type="button" id="settings-rotate-right" class="sim-settings-rotate-btn" title="Rotate +15°">↻ +15°</button>
+          </div>
+          <p class="sim-settings-hint">Shift + mouse wheel rotates when enabled.</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -710,64 +771,6 @@
       </div>
 
       <div id="canvas-wrapper" class="map-viewport map-container flex-1 relative">
-        <div id="sim-settings-panel" class="sim-settings-panel" aria-hidden="true" role="dialog" aria-labelledby="sim-settings-title">
-          <div class="sim-settings-panel__header">
-            <h3 id="sim-settings-title" class="sim-settings-panel__title">Settings</h3>
-            <button type="button" id="btn-sim-settings-close" class="sim-settings-panel__close" aria-label="Close settings">×</button>
-          </div>
-          <div class="sim-settings-panel__body">
-            <div class="sim-settings-field">
-              <label for="settings-label-size" class="sim-settings-field__label">Label Size</label>
-              <div class="sim-settings-field__row">
-                <input type="range" id="settings-label-size" min="9" max="18" step="1" value="11" aria-valuemin="9" aria-valuemax="18">
-                <span id="settings-label-size-value" class="sim-settings-field__value">11px</span>
-              </div>
-            </div>
-            <div class="sim-settings-field">
-              <label for="settings-label-color" class="sim-settings-field__label">Label Color</label>
-              <div class="sim-settings-field__row">
-                <input type="color" id="settings-label-color" value="#ffffff" aria-label="Label color">
-                <span id="settings-label-color-value" class="sim-settings-field__value">#FFFFFF</span>
-              </div>
-            </div>
-            <div class="sim-settings-field">
-              <label for="settings-tool-label-zoom" class="sim-settings-field__label">Show Tool Labels From Zoom</label>
-              <div class="sim-settings-field__row">
-                <input type="range" id="settings-tool-label-zoom" min="50" max="1000" step="10" value="100" aria-valuemin="50" aria-valuemax="1000">
-                <span id="settings-tool-label-zoom-value" class="sim-settings-field__value">100%</span>
-              </div>
-            </div>
-            <div class="sim-settings-field">
-              <label for="settings-cable-label-zoom" class="sim-settings-field__label">Show Cable Labels From Zoom</label>
-              <div class="sim-settings-field__row">
-                <input type="range" id="settings-cable-label-zoom" min="50" max="1000" step="10" value="150" aria-valuemin="50" aria-valuemax="1000">
-                <span id="settings-cable-label-zoom-value" class="sim-settings-field__value">150%</span>
-              </div>
-            </div>
-            <div class="sim-settings-field sim-settings-field--save">
-              <button type="button" id="settings-save" class="sim-settings-save-btn">Save Settings</button>
-            </div>
-            <div class="sim-settings-field">
-              <label class="sim-settings-toggle" for="settings-map-rotation">
-                <span class="sim-settings-toggle__label">Enable Map Rotation</span>
-                <input type="checkbox" id="settings-map-rotation" class="sim-settings-toggle__input">
-                <span class="sim-settings-toggle__track" aria-hidden="true"></span>
-              </label>
-            </div>
-            <div id="settings-rotation-controls" class="sim-settings-field sim-settings-rotation hidden" aria-hidden="true">
-              <label for="settings-map-rotation-deg" class="sim-settings-field__label">Rotation Angle</label>
-              <div class="sim-settings-field__row">
-                <input type="range" id="settings-map-rotation-deg" min="0" max="360" step="1" value="0">
-                <span id="settings-map-rotation-value" class="sim-settings-field__value">0°</span>
-              </div>
-              <div class="sim-settings-rotation__btns">
-                <button type="button" id="settings-rotate-left" class="sim-settings-rotate-btn" title="Rotate -15°">↺ −15°</button>
-                <button type="button" id="settings-rotate-right" class="sim-settings-rotate-btn" title="Rotate +15°">↻ +15°</button>
-              </div>
-              <p class="sim-settings-hint">Shift + mouse wheel rotates when enabled.</p>
-            </div>
-          </div>
-        </div>
         <!-- Fullscreen + reset zoom (zoom +/- moved to action bar) -->
         <div class="grid-controls" id="grid-controls" aria-label="Map controls">
           <button id="btn-fullscreen-map" type="button" class="grid-ctrl-btn" title="Fullscreen (keep Toolbox visible)" aria-label="Fullscreen">🖥️</button>
