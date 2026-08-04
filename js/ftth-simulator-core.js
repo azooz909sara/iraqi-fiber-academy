@@ -6108,10 +6108,10 @@
     if (tool === 'measure' || tool === 'vertex' || tool === 'cut') return true;
     if (Sim.selectedPath && (Sim.pathEdit?.editActive || Sim.pathEdit?.splitToolActive)) return true;
     if (Sim.pathEdit?.vertexToolActive) return true;
-    if (Sim.interactionMode === 'hand') return false;
     if (canPenDraw()) return true;
     if (Sim.selectedPath) return true;
-    if (Sim.interactionMode === 'select' && !Sim.selectedTool && !Sim.selectedCableSpec && !Sim.moveNodeId) return true;
+    if ((Sim.interactionMode === 'select' || Sim.interactionMode === 'hand') &&
+        !Sim.selectedTool && !Sim.selectedCableSpec && !Sim.moveNodeId) return true;
     if (isPenToolSelected() && !Sim.pen.lineMode) return false;
     return false;
   }
@@ -11514,7 +11514,8 @@
     if (Sim.pathEdit?.isDraggingVertex || Sim.pathEdit?.drag) return false;
     var mode = getCurrentMode();
     if (mode === WORKSPACE_MODES.CUT || mode === WORKSPACE_MODES.VERTEX || mode === WORKSPACE_MODES.MEASURE) return false;
-    if (mode === WORKSPACE_MODES.SELECT && target.closest('path.draw-path-hit, .draw-path-hit')) return false;
+    if ((mode === WORKSPACE_MODES.SELECT || mode === WORKSPACE_MODES.PAN) &&
+        target.closest('path.draw-path-hit, .draw-path-hit')) return false;
     return true;
   }
 
@@ -11524,7 +11525,8 @@
         e.target.closest('.pathway-bottom-panel') || e.target.closest('#pathway-corner-radius') ||
         e.target.closest('button') || e.target.closest('select')) return;
 
-    var isHandPan = getCurrentMode() === WORKSPACE_MODES.PAN && e.button === 0;
+    var isHandPan = getCurrentMode() === WORKSPACE_MODES.PAN && e.button === 0 &&
+      isMapBackgroundPanTarget(e.target);
     var isMiddlePan = e.button === 1;
     var isSpacePan = e.button === 0 && !!Sim.ui?.spacePanActive;
     var isMapBackgroundPan = e.button === 0 && isMapBackgroundPanTarget(e.target);
@@ -11581,24 +11583,16 @@
     if (Sim.interactionMode !== 'hand' || canPenDraw()) return false;
     var stored = Sim.ui?.handPathPick;
     if (Sim.ui) Sim.ui.handPathPick = null;
-    if (stored?.hit?.type && stored?.hit?.id) {
-      return applyMapPick({
-        kind: 'path',
-        type: stored.hit.type,
-        id: stored.hit.id,
-        segIndex: stored.hit.segIndex,
-      }, e);
-    }
     var clientX = e?.clientX;
     var clientY = e?.clientY;
     if (clientX == null || clientY == null) {
-      if (stored) {
-        clientX = stored.x;
-        clientY = stored.y;
-      }
+      if (!stored) return false;
+      clientX = stored.x;
+      clientY = stored.y;
     }
-    if (clientX == null || clientY == null) return false;
-    return applyMapPick(resolveMapPick(clientX, clientY), e);
+    var pick = resolveMapPick(clientX, clientY);
+    if (!pick) return false;
+    return applyMapPick(pick, e);
   }
 
   function tryHandModePathSelect(e) {

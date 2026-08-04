@@ -1676,29 +1676,6 @@
     var canvas = b()?.getDrawingCanvas?.();
     if (!canvas) return;
 
-    function recordHandPathPick(e) {
-      if (b()?.canPenDraw?.()) return;
-      var S = sim();
-      if (!S) return;
-      var hit = null;
-      var pathEl = e.target.closest?.('.draw-path-hit, .svg-pathway-line');
-      if (pathEl?.getAttribute?.('data-path-type')) {
-        hit = {
-          type: pathEl.getAttribute('data-path-type'),
-          id: pathEl.getAttribute('data-path-id'),
-          segIndex: pathEl.getAttribute('data-seg-index') != null
-            ? Number(pathEl.getAttribute('data-seg-index'))
-            : null,
-        };
-      } else {
-        var xyPick = svgCoords(e);
-        if (xyPick) hit = hitTestPaths(xyPick.x, xyPick.y, PATH_HIT_TOLERANCE);
-      }
-      if (!hit?.type || !hit?.id) return;
-      S.ui = S.ui || {};
-      S.ui.handPathPick = { x: e.clientX, y: e.clientY, hit: hit };
-    }
-
     function pickEquipmentNodeId(e) {
       return b()?.pickPlacedNodeUnderPointer?.(e.clientX, e.clientY) || null;
     }
@@ -1707,6 +1684,39 @@
       var pick = b()?.resolveMapPick?.(e.clientX, e.clientY);
       if (!pick) return false;
       return !!b()?.applyMapPick?.(pick, e);
+    }
+
+    function isPathMapPickTarget(e) {
+      var pathEl = e.target.closest?.('.draw-path-hit, .svg-pathway-line');
+      if (pathEl?.getAttribute?.('data-path-type')) return true;
+      var xy = svgCoords(e);
+      if (!xy) return false;
+      return !!pickPathHitAtPoint(xy.x, xy.y, PATH_HIT_TOLERANCE);
+    }
+
+    /** Hand tool: defer to pointerup so drag still pans; commit uses Selection tool pick logic. */
+    function scheduleHandToolMapPick(e) {
+      if (b()?.canPenDraw?.()) return false;
+      if (!isPathMapPickTarget(e)) return false;
+      var S = sim();
+      if (!S) return false;
+      S.ui = S.ui || {};
+      S.ui.handPathPick = { x: e.clientX, y: e.clientY };
+      var downX = e.clientX;
+      var downY = e.clientY;
+      e.preventDefault();
+      e.stopPropagation();
+      function onHandPathUp(upEv) {
+        document.removeEventListener('pointerup', onHandPathUp, true);
+        if (S.ui) S.ui.handPathPick = null;
+        var dx = upEv.clientX - downX;
+        var dy = upEv.clientY - downY;
+        if (Math.hypot(dx, dy) < 6) {
+          applyResolvedMapPick(upEv);
+        }
+      }
+      document.addEventListener('pointerup', onHandPathUp, true);
+      return true;
     }
 
     function onDown(e) {
@@ -1766,33 +1776,7 @@
               return;
             }
           }
-          var pathElDirect = e.target.closest?.('.draw-path-hit, .svg-pathway-line');
-          recordHandPathPick(e);
-          if (pathElDirect?.getAttribute?.('data-path-type') || S.ui?.handPathPick?.hit) {
-            e.preventDefault();
-            e.stopPropagation();
-            function onHandPathUp(upEv) {
-              document.removeEventListener('pointerup', onHandPathUp, true);
-              var pick = S.ui?.handPathPick;
-              if (S.ui) S.ui.handPathPick = null;
-              if (!pick?.hit) return;
-              var dx = upEv.clientX - pick.x;
-              var dy = upEv.clientY - pick.y;
-              if (Math.hypot(dx, dy) < 6) {
-                var resolved = pick.hit
-                  ? {
-                      kind: 'path',
-                      type: pick.hit.type,
-                      id: pick.hit.id,
-                      segIndex: pick.hit.segIndex,
-                    }
-                  : b()?.resolveMapPick?.(upEv.clientX, upEv.clientY);
-                b()?.applyMapPick?.(resolved, upEv);
-              }
-            }
-            document.addEventListener('pointerup', onHandPathUp, true);
-          }
-          return;
+          if (scheduleHandToolMapPick(e)) return;
         }
         return;
       }

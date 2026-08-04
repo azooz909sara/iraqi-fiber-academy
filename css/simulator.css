@@ -2076,7 +2076,7 @@ body.simulator-page-active #toolbox {
   pointer-events: none !important;
 }
 
-#canvas-wrapper.drawing-layer-interactive:not(.map-mode-hand) #global-drawing-layer {
+#canvas-wrapper.drawing-layer-interactive #global-drawing-layer {
   z-index: 125 !important;
 }
 
