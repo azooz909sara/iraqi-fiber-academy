@@ -883,6 +883,9 @@
     patchPenDraftLivePath(svg);
     renderCableMagneticSnapIndicator(svg);
     renderCrosshair(svg);
+    if (cableContinuePromptLocked && cableContinueOffer) {
+      positionCableContinueFab(cableContinueOffer);
+    }
   }
 
   function flushPenDrawingVisuals() {
@@ -1714,13 +1717,39 @@
     hideCableContinueFab();
   }
 
-  function offerCableContinueAfterFirstVertex(draft, resolved) {
-    if (!draft || draft.continueFromCable || draft.points?.length !== 1) return null;
+  function findResumeHandholeAtDraftStart(draft, resolved) {
     var nodeId = (draft.pointSnapNodeIds && draft.pointSnapNodeIds[0]) ||
       resolved?.snapNodeId || resolved?.snapTarget?.nodeId || null;
-    if (!nodeId) return null;
-    var node = findSimNodeById(nodeId);
-    if (!isResumeHandholeNode(node)) return null;
+    if (nodeId) {
+      var byId = findSimNodeById(nodeId);
+      if (isResumeHandholeNode(byId)) return byId;
+    }
+    var pt = draft?.points?.[0];
+    if (!pt) return null;
+    var geoTol = 40;
+    var best = null;
+    var bestDist = geoTol + 1;
+    (sim()?.nodes || []).forEach(function (node) {
+      if (!isResumeHandholeNode(node)) return;
+      var center = getDeviceSnapCenter(node);
+      if (!center) return;
+      var d = Math.hypot(center.x - pt[0], center.y - pt[1]);
+      if (d <= geoTol && d < bestDist) {
+        bestDist = d;
+        best = node;
+      }
+    });
+    return best;
+  }
+
+  function isCableContinuePromptActive() {
+    return !!(cableContinuePromptLocked && cableContinueOffer);
+  }
+
+  function offerCableContinueAfterFirstVertex(draft, resolved) {
+    if (!draft || draft.continueFromCable || draft.points?.length !== 1) return null;
+    var node = findResumeHandholeAtDraftStart(draft, resolved);
+    if (!node) return null;
     var offer = findMatchingBatchCableAtHandhole(node);
     if (!offer) return null;
     cableContinueOffer = offer;
@@ -1978,6 +2007,14 @@
     if (!draft) return false;
 
     if (isCable) {
+      if (cableContinuePromptLocked) {
+        b()?.updateStatus?.(
+          'Continue ' + (cableContinueOffer?.label || 'batch') +
+          ' — choose Yes to merge or No for a new cable',
+          true
+        );
+        return false;
+      }
       if (!commitCablePointFromResolved(draft, resolved, e)) {
         b()?.updateStatus?.('Stay on the excavation trench to add cable points', true);
         return false;
@@ -2568,6 +2605,16 @@
 
     if (S?.pen?.lineMode === 'cable') {
       if (cableFinishingDblClick || cableSaveInProgress) return true;
+      if (cableContinuePromptLocked) {
+        e.preventDefault();
+        e.stopPropagation();
+        b()?.updateStatus?.(
+          'Continue ' + (cableContinueOffer?.label || 'batch') +
+          ' — choose Yes to merge or No for a new cable',
+          true
+        );
+        return true;
+      }
       var cableAdded = addPenVertexFromEvent(e);
       if (cableAdded) {
         e.preventDefault();
@@ -2821,7 +2868,7 @@
     hideSvgEl(svg, 'cable-magnetic-snap-marker');
     hideSvgEl(svg, 'pen-draft-live-path');
     hideSvgEl(svg, 'device-snap-center-point');
-    hideCableContinueFab();
+    if (!cableContinuePromptLocked) hideCableContinueFab();
   }
 
   function penToolCrosshairInk() {
@@ -4904,6 +4951,7 @@
       applySnappedFinishToDraft(S.penDraft, e);
 
       if (S.pen?.lineMode === 'cable') {
+        if (cableContinuePromptLocked) return true;
         if (!S.penDraft.points?.length) {
           forceExitPenDrawing('Drawing cancelled');
           return true;
@@ -5011,6 +5059,7 @@
     finishPenDrawing: finishPenDrawing,
     acceptCableContinueOffer: acceptCableContinueOffer,
     declineCableContinueOffer: declineCableContinueOffer,
+    isCableContinuePromptActive: isCableContinuePromptActive,
     hideCableContinueFab: hideCableContinueFab,
     clearCableContinueSession: clearCableContinueSession,
     syncPenDraftPathState: syncPenDraftPathState,

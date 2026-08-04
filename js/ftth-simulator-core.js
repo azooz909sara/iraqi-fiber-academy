@@ -4767,6 +4767,7 @@
     }
     syncPenModeClass();
     syncDrawingLayerInteraction();
+    global.FTTHDrawingEngine?.clearCableContinueSession?.();
     global.FTTHDrawingEngine?.hidePenDrawingOverlays?.();
     global.FTTHDrawingEngine?.syncPenPointerTracking?.();
     renderGlobalDrawingLayer();
@@ -7308,6 +7309,9 @@
       getTrenchVertexSubpathPoints: getTrenchVertexSubpathPoints,
       appendCableVerticesAlongTrench: appendCableVerticesAlongTrench,
       isCablePenDrawActive: isCablePenDrawActive,
+      isCableContinuePromptActive: function () {
+        return !!global.FTTHDrawingEngine?.isCableContinuePromptActive?.();
+      },
       isHandholeGeometryLocked: isHandholeGeometryLocked,
       isHandholeNodePositionLocked: isHandholeNodePositionLocked,
       getCableRenderGeometry: getCableRenderGeometry,
@@ -9328,6 +9332,13 @@
     if (canPenDraw() && Sim.pen && Sim.pen.lineMode === 'cable') {
       e.preventDefault();
       e.stopPropagation();
+      if (global.FTTHDrawingEngine?.isCableContinuePromptActive?.()) {
+        updateStatus(
+          'Continue batch — choose Yes to merge existing cable or No to draw new',
+          true
+        );
+        return;
+      }
       if (global.FTTHDrawingEngine?.addPenVertexFromPlacedNode) {
         global.FTTHDrawingEngine.addPenVertexFromPlacedNode(nodeId, e);
       } else if (global.FTTHDrawingEngine) {
