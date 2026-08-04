@@ -236,6 +236,145 @@
     Sim.counters.cableByCapacity = {};
   }
 
+  function parseLabeledNumericId(value, pattern) {
+    if (value == null || value === '') return null;
+    var m = String(value).match(pattern);
+    if (!m) return null;
+    var n = parseInt(m[1], 10);
+    return (!isNaN(n) && n > 0) ? n : null;
+  }
+
+  /** Smallest positive integer not present in usedIds (1 when none are in use). */
+  function findLowestAvailableNumericId(usedIds) {
+    var used = {};
+    var i;
+    for (i = 0; i < usedIds.length; i++) {
+      var n = usedIds[i];
+      if (n != null && n > 0) used[n] = true;
+    }
+    var id = 1;
+    while (used[id]) id++;
+    return id;
+  }
+
+  function maxNumericId(usedIds) {
+    var max = 0;
+    var i;
+    for (i = 0; i < usedIds.length; i++) {
+      var n = usedIds[i];
+      if (n != null && n > 0) max = Math.max(max, n);
+    }
+    return max;
+  }
+
+  function collectHandholeNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'handhole') return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.autoName, /^H(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectFdtNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'fdt') return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.autoName, /^FDT(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectFatHandholeNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'fat_handhole') return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.autoName, /^FH(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectFatSystemNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'fat_handhole' || !node.fatSystemName) return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.fatSystemName, /^FAT(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectPoleNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'pole_foundation' || !node.hasPole || !node.poleName) return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.poleName, /^P(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectClosureNumericIds(excludeNodeId) {
+    var ids = [];
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || !node.closureName) return;
+      if (excludeNodeId && node.id === excludeNodeId) return;
+      var n = parseLabeledNumericId(node.closureName, /C(\d+)$/i);
+      if (n != null) ids.push(n);
+    });
+    return ids;
+  }
+
+  function collectCableBatchIdsForCapacity(capacity, excludeCableId) {
+    var ids = [];
+    var cap = parseInt(capacity, 10);
+    if (!cap || cap <= 0) return ids;
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      if (!cable) return;
+      if (excludeCableId && cable.id === excludeCableId) return;
+      var cableCap = cable.capacity || getCableCapacityForKind(cable.kind);
+      if (cableCap !== cap) return;
+      var batch = cable.batch;
+      if (batch == null) {
+        batch = parseLabeledNumericId(cable.asBuiltId || cable.name || '', new RegExp('^' + cap + 'F(\\d+)$', 'i'));
+      }
+      if (batch != null && batch > 0) ids.push(batch);
+    });
+    (Sim.connections || []).forEach(function (conn) {
+      if (!conn || !conn.name || !conn.capacity) return;
+      if (conn.capacity !== cap) return;
+      var batch = parseLabeledNumericId(conn.name, new RegExp('^' + cap + 'F(\\d+)$', 'i'));
+      if (batch != null) ids.push(batch);
+    });
+    return ids;
+  }
+
+  function syncDefaultCableBatchesToMap() {
+    var cfg = ensureCableConfig();
+    Object.keys(cfg).forEach(function (key) {
+      var entry = cfg[key];
+      if (!entry) return;
+      var cap = entry.capacity || (key === 'lastmile' ? 12 : 72);
+      entry.batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
+    });
+    if (Sim.penDraft && Sim.penDraft.lineMode === 'cable') {
+      var kind = Sim.penDraft.kind || getActiveCableKind();
+      if (kind) {
+        Sim.penDraft.batch = getCableBatchForKind(kind);
+        Sim.penDraft.capacity = getCableCapacityForKind(kind);
+      }
+    }
+    updateFieldStatusCounters();
+  }
+
   /* ─── Map history (undo / redo) ─── */
   function cloneMapState() {
     return {
@@ -266,6 +405,8 @@
     Sim.fiberCablePathId = state.fiberCablePathId || 0;
     Sim.counters = JSON.parse(JSON.stringify(state.counters));
     Sim.cableDraftFrom = state.cableDraftFrom;
+    syncNameCountersFromNodes();
+    syncDefaultCableBatchesToMap();
     Sim.penDraft = null;
     Sim.selectedPath = null;
     Sim.pathEdit = { drag: null, context: null };
@@ -333,67 +474,39 @@
 
   function syncNameCountersFromNodes() {
     resetNameCounters();
+    Sim.counters.handhole = maxNumericId(collectHandholeNumericIds());
+    Sim.counters.fdt = maxNumericId(collectFdtNumericIds());
+    Sim.counters.fatHandhole = maxNumericId(collectFatHandholeNumericIds());
+    Sim.counters.fatSystem = maxNumericId(collectFatSystemNumericIds());
+    Sim.counters.pole = maxNumericId(collectPoleNumericIds());
+    Sim.counters.closure = maxNumericId(collectClosureNumericIds());
     Sim.nodes.forEach(function (node) {
-      if (node.type === 'handhole' && node.autoName) {
-        var n = parseInt(node.autoName.replace(/^H/, ''), 10);
-        if (!isNaN(n)) Sim.counters.handhole = Math.max(Sim.counters.handhole, n);
-      }
-      if (node.type === 'fdt' && node.autoName) {
-        var f = parseInt(node.autoName.replace(/^FDT/, ''), 10);
-        if (!isNaN(f)) Sim.counters.fdt = Math.max(Sim.counters.fdt, f);
-      }
-      if (node.closureName && node.type === 'handhole') {
-        var hm = String(node.closureName).match(/^H(\d+)C(\d+)$/i);
-        if (hm) {
-          Sim.counters.handhole = Math.max(Sim.counters.handhole, parseInt(hm[1], 10) || 0);
-          Sim.counters.closure = Math.max(Sim.counters.closure, parseInt(hm[2], 10) || 0);
-        } else {
-          var c = parseInt(String(node.closureName).replace(/\D/g, ''), 10);
-          if (!isNaN(c)) Sim.counters.closure = Math.max(Sim.counters.closure, c);
-        }
-      }
-      if (node.type === 'fat_handhole' && node.autoName) {
-        var fh = parseInt(node.autoName.replace(/^FH/, ''), 10);
-        if (!isNaN(fh)) Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole, fh);
-      }
-      if (node.type === 'fat_handhole' && node.fatSystemName) {
-        var fs = parseInt(node.fatSystemName.replace(/^FAT/, ''), 10);
-        if (!isNaN(fs)) Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem, fs);
-      }
-      if (node.type === 'pole_foundation' && node.hasPole) {
-        if (!node.poleName) assignPoleName(node);
-        else {
-          var pm = String(node.poleName).match(/^P(\d+)$/i);
-          if (pm) Sim.counters.pole = Math.max(Sim.counters.pole, parseInt(pm[1], 10) || 0);
-        }
-      }
+      if (node.type === 'pole_foundation' && node.hasPole && !node.poleName) assignPoleName(node);
     });
-    Sim.connections.forEach(function (conn) {
-      if (!conn.name || !conn.capacity) return;
-      var m = conn.name.match(/^(\d+)F(\d+)$/i);
-      if (m && parseInt(m[1], 10) === conn.capacity) {
-        var seq = parseInt(m[2], 10);
-        var cap = conn.capacity;
-        if (!Sim.counters.cableByCapacity[cap]) Sim.counters.cableByCapacity[cap] = 0;
-        Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], seq);
-      }
-    });
+    var cableCapKeys = {};
     (Sim.fiberCablePaths || []).forEach(function (cable) {
       if (!cable) return;
       var cap = cable.capacity || getCableCapacityForKind(cable.kind);
-      var label = cable.asBuiltId || cable.name || '';
-      var cm = String(label).match(/^(\d+)F(\d+)$/i);
-      if (cm && parseInt(cm[1], 10) === cap) {
-        var cseq = parseInt(cm[2], 10);
-        if (!Sim.counters.cableByCapacity[cap]) Sim.counters.cableByCapacity[cap] = 0;
-        Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], cseq);
-      }
+      if (cap) cableCapKeys[cap] = true;
+    });
+    (Sim.connections || []).forEach(function (conn) {
+      if (conn && conn.capacity) cableCapKeys[conn.capacity] = true;
+    });
+    Object.keys(cableCapKeys).forEach(function (capKey) {
+      var cap = parseInt(capKey, 10);
+      var maxBatch = maxNumericId(collectCableBatchIdsForCapacity(cap));
+      if (maxBatch > 0) Sim.counters.cableByCapacity[cap] = maxBatch;
     });
   }
 
   function assignCableAsBuiltLabel(meta) {
     var cap = meta.capacity || getCableCapacityForKind(meta.kind) || 12;
-    var batch = meta.batch || getCableBatchForKind(meta.kind) || 1;
+    var batch = meta.batch;
+    if (batch == null) {
+      batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
+    } else {
+      batch = Math.max(1, parseInt(batch, 10) || 1);
+    }
     if (!Sim.counters.cableByCapacity[cap]) Sim.counters.cableByCapacity[cap] = 0;
     Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], batch);
     return formatCableLabel(cap, batch);
@@ -401,20 +514,24 @@
 
   function assignPoleName(node) {
     if (!node || node.type !== 'pole_foundation') return;
-    Sim.counters.pole = (Sim.counters.pole || 0) + 1;
-    node.poleName = 'P' + Sim.counters.pole;
+    var poleId = findLowestAvailableNumericId(collectPoleNumericIds(node.id));
+    node.poleName = 'P' + poleId;
+    Sim.counters.pole = Math.max(Sim.counters.pole || 0, poleId);
   }
 
   function assignAutoName(type, node) {
     if (type === 'handhole') {
-      Sim.counters.handhole++;
-      node.autoName = 'H' + Sim.counters.handhole;
+      var handholeId = findLowestAvailableNumericId(collectHandholeNumericIds(node && node.id));
+      node.autoName = 'H' + handholeId;
+      Sim.counters.handhole = Math.max(Sim.counters.handhole || 0, handholeId);
     } else if (type === 'fdt') {
-      Sim.counters.fdt++;
-      node.autoName = 'FDT' + Sim.counters.fdt;
+      var fdtId = findLowestAvailableNumericId(collectFdtNumericIds(node && node.id));
+      node.autoName = 'FDT' + fdtId;
+      Sim.counters.fdt = Math.max(Sim.counters.fdt || 0, fdtId);
     } else if (type === 'fat_handhole') {
-      Sim.counters.fatHandhole++;
-      node.autoName = 'FH' + Sim.counters.fatHandhole;
+      var fhId = findLowestAvailableNumericId(collectFatHandholeNumericIds(node && node.id));
+      node.autoName = 'FH' + fhId;
+      Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole || 0, fhId);
     }
   }
 
@@ -453,15 +570,17 @@
       return;
     }
 
-    Sim.counters.fatSystem = (Sim.counters.fatSystem || 0) + 1;
-    target.fatSystemName = 'FAT' + Sim.counters.fatSystem;
+    var fatId = findLowestAvailableNumericId(collectFatSystemNumericIds(target && target.id));
+    target.fatSystemName = 'FAT' + fatId;
+    Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, fatId);
   }
 
   function assignClosureName(target) {
     if (!target || target.type !== 'handhole') return;
-    Sim.counters.closure = (Sim.counters.closure || 0) + 1;
-    target.closureCount = Sim.counters.closure;
-    target.closureName = (target.autoName || 'H1') + 'C' + Sim.counters.closure;
+    var closureId = findLowestAvailableNumericId(collectClosureNumericIds(target && target.id));
+    target.closureCount = closureId;
+    target.closureName = (target.autoName || 'H1') + 'C' + closureId;
+    Sim.counters.closure = Math.max(Sim.counters.closure || 0, closureId);
   }
 
   function formatCableLabel(capacity, batch) {
@@ -6247,12 +6366,11 @@
       Sim.fiberCablePathId++;
       var newId = 'cable_path_' + Sim.fiberCablePathId;
       var cableCapacity = src.capacity || getCableCapacityForKind(src.kind) || 12;
-      var cableBatch = getCableBatchForKind(src.kind) || 1;
       var toolboxLabel = assignCableAsBuiltLabel({
         kind: src.kind,
         capacity: cableCapacity,
-        batch: cableBatch,
       });
+      var cableBatch = parseLabeledNumericId(toolboxLabel, new RegExp('^' + cableCapacity + 'F(\\d+)$', 'i')) || 1;
       if (!Sim.counters.cableByCapacity[cableCapacity]) Sim.counters.cableByCapacity[cableCapacity] = 0;
       Sim.counters.cableByCapacity[cableCapacity] = Math.max(Sim.counters.cableByCapacity[cableCapacity], cableBatch);
       newPath = {
@@ -7129,6 +7247,8 @@
 
     resetPathEditToSelect();
     Sim.ui.sidebarEditMode = false;
+    syncNameCountersFromNodes();
+    syncDefaultCableBatchesToMap();
     renderUnifiedSidebar();
     syncPathBottomPanelLayout(false);
     updateStatus('Path deleted');
@@ -10576,6 +10696,8 @@
     });
     if (Sim.selectedNodeId === nodeId) clearNodeSelection();
     if (Sim.moveNodeId === nodeId) Sim.moveNodeId = null;
+    syncNameCountersFromNodes();
+    syncDefaultCableBatchesToMap();
     renderConnections();
     updateMetrics();
     updateStatus('Component deleted');
