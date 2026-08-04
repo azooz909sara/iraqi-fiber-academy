@@ -2797,6 +2797,103 @@
     }).filter(function (c) { return !!c; });
   }
 
+  function distancePointToTrenchPolyline(x, y, trench) {
+    var pts = trench?.points;
+    if (!pts || pts.length < 2 || x == null || y == null) return Infinity;
+    var best = Infinity;
+    for (var i = 0; i < pts.length - 1; i++) {
+      var d = distancePointToSegment(x, y, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  /** Geometric membership: cable samples must lie on this trench polyline. */
+  function cableIsPhysicallyInsideTrench(cable, trench) {
+    if (!cable || !trench?.points || trench.points.length < 2) return false;
+    var pts = cable.points || [];
+    if (pts.length < 2) return false;
+
+    var tol = Math.max(12, (Sim.layout?.cellSize || 50) * 0.28);
+    var onCount = 0;
+    var samples = 0;
+
+    function consider(x, y) {
+      if (x == null || y == null) return;
+      samples++;
+      if (distancePointToTrenchPolyline(x, y, trench) <= tol) onCount++;
+    }
+
+    for (var i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (!p) continue;
+      consider(p[0], p[1]);
+      if (i < pts.length - 1 && pts[i + 1]) {
+        consider((p[0] + pts[i + 1][0]) / 2, (p[1] + pts[i + 1][1]) / 2);
+      }
+    }
+    if (samples < 2 || onCount < 2) return false;
+
+    var multi = !!(cable.userDrawn || ((cable.trenchPathIds || []).length > 1));
+    if (multi) {
+      /* Multi-trench cable: require real occupancy on this trench, not a shared endpoint. */
+      return onCount >= 2 && (onCount / samples >= 0.25 || onCount >= 3);
+    }
+    return onCount / samples >= 0.55;
+  }
+
+  /**
+   * Evaluation-only: cables that truly belong inside this trench.
+   * Rejects stray cables hosted on other excavations that only appear via stale
+   * cableIds / junction trenchPathIds listings.
+   */
+  function getCablesStrictlyOnTrench(trenchId) {
+    if (!trenchId) return [];
+    var trench = findPathByRef({ type: 'excavation', id: trenchId });
+    if (!trench) return [];
+
+    var seen = {};
+    var candidates = [];
+
+    function addCandidate(cable) {
+      if (!cable || !cable.id || seen[cable.id]) return;
+      seen[cable.id] = true;
+      candidates.push(cable);
+    }
+
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      if (!cable) return;
+      if (cable.hostTrenchId === trenchId || cable.trenchPathId === trenchId) {
+        addCandidate(cable);
+        return;
+      }
+      if ((cable.trenchPathIds || []).indexOf(trenchId) >= 0) addCandidate(cable);
+    });
+    (trench.cableIds || []).forEach(function (cid) {
+      addCandidate(findPathByRef({ type: 'fiber', id: cid }));
+    });
+
+    return candidates.filter(function (cable) {
+      var primary = cable.hostTrenchId || cable.trenchPathId || null;
+      var inPathIds = (cable.trenchPathIds || []).indexOf(trenchId) >= 0;
+      var multi = !!(cable.userDrawn || ((cable.trenchPathIds || []).length > 1));
+
+      /* Never show a cable whose primary host is a different trench. */
+      if (primary && primary !== trenchId) {
+        if (!(multi && inPathIds)) return false;
+      }
+
+      if (!cableIsPhysicallyInsideTrench(cable, trench)) return false;
+
+      if (!primary) {
+        var resolved = resolveTrenchForCable(cable);
+        if (resolved && resolved.id !== trenchId && !multi) return false;
+      }
+
+      return true;
+    });
+  }
+
   function pathLengthMeters(path) {
     var cs = Sim.layout?.cellSize || 50;
     var editor = global.FTTHPathwayEditor;
@@ -7061,6 +7158,7 @@
       clearToolboxSelection: clearToolboxSelection,
       registerCableOnTrench: registerCableOnTrench,
       getCablesOnTrench: getCablesOnTrench,
+      getCablesStrictlyOnTrench: getCablesStrictlyOnTrench,
       getChildClosureSegments: getChildClosureSegments,
       unregisterCableFromTrench: unregisterCableFromTrench,
       deleteExcavationWithContents: deleteExcavationWithContents,
@@ -9679,7 +9777,8 @@
           if (aloneEx) focusedEx = [aloneEx];
         }
         excavations = focusedEx;
-        cables = sortCablesForLaneOrder(getCablesOnTrench(focus.pathId) || []);
+        /* Strict: only cables physically inside this trench — never stray hosts. */
+        cables = sortCablesForLaneOrder(getCablesStrictlyOnTrench(focus.pathId) || []);
       } else if (focus.kind === 'cable' && focus.pathId) {
         var focusedCable = findPathByRef({ type: 'fiber', id: focus.pathId });
         cables = focusedCable ? [focusedCable] : [];
@@ -9725,16 +9824,9 @@
     if (pathType === 'excavation') {
       var pathActive = focus.kind === 'excavation' && focus.pathId === path.id;
       excavHtml = renderExcavationSidebarCard(path, pathActive);
-      // Use strict cable filtering via cableIds array
-      var trench = path;
-      if (trench && trench.cableIds && trench.cableIds.length > 0) {
-        var filteredCables = (Sim.fiberCablePaths || []).filter(function (cable) {
-          return trench.cableIds.indexOf(cable.id) !== -1;
-        });
-        sortCablesForLaneOrder(filteredCables).forEach(function (cable) {
-          cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
-        });
-      }
+      sortCablesForLaneOrder(getCablesStrictlyOnTrench(path.id) || []).forEach(function (cable) {
+        cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
+      });
     } else if (pathType === 'fiber') {
       cableHtml = renderCableSidebarCard(path, focus.kind === 'cable' && focus.pathId === path.id);
       var trench = resolveTrenchForCable(path);
