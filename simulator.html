@@ -141,12 +141,6 @@
       max-width: 0 !important;
     }
 
-    body.ftth-fake-fullscreen-active #evaluation-panel.sidebar--collapsed {
-      width: 2.75rem !important;
-      min-width: 2.75rem !important;
-      max-width: 2.75rem !important;
-    }
-
     .toolbox-item {
       transition: padding 0.35s cubic-bezier(0.4, 0, 0.2, 1),
                   gap 0.35s cubic-bezier(0.4, 0, 0.2, 1),
@@ -803,12 +797,9 @@
 
     <!-- RIGHT: Unified Evaluation + Features Sidebar -->
     <aside id="evaluation-panel" class="side-panel side-panel--right bg-fiber-panel border-l border-fiber-border flex flex-col overflow-hidden sidebar--idle">
-      <div class="evaluation-panel__header p-4 border-b border-fiber-border flex items-start justify-between gap-2">
-        <div>
-          <h2 class="text-xs font-bold uppercase tracking-wider text-fiber-cyan">Evaluation</h2>
-          <p class="text-[11px] text-slate-400 mt-1" dir="rtl">لوحة التقييم والتحقق</p>
-        </div>
-        <button type="button" id="btn-sidebar-collapse" class="sidebar-collapse-btn" title="Collapse sidebar" aria-label="Collapse sidebar">◀</button>
+      <div class="evaluation-panel__header p-4 border-b border-fiber-border">
+        <h2 class="text-xs font-bold uppercase tracking-wider text-fiber-cyan">Evaluation</h2>
+        <p class="text-[11px] text-slate-400 mt-1" dir="rtl">لوحة التقييم والتحقق</p>
       </div>
 
       <div id="evaluation-panel-inner" class="p-4 space-y-3 flex-1 flex flex-col min-h-0">
@@ -884,9 +875,8 @@
         </div><!-- /evaluation-content -->
       </div><!-- /evaluation-panel-inner -->
 
-      <div class="evaluation-panel__footer px-3 py-2 border-t border-fiber-border">
-        <button id="btn-check-design" type="button"
-          class="evaluation-panel__check-btn">
+      <div class="evaluation-panel__footer">
+        <button id="btn-check-design" type="button" class="evaluation-panel__check-btn">
           ✓ Check Design
         </button>
       </div>

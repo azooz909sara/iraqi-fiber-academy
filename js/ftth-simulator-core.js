@@ -103,7 +103,6 @@
       topologyTreeFocus: null,
       pathHighlightFromSidebar: false,
       sidebarEditMode: false,
-      sidebarCollapsed: false,
       toolboxWidth: 250,
       evalPanelWidth: 256,
       sidePanelResizeBound: false,
@@ -4387,7 +4386,6 @@
     syncFullscreenButtonUi();
     applyMapTransform();
     applyEvaluationPanelCollapseState();
-    applyEvaluationSidebarCollapseState();
     requestAnimationFrame(positionNodeActionHud);
     var menu = document.getElementById('sim-context-menu');
     if (menu) menu.style.zIndex = isFs ? '1000055' : '9999';
@@ -9704,7 +9702,6 @@
       var node = findNode(Sim.selectedNodeId);
       if (!node) clearNodeSelection();
     }
-    bindSidebarCollapseButton();
   }
 
   function hideContextMenu() {
@@ -10397,20 +10394,6 @@
     }
   }
 
-  function bindSidebarCollapseButton() {
-    if (Sim.ui.sidebarCollapseBound) return;
-    var btn = document.getElementById('btn-sidebar-collapse');
-    if (!btn) return;
-    btn.addEventListener('click', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      Sim.ui.sidebarCollapsed = !Sim.ui.sidebarCollapsed;
-      applyEvaluationSidebarCollapseState();
-    });
-    applyEvaluationSidebarCollapseState();
-    Sim.ui.sidebarCollapseBound = true;
-  }
-
   function renderUnifiedSidebar() {
     syncSidebarSelectionState();
     var body = document.getElementById('property-panel-body');
@@ -11017,19 +11000,6 @@
     requestAnimationFrame(applyMapTransform);
   }
 
-  function applyEvaluationSidebarCollapseState() {
-    var panel = document.getElementById('evaluation-panel');
-    var btn = document.getElementById('btn-sidebar-collapse');
-    if (!panel) return;
-    panel.classList.toggle('sidebar--collapsed', !!Sim.ui.sidebarCollapsed);
-    if (btn) {
-      btn.textContent = Sim.ui.sidebarCollapsed ? '▶' : '◀';
-      btn.setAttribute('aria-label', Sim.ui.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar');
-    }
-    syncSidePanelResizeHandles();
-    requestAnimationFrame(applyMapTransform);
-  }
-
   function bindPanelToggles() {
     if (Sim.ui.panelTogglesBound) return;
     var tbBtn = document.getElementById('toggle-toolbox');
@@ -11062,7 +11032,6 @@
   var EVAL_WIDTH_MIN = 200;
   var EVAL_WIDTH_MAX = 520;
   var EVAL_WIDTH_DEFAULT = 256;
-  var EVAL_WIDTH_SIDEBAR_COLLAPSED = 44;
   var SIDE_PANEL_MIN_CANVAS = 280;
   var sidePanelResizeState = null;
 
@@ -11077,7 +11046,6 @@
 
   function getEffectiveEvalWidth() {
     if (Sim.ui.evalCollapsed) return 0;
-    if (Sim.ui.sidebarCollapsed) return EVAL_WIDTH_SIDEBAR_COLLAPSED;
     return Sim.ui.evalPanelWidth || EVAL_WIDTH_DEFAULT;
   }
 
@@ -11124,7 +11092,7 @@
     var tbHandle = document.getElementById('toolbox-resize-handle');
     var evHandle = document.getElementById('eval-resize-handle');
     if (tbHandle) tbHandle.hidden = !!Sim.ui.toolboxCollapsed;
-    if (evHandle) evHandle.hidden = !!Sim.ui.evalCollapsed || !!Sim.ui.sidebarCollapsed;
+    if (evHandle) evHandle.hidden = !!Sim.ui.evalCollapsed;
   }
 
   function applySidePanelWidths() {
@@ -11214,7 +11182,7 @@
       startSidePanelResize('toolbox', e);
     });
     evHandle.addEventListener('pointerdown', function (e) {
-      if (e.button !== 0 || Sim.ui.evalCollapsed || Sim.ui.sidebarCollapsed) return;
+      if (e.button !== 0 || Sim.ui.evalCollapsed) return;
       startSidePanelResize('eval', e);
     });
     document.addEventListener('pointermove', onSidePanelResizeMove);
@@ -12705,7 +12673,6 @@
       applyLayoutSettingsFromStorage();
       applyIconZoomCompensation();
       renderUnifiedSidebar();
-      bindSidebarCollapseButton();
       initFiberDesignModules();
       syncSplicingToolbarState();
       if (global.FTTHFileMenu?.init) global.FTTHFileMenu.init();

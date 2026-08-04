@@ -5708,12 +5708,6 @@ body.ftth-fake-fullscreen-active #evaluation-panel.collapsed {
   pointer-events: none;
 }
 
-body.ftth-fake-fullscreen-active #evaluation-panel.sidebar--collapsed {
-  width: 2.75rem !important;
-  min-width: 2.75rem !important;
-  max-width: 2.75rem !important;
-}
-
 html.is-document-fullscreen,
 html.is-document-fullscreen body,
 html:fullscreen body {
@@ -5746,6 +5740,8 @@ html:fullscreen #main-layout {
   gap: 0.5rem;
   padding: 0.35rem 0;
   border-bottom: 1px solid rgba(100, 116, 139, 0.15);
+  min-width: 0;
+  max-width: 100%;
 }
 .prop-row--stack {
   flex-direction: column;
@@ -5760,12 +5756,21 @@ html:fullscreen #main-layout {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .prop-value {
   color: #e2e8f0;
   text-align: right;
-  word-break: break-all;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .prop-section {
   margin-top: 0.65rem;
@@ -8163,15 +8168,26 @@ body.ftth-low-zoom-performance .map-label {
   min-height: 0;
   height: 100%;
   overflow: hidden;
+  overflow-x: hidden;
+  box-sizing: border-box;
   transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               min-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
               opacity 0.35s ease;
 }
 
+#evaluation-panel *,
+#evaluation-panel *::before,
+#evaluation-panel *::after {
+  box-sizing: border-box;
+}
+
 #evaluation-panel-inner {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
+  width: 100%;
+  max-width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -8182,36 +8198,78 @@ body.ftth-low-zoom-performance .map-label {
   position: relative;
   z-index: 4;
   background: inherit;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.evaluation-panel__header h2,
+.evaluation-panel__header p {
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .evaluation-panel__footer {
   flex-shrink: 0;
-  position: relative;
-  z-index: 4;
-  background: var(--fiber-panel, #0f172a);
-  box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.45);
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0.75rem 0.875rem;
+  background: rgba(15, 23, 42, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 -8px 20px rgba(15, 23, 42, 0.35);
 }
 
 .evaluation-panel__check-btn {
   display: block;
   width: 100%;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
+  max-width: 100%;
+  margin: 0;
+  padding: 0.625rem 1rem;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+  transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.evaluation-panel__check-btn:hover {
+  background: rgba(0, 229, 255, 0.08);
+  border-color: rgba(0, 229, 255, 0.42);
+  color: #f8fafc;
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.12);
+}
+
+.evaluation-panel__check-btn:active {
+  background: rgba(0, 229, 255, 0.14);
+  border-color: rgba(0, 229, 255, 0.55);
+}
+
+.evaluation-panel__check-btn:focus-visible {
+  outline: 2px solid rgba(0, 229, 255, 0.45);
+  outline-offset: 2px;
 }
 
 #btn-check-design {
   display: block !important;
-  padding: 6px 12px !important;
-  font-size: 13px !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
   height: auto !important;
-  width: 90% !important;
-  margin: 10px auto !important;
-  border-radius: 4px !important;
-  background: rgba(0, 100, 200, 0.2) !important;
-  border: 1px solid rgba(255, 255, 255, 0.2) !important;
   box-shadow: none !important;
-  color: #e2e8f0 !important;
-  font-weight: 600 !important;
 }
 
 #evaluation-panel.sidebar--selection-active .evaluation-content {
@@ -8220,13 +8278,6 @@ body.ftth-low-zoom-performance .map-label {
 
 #evaluation-panel.sidebar--idle #property-panel {
   display: none !important;
-}
-
-#evaluation-panel.sidebar--collapsed {
-  width: 2.75rem !important;
-  min-width: 2.75rem !important;
-  max-width: 2.75rem !important;
-  overflow: hidden;
 }
 
 /* ─── Side panel width resize handles ─── */
@@ -8280,45 +8331,123 @@ body.is-resizing-side-panel #evaluation-panel {
   border-color: transparent !important;
 }
 
-#evaluation-panel.sidebar--collapsed .evaluation-panel__header h2,
-#evaluation-panel.sidebar--collapsed .evaluation-panel__header p,
-#evaluation-panel.sidebar--collapsed #evaluation-panel-inner,
-#evaluation-panel.sidebar--collapsed .evaluation-panel__footer {
-  display: none !important;
+/* ─── Evaluation panel resize resilience ─── */
+#evaluation-panel .evaluation-content,
+#evaluation-panel #property-panel,
+#evaluation-panel .sidebar-sections-view,
+#evaluation-panel .sidebar-section,
+#evaluation-panel .sidebar-section__cards,
+#evaluation-panel .sidebar-card,
+#evaluation-panel .sidebar-card__details,
+#evaluation-panel .sidebar-card__tools {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
-#evaluation-panel.sidebar--collapsed .evaluation-panel__header {
-  justify-content: center;
-  padding: 0.75rem 0.35rem;
+#evaluation-panel .evaluation-content {
+  width: 100%;
 }
 
-.sidebar-collapse-btn {
-  flex-shrink: 0;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(0, 229, 255, 0.25);
-  background: rgba(0, 229, 255, 0.08);
-  color: #00e5ff;
-  font-size: 0.65rem;
-  cursor: pointer;
-  line-height: 1;
-  pointer-events: auto;
-  position: relative;
-  z-index: 6;
+#evaluation-panel .evaluation-content > div,
+#evaluation-panel .rounded-xl {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
-.sidebar-collapse-btn:hover {
-  background: rgba(0, 229, 255, 0.16);
+#evaluation-panel #score-value {
+  font-size: clamp(1.35rem, 8vw, 2.25rem);
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#evaluation-panel #score-label,
+#evaluation-panel .evaluation-content .text-\[10px\],
+#evaluation-panel .evaluation-content .text-\[11px\] {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#evaluation-panel .evaluation-content .flex.justify-between {
+  min-width: 0;
+  max-width: 100%;
+  gap: 0.5rem;
+}
+
+#evaluation-panel .evaluation-content .flex.justify-between > span {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#evaluation-panel .evaluation-content .flex.justify-between > span:last-child {
+  text-align: right;
+  flex: 0 1 auto;
+}
+
+#evaluation-panel .evaluation-content .flex.justify-between > span:first-child {
+  flex: 1 1 auto;
+}
+
+#evaluation-panel #checklist li,
+#evaluation-panel #feedback-list li {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#evaluation-panel #checklist li > span:last-child,
+#evaluation-panel .evaluation-content p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#evaluation-panel .sidebar-section__title,
+#evaluation-panel .unified-sidebar__title,
+#evaluation-panel .sidebar-section__empty {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+#evaluation-panel .path-section-tools,
+#evaluation-panel .sidebar-node-tools,
+#evaluation-panel .unified-sidebar__actions {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+body.is-resizing-side-panel #evaluation-panel .evaluation-panel__footer,
+body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
+  transition: none !important;
 }
 
 .property-panel--unified {
   border-color: rgba(0, 229, 255, 0.28) !important;
+  min-width: 0;
   min-height: 0;
+  max-width: 100%;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .property-panel__body {
+  min-width: 0;
   min-height: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* Per-section path edit toolbars (cable vs excavation) */
@@ -8567,9 +8696,11 @@ body.is-resizing-side-panel #evaluation-panel {
 
 .sidebar-card__meta-row {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 0.65rem;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .sidebar-card__meta-dt {
@@ -8579,7 +8710,12 @@ body.is-resizing-side-panel #evaluation-panel {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: #64748b;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar-card__meta-dd {
@@ -8590,6 +8726,11 @@ body.is-resizing-side-panel #evaluation-panel {
   color: #e2e8f0;
   text-align: right;
   line-height: 1.3;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sidebar-section--cable .sidebar-card--expanded .sidebar-card__meta-dd {
