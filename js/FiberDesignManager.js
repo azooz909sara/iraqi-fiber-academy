@@ -882,6 +882,20 @@
     return mainPointers[key];
   }
 
+  /**
+   * True when two map/design cables are the same Main backbone feed:
+   * same physical id, or same batch/display label (e.g. 48F1).
+   */
+  function isSameMainBackboneCable(a, b) {
+    if (!a || !b) return false;
+    if (a.id != null && b.id != null && String(a.id) === String(b.id)) return true;
+    if (a.map_cable_id != null && b.id != null && String(a.map_cable_id) === String(b.id)) return true;
+    if (b.map_cable_id != null && a.id != null && String(b.map_cable_id) === String(a.id)) return true;
+    var la = String(getCableLabel(a) || a.name || a.asBuiltId || '').trim().toLowerCase();
+    var lb = String(getCableLabel(b) || b.name || b.asBuiltId || '').trim().toLowerCase();
+    return !!(la && lb && la === lb);
+  }
+
   /** @deprecated */
   function createTubeFiberAllocator(capacityF) {
     return createMainFiberPointer(capacityF);
@@ -1706,11 +1720,29 @@
       });
     }
 
+    /* Mark only the undirected a↔b segment — never every edge of the cable id. */
+    function markEdgeBetween(aId, bId) {
+      if (!graph || !graph.edges || aId == null || bId == null) return;
+      var a = String(aId);
+      var b = String(bId);
+      if (a === b) return;
+      var ei;
+      for (ei = 0; ei < graph.edges.length; ei++) {
+        var e = graph.edges[ei];
+        if (!e) continue;
+        if ((e.a === a && e.b === b) || (e.a === b && e.b === a)) {
+          usedEdges[edgeKeyFn(e)] = true;
+          return;
+        }
+      }
+    }
+
     var startCable = startLink.edge && startLink.edge.cable;
     var tipId = null;
 
     if (startCable) {
       var ordered = getOrderedNodesOnCable(startCable, closureNode);
+      var prevId = closureId;
       var oi;
       for (oi = 0; oi < ordered.length; oi++) {
         var on = ordered[oi];
@@ -1718,27 +1750,25 @@
         var oid = String(on.id);
         if (oid === closureId) {
           visited[oid] = true;
+          prevId = oid;
           continue;
         }
-        /* Next pure splice Closure ends this Sub-Cable domain */
+        /* Next pure splice Closure ends this Sub-Cable domain.
+           Mark only the segment into that closure (e.g. C1→C2); leave C2→C3+ open. */
         if (isClosureNode(on) && !isFatOrPoleNode(on)) {
           visited[oid] = true;
+          markEdgeBetween(prevId, oid);
           break;
         }
         visited[oid] = true;
         tipId = oid;
         pushFat(on, results.length + 1, oi, startLink.edge);
+        markEdgeBetween(prevId, oid);
+        prevId = oid;
       }
 
-      /* Mark every graph segment that belongs to this Sub-Cable as used */
-      var cableId = String(startCable.id || '');
-      if (cableId && graph.edges) {
-        graph.edges.forEach(function (e) {
-          if (!e || e.virtual) return;
-          if (String(e.cable && e.cable.id) !== cableId) return;
-          usedEdges[edgeKeyFn(e)] = true;
-        });
-      } else if (startLink.edge) {
+      /* Always consume the outbound start edge; never blanket-mark the whole backbone. */
+      if (startLink.edge) {
         usedEdges[edgeKeyFn(startLink.edge)] = true;
       }
     } else if (startLink.edge) {
@@ -1912,9 +1942,18 @@
 
         if (isClosureNode(out.nextNode) && !isFatOrPoleNode(out.nextNode)) {
           usedEdges[edgeKey(out.link.edge)] = true;
-          var nestedMain = out.link.edge.cable;
-          // Use shared main pointer for nested closures to maintain continuous allocation
-          var nestedPtr = getOrCreateMainPointer(nestedMain);
+          var edgeCable = out.link.edge.cable;
+          var nestedMain;
+          var nestedPtr;
+          /* Same physical LineString or same Main batch label → inherit parent feed.
+             Do not allocate a fresh pointer / duplicate Main for C2, C3, C4... */
+          if (mainCable && isSameMainBackboneCable(mainCable, edgeCable)) {
+            nestedMain = mainCable;
+            nestedPtr = mainPointer || getOrCreateMainPointer(mainCable);
+          } else {
+            nestedMain = edgeCable || mainCable;
+            nestedPtr = getOrCreateMainPointer(nestedMain);
+          }
           processClosureDistribution(out.nextNode, nestedMain, nestedPtr, closureId);
         } else if (isFatOrPoleNode(out.nextNode) && isClosureNode(out.nextNode)) {
           processClosureDistribution(out.nextNode, mainCable, mainPointer, closureId);

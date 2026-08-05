@@ -9,9 +9,26 @@
   var overlayEl = null;
   var stylesInjected = false;
   var renderScheduled = false;
+  var deferredViewportRefresh = false;
   var measureCanvas = null;
   var measureCtx = null;
   var cachedCanvasWrapper = null;
+
+  /** Ephemeral pen/crosshair/rubber-band overlay — not structural map geometry. */
+  var DRAWING_OVERLAY_ROOT_IDS = {
+    'drawing-overlay-top': 1,
+    'pen-rubber-band': 1,
+    'qfield-crosshair': 1,
+    'pen-draft-live-path': 1,
+    'cable-magnetic-snap-marker': 1,
+    'pen-vertex-markers': 1,
+    'cable-anchor-dots': 1,
+    'device-snap-center-point': 1,
+    'vertex-active-ring': 1,
+    'vertex-insert-preview': 1,
+    'vertex-ghost-line-prev': 1,
+    'vertex-ghost-line-next': 1,
+  };
 
   var HANDHOLE_SLOTS = ['TL', 'T', 'TR', 'L', 'R', 'BL', 'B', 'BR'];
   var POLE_SLOTS = ['T', 'TL', 'TR', 'L', 'R', 'BL', 'BR'];
@@ -1746,31 +1763,143 @@
     return escapeHtml(text).replace(/'/g, '&#39;');
   }
 
-  function scheduleRender() {
+  function isPenDrawHoverActive() {
+    if (!api?.canPenDraw?.()) return false;
+    if (api.isPenPointerTrackingActive?.()) return true;
+    if (api.hasActiveDrawingStroke?.()) return true;
+    return false;
+  }
+
+  function isMapViewportNavigating() {
+    return !!(api?.isMapViewportNavigating?.());
+  }
+
+  function shouldDeferRefreshForDrawingNav(opts) {
+    if (opts?.force) return false;
+    return !!(api?.canPenDraw?.() && isMapViewportNavigating());
+  }
+
+  function isTransientDrawingOverlayNode(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.closest && el.closest('#drawing-overlay-top')) return true;
+    if (el.id && DRAWING_OVERLAY_ROOT_IDS[el.id]) return true;
+    if (el.classList) {
+      if (el.classList.contains('pen-rubber-band') ||
+          el.classList.contains('qfield-crosshair') ||
+          el.classList.contains('draw-path--draft-live') ||
+          el.classList.contains('vertex-ghost-line')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function isStructuralDrawingPathNode(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.classList &&
+        (el.classList.contains('draw-path-visible') ||
+         el.classList.contains('draw-path-hit') ||
+         el.classList.contains('draw-path-editable'))) {
+      return true;
+    }
+    if (el.querySelector &&
+        el.querySelector('.draw-path-visible, .draw-path-hit, .draw-path-editable')) {
+      return true;
+    }
+    return false;
+  }
+
+  function nodeListHasStructuralDrawingPath(list) {
+    if (!list || !list.length) return false;
+    for (var i = 0; i < list.length; i++) {
+      var node = list[i];
+      if (node.nodeType !== 1) continue;
+      if (isStructuralDrawingPathNode(node)) return true;
+    }
+    return false;
+  }
+
+  /** Ignore rubber-band / crosshair churn while pen hover is active. */
+  function shouldIgnoreDrawingLayerMutations(mutations) {
+    if (!isPenDrawHoverActive() || !mutations || !mutations.length) return false;
+    for (var i = 0; i < mutations.length; i++) {
+      var m = mutations[i];
+      if (m.type === 'attributes') {
+        if (!isTransientDrawingOverlayNode(m.target)) return false;
+        continue;
+      }
+      if (m.type === 'childList') {
+        if (nodeListHasStructuralDrawingPath(m.addedNodes)) return false;
+        if (nodeListHasStructuralDrawingPath(m.removedNodes)) return false;
+        if (m.target && m.target.id === 'global-drawing-layer' &&
+            (m.addedNodes.length > 2 || m.removedNodes.length > 2)) {
+          return false;
+        }
+        var j;
+        for (j = 0; j < m.addedNodes.length; j++) {
+          var added = m.addedNodes[j];
+          if (added.nodeType !== 1) continue;
+          if (!isTransientDrawingOverlayNode(added) && !isStructuralDrawingPathNode(added)) {
+            return false;
+          }
+        }
+        for (j = 0; j < m.removedNodes.length; j++) {
+          var removed = m.removedNodes[j];
+          if (removed.nodeType !== 1) continue;
+          if (!isTransientDrawingOverlayNode(removed) && !isStructuralDrawingPathNode(removed)) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  function scheduleRender(opts) {
+    opts = opts || {};
+    if (shouldDeferRefreshForDrawingNav(opts)) {
+      deferredViewportRefresh = true;
+      return;
+    }
     lastRenderSignature = '';
     if (renderScheduled) return;
     renderScheduled = true;
     requestAnimationFrame(renderLabels);
   }
 
+  function scheduleRenderFromDrawingLayer(mutations) {
+    if (shouldIgnoreDrawingLayerMutations(mutations)) return;
+    scheduleRender();
+  }
+
+  function flushDeferredRefresh() {
+    if (!deferredViewportRefresh) return;
+    if (isMapViewportNavigating()) return;
+    deferredViewportRefresh = false;
+    refresh({ force: true });
+  }
+
   function bindRefreshHooks() {
     if (typeof MutationObserver !== 'function') return;
     if (!api.gridObserverBound) {
       api.gridObserverBound = true;
-      var observer = new MutationObserver(function () { scheduleRender(); });
+      var gridObserver = new MutationObserver(function () { scheduleRender({ force: true }); });
       var grid = document.getElementById('city-grid');
-      if (grid) observer.observe(grid, { childList: true, subtree: true, attributes: true });
+      if (grid) gridObserver.observe(grid, { childList: true, subtree: true, attributes: true });
       var svg = document.getElementById('global-drawing-layer');
       if (svg) {
-        observer.observe(svg, {
+        var svgObserver = new MutationObserver(function (mutations) {
+          scheduleRenderFromDrawingLayer(mutations);
+        });
+        svgObserver.observe(svg, {
           childList: true,
           subtree: true,
           attributes: true,
-          attributeFilter: ['d', 'points', 'x', 'y', 'cx', 'cy', 'transform'],
+          attributeFilter: ['d', 'points', 'x', 'y', 'cx', 'cy', 'x1', 'y1', 'x2', 'y2', 'transform'],
         });
       }
     }
-    global.addEventListener('resize', scheduleRender, { passive: true });
+    global.addEventListener('resize', function () { scheduleRender({ force: true }); }, { passive: true });
   }
 
   function init(deps) {
@@ -1781,7 +1910,13 @@
     scheduleRender();
   }
 
-  function refresh() {
+  function refresh(opts) {
+    opts = opts || {};
+    if (shouldDeferRefreshForDrawingNav(opts)) {
+      deferredViewportRefresh = true;
+      return;
+    }
+    deferredViewportRefresh = false;
     ensureStyles();
     lastRenderSignature = '';
     renderScheduled = false;
@@ -1791,6 +1926,7 @@
   global.FTTHLabelManager = {
     init: init,
     refresh: refresh,
+    flushDeferredRefresh: flushDeferredRefresh,
     shouldShowToolLabels: shouldShowToolLabels,
     shouldShowCableLabels: shouldShowCableLabels,
     getCableLabelOffsetFactor: getCableLabelOffsetFactor,

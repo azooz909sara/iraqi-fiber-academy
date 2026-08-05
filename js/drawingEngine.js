@@ -966,6 +966,8 @@
 
   function onPenDraftVertexDragMove(e) {
     if (!penDraftVertexDrag || e.pointerId !== penDraftVertexDrag.pointerId) return;
+    beginScreenCtmCacheFrame();
+    try {
     var S = sim();
     var draft = S?.penDraft;
     if (!draft?.points) return;
@@ -996,6 +998,9 @@
     b()?.renderGlobalDrawingLayer?.();
     flushPenDrawingVisuals();
     e.preventDefault();
+    } finally {
+      sealScreenCtmCacheFrame();
+    }
   }
 
   function endPenDraftVertexDrag(e) {
@@ -2137,6 +2142,8 @@
   }
 
   function updateRubberBandFromEvent(e) {
+    beginScreenCtmCacheFrame();
+    try {
     var S = sim();
     if (!b()?.canPenDraw?.()) return;
     if (e?.clientX == null || e?.clientY == null) return;
@@ -2256,6 +2263,9 @@
     S.penDraft.cursor = [px, py];
     S.penDraft.cursorSnapNodeId = snap.snapNodeId || snap.target?.nodeId || null;
     flushPenCursorVisuals();
+    } finally {
+      sealScreenCtmCacheFrame();
+    }
   }
 
   function penPreviewCursorXY(S) {
@@ -2868,6 +2878,8 @@
   }
 
   function updateCrosshairFromEvent(e) {
+    beginScreenCtmCacheFrame();
+    try {
     syncCrosshairMapHoverFromEvent(e);
     if (!shouldShowCrosshair()) {
       var S = sim();
@@ -2880,6 +2892,9 @@
     updateCrosshairFromXY(xy.x, xy.y, e.clientX, e.clientY);
     b()?.requestOverlayRedraw?.();
     return true;
+    } finally {
+      sealScreenCtmCacheFrame();
+    }
   }
 
   function hidePenDrawingOverlays() {
@@ -3267,6 +3282,31 @@
     return { x: free.x, y: free.y, snapped: false, target: null, snapLabel: null, snapNodeId: null };
   }
 
+  var screenCtmCacheGen = 0;
+  var screenCtmCache = { gen: -1, svg: null, ctm: null };
+  var screenCtmCacheSealed = true;
+
+  /** One getScreenCTM() per pointer/snap frame — reused by all snap distance tests. */
+  function beginScreenCtmCacheFrame() {
+    if (!screenCtmCacheSealed) return;
+    screenCtmCacheSealed = false;
+    screenCtmCacheGen++;
+  }
+
+  function sealScreenCtmCacheFrame() {
+    screenCtmCacheSealed = true;
+  }
+
+  function getCachedScreenCTM(svg) {
+    if (!svg?.getScreenCTM) return null;
+    if (screenCtmCache.gen === screenCtmCacheGen && screenCtmCache.svg === svg) {
+      return screenCtmCache.ctm;
+    }
+    var ctm = svg.getScreenCTM();
+    screenCtmCache = { gen: screenCtmCacheGen, svg: svg, ctm: ctm };
+    return ctm;
+  }
+
   function canvasXYToScreenXY(cx, cy) {
     var svg = b()?.ensureGlobalDrawingLayer?.();
     if (!svg?.createSVGPoint) return { x: cx, y: cy };
@@ -3274,7 +3314,7 @@
       var pt = svg.createSVGPoint();
       pt.x = cx;
       pt.y = cy;
-      var ctm = svg.getScreenCTM && svg.getScreenCTM();
+      var ctm = getCachedScreenCTM(svg);
       if (!ctm) return { x: cx, y: cy };
       var sp = pt.matrixTransform(ctm);
       return { x: sp.x, y: sp.y };
@@ -4196,6 +4236,8 @@
   }
 
   function updateGhostPositionFromEvent(e) {
+    beginScreenCtmCacheFrame();
+    try {
     var pe = sim()?.pathEdit;
     if (!pe?.ghostDragging || !pe.drag) return false;
     var xy = svgCoordsFromEvent(e);
@@ -4207,6 +4249,9 @@
     });
     setUnifiedPointerPosition({ x: snap.x, y: snap.y }, snap.snapped, snap.target);
     return true;
+    } finally {
+      sealScreenCtmCacheFrame();
+    }
   }
 
   function commitGhostVertexDrag() {

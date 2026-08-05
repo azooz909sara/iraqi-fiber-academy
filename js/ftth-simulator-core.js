@@ -12081,6 +12081,9 @@
     var wrap = document.getElementById('canvas-wrapper');
     if (wrap) wrap.classList.remove('is-map-gesture-nav');
     syncTemporaryPanCursor();
+    requestAnimationFrame(function () {
+      global.FTTHLabelManager?.flushDeferredRefresh?.();
+    });
   }
 
   function onMapGesturePointerDown(e) {
@@ -12398,7 +12401,10 @@
     if (wasTemporary && Sim.ui && session.panButton === 1) Sim.ui.middleMousePanActive = false;
     var wrap = document.getElementById('canvas-wrapper');
     if (wrap) wrap.classList.remove('is-panning', 'is-temporary-pan');
-    requestAnimationFrame(positionNodeActionHud);
+    requestAnimationFrame(function () {
+      global.FTTHLabelManager?.flushDeferredRefresh?.();
+      positionNodeActionHud();
+    });
     syncTemporaryPanCursor();
   }
 
@@ -13080,6 +13086,18 @@
           getOverlayHost: getWorkspaceContainer,
           getLabelColor: function () { return Sim.settings?.labelColor || '#ffffff'; },
           getLabelFontSize: function () { return Sim.settings?.labelFontSize || 11; },
+          canPenDraw: canPenDraw,
+          hasActiveDrawingStroke: hasActiveDrawingStroke,
+          isPenPointerTrackingActive: function () {
+            return !!global.FTTHDrawingEngine?.isPenPointerTrackingActive?.();
+          },
+          isMapViewportNavigating: function () {
+            if (Sim.isPanning) return true;
+            var wrap = document.getElementById('canvas-wrapper');
+            if (wrap && wrap.classList.contains('is-wheel-zooming')) return true;
+            if (wrap && wrap.classList.contains('is-map-gesture-nav')) return true;
+            return false;
+          },
         });
       }
       if (global.FTTHFiberDesignUI?.init) {
