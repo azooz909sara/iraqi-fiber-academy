@@ -510,6 +510,21 @@
 </head>
 <body class="bg-fiber-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden simulator-page-active">
 
+  <!-- Subscriber access gate (overlay only — does not remove canvas / workspace) -->
+  <div id="subscriber-gate" class="subscriber-gate subscriber-gate--visible" role="dialog" aria-modal="true" aria-labelledby="subscriber-gate-title" aria-hidden="false">
+    <div class="subscriber-gate__backdrop" aria-hidden="true"></div>
+    <div class="subscriber-gate__card" dir="rtl">
+      <img class="subscriber-gate__logo" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="56" height="56" />
+      <h2 id="subscriber-gate-title" class="subscriber-gate__title">الوصول للمشتركين فقط</h2>
+      <p class="subscriber-gate__message">عذراً، محاكي الفايبر متاح فقط للمشتركين الفعّالين في الأكاديمية.</p>
+      <p class="subscriber-gate__status" data-subscriber-gate-status>جاري التحقق من حالة الاشتراك…</p>
+      <div class="subscriber-gate__actions">
+        <button type="button" class="subscriber-gate__btn subscriber-gate__btn--primary" data-subscriber-login>تسجيل الدخول / تفعيل الاشتراك</button>
+        <a href="index.html" class="subscriber-gate__btn subscriber-gate__btn--ghost" data-subscriber-home>العودة للرئيسية</a>
+      </div>
+    </div>
+  </div>
+
   <!-- Startup / Welcome (entry gate — map engine loads after project selection) -->
   <div id="startup-view" class="startup-view" role="main" aria-label="Welcome">
     <header class="startup-view__hero">
@@ -520,7 +535,12 @@
           <p class="startup-view__subtitle">Iraqi Fiber Academy — Open a recent project or start from a template</p>
         </div>
       </div>
-      <a href="index.html" class="startup-view__home-link">← Back to Home</a>
+      <div class="startup-view__hero-actions">
+        <div class="auth-slot auth-slot--sim" data-auth-slot data-auth-variant="simulator">
+          <button type="button" class="auth-login-btn auth-login-btn--sim" data-auth-login>تسجيل الدخول</button>
+        </div>
+        <a href="index.html" class="startup-view__home-link">← Back to Home</a>
+      </div>
     </header>
     <div class="startup-view__panels">
       <section class="startup-view__panel startup-view__panel--recent" aria-labelledby="startup-recent-heading">
@@ -559,7 +579,7 @@
 
   <!-- Branding header (row 1) -->
   <header id="workspace-title-bar" class="workspace-title-bar app-surface-panel h-14 shrink-0 flex items-center justify-between px-4 z-20">
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-3 min-w-0">
       <a href="index.html" class="flex items-center gap-2 text-slate-300 hover:text-fiber-cyan transition-colors" title="العودة للصفحة الرئيسية">
         <img class="workspace-brand-logo" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
         <span class="font-semibold text-sm hidden sm:inline">Iraqi Fiber Academy</span>
@@ -572,6 +592,9 @@
         <h1 class="text-sm font-bold text-white">FTTH Network Simulator</h1>
         <p class="text-[10px] text-fiber-cyan font-mono">v3.5 — Dropdown Toolbox</p>
       </div>
+    </div>
+    <div class="auth-slot auth-slot--sim shrink-0" data-auth-slot data-auth-variant="simulator">
+      <button type="button" class="auth-login-btn auth-login-btn--sim" data-auth-login>تسجيل الدخول</button>
     </div>
   </header>
 
@@ -909,5 +932,7 @@
   <script src="js/startupView.js"></script>
   <script src="js/ftth-simulator-core.js"></script>
   <script src="js/main.js"></script>
+  <script type="module" src="js/auth-manager.js"></script>
+  <script type="module" src="js/simulator-access.js"></script>
 </body>
 </html>

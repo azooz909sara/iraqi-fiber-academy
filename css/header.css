@@ -53,6 +53,61 @@
 
 .header__login:hover { background: var(--color-accent-cyan); color: var(--color-bg-primary); box-shadow: var(--shadow-glow); }
 
+/* Google Auth slot — keeps existing header__actions layout */
+.auth-slot { display: flex; align-items: center; }
+
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.auth-user__avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+}
+
+.auth-user__avatar--fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 229, 255, 0.15);
+  color: var(--color-accent-cyan);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.auth-user__name {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-logout-link {
+  padding: 0.45rem 0.9rem;
+  background: transparent;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  color: var(--color-text-secondary);
+  border-radius: var(--border-radius);
+  font-weight: 600;
+  font-size: 0.82rem;
+  transition: all var(--transition-normal);
+  cursor: pointer;
+}
+
+.auth-logout-link:hover {
+  border-color: var(--color-accent-cyan);
+  color: var(--color-accent-cyan);
+}
+
 .header__cta {
   padding: 0.6rem 1.5rem; background: var(--gradient-accent); color: var(--color-bg-primary);
   border-radius: var(--border-radius); font-weight: 600; font-size: 0.9rem; display: none;

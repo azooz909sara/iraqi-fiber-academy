@@ -34,7 +34,9 @@
           <li><a href="#faq" class="nav__link">الأسئلة الشائعة</a></li>
         </ul>
         <div class="header__actions">
-          <a href="#" class="header__login" data-panel="login">تسجيل الدخول</a>
+          <div class="auth-slot" data-auth-slot data-auth-variant="landing">
+            <a href="#" class="header__login" data-auth-login role="button">تسجيل الدخول</a>
+          </div>
           <a href="#pricing" class="header__cta">ابدأ مجاناً</a>
         </div>
       </nav>
@@ -303,5 +305,6 @@
   <script src="js/navigation.js"></script>
   <script src="js/animations.js"></script>
   <script src="js/main.js"></script>
+  <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>
