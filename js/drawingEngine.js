@@ -7,8 +7,10 @@
 
   var DEBUG = !!(global && global.FTTH_DEBUG);
 
-  var SNAP_THRESHOLD = 10;
+  var SNAP_THRESHOLD = 6;
   var SNAP_THRESHOLD_SQ = SNAP_THRESHOLD * SNAP_THRESHOLD;
+  /* Hard geographic cap: zoomed-out screen magnets must not latch across the map. */
+  var MAX_SNAP_MAP_UNITS = 2.5;
   var CABLE_MAGNETIC_SNAP_RADIUS = 32;
   var CABLE_MAGNETIC_SNAP_SQ = CABLE_MAGNETIC_SNAP_RADIUS * CABLE_MAGNETIC_SNAP_RADIUS;
   var CABLE_SNAP_MARKER_RADIUS = 6;
@@ -3325,7 +3327,21 @@
     }
   }
 
+  function probeCanvasFromClient(clientX, clientY) {
+    if (clientX == null || clientY == null) return null;
+    return b()?.pointerClientToCanvasXY?.(clientX, clientY) || null;
+  }
+
+  /** Reject snaps whose map distance exceeds MAX_SNAP_MAP_UNITS (zoom overreach guard). */
+  function exceedsMaxSnapMapUnits(clientX, clientY, cx, cy) {
+    if (!isFinite(cx) || !isFinite(cy)) return true;
+    var probe = probeCanvasFromClient(clientX, clientY);
+    if (!probe || !isFinite(probe.x) || !isFinite(probe.y)) return false;
+    return Math.hypot(probe.x - cx, probe.y - cy) > MAX_SNAP_MAP_UNITS;
+  }
+
   function screenDistSqToCanvasPoint(clientX, clientY, cx, cy) {
+    if (exceedsMaxSnapMapUnits(clientX, clientY, cx, cy)) return Infinity;
     var sp = canvasXYToScreenXY(cx, cy);
     var dx = sp.x - clientX;
     var dy = sp.y - clientY;
@@ -3409,6 +3425,10 @@
 
   function screenDistSqToDevice(node, clientX, clientY) {
     if (!node) return Infinity;
+    var mapCenter = getDeviceSnapCenter(node) || b()?.getNodeCenterXY?.(node);
+    if (mapCenter && exceedsMaxSnapMapUnits(clientX, clientY, mapCenter.x, mapCenter.y)) {
+      return Infinity;
+    }
     var placed = document.querySelector('.placed-node[data-id="' + node.id + '"]');
     var glyph = placed ? queryDeviceGlyphEl(placed) : null;
     if (glyph && glyph.getBoundingClientRect) {
@@ -3421,7 +3441,7 @@
         return sdx * sdx + sdy * sdy;
       }
     }
-    var gridCenter = b()?.getNodeCenterXY?.(node);
+    var gridCenter = mapCenter || b()?.getNodeCenterXY?.(node);
     if (!gridCenter) return Infinity;
     return screenDistSqToCanvasPoint(clientX, clientY, gridCenter.x, gridCenter.y);
   }
@@ -3435,6 +3455,7 @@
 
     function consider(x, y, meta) {
       if (!isFinite(x) || !isFinite(y)) return;
+      if (exceedsMaxSnapMapUnits(clientX, clientY, x, y)) return;
       var d2 = screenDistSqToCanvasPoint(clientX, clientY, x, y);
       if (d2 <= SNAP_THRESHOLD_SQ && d2 <= bestDistSq) {
         bestDistSq = d2;

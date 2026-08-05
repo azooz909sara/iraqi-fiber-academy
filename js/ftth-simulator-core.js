@@ -3431,20 +3431,32 @@
 
   function cablePassesThroughNode(cable, node) {
     if (!cable || !node) return false;
+    var nodeId = node.id;
+    // Strict topological: snap-node IDs recorded on cable vertices
+    var snapIds = cable.pointSnapNodeIds || [];
+    for (var si = 0; si < snapIds.length; si++) {
+      if (snapIds[si] && snapIds[si] === nodeId) return true;
+    }
+    // Strict topological: connectedTo start/end by node id or snap labels
     var ct = cable.connectedTo || {};
     var labels = [];
+    if (nodeId) labels.push(nodeId);
+    if (node.label) labels.push(node.label);
     if (node.autoName) labels.push(node.autoName);
     if (node.closureName) labels.push(node.closureName);
     if (node.fatSystemName) labels.push(node.fatSystemName);
+    var snapLbl = getNodeSnapLabel(node);
+    if (snapLbl) labels.push(snapLbl);
     for (var i = 0; i < labels.length; i++) {
       if (ct.start === labels[i] || ct.end === labels[i]) return true;
     }
+    // Precision spatial fallback only (micro-tolerance; not cellSize * 0.55)
     var center = getNodeCenterXY(node);
     if (!center || !cable.points) return false;
-    var cs = Sim.layout?.cellSize || 50;
-    var tol = cs * 0.55;
+    var tol = 2.0;
     for (var j = 0; j < cable.points.length; j++) {
       var pt = cable.points[j];
+      if (!pt) continue;
       if (Math.hypot(pt[0] - center.x, pt[1] - center.y) <= tol) return true;
     }
     return false;
@@ -4389,22 +4401,9 @@
   }
 
   function getCablesLinkedToNode(node) {
-    var linked = [];
-    var seen = {};
-    function addCable(cable) {
-      if (!cable || seen[cable.id]) return;
-      seen[cable.id] = 1;
-      linked.push(cable);
-    }
-    (getCablesThroughNode(node) || []).forEach(addCable);
-    getExcavationsLinkedToNode(node).forEach(function (excav) {
-      (getCablesOnTrench(excav.id) || []).forEach(addCable);
-    });
-    (Sim.fiberCablePaths || []).forEach(function (cable) {
-      var trench = resolveTrenchForCable(cable);
-      if (trench && excavationPassesThroughNode(trench, node)) addCable(cable);
-    });
-    return linked;
+    // Strict: only cables that themselves connect/terminate/intersect this node.
+    // Do NOT dump all cables from parent trenches that merely touch the node.
+    return getCablesThroughNode(node) || [];
   }
 
   function getHandholesLinkedToExcavation(path) {
@@ -6916,7 +6915,7 @@
   }
 
   /* ─── Pen drawing (#global-drawing-layer) ─── */
-  var SNAP_THRESHOLD = 10;
+  var SNAP_THRESHOLD = 6;
   var SNAP_THRESHOLD_SQ = SNAP_THRESHOLD * SNAP_THRESHOLD;
   var PEN_RUBBER_COLOR = '#f97316';
   var PEN_RUBBER_DASH = '5,5';
