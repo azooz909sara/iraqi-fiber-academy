@@ -4527,6 +4527,11 @@
     return !!(Sim.penDraft && Sim.penDraft.points && Sim.penDraft.points.length > 0);
   }
 
+  /** After trench/cable commit - one forced LabelManager pass (signature + content check). */
+  function refreshLabelsAfterPathCommit() {
+    global.FTTHLabelManager?.refresh?.({ force: true });
+  }
+
   function isDrawingActive() {
     return hasActiveDrawingStroke() || !!(isPenToolActive() && Sim.pen.lineMode);
   }
@@ -7472,6 +7477,7 @@
       isDrawingLayerInteractive: isDrawingLayerInteractive,
       syncPenModeClass: syncPenModeClass,
       syncDrawingLayerInteraction: syncDrawingLayerInteraction,
+      refreshLabelsAfterPathCommit: refreshLabelsAfterPathCommit,
       renderGlobalDrawingLayer: renderGlobalDrawingLayer,
       requestCanvasRedraw: requestCanvasRedraw,
       requestOverlayRedraw: requestOverlayRedraw,

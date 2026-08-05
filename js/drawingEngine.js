@@ -617,17 +617,17 @@
     if (!last) return false;
     if (commitMeta?.snapNodeId) {
       var lastNodeId = draft.pointSnapNodeIds && draft.pointSnapNodeIds[draft.points.length - 1];
-      if (lastNodeId && lastNodeId === commitMeta.snapNodeId && pointsNear(last, pt, 1.5)) return true;
+      if (lastNodeId && lastNodeId === commitMeta.snapNodeId && pointsNear(last, pt, 0.3)) return true;
       return false;
     }
-    return pointsNear(last, pt, 2);
+    return pointsNear(last, pt, 0.3);
   }
 
   function shouldSkipCableVertex(draft, pt) {
     if (!draft?.points?.length || !pt) return false;
     var last = draft.points[draft.points.length - 1];
     if (!last) return false;
-    return pointsNear(last, pt, 0.5);
+    return pointsNear(last, pt, 0.2);
   }
 
   var CABLE_TRENCH_SEGMENT_HIT_PX = 8;
@@ -900,7 +900,7 @@
 
   var penDraftVertexDrag = null;
   var penDraftVertexDragBound = false;
-  var PEN_DRAFT_VERTEX_HIT = 14;
+  var PEN_DRAFT_VERTEX_HIT = 4;
 
   function resolvePenDraftPointerXY(e) {
     var resolved = b()?.resolvePenPointerFromEvent?.(e);
@@ -2513,6 +2513,7 @@
         b()?.requestCanvasRedraw?.();
         b()?.syncPenModeClass?.();
         b()?.syncDrawingLayerInteraction?.();
+        b()?.refreshLabelsAfterPathCommit?.();
         Sim.selectedPath = null;
         if (!Sim.ui) Sim.ui = {};
         Sim.ui.topologyTreeFocus = {
@@ -2552,6 +2553,7 @@
     b()?.updateMetrics?.();
     b()?.syncPenModeClass?.();
     b()?.syncDrawingLayerInteraction?.();
+    b()?.refreshLabelsAfterPathCommit?.();
     if (createdRef.type === 'fiber') {
       b()?.selectPath?.('fiber', createdRef.id, false);
     }

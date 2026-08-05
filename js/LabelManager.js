@@ -89,6 +89,7 @@
   var CABLE_FOCUS_POLE_LIFT = 26;
   var CABLE_FOCUS_LABEL_GAP = 6;
   var lastRenderSignature = '';
+  var lastRenderedHtml = '';
 
   function getZoomFactor() {
     return api?.getZoomFactor?.() || 1;
@@ -1748,6 +1749,13 @@
       });
     }
 
+    /* Skip DOM wipe when label markup is unchanged - prevents 1-frame flicker
+       after pen vertex SVG rebuilds / redundant scheduled passes. */
+    if (html === lastRenderedHtml && overlay.childElementCount > 0) {
+      lastRenderSignature = signature;
+      return;
+    }
+    lastRenderedHtml = html;
     overlay.innerHTML = html;
   }
 
@@ -1767,6 +1775,14 @@
     if (!api?.canPenDraw?.()) return false;
     if (api.isPenPointerTrackingActive?.()) return true;
     if (api.hasActiveDrawingStroke?.()) return true;
+    return false;
+  }
+
+  /** True while drafting trench/cable vertices (pen-drawing-active / active stroke). */
+  function isPenDrawingSessionActive() {
+    if (api?.hasActiveDrawingStroke?.()) return true;
+    var wrap = document.getElementById('canvas-wrapper');
+    if (wrap && wrap.classList.contains('pen-drawing-active')) return true;
     return false;
   }
 
@@ -1819,8 +1835,14 @@
     return false;
   }
 
-  /** Ignore rubber-band / crosshair churn while pen hover is active. */
+  /**
+   * Ignore drawing-layer MutationObserver noise while pen drafting:
+   * vertex placement wipes/rebuilds #global-drawing-layer but does not
+   * change entity label content (FH##). Suppress scheduleRender so we
+   * do not clear lastRenderSignature or recreate overlay DOM.
+   */
   function shouldIgnoreDrawingLayerMutations(mutations) {
+    if (isPenDrawingSessionActive()) return true;
     if (!isPenDrawHoverActive() || !mutations || !mutations.length) return false;
     for (var i = 0; i < mutations.length; i++) {
       var m = mutations[i];
@@ -1861,7 +1883,8 @@
       deferredViewportRefresh = true;
       return;
     }
-    lastRenderSignature = '';
+    /* Only invalidate signature on forced/invalidating passes - not every schedule. */
+    if (opts.force || opts.invalidate) lastRenderSignature = '';
     if (renderScheduled) return;
     renderScheduled = true;
     requestAnimationFrame(renderLabels);
@@ -1919,6 +1942,7 @@
     deferredViewportRefresh = false;
     ensureStyles();
     lastRenderSignature = '';
+    lastRenderedHtml = '';
     renderScheduled = false;
     renderLabels();
   }
