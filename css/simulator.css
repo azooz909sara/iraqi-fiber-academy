@@ -37,15 +37,21 @@
 }
 
 .startup-view__logo {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 0.65rem;
-  background: linear-gradient(135deg, #22d3ee, #3b82f6);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.25);
-  font-size: 1.1rem;
+  display: block;
+  height: 42px;
+  width: auto;
+  max-height: 42px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.workspace-brand-logo {
+  display: block;
+  height: 42px;
+  width: auto;
+  max-height: 42px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 .startup-view__title {
