@@ -793,12 +793,13 @@
   /* ─── Continuous fiber pointers (Main continuous · Sub resets per cable) ─── */
 
   /**
-   * Strict 6-fiber tube math for a 48F main cable:
-   *   tubeIndex       = Math.floor(globalFiberIndex / 6)
-   *   fiberColorIndex = globalFiberIndex % 6
-   * Each FAT consumes exactly 2 fibers (Main + Expansion).
-   * When globalFiberIndex reaches 6, tube rolls to the next of 8 tube colors and fiber colors reset to Blue.
-   * Uses fixed TUBE_COLORS and FIBER_COLORS arrays - never reorders.
+   * Strict sequential tube math (Main continuous · Sub resets per cable):
+   *   tubeIndex       = Math.floor(globalFiberIndex / FIBERS_PER_TUBE)
+   *   fiberColorIndex = globalFiberIndex % FIBERS_PER_TUBE
+   * Each FAT consumes exactly FIBERS_PER_FAT strands (Main + Expansion).
+   * Strands are consumed in order within the active tube; the next tube opens
+   * only after the current tube's FIBERS_PER_TUBE strands are exhausted.
+   * No odd-index skips or mid-tube rollover abandonment.
    */
   function createFiberPointer(capacityF) {
     if (DEBUG) {
@@ -809,26 +810,23 @@
       globalFiberIndex: 0,
       nextPair: function () {
         try {
-          // Validate bounds for 48F cable (8 tubes * 6 fibers = 48 fibers max)
           var maxFibers = this.capacityF || 48;
           if (this.globalFiberIndex >= maxFibers) {
             console.error('[FiberDesignManager] createFiberPointer ERROR: exceeded capacity. globalFiberIndex=' + this.globalFiberIndex + ', maxFibers=' + maxFibers);
             throw new Error('Fiber pointer exceeded 48F capacity (' + maxFibers + ' fibers)');
           }
-
-          /* Align to even index so Main+Expansion always share one tube pair. */
-          if (this.globalFiberIndex % 2 !== 0) {
-            this.globalFiberIndex += 1;
-          }
-          /* If only the 6th fiber remains in this tube, roll to the next tube. */
-          if (this.globalFiberIndex % FIBERS_PER_TUBE === FIBERS_PER_TUBE - 1) {
-            this.globalFiberIndex += 1;
+          if (this.globalFiberIndex + FIBERS_PER_FAT > maxFibers) {
+            throw new Error('Fiber pointer cannot allocate pair — only ' + (maxFibers - this.globalFiberIndex) + ' strand(s) remain');
           }
 
           var tubeIndex = Math.floor(this.globalFiberIndex / FIBERS_PER_TUBE);
           var fiberColorIndex = this.globalFiberIndex % FIBERS_PER_TUBE;
 
-          // Validate tube index is within TUBE_COLORS array bounds
+          /* Pair must stay inside the active tube (sequential exhaust before next tube). */
+          if (fiberColorIndex + FIBERS_PER_FAT > FIBERS_PER_TUBE) {
+            throw new Error('Fiber pointer misaligned — pair would cross tube boundary at index ' + this.globalFiberIndex);
+          }
+
           if (tubeIndex >= TUBE_COLORS.length) {
             console.error('[FiberDesignManager] createFiberPointer ERROR: tubeIndex=' + tubeIndex + ' exceeds TUBE_COLORS.length=' + TUBE_COLORS.length);
             throw new Error('Tube index ' + tubeIndex + ' exceeds TUBE_COLORS array length ' + TUBE_COLORS.length);
@@ -868,15 +866,36 @@
   }
 
   /**
-   * Get or create a shared main-pointer object for a main cable design instance.
-   * Keyed by the design cable id/map_cable_id/name to ensure one pointer per main cable.
+   * Normalize feeder identity to a shared label key (e.g. "48F1") so every map
+   * segment / design wrapper of the same physical Main resolves to one pointer.
+   */
+  function normalizeMainFeederKey(mainCable) {
+    if (!mainCable) return '';
+    var label = String(
+      getCableLabel(mainCable) || mainCable.name || mainCable.asBuiltId || ''
+    ).trim();
+    var batch = label.match(/(\d+\s*F\s*\d+)/i);
+    if (batch) return batch[1].replace(/\s+/g, '').toUpperCase();
+    if (label) return label.toUpperCase();
+    if (mainCable.map_cable_id != null && String(mainCable.map_cable_id)) {
+      return 'MAP:' + String(mainCable.map_cable_id).toUpperCase();
+    }
+    if (mainCable.id != null && String(mainCable.id)) {
+      return 'ID:' + String(mainCable.id).toUpperCase();
+    }
+    return '';
+  }
+
+  /**
+   * Get or create a shared main-pointer for a physical feeder (one key per 48F1, etc.).
    */
   function getOrCreateMainPointer(mainCable) {
     if (!mainCable) return createMainFiberPointer(48);
-    var key = String(mainCable.id || mainCable.map_cable_id || mainCable.name || '').toUpperCase();
-    if (!key) key = String(mainCable.id || createUuid());
+    var key = normalizeMainFeederKey(mainCable);
+    if (!key) key = 'ANON:' + createUuid();
     if (!mainPointers[key]) {
-      var cap = Number(mainCable.capacity_f) || Number(mainCable.capacity) || 48;
+      var cap = Number(mainCable.capacity_f) || Number(mainCable.capacity) ||
+        parseCapacityFromLabel(key) || 48;
       mainPointers[key] = createMainFiberPointer(cap);
     }
     return mainPointers[key];
@@ -891,9 +910,9 @@
     if (a.id != null && b.id != null && String(a.id) === String(b.id)) return true;
     if (a.map_cable_id != null && b.id != null && String(a.map_cable_id) === String(b.id)) return true;
     if (b.map_cable_id != null && a.id != null && String(b.map_cable_id) === String(a.id)) return true;
-    var la = String(getCableLabel(a) || a.name || a.asBuiltId || '').trim().toLowerCase();
-    var lb = String(getCableLabel(b) || b.name || b.asBuiltId || '').trim().toLowerCase();
-    return !!(la && lb && la === lb);
+    var ka = normalizeMainFeederKey(a);
+    var kb = normalizeMainFeederKey(b);
+    return !!(ka && kb && ka === kb);
   }
 
   /** @deprecated */
@@ -1509,9 +1528,14 @@
     var mainCable = findOrAddDesignCable(designNode, 'inbound', inboundMapCable, 'main');
     var subCable = findOrAddDesignCable(designNode, 'outbound', outboundMapCable, 'sub');
 
-    // Use a shared main pointer per main cable so allocations persist globally.
-    // Never reset this pointer - it continues across all closures and sub cables.
-    var sharedMainPointer = getOrCreateMainPointer(mainCable);
+    /* Prefer cascaded pointer from processClosureDistribution so C2 resumes C1's index.
+       Fall back to label-keyed shared registry (same "48F1" across segments). */
+    var sharedMainPointer = (mainPointer && typeof mainPointer.nextPair === 'function')
+      ? mainPointer
+      : getOrCreateMainPointer(inboundMapCable || mainCable);
+    var feederKey = normalizeMainFeederKey(inboundMapCable || mainCable);
+    if (feederKey) mainPointers[feederKey] = sharedMainPointer;
+
     var mainAsg = sharedMainPointer.nextPair();
     var subAsg = subPointer.nextPair();
     if (!mainAsg || !subAsg) return;
@@ -1657,12 +1681,6 @@
 
       if (!attach || isCabinetNode(attach)) return;
       addGraphEdge(graph, cable, fdt, attach, cableIdx + 100000, true);
-    });
-
-    Object.keys(graph.adj).forEach(function (id) {
-      graph.adj[id].sort(function (x, y) {
-        return (x.edge.order || 0) - (y.edge.order || 0);
-      });
     });
 
     return graph;
@@ -1851,10 +1869,9 @@
   }
 
   /**
-   * DFS from cabinet. At each Closure:
-   * 1. Enter each outbound Sub-Cable
-   * 2. FIRST collect ALL FATs on that branch to the dead end
-   * 3. THEN allocate exactly 2 Main-Cable fibers per FAT (continuous tube math)
+   * DFS from cabinet. At each Closure (strict two-phase):
+   * Phase 1 — allocate ALL local FATs across every outbound branch (no child recursion)
+   * Phase 2 — ONLY THEN recurse into downstream closures so they inherit the advanced pointer
    *    Sub-Cable pointer resets to Blue/0 for each new outbound cable
    */
   function dfsDesignFromRoot(root, graph) {
@@ -1872,7 +1889,10 @@
       processedClosures[closureId] = true;
 
       if (!mainPointer) {
-        mainPointer = createMainFiberPointer(Number(mainCable && mainCable.capacity) || 48);
+        mainPointer = getOrCreateMainPointer(mainCable);
+      } else {
+        var inheritKey = normalizeMainFeederKey(mainCable);
+        if (inheritKey) mainPointers[inheritKey] = mainPointer;
       }
 
       var neighbors = (graph.adj[closureId] || []).slice();
@@ -1903,17 +1923,15 @@
         });
       }
 
-      outbound.sort(function (a, b) {
-        if (a.order !== b.order) return a.order - b.order;
-        return a.geo - b.geo;
-      });
+      /* Child closures queued in Phase 1; recursed only in Phase 2 (parent-complete-then-child). */
+      var childCascade = [];
 
+      /* ── Phase 1: allocate ALL local FATs for this closure — no recursion ── */
       for (i = 0; i < outbound.length; i++) {
         var out = outbound[i];
         var subCable = out.link.edge.cable;
         var subPointer = createSubCablePointer(Number(subCable && subCable.capacity) || 12);
 
-        /* Collect ALL FATs on this Sub-Cable first — then allocate sequentially */
         var fats = collectFatsAlongBranch(graph, closureNode, out.link, usedEdges, edgeKey);
 
         if (!fats.length && isFatOrPoleNode(out.nextNode)) {
@@ -1940,13 +1958,12 @@
           );
         }
 
+        /* Queue downstream closures only — do not recurse yet. */
         if (isClosureNode(out.nextNode) && !isFatOrPoleNode(out.nextNode)) {
           usedEdges[edgeKey(out.link.edge)] = true;
           var edgeCable = out.link.edge.cable;
           var nestedMain;
           var nestedPtr;
-          /* Same physical LineString or same Main batch label → inherit parent feed.
-             Do not allocate a fresh pointer / duplicate Main for C2, C3, C4... */
           if (mainCable && isSameMainBackboneCable(mainCable, edgeCable)) {
             nestedMain = mainCable;
             nestedPtr = mainPointer || getOrCreateMainPointer(mainCable);
@@ -1954,10 +1971,29 @@
             nestedMain = edgeCable || mainCable;
             nestedPtr = getOrCreateMainPointer(nestedMain);
           }
-          processClosureDistribution(out.nextNode, nestedMain, nestedPtr, closureId);
+          childCascade.push({
+            nextNode: out.nextNode,
+            nestedMain: nestedMain,
+            nestedPtr: nestedPtr,
+          });
         } else if (isFatOrPoleNode(out.nextNode) && isClosureNode(out.nextNode)) {
-          processClosureDistribution(out.nextNode, mainCable, mainPointer, closureId);
+          childCascade.push({
+            nextNode: out.nextNode,
+            nestedMain: mainCable,
+            nestedPtr: mainPointer,
+          });
         }
+      }
+
+      /* ── Phase 2: cascade to children only after parent allocation is complete ── */
+      for (i = 0; i < childCascade.length; i++) {
+        var child = childCascade[i];
+        processClosureDistribution(
+          child.nextNode,
+          child.nestedMain,
+          child.nestedPtr,
+          closureId
+        );
       }
     }
 
@@ -1980,7 +2016,7 @@
         if (!nextNode) continue;
 
         if (isCabinetNode(node)) {
-          var feederPtr = createMainFiberPointer(Number(cable && cable.capacity) || 48);
+          var feederPtr = getOrCreateMainPointer(cable);
           usedEdges[ek] = true;
           if (isClosureNode(nextNode) || isFatOrPoleNode(nextNode)) {
             processClosureDistribution(nextNode, cable, feederPtr, nodeId);
@@ -1994,8 +2030,8 @@
 
         if (isClosureNode(nextNode) || isFatOrPoleNode(nextNode)) {
           usedEdges[ek] = true;
-          var ptr = ctx.mainPointer || createMainFiberPointer(Number((ctx.mainCable || cable).capacity) || 48);
           var mainCab = ctx.mainCable || cable;
+          var ptr = ctx.mainPointer || getOrCreateMainPointer(mainCab);
           processClosureDistribution(nextNode, mainCab, ptr, nodeId);
           visitTowardClosures(nextId, nodeId, {
             mainCable: mainCab,
@@ -2078,43 +2114,19 @@
   }
 
   function sortMatrixRows(rows) {
+    /* Stable sort: keep sub-cable / fiber insertion order from DFS allocation.
+       Do not re-order by ascending S-Cable ID or artificial tube comparators. */
     return rows.slice().sort(function (a, b) {
-      // CRITICAL FIX: Sort by cabinet first
       if (a.cabinet_label !== b.cabinet_label) {
         return String(a.cabinet_label || '').localeCompare(String(b.cabinet_label || ''), undefined, { numeric: true });
       }
-      // Then by M-Cable ID
       if (a.m_cable_id !== b.m_cable_id) {
-        return String(a.m_cable_id).localeCompare(String(b.m_cable_id), undefined, { numeric: true });
+        return String(a.m_cable_id || '').localeCompare(String(b.m_cable_id || ''), undefined, { numeric: true });
       }
-      // PRESERVE TRAVERSAL ORDER: Sort by closure_order (not closure_id)
-      // This ensures closures appear in the order they were traversed from the map
       if (a.closure_order !== b.closure_order) {
         return (a.closure_order || 0) - (b.closure_order || 0);
       }
-      // Then by S-Cable ID
-      if (a.s_cable_id !== b.s_cable_id) {
-        return String(a.s_cable_id).localeCompare(String(b.s_cable_id), undefined, { numeric: true });
-      }
-      // CRITICAL FIX: STRICT tube color order - use STANDARD_COLOR_CODE index
-      if (a.m_tube_color !== b.m_tube_color) {
-        var aIndex = STANDARD_COLOR_CODE.indexOf(String(a.m_tube_color).toLowerCase());
-        var bIndex = STANDARD_COLOR_CODE.indexOf(String(b.m_tube_color).toLowerCase());
-        return aIndex - bIndex;
-      }
-      if (a.s_tube_color !== b.s_tube_color) {
-        var aIndex = STANDARD_COLOR_CODE.indexOf(String(a.s_tube_color).toLowerCase());
-        var bIndex = STANDARD_COLOR_CODE.indexOf(String(b.s_tube_color).toLowerCase());
-        return aIndex - bIndex;
-      }
-      // Sort FATs by topology distance from Closure (nearest first)
-      var ad = Number(a.fat_distance) || 0;
-      var bd = Number(b.fat_distance) || 0;
-      if (ad !== bd) return ad - bd;
-      if (a.fiber_type !== b.fiber_type) {
-        return a.fiber_type === 'Main' ? -1 : 1;
-      }
-      return (a.m_fiber_color || '').localeCompare(b.m_fiber_color || '');
+      return 0;
     });
   }
 

@@ -114,13 +114,8 @@
   }
 
   function sortCablesForTabs(cables) {
-    return (cables || []).slice().sort(function (a, b) {
-      var ka = parseCableLabelSortKey(cableTabLabel(a));
-      var kb = parseCableLabelSortKey(cableTabLabel(b));
-      if (ka.capacity !== kb.capacity) return kb.capacity - ka.capacity;
-      if (ka.batch !== kb.batch) return ka.batch - kb.batch;
-      return ka.label.localeCompare(kb.label);
-    });
+    /* Preserve physical connection / insertion order — no ascending label sort. */
+    return (cables || []).slice();
   }
 
   function collectNodeCables(nodeData) {
