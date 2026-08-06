@@ -10,6 +10,9 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { syncUserProfile } from './db-manager.js';
 
+/** Local testing: show بروفايل instead of sign-in in the same slot (set false for production). */
+var DEV_SHOW_PROFILE_MENU = true;
+
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -24,8 +27,128 @@ function getFirstName(user) {
   return String(full).trim().split(/\s+/)[0] || 'User';
 }
 
+function getFullName(user, profile) {
+  if (profile && profile.name) return String(profile.name).trim();
+  if (user && user.displayName) return String(user.displayName).trim();
+  if (user && user.email) return String(user.email).trim();
+  return 'مستخدم';
+}
+
+function getSubscriptionLabel(profile) {
+  if (profile && profile.isSubscriber === true) return 'مشترك نشط';
+  return 'غير مشترك';
+}
+
+function isAdminUser(profile) {
+  if (!profile) return false;
+  if (profile.isAdmin === true) return true;
+  if (String(profile.role || '').toLowerCase() === 'admin') return true;
+  return false;
+}
+
+function isInstructorUser(profile, email) {
+  if (profile && (profile.isInstructor === true || String(profile.role || '').toLowerCase() === 'instructor')) {
+    return true;
+  }
+  var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
+  if (!Apps) return false;
+  var checkEmail = email || (profile && profile.email) || Apps.getSessionEmail();
+  return Apps.isApprovedInstructor(checkEmail);
+}
+
+function resolveMenuEmail(user, profile) {
+  if (user && user.email) return user.email;
+  if (profile && profile.email) return profile.email;
+  var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
+  return Apps ? Apps.getSessionEmail() : '';
+}
+
 function slotVariant(slot) {
   return (slot && slot.getAttribute('data-auth-variant')) || 'landing';
+}
+
+function avatarHtml(user, firstName) {
+  var photo = user && user.photoURL ? escapeHtml(user.photoURL) : '';
+  if (photo) {
+    return (
+      '<img class="user-menu__avatar" src="' +
+      photo +
+      '" alt="" width="28" height="28" referrerpolicy="no-referrer" />'
+    );
+  }
+  return (
+    '<span class="user-menu__avatar" aria-hidden="true">' +
+    escapeHtml(firstName.charAt(0)) +
+    '</span>'
+  );
+}
+
+function simAvatarHtml(user, firstName) {
+  var photo = user && user.photoURL ? escapeHtml(user.photoURL) : '';
+  if (photo) {
+    return (
+      '<img class="auth-user__avatar" src="' +
+      photo +
+      '" alt="" width="28" height="28" referrerpolicy="no-referrer" />'
+    );
+  }
+  return (
+    '<span class="auth-user__avatar auth-user__avatar--fallback" aria-hidden="true">' +
+    escapeHtml(firstName.charAt(0)) +
+    '</span>'
+  );
+}
+
+function userMenuHtml(options) {
+  var fullName = escapeHtml(options.fullName || 'مستخدم تجريبي');
+  var subscription = escapeHtml(options.subscription || 'غير مشترك');
+  var isAdmin = options.isAdmin === true;
+  var isInstructor = options.isInstructor === true;
+  var avatar =
+    options.avatarHtml ||
+    '<span class="user-menu__avatar" aria-hidden="true">' +
+      escapeHtml((options.fullName || 'ت').charAt(0)) +
+      '</span>';
+
+  var menuClasses = 'user-menu';
+  if (isAdmin) menuClasses += ' is-admin';
+  if (isInstructor) menuClasses += ' is-instructor';
+
+  var instructorItem = isInstructor
+    ? '<a href="#" class="user-menu__item user-menu__item--instructor" role="menuitem" data-panel="instructor">لوحة المدرب</a>'
+    : '<a href="#" class="user-menu__item user-menu__item--instructor is-locked" role="menuitem" data-panel="instructor" data-instructor-locked aria-disabled="true">لوحة المدرب</a>';
+
+  var joinItem = isInstructor
+    ? ''
+    : '<a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>';
+
+  return (
+    '<div class="' + menuClasses + '" id="userMenu">' +
+      '<button type="button" class="user-menu__toggle" id="userMenuToggle" ' +
+        'aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">' +
+        avatar +
+        '<span class="user-menu__label">Profile</span>' +
+        '<svg class="user-menu__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
+          'stroke="currentColor" stroke-width="2.5" aria-hidden="true">' +
+          '<path d="M6 9l6 6 6-6"/>' +
+        '</svg>' +
+      '</button>' +
+      '<div class="user-menu__dropdown" id="userMenuDropdown" role="menu" hidden>' +
+        '<div class="user-menu__info" role="none">' +
+          '<span class="user-menu__info-name">' + fullName + '</span>' +
+          '<span class="user-menu__info-status">' + subscription + '</span>' +
+        '</div>' +
+        '<div class="user-menu__divider" role="separator"></div>' +
+        '<a href="#" class="user-menu__item" role="menuitem" data-panel="student">لوحة الطالب</a>' +
+        instructorItem +
+        '<a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only' +
+          (isAdmin ? '' : ' hidden') + '>لوحة الإدارة</a>' +
+        joinItem +
+        '<div class="user-menu__divider" role="separator"></div>' +
+        '<a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>' +
+      '</div>' +
+    '</div>'
+  );
 }
 
 function loggedOutHtml(variant) {
@@ -36,43 +159,52 @@ function loggedOutHtml(variant) {
       '</button>'
     );
   }
-  return (
-    '<a href="#" class="header__login" data-auth-login role="button">تسجيل الدخول</a>'
-  );
+
+  var loginBtn =
+    '<a href="#" class="header__login" data-auth-login role="button">تسجيل الدخول</a>';
+
+  /* Same auth-slot child: profile replaces sign-in (never both). */
+  if (DEV_SHOW_PROFILE_MENU) {
+    var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
+    var sessionEmail = Apps ? Apps.getSessionEmail() : '';
+    return userMenuHtml({
+      fullName: 'مستخدم تجريبي',
+      subscription: 'غير مشترك',
+      isAdmin: true,
+      isInstructor: isInstructorUser(null, sessionEmail),
+    });
+  }
+
+  return loginBtn;
 }
 
-function loggedInHtml(user, variant) {
-  var name = escapeHtml(getFirstName(user));
-  var photo = user && user.photoURL ? escapeHtml(user.photoURL) : '';
-  var avatar = photo
-    ? '<img class="auth-user__avatar" src="' + photo + '" alt="" width="28" height="28" referrerpolicy="no-referrer" />'
-    : '<span class="auth-user__avatar auth-user__avatar--fallback" aria-hidden="true">' +
-      name.charAt(0) +
-      '</span>';
+function loggedInHtml(user, variant, profile) {
+  var firstName = getFirstName(user);
 
   if (variant === 'simulator') {
     return (
       '<div class="auth-user auth-user--sim" role="group" aria-label="Account">' +
-      avatar +
-      '<span class="auth-user__name">' + name + '</span>' +
+      simAvatarHtml(user, firstName) +
+      '<span class="auth-user__name">' + escapeHtml(firstName) + '</span>' +
       '<button type="button" class="auth-logout-btn auth-logout-btn--sim" data-auth-logout>تسجيل الخروج</button>' +
       '</div>'
     );
   }
 
-  return (
-    '<div class="auth-user" role="group" aria-label="الحساب">' +
-    avatar +
-    '<span class="auth-user__name">' + name + '</span>' +
-    '<a href="#" class="auth-logout-link" data-auth-logout role="button">تسجيل الخروج</a>' +
-    '</div>'
-  );
+  var email = resolveMenuEmail(user, profile);
+  return userMenuHtml({
+    fullName: getFullName(user, profile),
+    subscription: getSubscriptionLabel(profile),
+    avatarHtml: avatarHtml(user, firstName),
+    isAdmin: isAdminUser(profile),
+    isInstructor: isInstructorUser(profile, email),
+  });
 }
 
-function renderAuthSlot(slot, user) {
+function renderAuthSlot(slot, user, profile) {
   if (!slot) return;
   var variant = slotVariant(slot);
-  slot.innerHTML = user ? loggedInHtml(user, variant) : loggedOutHtml(variant);
+  slot.innerHTML = user ? loggedInHtml(user, variant, profile) : loggedOutHtml(variant);
 }
 
 export async function loginWithGoogle() {
@@ -115,15 +247,49 @@ function bindAuthClicks() {
 function initAuthUI() {
   bindAuthClicks();
   var slots = document.querySelectorAll('[data-auth-slot]');
-  onAuthStateChanged(auth, function (user) {
-    slots.forEach(function (slot) {
-      renderAuthSlot(slot, user);
-    });
+  var lastUser = null;
+  var lastProfile = null;
 
-    if (user) {
-      syncUserProfile(user).catch(function (err) {
+  function refreshSlots() {
+    slots.forEach(function (slot) {
+      renderAuthSlot(slot, lastUser, lastProfile);
+    });
+  }
+
+  onAuthStateChanged(auth, function (user) {
+    lastUser = user || null;
+    if (!user) {
+      lastProfile = null;
+      refreshSlots();
+      return;
+    }
+
+    refreshSlots();
+
+    syncUserProfile(user)
+      .then(function (profile) {
+        lastProfile = profile;
+        if (profile && profile.email && window.InstructorApps) {
+          window.InstructorApps.setSessionEmail(profile.email);
+        } else if (user.email && window.InstructorApps) {
+          window.InstructorApps.setSessionEmail(user.email);
+        }
+        refreshSlots();
+      })
+      .catch(function (err) {
         console.error('[Auth] syncUserProfile failed:', err);
       });
+  });
+
+  document.addEventListener('ifa:instructor-application-submitted', refreshSlots);
+  document.addEventListener('ifa:instructor-status-changed', refreshSlots);
+  window.addEventListener('storage', function (e) {
+    if (
+      e.key === 'ifa_instructor_applications' ||
+      e.key === 'ifa_approved_instructors' ||
+      e.key === 'ifa_session_email'
+    ) {
+      refreshSlots();
     }
   });
 }

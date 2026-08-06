@@ -29,6 +29,8 @@ export async function syncUserProfile(user) {
     name: user.displayName || null,
     photo: user.photoURL || null,
     isSubscriber: false,
+    isAdmin: false,
+    role: 'student',
     createdAt: new Date(),
   };
 
@@ -46,4 +48,17 @@ export async function checkSubscriberStatus(uid) {
   if (!snap.exists()) return false;
   var data = snap.data() || {};
   return data.isSubscriber === true;
+}
+
+/**
+ * @param {string} uid
+ * @returns {Promise<boolean>}
+ */
+export async function checkAdminStatus(uid) {
+  if (!uid) return false;
+  var snap = await getDoc(doc(db, 'users', uid));
+  if (!snap.exists()) return false;
+  var data = snap.data() || {};
+  if (data.isAdmin === true) return true;
+  return String(data.role || '').toLowerCase() === 'admin';
 }

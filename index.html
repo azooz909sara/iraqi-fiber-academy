@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="css/features.css">
   <link rel="stylesheet" href="css/pricing.css">
   <link rel="stylesheet" href="css/footer.css">
+  <link rel="stylesheet" href="css/instructor-apply.css">
 </head>
 <body>
 
@@ -35,7 +36,27 @@
         </ul>
         <div class="header__actions">
           <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <a href="#" class="header__login" data-auth-login role="button">تسجيل الدخول</a>
+            <!-- DEV: profile replaces sign-in in the same slot (toggled by auth-manager) -->
+            <div class="user-menu is-admin" id="userMenu">
+              <button type="button" class="user-menu__toggle" id="userMenuToggle" aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">
+                <span class="user-menu__avatar" aria-hidden="true">ت</span>
+                <span class="user-menu__label">Profile</span>
+                <svg class="user-menu__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="user-menu__dropdown" id="userMenuDropdown" role="menu" hidden>
+                <div class="user-menu__info" role="none">
+                  <span class="user-menu__info-name">مستخدم تجريبي</span>
+                  <span class="user-menu__info-status">غير مشترك</span>
+                </div>
+                <div class="user-menu__divider" role="separator"></div>
+                <a href="#" class="user-menu__item" role="menuitem" data-panel="student">لوحة الطالب</a>
+                <a href="#" class="user-menu__item user-menu__item--instructor is-locked" role="menuitem" data-panel="instructor" data-instructor-locked aria-disabled="true">لوحة المدرب</a>
+                <a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>
+                <a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>
+                <div class="user-menu__divider" role="separator"></div>
+                <a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>
+              </div>
+            </div>
           </div>
           <a href="#pricing" class="header__cta">ابدأ مجاناً</a>
         </div>
@@ -323,7 +344,6 @@
         </div>
         <div class="footer__column"><h4 class="footer__column-title">المنصة</h4><ul class="footer__links"><li><a href="#hero">الرئيسية</a></li><li><a href="#courses">الكورسات التعليمية</a></li><li><a href="#simulators">المحاكيات</a></li><li><a href="#pricing">الباقات</a></li><li><a href="#articles">المقالات التقنية</a></li><li><a href="#faq">الأسئلة الشائعة</a></li></ul></div>
         <div class="footer__column"><h4 class="footer__column-title">الدعم</h4><ul class="footer__links"><li><a href="#faq">الأسئلة الشائعة</a></li><li><a href="#">مركز المساعدة</a></li><li><a href="#">تواصل معنا</a></li></ul></div>
-        <div class="footer__column"><h4 class="footer__column-title">لوحات التحكم</h4><ul class="footer__links"><li><a href="#" data-panel="student">لوحة الطالب</a></li><li><a href="#" data-panel="instructor">لوحة المدرب</a></li><li><a href="#" data-panel="admin">لوحة الإدارة</a></li></ul></div>
       </div>
       <div class="footer__bottom">
         <p class="footer__copyright">© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.</p>
@@ -332,6 +352,75 @@
     </div>
   </footer>
 
+  <div class="instructor-modal" id="instructorModal" hidden aria-hidden="true">
+    <div class="instructor-modal__backdrop" data-instructor-modal-close></div>
+    <div class="instructor-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="instructorModalTitle">
+      <div class="instructor-modal__header">
+        <div>
+          <h2 class="instructor-modal__title" id="instructorModalTitle">انضم إلينا كمدرب</h2>
+          <p class="instructor-modal__subtitle">قدّم طلبك للانضمام إلى فريق المدربين في أكاديمية الفايبر العراقية. ستتم مراجعة الطلب من لوحة الإدارة.</p>
+        </div>
+        <button type="button" class="instructor-modal__close" data-instructor-modal-close aria-label="إغلاق">×</button>
+      </div>
+
+      <form class="instructor-form" id="instructorApplyForm" novalidate>
+        <div class="instructor-form__error" id="instructorFormError" hidden></div>
+        <div class="instructor-form__success" id="instructorFormSuccess" hidden></div>
+
+        <div class="instructor-form__field">
+          <label class="instructor-form__label" for="instructorFullName">الاسم الكامل <span>*</span></label>
+          <input class="instructor-form__input" type="text" id="instructorFullName" name="fullName" required autocomplete="name" placeholder="مثال: أحمد محمد" />
+        </div>
+
+        <div class="instructor-form__field">
+          <label class="instructor-form__label" for="instructorEmail">البريد الإلكتروني <span>*</span></label>
+          <input class="instructor-form__input" type="email" id="instructorEmail" name="email" required autocomplete="email" placeholder="name@example.com" dir="ltr" />
+        </div>
+
+        <div class="instructor-form__field">
+          <label class="instructor-form__label" for="instructorBio">نبذة مختصرة <span>*</span></label>
+          <textarea class="instructor-form__textarea" id="instructorBio" name="bio" required placeholder="خبرتك في شبكات الألياف الضوئية / FTTH والتعليم..."></textarea>
+        </div>
+
+        <div class="instructor-form__field">
+          <label class="instructor-form__label" for="instructorCvLink">رابط السيرة الذاتية</label>
+          <input class="instructor-form__input" type="url" id="instructorCvLink" name="cvLink" placeholder="https://..." dir="ltr" />
+          <p class="instructor-form__hint">أو ارفع ملفاً أدناه (يُحفظ اسم الملف محلياً لأغراض الاختبار)</p>
+        </div>
+
+        <div class="instructor-form__field instructor-form__file">
+          <label class="instructor-form__label">رفع السيرة الذاتية (PDF / DOC)</label>
+          <label class="instructor-form__file-btn">
+            اختيار ملف
+            <input type="file" id="instructorCvFile" name="cvFile" accept=".pdf,.doc,.docx,application/pdf" />
+          </label>
+          <span class="instructor-form__file-name" id="instructorCvFileName">لم يتم اختيار ملف</span>
+        </div>
+
+        <div class="instructor-form__field">
+          <label class="instructor-form__label" for="instructorCourses">الكورسات المقترحة <span>*</span></label>
+          <textarea class="instructor-form__textarea" id="instructorCourses" name="courses" required placeholder="مثال: أساسيات FTTH، لحام الألياف، قراءة مخططات OTDR..."></textarea>
+        </div>
+
+        <div class="instructor-form__actions">
+          <button type="submit" class="btn btn--primary" id="instructorSubmitBtn">إرسال الطلب</button>
+          <button type="button" class="btn btn--outline" data-instructor-modal-close>إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="instructor-alert" id="instructorSuccessAlert" hidden aria-hidden="true">
+    <div class="instructor-alert__backdrop" data-instructor-success-ok></div>
+    <div class="instructor-alert__dialog" role="alertdialog" aria-modal="true" aria-labelledby="instructorSuccessTitle" aria-describedby="instructorSuccessMessage">
+      <div class="instructor-alert__icon" aria-hidden="true">✓</div>
+      <h3 class="instructor-alert__title" id="instructorSuccessTitle">تم إرسال طلبك بنجاح!</h3>
+      <p class="instructor-alert__message" id="instructorSuccessMessage">سيتم مراجعة طلبك والرد عليك خلال 48 ساعة، وستصلك رسالة عبر البريد الإلكتروني عند الموافقة.</p>
+      <button type="button" class="btn btn--primary instructor-alert__ok" id="instructorSuccessOk" data-instructor-success-ok>موافق</button>
+    </div>
+  </div>
+
+  <script src="js/instructor-applications.js"></script>
   <script src="js/navigation.js"></script>
   <script src="js/animations.js"></script>
   <script src="js/main.js"></script>

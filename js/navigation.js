@@ -66,4 +66,58 @@
   window.addEventListener('resize', function () {
     if (window.innerWidth > 992) closeMenu();
   });
+
+  /* User profile dropdown */
+  document.addEventListener('click', function (e) {
+    var toggle = e.target.closest ? e.target.closest('#userMenuToggle, .user-menu__toggle') : null;
+    var menu = document.getElementById('userMenu');
+    var dropdown = document.getElementById('userMenuDropdown');
+
+    if (toggle && menu && dropdown) {
+      e.preventDefault();
+      e.stopPropagation();
+      var isOpen = menu.classList.contains('open');
+      document.querySelectorAll('.user-menu.open').forEach(function (m) {
+        m.classList.remove('open');
+        var t = m.querySelector('.user-menu__toggle');
+        var d = m.querySelector('.user-menu__dropdown');
+        if (t) t.setAttribute('aria-expanded', 'false');
+        if (d) d.hidden = true;
+      });
+      if (!isOpen) {
+        menu.classList.add('open');
+        toggle.setAttribute('aria-expanded', 'true');
+        dropdown.hidden = false;
+      }
+      return;
+    }
+
+    if (menu && !menu.contains(e.target)) {
+      menu.classList.remove('open');
+      var t = menu.querySelector('.user-menu__toggle');
+      var d = menu.querySelector('.user-menu__dropdown');
+      if (t) t.setAttribute('aria-expanded', 'false');
+      if (d) d.hidden = true;
+    }
+
+    var menuItem = e.target.closest ? e.target.closest('.user-menu__item') : null;
+    if (menuItem && menu) {
+      menu.classList.remove('open');
+      var toggleBtn = menu.querySelector('.user-menu__toggle');
+      var drop = menu.querySelector('.user-menu__dropdown');
+      if (toggleBtn) toggleBtn.setAttribute('aria-expanded', 'false');
+      if (drop) drop.hidden = true;
+    }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var menu = document.getElementById('userMenu');
+    if (!menu) return;
+    menu.classList.remove('open');
+    var t = menu.querySelector('.user-menu__toggle');
+    var d = menu.querySelector('.user-menu__dropdown');
+    if (t) t.setAttribute('aria-expanded', 'false');
+    if (d) d.hidden = true;
+  });
 })();

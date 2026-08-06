@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="لوحة إدارة أكاديمية الفايبر العراقية">
+  <title>لوحة الإدارة | أكاديمية الفايبر العراقية</title>
+  <link rel="icon" type="image/png" href="images/logo.png" />
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/admin.css">
+</head>
+<body class="admin-body">
+
+  <div class="admin-overlay" id="adminOverlay" aria-hidden="true"></div>
+
+  <aside class="admin-sidebar" id="adminSidebar" aria-label="قائمة لوحة الإدارة">
+    <a href="index.html" class="admin-sidebar__brand">
+      <img class="admin-sidebar__brand-img" src="images/logo.png" alt="Iraqi Fiber Academy" width="40" height="40" />
+      <div class="admin-sidebar__brand-text">
+        <span class="admin-sidebar__brand-name">أكاديمية الفايبر</span>
+        <span class="admin-sidebar__brand-role">ADMIN DASHBOARD</span>
+      </div>
+    </a>
+
+    <nav class="admin-sidebar__nav">
+      <p class="admin-sidebar__label">القائمة الرئيسية</p>
+      <a href="#overview" class="admin-nav__link active" data-section="overview">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+        </svg>
+        نظرة عامة
+      </a>
+      <a href="#users" class="admin-nav__link" data-section="users">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        إدارة المستخدمين
+      </a>
+      <a href="#instructor-requests" class="admin-nav__link" data-section="instructor-requests">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+        </svg>
+        طلبات المدربين
+      </a>
+      <a href="#courses" class="admin-nav__link" data-section="courses">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        </svg>
+        الكورسات
+      </a>
+      <a href="#simulators" class="admin-nav__link" data-section="simulators">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+        </svg>
+        المحاكيات
+      </a>
+
+      <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
+      <a href="#settings" class="admin-nav__link" data-section="settings">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        الإعدادات
+      </a>
+    </nav>
+
+    <div class="admin-sidebar__footer">
+      <a href="index.html" class="admin-sidebar__back">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        العودة للموقع
+      </a>
+    </div>
+  </aside>
+
+  <div class="admin-main">
+    <header class="admin-topbar">
+      <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <button class="admin-menu-toggle" id="adminMenuToggle" aria-label="فتح القائمة" type="button">☰</button>
+        <div>
+          <h1 class="admin-topbar__title">لوحة الإدارة</h1>
+          <p class="admin-topbar__subtitle">أكاديمية الفايبر العراقية — نظرة عامة على المنصة</p>
+        </div>
+      </div>
+      <div class="admin-topbar__actions">
+        <div class="admin-user-chip">
+          <div class="admin-user-chip__avatar">أ</div>
+          <div class="admin-user-chip__meta">
+            <div class="admin-user-chip__name">أحمد المدير</div>
+            <div class="admin-user-chip__role">مسؤول النظام</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="admin-content" id="overview">
+      <section class="admin-stats" aria-label="إحصائيات المنصة">
+        <article class="admin-stat">
+          <div class="admin-stat__header">
+            <div class="admin-stat__icon" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+              </svg>
+            </div>
+            <span class="admin-stat__trend">+12%</span>
+          </div>
+          <div class="admin-stat__value">2,547</div>
+          <div class="admin-stat__label">إجمالي المستخدمين</div>
+        </article>
+
+        <article class="admin-stat">
+          <div class="admin-stat__header">
+            <div class="admin-stat__icon admin-stat__icon--green" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+              </svg>
+            </div>
+            <span class="admin-stat__trend">+8%</span>
+          </div>
+          <div class="admin-stat__value">1,842</div>
+          <div class="admin-stat__label">طلاب نشطون</div>
+        </article>
+
+        <article class="admin-stat">
+          <div class="admin-stat__header">
+            <div class="admin-stat__icon admin-stat__icon--blue" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+            <span class="admin-stat__trend">+3</span>
+          </div>
+          <div class="admin-stat__value">48</div>
+          <div class="admin-stat__label">كورسات منشورة</div>
+        </article>
+
+        <article class="admin-stat">
+          <div class="admin-stat__header">
+            <div class="admin-stat__icon admin-stat__icon--amber" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/>
+              </svg>
+            </div>
+            <span class="admin-stat__trend admin-stat__trend--down">−2%</span>
+          </div>
+          <div class="admin-stat__value">326</div>
+          <div class="admin-stat__label">جلسات محاكاة اليوم</div>
+        </article>
+      </section>
+
+      <section class="admin-panel" id="users" aria-labelledby="usersHeading">
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="usersHeading">إدارة المستخدمين</h2>
+            <p class="admin-panel__desc">عرض وإدارة حسابات الطلاب والمدربين والمسؤولين</p>
+          </div>
+          <div class="admin-panel__tools">
+            <label class="admin-search">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
+              <input class="admin-search__input" type="search" id="userSearch" placeholder="بحث بالاسم أو البريد..." aria-label="بحث عن مستخدم" />
+            </label>
+            <button class="admin-btn admin-btn--primary" type="button" id="addUserBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              إضافة مستخدم
+            </button>
+          </div>
+        </div>
+
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">المستخدم</th>
+                <th scope="col">الدور</th>
+                <th scope="col">الحالة</th>
+                <th scope="col">تاريخ التسجيل</th>
+                <th scope="col">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <tr data-name="سارة العلي" data-email="sara.ali@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">س</div>
+                    <div>
+                      <div class="admin-user-cell__name">سارة العلي</div>
+                      <div class="admin-user-cell__email">sara.ali@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--student">طالب</span></td>
+                <td><span class="admin-badge admin-badge--active">نشط</span></td>
+                <td>12 مارس 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-name="محمد حسن" data-email="m.hassan@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">م</div>
+                    <div>
+                      <div class="admin-user-cell__name">محمد حسن</div>
+                      <div class="admin-user-cell__email">m.hassan@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--instructor">مدرب</span></td>
+                <td><span class="admin-badge admin-badge--active">نشط</span></td>
+                <td>28 فبراير 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-name="نور الكاظم" data-email="noor.k@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">ن</div>
+                    <div>
+                      <div class="admin-user-cell__name">نور الكاظم</div>
+                      <div class="admin-user-cell__email">noor.k@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--student">طالب</span></td>
+                <td><span class="admin-badge admin-badge--pending">قيد المراجعة</span></td>
+                <td>5 أبريل 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-name="علي جاسم" data-email="ali.j@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">ع</div>
+                    <div>
+                      <div class="admin-user-cell__name">علي جاسم</div>
+                      <div class="admin-user-cell__email">ali.j@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--admin">مسؤول</span></td>
+                <td><span class="admin-badge admin-badge--active">نشط</span></td>
+                <td>10 يناير 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-name="زينب محمود" data-email="zainab.m@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">ز</div>
+                    <div>
+                      <div class="admin-user-cell__name">زينب محمود</div>
+                      <div class="admin-user-cell__email">zainab.m@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--student">طالب</span></td>
+                <td><span class="admin-badge admin-badge--suspended">موقوف</span></td>
+                <td>18 فبراير 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تفعيل</button>
+                  </div>
+                </td>
+              </tr>
+              <tr data-name="حسام الراوي" data-email="hussam.r@example.com">
+                <td>
+                  <div class="admin-user-cell">
+                    <div class="admin-user-cell__avatar">ح</div>
+                    <div>
+                      <div class="admin-user-cell__name">حسام الراوي</div>
+                      <div class="admin-user-cell__email">hussam.r@example.com</div>
+                    </div>
+                  </div>
+                </td>
+                <td><span class="admin-badge admin-badge--instructor">مدرب</span></td>
+                <td><span class="admin-badge admin-badge--active">نشط</span></td>
+                <td>3 مارس 2026</td>
+                <td>
+                  <div class="admin-table__actions">
+                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
+                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta" id="usersMeta">عرض 1–6 من 2,547 مستخدم</p>
+          <div class="admin-pagination" aria-label="تصفح الصفحات">
+            <button class="admin-pagination__btn active" type="button">1</button>
+            <button class="admin-pagination__btn" type="button">2</button>
+            <button class="admin-pagination__btn" type="button">3</button>
+            <button class="admin-pagination__btn" type="button">…</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-panel" id="instructor-requests" aria-labelledby="instructorRequestsHeading" style="margin-top: 2rem;">
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="instructorRequestsHeading">طلبات المدربين</h2>
+            <p class="admin-panel__desc">مراجعة طلبات الانضمام كمدرب والموافقة أو الرفض</p>
+          </div>
+          <div class="admin-panel__tools">
+            <button class="admin-btn admin-btn--ghost" type="button" id="refreshInstructorRequests">تحديث</button>
+          </div>
+        </div>
+
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th scope="col">المتقدم</th>
+                <th scope="col">النبذة</th>
+                <th scope="col">الكورسات المقترحة</th>
+                <th scope="col">السيرة الذاتية</th>
+                <th scope="col">التاريخ</th>
+                <th scope="col">الحالة</th>
+                <th scope="col">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="instructorRequestsBody">
+              <tr>
+                <td colspan="7" class="admin-empty-cell">لا توجد طلبات حالياً</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta" id="instructorRequestsMeta">0 طلب قيد المراجعة</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/instructor-applications.js"></script>
+  <script>
+    (function () {
+      var sidebar = document.getElementById('adminSidebar');
+      var overlay = document.getElementById('adminOverlay');
+      var toggle = document.getElementById('adminMenuToggle');
+      var search = document.getElementById('userSearch');
+      var rows = document.querySelectorAll('#usersTableBody tr');
+      var navLinks = document.querySelectorAll('.admin-nav__link');
+
+      function closeSidebar() {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+      }
+
+      function openSidebar() {
+        sidebar.classList.add('open');
+        overlay.classList.add('visible');
+      }
+
+      if (toggle) {
+        toggle.addEventListener('click', function () {
+          if (sidebar.classList.contains('open')) closeSidebar();
+          else openSidebar();
+        });
+      }
+
+      if (overlay) overlay.addEventListener('click', closeSidebar);
+
+      navLinks.forEach(function (link) {
+        link.addEventListener('click', function () {
+          navLinks.forEach(function (l) { l.classList.remove('active'); });
+          link.classList.add('active');
+          if (window.innerWidth <= 900) closeSidebar();
+        });
+      });
+
+      if (search) {
+        search.addEventListener('input', function () {
+          var q = search.value.trim().toLowerCase();
+          var visible = 0;
+          rows.forEach(function (row) {
+            var name = (row.getAttribute('data-name') || '').toLowerCase();
+            var email = (row.getAttribute('data-email') || '').toLowerCase();
+            var match = !q || name.indexOf(q) !== -1 || email.indexOf(q) !== -1;
+            row.style.display = match ? '' : 'none';
+            if (match) visible += 1;
+          });
+          var meta = document.getElementById('usersMeta');
+          if (meta) meta.textContent = 'عرض ' + visible + ' من 2,547 مستخدم';
+        });
+      }
+
+      function escapeHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function statusBadge(status) {
+        if (status === 'approved') return '<span class="admin-badge admin-badge--active">موافق عليه</span>';
+        if (status === 'rejected') return '<span class="admin-badge admin-badge--suspended">مرفوض</span>';
+        return '<span class="admin-badge admin-badge--pending">قيد المراجعة</span>';
+      }
+
+      function cvCell(app) {
+        var parts = [];
+        if (app.cvLink) {
+          parts.push('<a href="' + escapeHtml(app.cvLink) + '" target="_blank" rel="noopener noreferrer" class="admin-cv-link">رابط CV</a>');
+        }
+        if (app.cvFileName) {
+          parts.push('<span class="admin-cv-file">' + escapeHtml(app.cvFileName) + '</span>');
+        }
+        return parts.length ? parts.join('<br>') : '—';
+      }
+
+      function renderInstructorRequests() {
+        var body = document.getElementById('instructorRequestsBody');
+        var meta = document.getElementById('instructorRequestsMeta');
+        if (!body || !window.InstructorApps) return;
+
+        var apps = window.InstructorApps.getApplications().slice().sort(function (a, b) {
+          return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+        });
+
+        var pendingCount = apps.filter(function (a) { return a.status === 'pending'; }).length;
+        if (meta) meta.textContent = pendingCount + ' طلب قيد المراجعة · إجمالي ' + apps.length;
+
+        if (!apps.length) {
+          body.innerHTML = '<tr><td colspan="7" class="admin-empty-cell">لا توجد طلبات حالياً. ستظهر هنا بعد الإرسال من صفحة الموقع.</td></tr>';
+          return;
+        }
+
+        body.innerHTML = apps.map(function (app) {
+          var initial = escapeHtml((app.fullName || '?').charAt(0));
+          var actions = '';
+          if (app.status === 'pending') {
+            actions =
+              '<div class="admin-table__actions">' +
+                '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-approve-instructor="' + escapeHtml(app.id) + '">موافقة</button>' +
+                '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-reject-instructor="' + escapeHtml(app.id) + '">رفض</button>' +
+              '</div>';
+          } else {
+            actions = '<span class="admin-panel__meta">تمت المراجعة</span>';
+          }
+
+          return (
+            '<tr data-app-id="' + escapeHtml(app.id) + '">' +
+              '<td>' +
+                '<div class="admin-user-cell">' +
+                  '<div class="admin-user-cell__avatar">' + initial + '</div>' +
+                  '<div>' +
+                    '<div class="admin-user-cell__name">' + escapeHtml(app.fullName) + '</div>' +
+                    '<div class="admin-user-cell__email">' + escapeHtml(app.email) + '</div>' +
+                  '</div>' +
+                '</div>' +
+              '</td>' +
+              '<td><div class="admin-cell-clamp">' + escapeHtml(app.bio) + '</div></td>' +
+              '<td><div class="admin-cell-clamp">' + escapeHtml(app.courses) + '</div></td>' +
+              '<td>' + cvCell(app) + '</td>' +
+              '<td>' + escapeHtml(window.InstructorApps.formatDate(app.createdAt)) + '</td>' +
+              '<td>' + statusBadge(app.status) + '</td>' +
+              '<td>' + actions + '</td>' +
+            '</tr>'
+          );
+        }).join('');
+      }
+
+      document.addEventListener('click', function (e) {
+        var approveBtn = e.target.closest ? e.target.closest('[data-approve-instructor]') : null;
+        var rejectBtn = e.target.closest ? e.target.closest('[data-reject-instructor]') : null;
+
+        if (approveBtn && window.InstructorApps) {
+          var approveId = approveBtn.getAttribute('data-approve-instructor');
+          try {
+            var approved = window.InstructorApps.approveApplication(approveId);
+            document.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: approved }));
+            renderInstructorRequests();
+            alert('تمت الموافقة. تم تفعيل لوحة المدرب للمتقدم: ' + approved.email);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر تنفيذ الموافقة');
+          }
+          return;
+        }
+
+        if (rejectBtn && window.InstructorApps) {
+          var rejectId = rejectBtn.getAttribute('data-reject-instructor');
+          try {
+            var rejected = window.InstructorApps.rejectApplication(rejectId);
+            document.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: rejected }));
+            renderInstructorRequests();
+          } catch (err) {
+            alert((err && err.message) || 'تعذر تنفيذ الرفض');
+          }
+        }
+      });
+
+      var refreshBtn = document.getElementById('refreshInstructorRequests');
+      if (refreshBtn) refreshBtn.addEventListener('click', renderInstructorRequests);
+
+      window.addEventListener('storage', function (e) {
+        if (e.key === 'ifa_instructor_applications' || e.key === 'ifa_approved_instructors') {
+          renderInstructorRequests();
+        }
+      });
+
+      renderInstructorRequests();
+    })();
+  </script>
+</body>
+</html>
