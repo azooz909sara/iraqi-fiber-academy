@@ -304,6 +304,27 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 @keyframes fiberPulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
 @keyframes pulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
 
+/* Articles */
+.articles__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+
+.article-card {
+  background: var(--color-bg-card); border: 1px solid var(--color-border);
+  border-radius: var(--border-radius-lg); padding: 2rem;
+  transition: all var(--transition-normal); display: flex; flex-direction: column; gap: 0.75rem;
+}
+
+.article-card:hover { border-color: var(--color-border-hover); transform: translateY(-4px); box-shadow: var(--shadow-card); }
+
+.article-card__category {
+  display: inline-block; align-self: flex-start; padding: 0.2rem 0.65rem;
+  font-size: 0.75rem; color: var(--color-accent-cyan); background: rgba(0, 229, 255, 0.08);
+  border-radius: 4px;
+}
+
+.article-card__title { font-size: 1.1rem; font-weight: 600; line-height: 1.5; }
+.article-card__desc { font-size: 0.9rem; color: var(--color-text-secondary); line-height: 1.7; flex: 1; }
+.article-card__meta { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.5rem; }
+
 /* Testimonials */
 .testimonials__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
 
@@ -361,11 +382,14 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .stats__grid { grid-template-columns: repeat(2, 1fr); }
   .demo__wrapper { grid-template-columns: 1fr; }
   .demo__content { max-width: 100%; text-align: center; }
-  .testimonials__grid { grid-template-columns: repeat(2, 1fr); }
+  .testimonials__grid,
+  .articles__grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 768px) {
-  .stats__grid, .testimonials__grid { grid-template-columns: 1fr; }
+  .stats__grid,
+  .testimonials__grid,
+  .articles__grid { grid-template-columns: 1fr; }
   .learning-path__timeline::before { right: 22px; }
   .path-step__marker { width: 44px; height: 44px; font-size: 0.95rem; }
 }
