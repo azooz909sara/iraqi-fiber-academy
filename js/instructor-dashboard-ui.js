@@ -18,16 +18,6 @@
       .replace(/"/g, '&quot;');
   }
 
-  function denyAccess() {
-    document.getElementById('instructorGate').hidden = false;
-    document.getElementById('instructorApp').hidden = true;
-  }
-
-  function allowAccess() {
-    document.getElementById('instructorGate').hidden = true;
-    document.getElementById('instructorApp').hidden = false;
-  }
-
   function showSection(id) {
     document.querySelectorAll('.inst-section').forEach(function (s) {
       s.classList.toggle('active', s.id === 'section-' + id);
@@ -393,23 +383,25 @@
   function init() {
     if (Apps && Apps.absorbApprovalFromUrl) Apps.absorbApprovalFromUrl();
 
-    if (!Dash || !Dash.isInstructorAllowed()) {
-      denyAccess();
-      return;
+    var app = document.getElementById('instructorApp');
+    if (app) app.hidden = false;
+
+    email =
+      (Dash && Dash.currentInstructorEmail && Dash.currentInstructorEmail()) ||
+      (Apps && Apps.getSessionEmail && Apps.getSessionEmail()) ||
+      'instructor@local';
+    email = String(email || 'instructor@local').trim().toLowerCase();
+
+    if (Dash && typeof Dash.seedDemoIfEmpty === 'function') {
+      Dash.seedDemoIfEmpty(email);
     }
 
-    email = Dash.currentInstructorEmail();
-    if (!email) {
-      denyAccess();
-      return;
-    }
-
-    allowAccess();
-    Dash.seedDemoIfEmpty(email);
-
-    document.getElementById('instEmailChip').textContent = email;
-    document.getElementById('instNameChip').textContent = email.split('@')[0] || 'مدرب';
-    document.getElementById('instSubtitle').textContent = 'صلاحيات محدودة لكورساتك فقط — ' + email;
+    var emailChip = document.getElementById('instEmailChip');
+    var nameChip = document.getElementById('instNameChip');
+    var subtitle = document.getElementById('instSubtitle');
+    if (emailChip) emailChip.textContent = email;
+    if (nameChip) nameChip.textContent = email.split('@')[0] || 'مدرب';
+    if (subtitle) subtitle.textContent = 'إدارة كورساتك وحلقاتك وامتحاناتك — ' + email;
 
     renderOverview();
 

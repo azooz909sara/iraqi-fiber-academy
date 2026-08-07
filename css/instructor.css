@@ -6,35 +6,6 @@
   background: var(--color-bg-primary);
 }
 
-.inst-gate {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2rem;
-  text-align: center;
-}
-
-.inst-gate__card {
-  max-width: 420px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border);
-  border-radius: var(--border-radius-lg);
-  padding: 2rem;
-}
-
-.inst-gate__title {
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin-bottom: 0.75rem;
-}
-
-.inst-gate__text {
-  color: var(--color-text-secondary);
-  margin-bottom: 1.5rem;
-  line-height: 1.7;
-}
-
 .inst-main {
   flex: 1;
   margin-right: 260px;
