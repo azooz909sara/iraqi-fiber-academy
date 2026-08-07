@@ -98,9 +98,21 @@
   function renderCourseCard(course, index) {
     var instructor = course.instructorName || course.instructorEmail || '';
     var lessonCount = Array.isArray(course.lessons) ? course.lessons.length : 0;
-    var metaBits = [];
-    if (instructor) metaBits.push('المدرب: ' + escapeHtml(instructor));
-    if (lessonCount) metaBits.push(lessonCount + ' حلقة');
+
+    var footer =
+      '<footer class="public-course-card__footer">' +
+      '<div class="public-course-card__instructor">' +
+      '<span class="public-course-card__footer-label">المدرب</span>' +
+      '<span class="public-course-card__footer-value">' +
+      escapeHtml(instructor || 'الأكاديمية') +
+      '</span>' +
+      '</div>' +
+      '<div class="public-course-card__episodes">' +
+      '<span class="public-course-card__footer-value">' +
+      (lessonCount ? lessonCount + ' حلقة' : 'قريباً') +
+      '</span>' +
+      '</div>' +
+      '</footer>';
 
     return (
       '<article class="public-course-card" data-course-id="' +
@@ -108,21 +120,21 @@
       '" style="--card-index:' +
       index +
       '">' +
-      '<div class="public-course-card__top">' +
+      '<div class="public-course-card__header">' +
       '<span class="public-course-card__badge">منشور</span>' +
       '<span class="public-course-card__duration">⏱ ' +
       escapeHtml(formatDurationLabel(course)) +
       '</span>' +
       '</div>' +
+      '<div class="public-course-card__body">' +
       '<h3 class="public-course-card__title">' +
       escapeHtml(course.title || 'كورس بدون عنوان') +
       '</h3>' +
       '<p class="public-course-card__desc">' +
       escapeHtml(course.description || 'لا يوجد وصف لهذا الكورس بعد.') +
       '</p>' +
-      (metaBits.length
-        ? '<div class="public-course-card__meta">' + metaBits.join(' · ') + '</div>'
-        : '') +
+      '</div>' +
+      footer +
       '</article>'
     );
   }
