@@ -1,5 +1,7 @@
 {
   "projects": {
     "default": "iraqi-fiber-academy"
-  }
+  },
+  "targets": {},
+  "etags": {}
 }
