@@ -136,6 +136,48 @@
     select.innerHTML = html;
   }
 
+  function fillRequiredPlanSelect(selectedId, category) {
+    var select = document.getElementById('courseEditorRequiredPlan');
+    if (!select) return;
+    var plans =
+      window.PlatformPlans && typeof window.PlatformPlans.getPlans === 'function'
+        ? window.PlatformPlans.getPlans()
+        : [];
+    var preferredLevel = 'free';
+    if (category === 'program') preferredLevel = 'standard';
+    if (category === 'master') preferredLevel = 'professional';
+
+    var html = '<option value="">— تلقائي حسب فئة الكورس (' + preferredLevel + ') —</option>';
+    plans.forEach(function (plan) {
+      html +=
+        '<option value="' +
+        escapeHtml(plan.id) +
+        '">' +
+        escapeHtml(plan.name) +
+        ' — ' +
+        escapeHtml(
+          window.PlatformPlans.formatPrice
+            ? window.PlatformPlans.formatPrice(plan)
+            : String(plan.price)
+        ) +
+        ' (' +
+        escapeHtml(plan.accessLevel || '') +
+        ')</option>';
+    });
+    select.innerHTML = html;
+
+    if (selectedId && plans.some(function (p) { return p.id === selectedId; })) {
+      select.value = selectedId;
+    } else {
+      // Prefer plan matching category access level
+      var match =
+        window.PlatformPlans && window.PlatformPlans.findPlanByAccessLevel
+          ? window.PlatformPlans.findPlanByAccessLevel(preferredLevel)
+          : null;
+      select.value = match ? match.id : '';
+    }
+  }
+
   function applyPreset(presetId) {
     if (!window.PlatformCourses || !presetId) return;
     var preset = window.PlatformCourses.findPreset(presetId);
@@ -145,9 +187,13 @@
     document.getElementById('courseEditorDescription').value = preset.description || '';
     document.getElementById('courseEditorHours').value = preset.durationHours || '';
     document.getElementById('courseEditorWeeks').value = preset.durationWeeks || '';
+    document.getElementById('courseEditorPrice').value =
+      preset.price != null && preset.price !== '' ? preset.price : '';
+    document.getElementById('courseEditorCurrency').value = preset.currency || 'ر.س';
     document.getElementById('courseEditorSchedule').value = preset.weeklySchedule || '';
     document.getElementById('courseEditorCategory').value = preset.category || 'individual';
     document.getElementById('courseEditorStatus').value = 'draft';
+    fillRequiredPlanSelect(preset.requiredPlanId || '', preset.category || 'individual');
     fillInstructorSelect('');
 
     lessonDrafts = (preset.lessons || []).map(function (l, index) {
@@ -399,6 +445,9 @@
     document.getElementById('courseEditorDescription').value = course ? course.description : '';
     document.getElementById('courseEditorHours').value = course ? course.durationHours || '' : '';
     document.getElementById('courseEditorWeeks').value = course ? course.durationWeeks || '' : '';
+    document.getElementById('courseEditorPrice').value =
+      course && course.price != null && course.price !== '' ? course.price : '';
+    document.getElementById('courseEditorCurrency').value = course ? course.currency || 'ر.س' : 'ر.س';
     document.getElementById('courseEditorSchedule').value = course ? course.weeklySchedule || '' : '';
     document.getElementById('courseEditorStatus').value = course
       ? course.softDeleted
@@ -408,6 +457,10 @@
     document.getElementById('courseEditorCategory').value = course
       ? course.category || 'individual'
       : 'individual';
+    fillRequiredPlanSelect(
+      course ? course.requiredPlanId || '' : '',
+      course ? course.category || 'individual' : 'individual'
+    );
 
     fillInstructorSelect(course && !course.isAcademy ? course.instructorEmail : '');
     lessonDrafts =
@@ -714,7 +767,7 @@
             ? 'لا نتائج مطابقة للتصفية أو البحث.'
             : 'لا توجد كورسات. أضف كورساً أو اختر من الكتالوج.';
       body.innerHTML =
-        '<tr><td colspan="8" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
+        '<tr><td colspan="9" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
       return;
     }
 
@@ -796,6 +849,22 @@
           '<td>' +
           escapeHtml(instructorLabel) +
           '</td>' +
+          '<td><span class="admin-course-price">' +
+          escapeHtml(
+            window.PlatformCourses.formatPrice
+              ? window.PlatformCourses.formatPrice(course)
+              : course.price
+                ? course.price + ' ' + (course.currency || 'ر.س')
+                : 'مجاناً'
+          ) +
+          '</span>' +
+          '<div class="admin-user-cell__email">' +
+          escapeHtml(
+            window.PlatformCourses.formatCourseAccessLabel
+              ? window.PlatformCourses.formatCourseAccessLabel(course)
+              : course.accessLevel || '—'
+          ) +
+          '</div></td>' +
           '<td>' +
           escapeHtml(window.PlatformCourses.formatDuration(course)) +
           '</td>' +
@@ -915,6 +984,20 @@
           description: (document.getElementById('courseEditorDescription') || {}).value,
           durationHours: (document.getElementById('courseEditorHours') || {}).value,
           durationWeeks: (document.getElementById('courseEditorWeeks') || {}).value,
+          price: (document.getElementById('courseEditorPrice') || {}).value,
+          currency: (document.getElementById('courseEditorCurrency') || {}).value || 'ر.س',
+          requiredPlanId: (document.getElementById('courseEditorRequiredPlan') || {}).value || '',
+          accessLevel: (function () {
+            var planId = (document.getElementById('courseEditorRequiredPlan') || {}).value || '';
+            if (planId && window.PlatformPlans && window.PlatformPlans.findPlan) {
+              var p = window.PlatformPlans.findPlan(planId);
+              if (p) return p.accessLevel;
+            }
+            var cat = (document.getElementById('courseEditorCategory') || {}).value || 'individual';
+            if (cat === 'master') return 'professional';
+            if (cat === 'program') return 'standard';
+            return 'free';
+          })(),
           weeklySchedule: (document.getElementById('courseEditorSchedule') || {}).value,
           status: (document.getElementById('courseEditorStatus') || {}).value,
           category: (document.getElementById('courseEditorCategory') || {}).value || 'individual',

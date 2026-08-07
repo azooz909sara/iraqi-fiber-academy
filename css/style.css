@@ -238,9 +238,23 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
   margin-bottom: 1rem;
   direction: rtl;
+}
+
+.public-course-card__plan {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border: 1px solid rgba(0, 229, 255, 0.28);
+  background: rgba(0, 229, 255, 0.08);
+  padding: 0.22rem 0.55rem;
+  border-radius: 999px;
+  white-space: nowrap;
 }
 
 .public-course-card__badge {
@@ -262,6 +276,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   font-size: 0.78rem;
   color: var(--color-text-muted);
   white-space: nowrap;
+  margin-inline-start: auto;
 }
 
 .public-course-card__body {
@@ -328,15 +343,29 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   max-width: 11rem;
 }
 
-.public-course-card__episodes {
+.public-course-card__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
   flex-shrink: 0;
   padding-inline-start: 0.85rem;
   border-inline-start: 1px solid rgba(148, 163, 184, 0.18);
+  text-align: left;
 }
 
-.public-course-card__episodes .public-course-card__footer-value {
+.public-course-card__price {
+  font-size: 0.92rem;
+  font-weight: 700;
   color: var(--color-accent-cyan);
-  font-size: 0.8rem;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.public-course-card__episodes {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  white-space: nowrap;
 }
 
 .public-courses-empty {

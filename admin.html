@@ -52,6 +52,12 @@
         </svg>
         الكورسات
       </a>
+      <a href="#plans" class="admin-nav__link" data-section="plans">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+        </svg>
+        الباقات والأسعار
+      </a>
       <a href="#simulators" class="admin-nav__link" data-section="simulators">
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
@@ -464,6 +470,7 @@
                 <th scope="col" class="admin-table__drag-col" aria-label="ترتيب">⋮⋮</th>
                 <th scope="col">الكورس</th>
                 <th scope="col">المدرب</th>
+                <th scope="col">السعر</th>
                 <th scope="col">المدة</th>
                 <th scope="col">الجدول الأسبوعي</th>
                 <th scope="col">الحالة</th>
@@ -473,7 +480,7 @@
             </thead>
             <tbody id="coursesTableBody">
               <tr>
-                <td colspan="8" class="admin-empty-cell">جاري التحميل...</td>
+                <td colspan="9" class="admin-empty-cell">جاري التحميل...</td>
               </tr>
             </tbody>
           </table>
@@ -525,6 +532,19 @@
                 </select>
               </label>
               <label class="admin-field">
+                <span class="admin-field__label">سعر الكورس</span>
+                <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorPrice" placeholder="0 = مجاناً" />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">العملة</span>
+                <input class="admin-field__input" type="text" id="courseEditorCurrency" value="ر.س" placeholder="ر.س" />
+              </label>
+              <label class="admin-field admin-field--full">
+                <span class="admin-field__label">باقة الوصول المطلوبة</span>
+                <select class="admin-field__input" id="courseEditorRequiredPlan"></select>
+                <span class="admin-field__hint">يربط الكورس بمستوى الباقة — يظهر على البطاقة ويتزامن مع قسم الأسعار</span>
+              </label>
+              <label class="admin-field">
                 <span class="admin-field__label">المدة بالساعات</span>
                 <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorHours" placeholder="مثال: 24" />
               </label>
@@ -565,6 +585,108 @@
 
       <div class="admin-toast" id="adminToast" hidden role="status" aria-live="polite"></div>
 
+      <section class="admin-panel admin-panel--plans admin-view" id="plans" data-admin-view="plans" aria-labelledby="plansHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="plansHeading">الباقات والأسعار</h2>
+            <p class="admin-panel__desc">عدّل عناوين الباقات والأسعار ودورة الفوترة والمميزات — تظهر فوراً في الصفحة الرئيسية</p>
+          </div>
+          <div class="admin-panel__tools">
+            <button class="admin-btn admin-btn--primary" type="button" id="addPlanBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              إضافة باقة
+            </button>
+          </div>
+        </div>
+        <div class="admin-plans-list" id="adminPlansList"></div>
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta">التغييرات تُحفظ في <code>platform_plans</code> وتُحدَّث على الموقع تلقائياً.</p>
+        </div>
+      </section>
+
+      <div class="admin-modal" id="planEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-plan-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--plan" role="dialog" aria-modal="true" aria-labelledby="planEditorTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="planEditorTitle">إضافة باقة</h3>
+            <button class="admin-modal__close" type="button" data-close-plan-modal aria-label="إغلاق">×</button>
+          </div>
+          <form class="admin-modal__form" id="planEditorForm">
+            <div class="admin-modal__scroll">
+              <div class="admin-form-grid">
+                <label class="admin-field admin-field--full">
+                  <span class="admin-field__label">عنوان الباقة</span>
+                  <input class="admin-field__input" type="text" id="planEditorName" required />
+                </label>
+                <label class="admin-field admin-field--full">
+                  <span class="admin-field__label">الوصف القصير</span>
+                  <input class="admin-field__input" type="text" id="planEditorDescription" placeholder="مثال: للفنيين والمهتمين بالتخصص" />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">السعر</span>
+                  <input class="admin-field__input" type="number" min="0" step="1" id="planEditorPrice" required />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">العملة</span>
+                  <input class="admin-field__input" type="text" id="planEditorCurrency" value="ر.س" />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">دورة الفوترة</span>
+                  <input class="admin-field__input" type="text" id="planEditorPeriod" placeholder="شهرياً / سنوياً / مجاناً للأبد" />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">مستوى الوصول</span>
+                  <select class="admin-field__input" id="planEditorAccessLevel">
+                    <option value="free">مجاني — دروس أساسية</option>
+                    <option value="standard">قياسي — كورسات وبرامج</option>
+                    <option value="professional">احترافي — كامل المنصة</option>
+                  </select>
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">نص زر الاشتراك</span>
+                  <input class="admin-field__input" type="text" id="planEditorCta" placeholder="اشترك الآن" />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">نمط الزر</span>
+                  <select class="admin-field__input" id="planEditorCtaStyle">
+                    <option value="outline">حدود</option>
+                    <option value="primary">أساسي</option>
+                  </select>
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">شارة التمييز</span>
+                  <input class="admin-field__input" type="text" id="planEditorBadge" placeholder="الأكثر شعبية" />
+                </label>
+                <label class="admin-field admin-field--full admin-field--checkbox">
+                  <input type="checkbox" id="planEditorFeatured" />
+                  <span class="admin-field__label">باقة مميزة (الأكثر شعبية)</span>
+                </label>
+                <fieldset class="admin-field admin-field--full admin-field--fieldset">
+                  <legend class="admin-field__label">فئات الكورسات المشمولة</legend>
+                  <div class="admin-checkbox-row">
+                    <label><input type="checkbox" id="planCatIndividual" checked /> المنفردة</label>
+                    <label><input type="checkbox" id="planCatProgram" /> البرامج</label>
+                    <label><input type="checkbox" id="planCatMaster" /> الشامل</label>
+                  </div>
+                  <span class="admin-field__hint">تحدد أي أنواع كورسات تُفتح بهذه الباقة</span>
+                </fieldset>
+                <label class="admin-field admin-field--full">
+                  <span class="admin-field__label">المميزات (سطر لكل ميزة)</span>
+                  <textarea class="admin-field__input admin-field__textarea" id="planEditorFeatures" rows="5" placeholder="ميزة مضمّنة&#10;✗ ميزة غير مضمّنة"></textarea>
+                  <span class="admin-field__hint">ابدأ السطر بـ ✗ أو - لميزة غير مضمّنة</span>
+                </label>
+              </div>
+            </div>
+            <div class="admin-modal__actions admin-modal__actions--sticky">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-plan-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ الباقة</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <section class="admin-panel admin-view" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
         <div class="admin-panel__header">
           <div>
@@ -595,6 +717,8 @@
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/admin-courses-ui.js"></script>
+  <script src="js/platform-plans.js"></script>
+  <script src="js/admin-plans-ui.js"></script>
   <script>
     (function () {
       var sidebar = document.getElementById('adminSidebar');
@@ -609,6 +733,7 @@
         users: { title: 'إدارة المستخدمين', subtitle: 'عرض وإدارة حسابات الطلاب' },
         instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
         courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
+        plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
         simulators: { title: 'المحاكيات', subtitle: 'إعدادات المحاكيات' },
         settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
       };

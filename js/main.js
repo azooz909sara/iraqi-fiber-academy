@@ -184,11 +184,20 @@
       });
     }
 
-    document.querySelectorAll('[data-plan]').forEach(function (button) {
-      button.addEventListener('click', function () {
-        const plans = { free: 'المجانية', standard: 'القياسية', professional: 'الاحترافية' };
-        alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + (plans[this.getAttribute('data-plan')] || ''));
-      });
+    document.addEventListener('click', function (e) {
+      var button = e.target && e.target.closest ? e.target.closest('[data-plan]') : null;
+      if (!button) return;
+      var planId = button.getAttribute('data-plan') || '';
+      var planName = '';
+      if (window.PlatformPlans && typeof window.PlatformPlans.findPlan === 'function') {
+        var plan = window.PlatformPlans.findPlan(planId);
+        if (plan) planName = plan.name;
+      }
+      if (!planName) {
+        var legacy = { free: 'المجانية', standard: 'القياسية', professional: 'الاحترافية' };
+        planName = legacy[planId] || planId;
+      }
+      alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });
 
     document.querySelectorAll('.demo__mock-btn').forEach(function (btn) {

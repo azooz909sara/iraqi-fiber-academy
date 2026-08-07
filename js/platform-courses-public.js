@@ -72,6 +72,9 @@
           c.instructorName || '',
           c.durationHours || 0,
           c.durationWeeks || 0,
+          c.price || 0,
+          c.requiredPlanId || '',
+          c.accessLevel || '',
           c.sortOrder != null ? c.sortOrder : '',
         ].join(':');
       })
@@ -96,9 +99,32 @@
       '</div>';
   }
 
+  function formatCoursePrice(course) {
+    if (window.PlatformCourses && typeof window.PlatformCourses.formatPrice === 'function') {
+      return window.PlatformCourses.formatPrice(course);
+    }
+    var amount = Number(course && course.price);
+    if (!isFinite(amount) || amount <= 0) return 'مجاناً';
+    return amount + ' ' + ((course && course.currency) || 'ر.س');
+  }
+
+  function accessPlanLabel(course) {
+    if (window.PlatformCourses && typeof window.PlatformCourses.formatCourseAccessLabel === 'function') {
+      return window.PlatformCourses.formatCourseAccessLabel(course);
+    }
+    return '';
+  }
+
   function renderCourseCard(course, index) {
     var instructor = course.instructorName || course.instructorEmail || '';
     var lessonCount = Array.isArray(course.lessons) ? course.lessons.length : 0;
+    var priceLabel = formatCoursePrice(course);
+    var planLabel = accessPlanLabel(course);
+    var planChip = planLabel
+      ? '<span class="public-course-card__plan" title="باقة الوصول">' +
+        escapeHtml(planLabel) +
+        '</span>'
+      : '';
 
     var footer =
       '<footer class="public-course-card__footer">' +
@@ -108,8 +134,11 @@
       escapeHtml(instructor || 'الأكاديمية') +
       '</span>' +
       '</div>' +
-      '<div class="public-course-card__episodes">' +
-      '<span class="public-course-card__footer-value">' +
+      '<div class="public-course-card__meta">' +
+      '<span class="public-course-card__price">' +
+      escapeHtml(priceLabel) +
+      '</span>' +
+      '<span class="public-course-card__episodes">' +
       (lessonCount ? lessonCount + ' حلقة' : 'قريباً') +
       '</span>' +
       '</div>' +
@@ -118,11 +147,16 @@
     return (
       '<article class="public-course-card" data-course-id="' +
       escapeHtml(course.id) +
+      '" data-access-level="' +
+      escapeHtml(course.accessLevel || '') +
+      '" data-required-plan="' +
+      escapeHtml(course.requiredPlanId || '') +
       '" style="--card-index:' +
       index +
       '">' +
       '<div class="public-course-card__header">' +
       '<span class="public-course-card__badge">منشور</span>' +
+      planChip +
       '<span class="public-course-card__duration">⏱ ' +
       escapeHtml(formatDurationLabel(course)) +
       '</span>' +
@@ -172,13 +206,20 @@
 
   function bindLiveSync() {
     window.addEventListener('storage', function (e) {
-      if (!e.key || e.key === COURSES_KEY || e.key === LEGACY_KEY) {
+      if (
+        !e.key ||
+        e.key === COURSES_KEY ||
+        e.key === LEGACY_KEY ||
+        e.key === 'platform_plans'
+      ) {
         renderPublicCourses();
       }
     });
 
     document.addEventListener('ifa:platform-courses-changed', renderPublicCourses);
     window.addEventListener('ifa:platform-courses-changed', renderPublicCourses);
+    document.addEventListener('ifa:platform-plans-changed', renderPublicCourses);
+    window.addEventListener('ifa:platform-plans-changed', renderPublicCourses);
 
     /* Lightweight same-origin poll so publish from another tab/window
        still updates even if a browser skips the storage event. */

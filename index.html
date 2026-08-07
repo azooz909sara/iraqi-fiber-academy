@@ -244,47 +244,8 @@
           <h2 class="section__title">اختر الباقة المناسبة لك</h2>
           <p class="section__subtitle">ابدأ مجاناً وطوّر مهاراتك مع باقات تناسب كل المستويات</p>
         </div>
-        <div class="pricing__grid">
-          <article class="pricing-card fade-in">
-            <h3 class="pricing-card__name">المجانية</h3>
-            <p class="pricing-card__desc">للمبتدئين والتجربة الأولى</p>
-            <div class="pricing-card__price"><div class="pricing-card__amount">0 <span>ر.س</span></div><div class="pricing-card__period">مجاناً للأبد</div></div>
-            <ul class="pricing-card__features">
-              <li><span class="pricing-card__check">✓</span> الوصول للدروس الأساسية</li>
-              <li><span class="pricing-card__check">✓</span> 3 سيناريوهات محاكاة</li>
-              <li><span class="pricing-card__check">✓</span> منتدى المجتمع</li>
-              <li><span class="pricing-card__check pricing-card__check--disabled">✗</span> محاكي OTDR</li>
-              <li><span class="pricing-card__check pricing-card__check--disabled">✗</span> شهادة معتمدة</li>
-            </ul>
-            <button class="pricing-card__btn pricing-card__btn--outline" data-plan="free">ابدأ مجاناً</button>
-          </article>
-          <article class="pricing-card pricing-card--featured fade-in">
-            <span class="pricing-card__badge">الأكثر شعبية</span>
-            <h3 class="pricing-card__name">القياسية</h3>
-            <p class="pricing-card__desc">للفنيين والمهتمين بالتخصص</p>
-            <div class="pricing-card__price"><div class="pricing-card__amount">149 <span>ر.س</span></div><div class="pricing-card__period">شهرياً</div></div>
-            <ul class="pricing-card__features">
-              <li><span class="pricing-card__check">✓</span> كل مميزات المجانية</li>
-              <li><span class="pricing-card__check">✓</span> محاكي FTTH كامل</li>
-              <li><span class="pricing-card__check">✓</span> 20 سيناريو تدريبي</li>
-              <li><span class="pricing-card__check">✓</span> محاكي OTDR أساسي</li>
-              <li><span class="pricing-card__check">✓</span> دعم فني عبر البريد</li>
-            </ul>
-            <button class="pricing-card__btn pricing-card__btn--primary" data-plan="standard">اشترك الآن</button>
-          </article>
-          <article class="pricing-card fade-in">
-            <h3 class="pricing-card__name">الاحترافية</h3>
-            <p class="pricing-card__desc">للمهندسين ومديري المشاريع</p>
-            <div class="pricing-card__price"><div class="pricing-card__amount">349 <span>ر.س</span></div><div class="pricing-card__period">شهرياً</div></div>
-            <ul class="pricing-card__features">
-              <li><span class="pricing-card__check">✓</span> كل مميزات القياسية</li>
-              <li><span class="pricing-card__check">✓</span> جميع المحاكيات المتقدمة</li>
-              <li><span class="pricing-card__check">✓</span> سيناريوهات غير محدودة</li>
-              <li><span class="pricing-card__check">✓</span> جلسات مع المدربين</li>
-              <li><span class="pricing-card__check">✓</span> شهادة احتراف معتمدة</li>
-            </ul>
-            <button class="pricing-card__btn pricing-card__btn--outline" data-plan="professional">اشترك الآن</button>
-          </article>
+        <div class="pricing__grid" id="publicPricingGrid" aria-live="polite">
+          <!-- تُملأ ديناميكياً من platform_plans -->
         </div>
       </div>
     </section>
@@ -417,6 +378,8 @@
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
+  <script src="js/platform-plans.js"></script>
+  <script src="js/platform-plans-public.js"></script>
   <script>
     /* Immediate approval sync for file:// / page load — before auth module settles */
     (function () {

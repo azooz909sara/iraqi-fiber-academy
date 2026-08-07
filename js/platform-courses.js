@@ -356,6 +356,29 @@
       isAcademy: academy,
       durationHours: Number(raw.durationHours) || 0,
       durationWeeks: Number(raw.durationWeeks) || 0,
+      price: (function () {
+        var p = Number(raw.price);
+        if (!isFinite(p) || p < 0) return 0;
+        return p;
+      })(),
+      currency: String(raw.currency || 'ر.س').trim() || 'ر.س',
+      requiredPlanId: String(raw.requiredPlanId || raw.planId || '').trim(),
+      accessLevel: (function () {
+        var level = String(raw.accessLevel || raw.requiredAccessLevel || '').trim().toLowerCase();
+        if (level === 'pro') level = 'professional';
+        if (level === 'basic') level = 'free';
+        if (level === 'free' || level === 'standard' || level === 'professional') return level;
+        // Infer from linked plan when available
+        if (raw.requiredPlanId && global.PlatformPlans && global.PlatformPlans.findPlan) {
+          var linked = global.PlatformPlans.findPlan(raw.requiredPlanId);
+          if (linked && linked.accessLevel) return linked.accessLevel;
+        }
+        // Category-based default access
+        var cat = normalizeCategory(raw.category);
+        if (cat === 'master') return 'professional';
+        if (cat === 'program') return 'standard';
+        return 'free';
+      })(),
       weeklySchedule: String(raw.weeklySchedule || '').trim(),
       lessons: normalizeLessons(raw.lessons),
       enrolledCount: Number(raw.enrolledCount) || 0,
@@ -623,6 +646,37 @@
     return parts.length ? parts.join(' · ') : '—';
   }
 
+  function formatPrice(course) {
+    if (!course) return '—';
+    var amount = Number(course.price);
+    if (!isFinite(amount) || amount <= 0) return 'مجاناً';
+    var currency = course.currency || 'ر.س';
+    return amount + ' ' + currency;
+  }
+
+  function resolveCoursePlan(course) {
+    if (!course) return null;
+    if (!global.PlatformPlans) return null;
+    if (course.requiredPlanId && typeof global.PlatformPlans.findPlan === 'function') {
+      var byId = global.PlatformPlans.findPlan(course.requiredPlanId);
+      if (byId) return byId;
+    }
+    if (course.accessLevel && typeof global.PlatformPlans.findPlanByAccessLevel === 'function') {
+      return global.PlatformPlans.findPlanByAccessLevel(course.accessLevel);
+    }
+    return null;
+  }
+
+  function formatCourseAccessLabel(course) {
+    var plan = resolveCoursePlan(course);
+    if (plan && plan.name) return plan.name;
+    var level = course && course.accessLevel;
+    if (level === 'professional') return 'احترافي';
+    if (level === 'standard') return 'قياسي';
+    if (level === 'free') return 'مجاني';
+    return '—';
+  }
+
   function resolveInstructorName(email, fallback) {
     if (isAcademyAssignment(email, fallback)) return ACADEMY_NAME;
     var key = normalizeEmail(email);
@@ -809,6 +863,9 @@
     reorderCourses: reorderCourses,
     sortByDisplayOrder: sortByDisplayOrder,
     formatDuration: formatDuration,
+    formatPrice: formatPrice,
+    resolveCoursePlan: resolveCoursePlan,
+    formatCourseAccessLabel: formatCourseAccessLabel,
     getPublishedCount: getPublishedCount,
     getDraftCount: getDraftCount,
     toInstructorShape: toInstructorShape,
