@@ -10,6 +10,9 @@
   var lessonDrafts = [];
   var uploadTimer = null;
   var toastTimer = null;
+  var dragCourseId = null;
+  var dragRowEl = null;
+  var dragBound = false;
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -351,6 +354,133 @@
     renderCoursesTable();
   }
 
+  function collectVisibleCourseIds() {
+    var body = document.getElementById('coursesTableBody');
+    if (!body) return [];
+    return Array.prototype.slice
+      .call(body.querySelectorAll('tr[data-course-id]'))
+      .map(function (row) {
+        return row.getAttribute('data-course-id');
+      })
+      .filter(Boolean);
+  }
+
+  function clearDragState() {
+    dragCourseId = null;
+    dragRowEl = null;
+    var body = document.getElementById('coursesTableBody');
+    if (!body) return;
+    body.querySelectorAll('tr.is-dragging, tr.is-drag-over').forEach(function (row) {
+      row.classList.remove('is-dragging', 'is-drag-over');
+    });
+  }
+
+  function moveDraggedRowBeforeTarget(body, targetRow, clientY) {
+    if (!dragRowEl || !targetRow || dragRowEl === targetRow || !body.contains(targetRow)) return;
+    var rect = targetRow.getBoundingClientRect();
+    var placeAfter = clientY > rect.top + rect.height / 2;
+    if (placeAfter) {
+      var next = targetRow.nextElementSibling;
+      if (next === dragRowEl) return;
+      body.insertBefore(dragRowEl, next);
+    } else {
+      if (targetRow.previousElementSibling === dragRowEl) return;
+      body.insertBefore(dragRowEl, targetRow);
+    }
+  }
+
+  function persistDomCourseOrder() {
+    if (!window.PlatformCourses || typeof window.PlatformCourses.reorderCourses !== 'function') {
+      return false;
+    }
+    var ids = collectVisibleCourseIds();
+    if (ids.length < 1) return false;
+    window.PlatformCourses.reorderCourses(ids);
+    return true;
+  }
+
+  function bindCourseDragAndDrop() {
+    var body = document.getElementById('coursesTableBody');
+    if (!body || dragBound) return;
+    dragBound = true;
+
+    body.addEventListener('dragstart', function (e) {
+      var row = e.target.closest ? e.target.closest('tr[data-course-id]') : null;
+      if (!row || !body.contains(row)) return;
+      if (e.target.closest && e.target.closest('button, a, input, select, textarea, label')) {
+        e.preventDefault();
+        return;
+      }
+      if (e.target.closest && e.target.closest('.admin-table__actions')) {
+        e.preventDefault();
+        return;
+      }
+
+      dragCourseId = row.getAttribute('data-course-id');
+      dragRowEl = row;
+      row.classList.add('is-dragging');
+      try {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragCourseId || '');
+      } catch (err) {
+        /* ignore */
+      }
+    });
+
+    body.addEventListener('dragend', function () {
+      clearDragState();
+    });
+
+    body.addEventListener('dragover', function (e) {
+      if (!dragRowEl && !dragCourseId) return;
+      e.preventDefault();
+      try {
+        e.dataTransfer.dropEffect = 'move';
+      } catch (err) {
+        /* ignore */
+      }
+
+      var row = e.target.closest ? e.target.closest('tr[data-course-id]') : null;
+      if (!row || row === dragRowEl) return;
+
+      body.querySelectorAll('tr.is-drag-over').forEach(function (r) {
+        if (r !== row) r.classList.remove('is-drag-over');
+      });
+      row.classList.add('is-drag-over');
+      moveDraggedRowBeforeTarget(body, row, e.clientY);
+    });
+
+    body.addEventListener('dragleave', function (e) {
+      var row = e.target.closest ? e.target.closest('tr[data-course-id]') : null;
+      if (!row) return;
+      if (e.relatedTarget && row.contains(e.relatedTarget)) return;
+      row.classList.remove('is-drag-over');
+    });
+
+    body.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      var targetRow = e.target.closest ? e.target.closest('tr[data-course-id]') : null;
+      if (targetRow && dragRowEl && targetRow !== dragRowEl) {
+        moveDraggedRowBeforeTarget(body, targetRow, e.clientY);
+      }
+
+      try {
+        var saved = persistDomCourseOrder();
+        clearDragState();
+        if (saved) {
+          renderCoursesTable();
+          showToast('تم حفظ ترتيب الكورسات', 'success');
+        }
+      } catch (err) {
+        clearDragState();
+        alert((err && err.message) || 'تعذر حفظ الترتيب');
+        renderCoursesTable();
+      }
+    });
+  }
+
   function renderCoursesTable() {
     var body = document.getElementById('coursesTableBody');
     var meta = document.getElementById('coursesMeta');
@@ -358,11 +488,9 @@
     if (!body || !window.PlatformCourses) return;
 
     var list = window.PlatformCourses.getCourses().slice();
-    list.sort(function (a, b) {
-      return String(b.updatedAt || b.createdAt || '').localeCompare(
-        String(a.updatedAt || a.createdAt || '')
-      );
-    });
+    if (typeof window.PlatformCourses.sortByDisplayOrder === 'function') {
+      list.sort(window.PlatformCourses.sortByDisplayOrder);
+    }
 
     var filtered = list.filter(function (c) {
       if (statusFilter === 'active') {
@@ -402,7 +530,8 @@
         ' · منشور: ' +
         window.PlatformCourses.getPublishedCount() +
         ' · مسودة: ' +
-        window.PlatformCourses.getDraftCount();
+        window.PlatformCourses.getDraftCount() +
+        ' · اسحب ⋮⋮ لإعادة الترتيب';
     }
 
     if (!filtered.length) {
@@ -413,7 +542,7 @@
             ? 'لا نتائج مطابقة للتصفية أو البحث.'
             : 'لا توجد كورسات. أضف كورساً أو اختر من الكتالوج.';
       body.innerHTML =
-        '<tr><td colspan="7" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
+        '<tr><td colspan="8" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
       return;
     }
 
@@ -474,9 +603,12 @@
         }
 
         return (
-          '<tr data-course-id="' +
+          '<tr class="admin-course-row" draggable="true" data-course-id="' +
           id +
           '">' +
+          '<td class="admin-table__drag-cell">' +
+          '<span class="admin-drag-handle" title="اسحب لإعادة الترتيب" aria-hidden="true">⋮⋮</span>' +
+          '</td>' +
           '<td>' +
           '<div class="admin-user-cell__name">' +
           escapeHtml(course.title) +
@@ -517,6 +649,8 @@
         );
       })
       .join('');
+
+    bindCourseDragAndDrop();
   }
 
   function resolveInstructorFromForm() {

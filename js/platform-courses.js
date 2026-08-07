@@ -334,23 +334,48 @@
       softDeleted: !!raw.softDeleted,
       previousStatus: raw.previousStatus ? normalizeStatus(raw.previousStatus) : '',
       deletedAt: raw.deletedAt || '',
+      sortOrder: (function () {
+        if (raw.sortOrder == null || raw.sortOrder === '') return null;
+        var n = Number(raw.sortOrder);
+        return isFinite(n) ? n : null;
+      })(),
       createdAt: raw.createdAt || new Date().toISOString(),
       updatedAt: raw.updatedAt || raw.createdAt || new Date().toISOString(),
     };
   }
 
-  function seedCourses() {
-    return COURSE_PRESETS.map(function (preset) {
-      return normalizeCourse(
-        Object.assign({}, preset, {
-          status: preset.id === 'preset_fiber_basics' || preset.id === 'preset_ftth_basics'
-            ? 'published'
-            : 'draft',
-          createdAt: '2026-06-01T10:00:00.000Z',
-          updatedAt: '2026-06-01T10:00:00.000Z',
-        })
-      );
+  function sortByDisplayOrder(a, b) {
+    var ao = a && a.sortOrder != null ? Number(a.sortOrder) : Number.MAX_SAFE_INTEGER;
+    var bo = b && b.sortOrder != null ? Number(b.sortOrder) : Number.MAX_SAFE_INTEGER;
+    if (ao !== bo) return ao - bo;
+    return String((a && a.createdAt) || '').localeCompare(String((b && b.createdAt) || ''));
+  }
+
+  /** Assign sortOrder from array index — preserves caller order (used after drag-drop). */
+  function assignSortOrderFromArray(list) {
+    return (list || []).map(function (course, index) {
+      return normalizeCourse(Object.assign({}, course, { sortOrder: index }));
     });
+  }
+
+  function withSequentialSortOrder(list) {
+    return assignSortOrderFromArray((list || []).slice().sort(sortByDisplayOrder));
+  }
+
+  function seedCourses() {
+    return withSequentialSortOrder(
+      COURSE_PRESETS.map(function (preset) {
+        return normalizeCourse(
+          Object.assign({}, preset, {
+            status: preset.id === 'preset_fiber_basics' || preset.id === 'preset_ftth_basics'
+              ? 'published'
+              : 'draft',
+            createdAt: '2026-06-01T10:00:00.000Z',
+            updatedAt: '2026-06-01T10:00:00.000Z',
+          })
+        );
+      })
+    );
   }
 
   function mergeMissingPresets(list) {
@@ -438,6 +463,7 @@
       base = base.map(normalizeCourse).filter(Boolean);
       base = migrateInstructorLocalsIntoCatalog(base);
       base = mergeMissingPresets(base);
+      base = withSequentialSortOrder(base);
       writeJson(COURSES_KEY, base);
       storageSet(SEED_VERSION_KEY, SEED_VERSION);
       writeJson(LEGACY_KEY, base);
@@ -445,6 +471,18 @@
     }
 
     if (!Array.isArray(current)) writeJson(COURSES_KEY, []);
+  }
+
+  function ensureDisplayOrder(list) {
+    var needs = !(list || []).length
+      ? false
+      : list.some(function (c) {
+          return c.sortOrder == null || !isFinite(Number(c.sortOrder));
+        });
+    if (!needs) return (list || []).slice().sort(sortByDisplayOrder);
+    var ordered = withSequentialSortOrder(list);
+    emitChanged(ordered, { type: 'ensure-order' });
+    return ordered;
   }
 
   function emitChanged(list, detail) {
@@ -461,11 +499,13 @@
   function getCourses() {
     ensureSeeded();
     var list = readJson(COURSES_KEY, []);
-    return (Array.isArray(list) ? list : []).map(normalizeCourse).filter(Boolean);
+    list = (Array.isArray(list) ? list : []).map(normalizeCourse).filter(Boolean);
+    return ensureDisplayOrder(list);
   }
 
   function saveCourses(list, detail) {
-    var normalized = (list || []).map(normalizeCourse).filter(Boolean);
+    /* Preserve array order — source of truth after drag-reorder. */
+    var normalized = assignSortOrderFromArray(list || []);
     emitChanged(normalized, detail);
     return normalized;
   }
@@ -479,9 +519,49 @@
   }
 
   function getPublished() {
-    return getCourses().filter(function (c) {
-      return c.status === 'published' && !c.softDeleted;
+    return getCourses()
+      .filter(function (c) {
+        return c.status === 'published' && !c.softDeleted;
+      })
+      .slice()
+      .sort(sortByDisplayOrder);
+  }
+
+  /**
+   * Reorder by visible id sequence. Non-listed courses keep their slots.
+   * Rewrites sortOrder from the final array index into platform_courses.
+   */
+  function reorderCourses(orderedIds) {
+    var all = getCourses().slice().sort(sortByDisplayOrder);
+    var byId = {};
+    all.forEach(function (c) {
+      byId[c.id] = c;
     });
+
+    var subset = [];
+    var subsetSet = {};
+    (orderedIds || []).forEach(function (id) {
+      var key = String(id || '');
+      if (!key || !byId[key] || subsetSet[key]) return;
+      subset.push(byId[key]);
+      subsetSet[key] = true;
+    });
+    if (!subset.length) return all;
+
+    var cursor = 0;
+    var merged = all.map(function (course) {
+      if (!subsetSet[course.id]) return course;
+      return subset[cursor++];
+    });
+
+    if (cursor !== subset.length) {
+      merged = subset.slice();
+      all.forEach(function (course) {
+        if (!subsetSet[course.id]) merged.push(course);
+      });
+    }
+
+    return saveCourses(merged, { type: 'reorder', orderedIds: orderedIds });
   }
 
   function getDrafts() {
@@ -567,6 +647,7 @@
       views: payload && payload.views,
       source: (payload && payload.source) || 'admin',
       softDeleted: false,
+      sortOrder: -1,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
@@ -695,6 +776,8 @@
     softDeleteCourse: softDeleteCourse,
     restoreCourse: restoreCourse,
     deleteCourse: deleteCourse,
+    reorderCourses: reorderCourses,
+    sortByDisplayOrder: sortByDisplayOrder,
     formatDuration: formatDuration,
     getPublishedCount: getPublishedCount,
     getDraftCount: getDraftCount,

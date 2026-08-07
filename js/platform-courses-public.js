@@ -72,6 +72,7 @@
           c.instructorName || '',
           c.durationHours || 0,
           c.durationWeeks || 0,
+          c.sortOrder != null ? c.sortOrder : '',
         ].join(':');
       })
       .join('|');
@@ -147,9 +148,13 @@
 
     var courses = getPublishedCourses();
     courses.sort(function (a, b) {
-      return String(b.updatedAt || b.createdAt || '').localeCompare(
-        String(a.updatedAt || a.createdAt || '')
-      );
+      if (window.PlatformCourses && typeof window.PlatformCourses.sortByDisplayOrder === 'function') {
+        return window.PlatformCourses.sortByDisplayOrder(a, b);
+      }
+      var ao = a.sortOrder != null ? Number(a.sortOrder) : Number.MAX_SAFE_INTEGER;
+      var bo = b.sortOrder != null ? Number(b.sortOrder) : Number.MAX_SAFE_INTEGER;
+      if (ao !== bo) return ao - bo;
+      return String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
     });
 
     var signature = courseSignature(courses);

@@ -751,6 +751,61 @@
   background: rgba(4, 16, 22, 0.18);
 }
 
+.admin-table__drag-col {
+  width: 2.5rem;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.admin-table__drag-cell {
+  width: 2.5rem;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.admin-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  letter-spacing: -0.08em;
+  font-size: 0.95rem;
+  line-height: 1;
+  border: 1px solid transparent;
+}
+
+.admin-drag-handle:hover {
+  color: var(--color-accent-cyan);
+  border-color: rgba(0, 229, 255, 0.25);
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.admin-course-row {
+  cursor: grab;
+}
+
+.admin-course-row.is-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.admin-course-row.is-drag-over {
+  box-shadow: inset 0 2px 0 0 rgba(0, 229, 255, 0.65);
+  background: rgba(0, 229, 255, 0.06);
+}
+
+.admin-course-row .admin-table__actions,
+.admin-course-row .admin-table__actions * {
+  cursor: pointer;
+}
+
 .admin-lessons-panel {
   border: 1px solid var(--color-border);
   border-radius: 12px;
