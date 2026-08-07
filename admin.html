@@ -99,7 +99,8 @@
       </div>
     </header>
 
-    <main class="admin-content" id="overview">
+    <main class="admin-content">
+      <section class="admin-view" id="overview" data-admin-view="overview" aria-label="نظرة عامة">
       <section class="admin-stats" aria-label="إحصائيات المنصة">
         <article class="admin-stat">
           <div class="admin-stat__header">
@@ -109,9 +110,9 @@
                 <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
               </svg>
             </div>
-            <span class="admin-stat__trend">+12%</span>
+            <span class="admin-stat__trend" id="statUsersTrend">—</span>
           </div>
-          <div class="admin-stat__value">2,547</div>
+          <div class="admin-stat__value" id="statTotalUsers">0</div>
           <div class="admin-stat__label">إجمالي المستخدمين</div>
         </article>
 
@@ -122,9 +123,9 @@
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
               </svg>
             </div>
-            <span class="admin-stat__trend">+8%</span>
+            <span class="admin-stat__trend" id="statActiveUsersTrend">—</span>
           </div>
-          <div class="admin-stat__value">1,842</div>
+          <div class="admin-stat__value" id="statActiveUsers">0</div>
           <div class="admin-stat__label">طلاب نشطون</div>
         </article>
 
@@ -135,9 +136,9 @@
                 <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
               </svg>
             </div>
-            <span class="admin-stat__trend">+3</span>
+            <span class="admin-stat__trend" id="statCoursesTrend">0 مسودة</span>
           </div>
-          <div class="admin-stat__value">48</div>
+          <div class="admin-stat__value" id="statPublishedCourses">0</div>
           <div class="admin-stat__label">كورسات منشورة</div>
         </article>
 
@@ -148,14 +149,28 @@
                 <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2"/>
               </svg>
             </div>
-            <span class="admin-stat__trend admin-stat__trend--down">−2%</span>
+            <span class="admin-stat__trend" id="statTotalCoursesTrend">الإجمالي</span>
           </div>
-          <div class="admin-stat__value">326</div>
-          <div class="admin-stat__label">جلسات محاكاة اليوم</div>
+          <div class="admin-stat__value" id="statTotalCourses">0</div>
+          <div class="admin-stat__label">إجمالي الكورسات</div>
         </article>
       </section>
 
-      <section class="admin-panel admin-panel--users" id="users" aria-labelledby="usersHeading">
+      <section class="admin-panel" style="margin-top: 1.5rem;" aria-labelledby="overviewCoursesHeading">
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="overviewCoursesHeading">ملخص الكورسات</h2>
+            <p class="admin-panel__desc">يتحدّث تلقائياً عند إنشاء أو نشر الكورسات من قسم الكورسات</p>
+          </div>
+          <button class="admin-btn admin-btn--ghost" type="button" data-goto-section="courses">إدارة الكورسات</button>
+        </div>
+        <div class="admin-overview-courses" id="overviewCoursesSummary">
+          <p class="admin-empty-cell">لا توجد كورسات بعد.</p>
+        </div>
+      </section>
+      </section>
+
+      <section class="admin-panel admin-panel--users admin-view" id="users" data-admin-view="users" aria-labelledby="usersHeading" hidden>
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="usersHeading">إدارة المستخدمين</h2>
@@ -273,7 +288,7 @@
         </div>
       </div>
 
-      <section class="admin-panel admin-panel--requests" id="instructors" aria-labelledby="instructorsHeading" style="margin-top: 2rem;">
+      <section class="admin-panel admin-panel--requests admin-view" id="instructors" data-admin-view="instructors" aria-labelledby="instructorsHeading" hidden>
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="instructorsHeading">إدارة المدربين</h2>
@@ -398,17 +413,184 @@
           </form>
         </div>
       </div>
+
+      <section class="admin-panel admin-panel--courses admin-view" id="courses" data-admin-view="courses" aria-labelledby="coursesHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="coursesHeading">الكورسات</h2>
+            <p class="admin-panel__desc" id="coursesDesc">إنشاء وإدارة الكورسات وربطها بالمدربين ونشرها على المنصة</p>
+          </div>
+          <div class="admin-panel__tools">
+            <label class="admin-search" id="courseSearchWrap">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
+              <input class="admin-search__input" type="search" id="courseSearch" placeholder="بحث بالعنوان أو المدرب..." aria-label="بحث عن كورس" />
+            </label>
+            <label class="admin-filter" id="coursesFilterWrap">
+              <span class="admin-filter__label">تصفية</span>
+              <select class="admin-filter__select" id="coursesStatusFilter" aria-label="تصفية الكورسات">
+                <option value="all">الكل</option>
+                <option value="published">منشور</option>
+                <option value="draft">مسودة</option>
+                <option value="suspended">معلّق</option>
+              </select>
+            </label>
+            <button class="admin-btn admin-btn--ghost" type="button" id="refreshCoursesBtn">تحديث</button>
+            <button class="admin-btn admin-btn--primary" type="button" id="addCourseBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M12 5v14M5 12h14"/>
+              </svg>
+              إضافة كورس
+            </button>
+          </div>
+        </div>
+
+        <div class="admin-table-wrap">
+          <table class="admin-table" id="coursesTable">
+            <thead>
+              <tr>
+                <th scope="col">الكورس</th>
+                <th scope="col">المدرب</th>
+                <th scope="col">المدة</th>
+                <th scope="col">الجدول الأسبوعي</th>
+                <th scope="col">الحالة</th>
+                <th scope="col">آخر تحديث</th>
+                <th scope="col">الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="coursesTableBody">
+              <tr>
+                <td colspan="7" class="admin-empty-cell">جاري التحميل...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta" id="coursesMeta">0 كورس</p>
+        </div>
+      </section>
+
+      <div class="admin-modal" id="courseEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-course-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="courseEditorTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="courseEditorTitle">إضافة كورس</h3>
+            <button class="admin-modal__close" type="button" data-close-course-modal aria-label="إغلاق">×</button>
+          </div>
+          <form class="admin-modal__body admin-modal__body--course" id="courseEditorForm">
+            <input type="hidden" id="courseEditorId" value="" />
+
+            <div class="admin-form-grid">
+              <label class="admin-field admin-field--full">
+                <span class="admin-field__label">عنوان الكورس</span>
+                <input class="admin-field__input" type="text" id="courseEditorName" required />
+              </label>
+              <label class="admin-field admin-field--full">
+                <span class="admin-field__label">الوصف</span>
+                <textarea class="admin-field__input admin-field__textarea" id="courseEditorDescription" rows="3"></textarea>
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">المدرب المسؤول</span>
+                <select class="admin-field__input" id="courseEditorInstructor"></select>
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">حالة النشر</span>
+                <select class="admin-field__input" id="courseEditorStatus">
+                  <option value="draft">مسودة</option>
+                  <option value="published">منشور</option>
+                  <option value="suspended">معلّق</option>
+                </select>
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">المدة بالساعات</span>
+                <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorHours" placeholder="مثال: 24" />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">المدة بالأسابيع</span>
+                <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorWeeks" placeholder="مثال: 3" />
+              </label>
+              <label class="admin-field admin-field--full">
+                <span class="admin-field__label">الجدول الأسبوعي</span>
+                <input class="admin-field__input" type="text" id="courseEditorSchedule" placeholder="مثال: سبت وثلاثاء — ساعتان لكل جلسة" />
+              </label>
+            </div>
+
+            <div class="admin-lessons-panel">
+              <div class="admin-lessons-panel__header">
+                <div>
+                  <h4 class="admin-lessons-panel__title">محتوى الدروس والفيديوهات</h4>
+                  <p class="admin-lessons-panel__hint">أضف دروساً بروابط فيديو أو أسماء ملفات مسجّلة</p>
+                </div>
+                <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" id="addCourseLessonBtn">+ إضافة درس</button>
+              </div>
+              <div class="admin-upload-status" id="courseUploadStatus" hidden>
+                <div class="admin-upload-status__label" id="courseUploadLabel">جاري تحميل الفيديو...</div>
+                <div class="admin-upload-status__track">
+                  <div class="admin-upload-status__bar" id="courseUploadBar"></div>
+                </div>
+              </div>
+              <div id="courseLessonsList" class="admin-lessons-list"></div>
+            </div>
+
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-course-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ الكورس</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="admin-toast" id="adminToast" hidden role="status" aria-live="polite"></div>
+
+      <section class="admin-panel admin-view" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="simulatorsHeading">المحاكيات</h2>
+            <p class="admin-panel__desc">إدارة إعدادات المحاكيات ستتوفر هنا قريباً</p>
+          </div>
+        </div>
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta">لا توجد إعدادات إضافية حالياً.</p>
+        </div>
+      </section>
+
+      <section class="admin-panel admin-view" id="settings" data-admin-view="settings" aria-labelledby="settingsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="settingsHeading">الإعدادات</h2>
+            <p class="admin-panel__desc">إعدادات النظام العامة ستتوفر هنا قريباً</p>
+          </div>
+        </div>
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta">لا توجد إعدادات إضافية حالياً.</p>
+        </div>
+      </section>
     </main>
   </div>
 
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
+  <script src="js/platform-courses.js"></script>
+  <script src="js/admin-courses-ui.js"></script>
   <script>
     (function () {
       var sidebar = document.getElementById('adminSidebar');
       var overlay = document.getElementById('adminOverlay');
       var toggle = document.getElementById('adminMenuToggle');
       var navLinks = document.querySelectorAll('.admin-nav__link');
+      var topbarTitle = document.querySelector('.admin-topbar__title');
+      var topbarSubtitle = document.querySelector('.admin-topbar__subtitle');
+
+      var VIEW_META = {
+        overview: { title: 'نظرة عامة', subtitle: 'أكاديمية الفايبر العراقية — نظرة عامة على المنصة' },
+        users: { title: 'إدارة المستخدمين', subtitle: 'عرض وإدارة حسابات الطلاب' },
+        instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
+        courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
+        simulators: { title: 'المحاكيات', subtitle: 'إعدادات المحاكيات' },
+        settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
+      };
 
       function closeSidebar() {
         sidebar.classList.remove('open');
@@ -420,6 +602,113 @@
         overlay.classList.add('visible');
       }
 
+      function showAdminView(sectionId) {
+        var id = VIEW_META[sectionId] ? sectionId : 'overview';
+        document.querySelectorAll('[data-admin-view]').forEach(function (view) {
+          view.hidden = view.getAttribute('data-admin-view') !== id;
+        });
+        navLinks.forEach(function (link) {
+          var active = link.getAttribute('data-section') === id;
+          link.classList.toggle('active', active);
+        });
+        var meta = VIEW_META[id];
+        if (topbarTitle) topbarTitle.textContent = meta.title;
+        if (topbarSubtitle) topbarSubtitle.textContent = meta.subtitle;
+        try {
+          if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, '', '#' + id);
+          } else {
+            window.location.hash = id;
+          }
+        } catch (err) {
+          /* ignore */
+        }
+        if (id === 'overview' && typeof window.refreshAdminOverviewStats === 'function') {
+          window.refreshAdminOverviewStats();
+        }
+        if (id === 'courses' && typeof window.renderAdminCoursesTable === 'function') {
+          window.renderAdminCoursesTable();
+        }
+      }
+
+      function escapeOverviewHtml(value) {
+        return String(value == null ? '' : value)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      window.refreshAdminOverviewStats = function () {
+        var publishedEl = document.getElementById('statPublishedCourses');
+        var totalCoursesEl = document.getElementById('statTotalCourses');
+        var coursesTrendEl = document.getElementById('statCoursesTrend');
+        var totalUsersEl = document.getElementById('statTotalUsers');
+        var activeUsersEl = document.getElementById('statActiveUsers');
+        var summaryEl = document.getElementById('overviewCoursesSummary');
+
+        if (window.PlatformCourses) {
+          var allCourses = window.PlatformCourses.getCourses();
+          var published = window.PlatformCourses.getPublishedCount();
+          var drafts = allCourses.length - published;
+          if (publishedEl) publishedEl.textContent = String(published);
+          if (totalCoursesEl) totalCoursesEl.textContent = String(allCourses.length);
+          if (coursesTrendEl) coursesTrendEl.textContent = drafts + ' مسودة';
+
+          if (summaryEl) {
+            if (!allCourses.length) {
+              summaryEl.innerHTML = '<p class="admin-empty-cell">لا توجد كورسات بعد.</p>';
+            } else {
+              var latest = allCourses.slice().sort(function (a, b) {
+                return String(b.updatedAt || b.createdAt || '').localeCompare(
+                  String(a.updatedAt || a.createdAt || '')
+                );
+              }).slice(0, 5);
+              summaryEl.innerHTML =
+                '<ul class="admin-overview-courses__list">' +
+                latest
+                  .map(function (c) {
+                    return (
+                      '<li>' +
+                      '<div>' +
+                      '<strong>' +
+                      escapeOverviewHtml(c.title) +
+                      '</strong>' +
+                      '<span>' +
+                      escapeOverviewHtml(window.PlatformCourses.formatDuration(c)) +
+                      (c.instructorName || c.instructorEmail
+                        ? ' · ' + escapeOverviewHtml(c.instructorName || c.instructorEmail)
+                        : '') +
+                      '</span>' +
+                      '</div>' +
+                      '<span class="admin-badge ' +
+                      (c.status === 'published' ? 'admin-badge--active' : 'admin-badge--pending') +
+                      '">' +
+                      (c.status === 'published' ? 'منشور' : 'مسودة') +
+                      '</span>' +
+                      '</li>'
+                    );
+                  })
+                  .join('') +
+                '</ul>';
+            }
+          }
+        }
+
+        if (window.AdminUsers) {
+          var users = window.AdminUsers.getUsers();
+          var active = users.filter(function (u) {
+            return u.status === 'active';
+          }).length;
+          if (totalUsersEl) totalUsersEl.textContent = String(users.length);
+          if (activeUsersEl) activeUsersEl.textContent = String(active);
+          var usersTrend = document.getElementById('statUsersTrend');
+          var activeTrend = document.getElementById('statActiveUsersTrend');
+          if (usersTrend) usersTrend.textContent = users.length ? 'محدّث' : '—';
+          if (activeTrend) activeTrend.textContent = active ? 'نشط' : '—';
+        }
+      };
+
       if (toggle) {
         toggle.addEventListener('click', function () {
           if (sidebar.classList.contains('open')) closeSidebar();
@@ -430,12 +719,35 @@
       if (overlay) overlay.addEventListener('click', closeSidebar);
 
       navLinks.forEach(function (link) {
-        link.addEventListener('click', function () {
-          navLinks.forEach(function (l) { l.classList.remove('active'); });
-          link.classList.add('active');
+        link.addEventListener('click', function (e) {
+          e.preventDefault();
+          var section = link.getAttribute('data-section') || 'overview';
+          showAdminView(section);
           if (window.innerWidth <= 900) closeSidebar();
         });
       });
+
+      document.addEventListener('click', function (e) {
+        var go = e.target.closest ? e.target.closest('[data-goto-section]') : null;
+        if (!go) return;
+        e.preventDefault();
+        showAdminView(go.getAttribute('data-goto-section') || 'overview');
+      });
+
+      document.addEventListener('ifa:platform-courses-changed', function () {
+        if (typeof window.refreshAdminOverviewStats === 'function') {
+          window.refreshAdminOverviewStats();
+        }
+      });
+
+      window.addEventListener('hashchange', function () {
+        var hash = (window.location.hash || '#overview').replace(/^#/, '') || 'overview';
+        showAdminView(hash);
+      });
+
+      var initialHash = (window.location.hash || '#overview').replace(/^#/, '') || 'overview';
+      showAdminView(initialHash);
+      window.refreshAdminOverviewStats();
 
       /* ── Users management ── */
       var usersSearchQuery = '';

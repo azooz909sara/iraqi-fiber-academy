@@ -152,14 +152,10 @@
         <div class="section__header fade-in">
           <span class="section__badge">رحلتك التعليمية</span>
           <h2 class="section__title">الكورسات التعليمية</h2>
-          <p class="section__subtitle">خمس مراحل منظّمة تأخذك من المفاهيم الأساسية إلى إدارة مشاريع FTTH كاملة</p>
+          <p class="section__subtitle">كورسات منظّمة من الأكاديمية والمدربين المعتمدين — تُحدَّث تلقائياً عند النشر من لوحة الإدارة</p>
         </div>
-        <div class="learning-path__timeline">
-          <div class="path-step fade-in"><div class="path-step__marker">1</div><div class="path-step__content"><h3 class="path-step__title">أساسيات الألياف الضوئية</h3><p class="path-step__desc">تعرّف على مبادئ الضوء، أنواع الألياف (SM/MM)، الموجات الطولية، ومكوّنات الكابلات البصرية الأساسية.</p><span class="path-step__duration">⏱ أسبوعان</span></div></div>
-          <div class="path-step fade-in"><div class="path-step__marker">2</div><div class="path-step__content"><h3 class="path-step__title">تركيب وتوصيل FTTH</h3><p class="path-step__desc">تعلّم تصميم شبكات GPON/EPON، تركيب Splitters، توصيل ONT، وإدارة الكابلات داخل المباني.</p><span class="path-step__duration">⏱ 3 أسابيع</span></div></div>
-          <div class="path-step fade-in"><div class="path-step__marker">3</div><div class="path-step__content"><h3 class="path-step__title">القياس والاختبار</h3><p class="path-step__desc">أتقن استخدام OTDR و Power Meter و VFL، تعلّم قراءة المنحنيات وتحديد نقاط الخسارة والأعطال.</p><span class="path-step__duration">⏱ 3 أسابيع</span></div></div>
-          <div class="path-step fade-in"><div class="path-step__marker">4</div><div class="path-step__content"><h3 class="path-step__title">الصيانة واستكشاف الأعطال</h3><p class="path-step__desc">تعلّم تشخيص المشاكل الشائعة في شبكات FTTH، إصلاح الكسر البصري، وإدارة SLA للمشتركين.</p><span class="path-step__duration">⏱ أسبوعان</span></div></div>
-          <div class="path-step fade-in"><div class="path-step__marker">5</div><div class="path-step__content"><h3 class="path-step__title">مشاريع احترافية</h3><p class="path-step__desc">نفّذ مشاريع محاكاة كاملة من التخطيط حتى التسليم، واحصل على شهادة احتراف معتمدة من الأكاديمية.</p><span class="path-step__duration">⏱ 4 أسابيع</span></div></div>
+        <div class="public-courses-grid" id="publicCoursesGrid" aria-live="polite">
+          <!-- Filled on load by js/platform-courses-public.js from localStorage key platform_courses -->
         </div>
       </div>
     </section>
@@ -419,6 +415,8 @@
   </div>
 
   <script src="js/instructor-applications.js"></script>
+  <script src="js/platform-courses.js"></script>
+  <script src="js/platform-courses-public.js"></script>
   <script>
     /* Immediate approval sync for file:// / page load — before auth module settles */
     (function () {

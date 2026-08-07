@@ -215,6 +215,41 @@
   flex: 1;
 }
 
+.admin-view[hidden] {
+  display: none !important;
+}
+
+.admin-overview-courses__list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 1.25rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.admin-overview-courses__list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-primary);
+}
+
+.admin-overview-courses__list strong {
+  display: block;
+  font-size: 0.92rem;
+  margin-bottom: 0.2rem;
+}
+
+.admin-overview-courses__list span:not(.admin-badge) {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
 /* ---------- Stats ---------- */
 .admin-stats {
   display: grid;
@@ -632,6 +667,163 @@
 
 .admin-modal__dialog--compact {
   width: min(380px, 100%);
+}
+
+.admin-modal__dialog--wide {
+  width: min(720px, 100%);
+  max-height: min(90vh, 900px);
+  overflow: auto;
+}
+
+.admin-modal__body--course {
+  gap: 1rem;
+  padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 0.85rem;
+}
+
+.admin-field--full {
+  grid-column: 1 / -1;
+}
+
+.admin-lessons-panel {
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 0.85rem;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.admin-lessons-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-lessons-panel__title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.admin-lessons-panel__hint {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+}
+
+.admin-lessons-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-upload-status {
+  margin-bottom: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(0, 229, 255, 0.35);
+  border-radius: 10px;
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.admin-upload-status[hidden] {
+  display: none !important;
+}
+
+.admin-upload-status__label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--color-accent-cyan);
+  margin-bottom: 0.45rem;
+}
+
+.admin-upload-status__track {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.admin-upload-status__bar {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-accent-cyan), #60a5fa);
+  transition: width 0.15s linear;
+}
+
+.admin-toast {
+  position: fixed;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  min-width: 240px;
+  max-width: min(420px, calc(100vw - 2rem));
+  padding: 0.85rem 1.15rem;
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4);
+}
+
+.admin-toast[hidden] {
+  display: none !important;
+}
+
+.admin-toast--success {
+  border-color: rgba(57, 255, 20, 0.45);
+  color: var(--color-accent-phosphor);
+}
+
+.admin-toast--info {
+  border-color: rgba(0, 229, 255, 0.4);
+  color: var(--color-accent-cyan);
+}
+
+.admin-lesson-card {
+  padding: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.admin-lesson-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.admin-lesson-card__order {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--color-accent-cyan);
+}
+
+.admin-lesson-card__media {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem 0.75rem;
+}
+
+@media (max-width: 700px) {
+  .admin-form-grid,
+  .admin-lesson-card__media {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-modal__header {

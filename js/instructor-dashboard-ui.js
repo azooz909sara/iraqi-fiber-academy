@@ -104,6 +104,9 @@
               '<div class="inst-lesson__files">فيديو: ' +
               esc(l.videoTitle || '—') +
               (l.videoFileName ? ' · ' + esc(l.videoFileName) : '') +
+              (l.videoUrl
+                ? ' · <a href="' + esc(l.videoUrl) + '" target="_blank" rel="noopener noreferrer">رابط</a>'
+                : '') +
               '<br>القوالب: ' +
               (files || '—') +
               '</div>' +
@@ -133,20 +136,29 @@
           '<div>' +
           '<div class="inst-course__title">' +
           esc(c.title) +
+          (c.platformManaged ? ' <span class="inst-chip">من الإدارة</span>' : '') +
           '</div>' +
           '<div class="inst-course__meta">' +
           esc(c.description || 'بدون وصف') +
           ' · مسجّلون: ' +
           esc(c.enrolledCount || 0) +
+          (c.durationWeeks || c.durationHours
+            ? ' · مدة: ' +
+              (c.durationWeeks ? c.durationWeeks + ' أسبوع' : '') +
+              (c.durationWeeks && c.durationHours ? ' / ' : '') +
+              (c.durationHours ? c.durationHours + ' ساعة' : '')
+            : '') +
           '</div>' +
           '</div>' +
           '<div class="inst-actions">' +
           '<button type="button" class="admin-btn admin-btn--primary admin-btn--sm" data-add-lesson="' +
           esc(c.id) +
           '">+ حلقة</button>' +
-          '<button type="button" class="admin-btn admin-btn--danger admin-btn--sm" data-delete-course="' +
-          esc(c.id) +
-          '">حذف الكورس</button>' +
+          (c.platformManaged
+            ? ''
+            : '<button type="button" class="admin-btn admin-btn--danger admin-btn--sm" data-delete-course="' +
+              esc(c.id) +
+              '">حذف الكورس</button>') +
           '</div>' +
           '</div>' +
           (lessonsHtml || '<div class="inst-empty" style="padding:0.75rem 0;">لا حلقات بعد</div>') +
@@ -435,9 +447,29 @@
       });
     }
 
+    function refreshAll() {
+      renderCourses();
+      fillQuizSelectors();
+      renderOverview();
+      renderQA();
+      renderAnalytics();
+      renderQuizQuestions();
+    }
+
+    /* Live sync from admin / other tabs */
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'platform_courses' || e.key === 'ifa_platform_courses') refreshAll();
+    });
+    document.addEventListener('ifa:platform-courses-changed', refreshAll);
+
     /* Course form */
     document.getElementById('courseForm').addEventListener('submit', function (e) {
       e.preventDefault();
+      var submitBtn = e.target.querySelector('[type="submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'جاري الحفظ...';
+      }
       try {
         Dash.addCourse(email, {
           title: document.getElementById('courseTitle').value,
@@ -446,18 +478,38 @@
         });
         e.target.reset();
         document.getElementById('courseEnrolled').value = '0';
-        renderCourses();
-        fillQuizSelectors();
-        renderOverview();
+        refreshAll();
+        window.alert('تم حفظ الكورس في المنصة — سيظهر فوراً في لوحة الإدارة');
       } catch (err) {
         alert(err.message || 'تعذر إضافة الكورس');
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'إضافة كورس';
+        }
       }
     });
 
     /* Lesson modal files */
     document.getElementById('lessonVideoFile').addEventListener('change', function (e) {
-      selectedVideoName = e.target.files && e.target.files[0] ? e.target.files[0].name : '';
-      document.getElementById('lessonVideoFileName').textContent = selectedVideoName || 'لم يتم اختيار ملف';
+      var file = e.target.files && e.target.files[0] ? e.target.files[0] : null;
+      selectedVideoName = file ? file.name : '';
+      var nameEl = document.getElementById('lessonVideoFileName');
+      if (!file) {
+        nameEl.textContent = 'لم يتم اختيار ملف';
+        return;
+      }
+      nameEl.textContent = 'جاري تحميل الفيديو...';
+      var pct = 0;
+      var timer = setInterval(function () {
+        pct += 12 + Math.floor(Math.random() * 18);
+        if (pct >= 100) {
+          clearInterval(timer);
+          nameEl.textContent = selectedVideoName + ' ✓';
+        } else {
+          nameEl.textContent = 'جاري تحميل الفيديو... ' + Math.min(99, pct) + '%';
+        }
+      }, 120);
     });
     document.getElementById('lessonTemplates').addEventListener('change', function (e) {
       selectedTemplates = [];
@@ -489,9 +541,8 @@
         if (lessonId) Dash.updateLesson(email, courseId, lessonId, payload);
         else Dash.addLesson(email, courseId, payload);
         closeLessonModal();
-        renderCourses();
-        fillQuizSelectors();
-        renderOverview();
+        refreshAll();
+        window.alert('تم النشر بنجاح!');
       } catch (err) {
         alert(err.message || 'تعذر حفظ الحلقة');
       }

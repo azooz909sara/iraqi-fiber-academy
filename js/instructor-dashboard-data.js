@@ -1,11 +1,10 @@
 /**
- * Instructor dashboard data (localStorage), scoped per instructor email.
- * Strictly isolated from admin dashboard data/keys.
+ * Instructor dashboard data.
+ * Courses are centralized in PlatformCourses (`platform_courses` localStorage key).
  */
 (function (global) {
   'use strict';
 
-  var CONTENT_KEY = 'ifa_instructor_content';
   var APPS = global.InstructorApps;
 
   function normalizeEmail(email) {
@@ -14,26 +13,6 @@
 
   function uid(prefix) {
     return (prefix || 'id') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
-  }
-
-  function readAll() {
-    try {
-      var raw = localStorage.getItem(CONTENT_KEY);
-      if (!raw) return {};
-      var parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch (err) {
-      console.warn('[InstructorDash] read failed', err);
-      return {};
-    }
-  }
-
-  function writeAll(data) {
-    try {
-      localStorage.setItem(CONTENT_KEY, JSON.stringify(data));
-    } catch (err) {
-      console.error('[InstructorDash] write failed', err);
-    }
   }
 
   function currentInstructorEmail() {
@@ -63,34 +42,36 @@
     return false;
   }
 
-  function ensureBucket(email) {
+  function pc() {
+    return global.PlatformCourses;
+  }
+
+  function requirePlatform() {
+    if (!pc()) throw new Error('منصة الكورسات غير متاحة');
+    return pc();
+  }
+
+  function assertOwns(course, email) {
     var key = normalizeEmail(email);
-    var all = readAll();
-    if (!all[key]) {
-      all[key] = {
-        email: key,
-        courses: [],
-        updatedAt: new Date().toISOString(),
-      };
-      writeAll(all);
+    if (!course || normalizeEmail(course.instructorEmail) !== key) {
+      throw new Error('غير مصرح');
     }
-    return all[key];
+    if (course.status === 'suspended') {
+      throw new Error('هذا الكورس معلّق من الإدارة');
+    }
   }
 
   function getCourses(email) {
-    var bucket = ensureBucket(email || currentInstructorEmail());
-    return Array.isArray(bucket.courses) ? bucket.courses : [];
-  }
-
-  function saveCourses(email, courses) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var all = readAll();
-    all[key] = {
-      email: key,
-      courses: courses,
-      updatedAt: new Date().toISOString(),
-    };
-    writeAll(all);
+    if (!pc()) return [];
+    return pc()
+      .getByInstructor(key)
+      .filter(function (c) {
+        return c.status !== 'suspended';
+      })
+      .map(function (c) {
+        return pc().toInstructorShape(c);
+      });
   }
 
   function findCourse(courses, courseId) {
@@ -110,53 +91,60 @@
 
   function addCourse(email, payload) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = {
-      id: uid('course'),
+    var name = '';
+    if (APPS && typeof APPS.findActiveInstructor === 'function') {
+      var inst = APPS.findActiveInstructor(key);
+      if (inst && inst.fullName) name = inst.fullName;
+    }
+    return requirePlatform().addCourse({
+      title: payload.title,
+      description: payload.description,
+      enrolledCount: payload.enrolledCount,
+      views: payload.views,
       instructorEmail: key,
-      title: String(payload.title || '').trim(),
-      description: String(payload.description || '').trim(),
-      enrolledCount: Number(payload.enrolledCount) || 0,
-      views: Number(payload.views) || 0,
-      createdAt: new Date().toISOString(),
-      lessons: [],
-    };
-    if (!course.title) throw new Error('عنوان الكورس مطلوب');
-    courses.unshift(course);
-    saveCourses(key, courses);
-    return course;
+      instructorName: name,
+      status: 'draft',
+      source: 'instructor',
+      durationHours: payload.durationHours,
+      durationWeeks: payload.durationWeeks,
+      weeklySchedule: payload.weeklySchedule,
+      lessons: payload.lessons || [],
+    });
   }
 
   function updateCourse(email, courseId, patch) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح بتعديل هذا الكورس');
-    if (patch.title != null) course.title = String(patch.title).trim();
-    if (patch.description != null) course.description = String(patch.description).trim();
-    if (patch.enrolledCount != null) course.enrolledCount = Number(patch.enrolledCount) || 0;
-    saveCourses(key, courses);
-    return course;
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    return requirePlatform().updateCourse(courseId, {
+      title: patch.title,
+      description: patch.description,
+      enrolledCount: patch.enrolledCount,
+      durationHours: patch.durationHours,
+      durationWeeks: patch.durationWeeks,
+      weeklySchedule: patch.weeklySchedule,
+    });
   }
 
   function deleteCourse(email, courseId) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key).filter(function (c) {
-      return !(c.id === courseId && c.instructorEmail === key);
-    });
-    saveCourses(key, courses);
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    requirePlatform().deleteCourse(courseId);
   }
 
   function addLesson(email, courseId, payload) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    var lessons = (course.lessons || []).slice();
     var lesson = {
       id: uid('lesson'),
       title: String(payload.title || '').trim(),
+      description: String(payload.description || '').trim(),
       videoTitle: String(payload.videoTitle || '').trim(),
       videoFileName: String(payload.videoFileName || '').trim(),
+      videoUrl: String(payload.videoUrl || '').trim(),
       templateFiles: Array.isArray(payload.templateFiles) ? payload.templateFiles : [],
       quiz: { questions: [] },
       comments: [],
@@ -165,57 +153,61 @@
       createdAt: new Date().toISOString(),
     };
     if (!lesson.title) throw new Error('عنوان الحلقة مطلوب');
-    course.lessons = course.lessons || [];
-    course.lessons.push(lesson);
-    saveCourses(key, courses);
+    lessons.push(lesson);
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
     return lesson;
   }
 
   function updateLesson(email, courseId, lessonId, patch) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
-    var lesson = findLesson(course, lessonId);
-    if (!lesson) throw new Error('الحلقة غير موجودة');
-    ['title', 'videoTitle', 'videoFileName'].forEach(function (f) {
-      if (patch[f] != null) lesson[f] = String(patch[f]).trim();
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    var lessons = (course.lessons || []).map(function (l) {
+      if (l.id !== lessonId) return l;
+      var next = Object.assign({}, l);
+      ['title', 'videoTitle', 'videoFileName', 'videoUrl', 'description'].forEach(function (f) {
+        if (patch[f] != null) next[f] = String(patch[f]).trim();
+      });
+      if (patch.templateFiles) next.templateFiles = patch.templateFiles;
+      return next;
     });
-    if (patch.templateFiles) lesson.templateFiles = patch.templateFiles;
-    saveCourses(key, courses);
-    return lesson;
+    var updated = findLesson({ lessons: lessons }, lessonId);
+    if (!updated) throw new Error('الحلقة غير موجودة');
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
+    return updated;
   }
 
   function deleteLesson(email, courseId, lessonId) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
-    course.lessons = (course.lessons || []).filter(function (l) {
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    var lessons = (course.lessons || []).filter(function (l) {
       return l.id !== lessonId;
     });
-    saveCourses(key, courses);
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
   }
 
   function setLessonQuiz(email, courseId, lessonId, questions) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
-    var lesson = findLesson(course, lessonId);
-    if (!lesson) throw new Error('الحلقة غير موجودة');
-    lesson.quiz = { questions: Array.isArray(questions) ? questions : [] };
-    saveCourses(key, courses);
-    return lesson.quiz;
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    var found = null;
+    var lessons = (course.lessons || []).map(function (l) {
+      if (l.id !== lessonId) return l;
+      found = Object.assign({}, l, {
+        quiz: { questions: Array.isArray(questions) ? questions : [] },
+      });
+      return found;
+    });
+    if (!found) throw new Error('الحلقة غير موجودة');
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
+    return found.quiz;
   }
 
   function addComment(email, courseId, lessonId, payload) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
-    var lesson = findLesson(course, lessonId);
-    if (!lesson) throw new Error('الحلقة غير موجودة');
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
     var comment = {
       id: uid('cmt'),
       studentName: String(payload.studentName || 'طالب').trim(),
@@ -223,31 +215,35 @@
       createdAt: new Date().toISOString(),
       reply: null,
     };
-    lesson.comments = lesson.comments || [];
-    lesson.comments.unshift(comment);
-    saveCourses(key, courses);
+    var lessons = (course.lessons || []).map(function (l) {
+      if (l.id !== lessonId) return l;
+      var comments = Array.isArray(l.comments) ? l.comments.slice() : [];
+      comments.unshift(comment);
+      return Object.assign({}, l, { comments: comments });
+    });
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
     return comment;
   }
 
   function replyToComment(email, courseId, lessonId, commentId, replyText) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    var courses = getCourses(key);
-    var course = findCourse(courses, courseId);
-    if (!course || course.instructorEmail !== key) throw new Error('غير مصرح');
-    var lesson = findLesson(course, lessonId);
-    if (!lesson) throw new Error('الحلقة غير موجودة');
-    var comments = lesson.comments || [];
-    for (var i = 0; i < comments.length; i++) {
-      if (comments[i].id === commentId) {
-        comments[i].reply = {
-          text: String(replyText || '').trim(),
-          at: new Date().toISOString(),
-        };
-        saveCourses(key, courses);
-        return comments[i];
-      }
-    }
-    throw new Error('التعليق غير موجود');
+    var course = requirePlatform().findCourse(courseId);
+    assertOwns(course, key);
+    var hit = null;
+    var lessons = (course.lessons || []).map(function (l) {
+      if (l.id !== lessonId) return l;
+      var comments = (l.comments || []).map(function (cm) {
+        if (cm.id !== commentId) return cm;
+        hit = Object.assign({}, cm, {
+          reply: { text: String(replyText || '').trim(), at: new Date().toISOString() },
+        });
+        return hit;
+      });
+      return Object.assign({}, l, { comments: comments });
+    });
+    if (!hit) throw new Error('التعليق غير موجود');
+    requirePlatform().updateCourse(courseId, { lessons: lessons });
+    return hit;
   }
 
   function getAnalytics(email) {
@@ -288,9 +284,9 @@
 
   function seedDemoIfEmpty(email) {
     var key = normalizeEmail(email || currentInstructorEmail());
-    if (!key) return;
-    var courses = getCourses(key);
-    if (courses.length) return;
+    if (!key || !pc()) return;
+    if (getCourses(key).length) return;
+    if (pc().getCourses().length) return;
 
     var course = addCourse(key, {
       title: 'أساسيات شبكات FTTH',
@@ -318,14 +314,9 @@
       studentName: 'سارة العلي',
       text: 'هل يمكن توضيح الفرق بين splitter و OLT؟',
     });
-    addComment(key, course.id, lesson.id, {
-      studentName: 'محمد حسن',
-      text: 'ممتاز! هل توجد حلقة عن OTDR قريباً؟',
-    });
   }
 
   global.InstructorDash = {
-    CONTENT_KEY: CONTENT_KEY,
     currentInstructorEmail: currentInstructorEmail,
     isInstructorAllowed: isInstructorAllowed,
     getCourses: getCourses,
