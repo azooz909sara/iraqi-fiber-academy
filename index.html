@@ -97,17 +97,176 @@
         </div>
         <div class="hero__visual fade-in">
           <div class="hero__visual-card">
-            <div class="hero__network">
-              <div class="hero__network-center">🔌</div>
-              <div class="hero__network-node hero__network-node--1">📡</div>
-              <div class="hero__network-node hero__network-node--2">🏠</div>
-              <div class="hero__network-node hero__network-node--3">🏢</div>
-              <div class="hero__network-node hero__network-node--4">📶</div>
-              <div class="hero__network-node hero__network-node--5">🔧</div>
-              <div class="hero__network-node hero__network-node--6">💡</div>
+            <div class="hero__network" aria-label="FTTH Simulator — شبكة معدات الألياف الضوئية">
+              <div class="hero__network-grid" aria-hidden="true"></div>
+              <svg class="hero__network-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                <line class="hero__link" x1="50" y1="50" x2="50" y2="14"/>
+                <line class="hero__link" x1="50" y1="50" x2="76" y2="24"/>
+                <line class="hero__link" x1="50" y1="50" x2="86" y2="50"/>
+                <line class="hero__link" x1="50" y1="50" x2="76" y2="76"/>
+                <line class="hero__link" x1="50" y1="50" x2="50" y2="86"/>
+                <line class="hero__link" x1="50" y1="50" x2="24" y2="76"/>
+                <line class="hero__link" x1="50" y1="50" x2="14" y2="50"/>
+                <line class="hero__link" x1="50" y1="50" x2="24" y2="24"/>
+              </svg>
+
+              <!-- Center: Fiber optic cable cross-section -->
+              <div class="hero__network-center" title="مقطع كابل الألياف الضوئية">
+                <svg class="hero__eq-svg hero__eq-svg--center" viewBox="0 0 64 64" aria-hidden="true">
+                  <!-- Outer jacket -->
+                  <circle cx="32" cy="32" r="26" fill="#1a1a1a" stroke="#3f3f46" stroke-width="1.2"/>
+                  <!-- Jacket thickness ring -->
+                  <circle cx="32" cy="32" r="22.5" fill="#2a2a2e" stroke="#52525b" stroke-width="0.6"/>
+                  <!-- Strength / aramid yarn ring -->
+                  <circle cx="32" cy="32" r="19.5" fill="none" stroke="#ca8a04" stroke-width="2.4" opacity="0.85"/>
+                  <circle cx="32" cy="32" r="18" fill="#e7e5e4"/>
+                  <!-- Buffer tube / coating -->
+                  <circle cx="32" cy="32" r="14.5" fill="#f5f5f4" stroke="#a8a29e" stroke-width="1"/>
+                  <circle cx="32" cy="32" r="12.2" fill="#eceff1" stroke="#94a3b8" stroke-width="0.7"/>
+                  <!-- Central strength member -->
+                  <circle cx="32" cy="32" r="2.4" fill="#78716c" stroke="#57534e" stroke-width="0.6"/>
+                  <!-- Color-coded fiber strands (TIA-598) -->
+                  <circle cx="32" cy="22.2" r="2.15" fill="#2563eb" stroke="#1e3a5f" stroke-width="0.4"/>
+                  <circle cx="39.2" cy="24.8" r="2.15" fill="#ea580c" stroke="#7c2d12" stroke-width="0.4"/>
+                  <circle cx="41.8" cy="32" r="2.15" fill="#16a34a" stroke="#14532d" stroke-width="0.4"/>
+                  <circle cx="39.2" cy="39.2" r="2.15" fill="#92400e" stroke="#451a03" stroke-width="0.4"/>
+                  <circle cx="32" cy="41.8" r="2.15" fill="#64748b" stroke="#334155" stroke-width="0.4"/>
+                  <circle cx="24.8" cy="39.2" r="2.15" fill="#f8fafc" stroke="#94a3b8" stroke-width="0.5"/>
+                  <circle cx="22.2" cy="32" r="2.15" fill="#dc2626" stroke="#7f1d1d" stroke-width="0.4"/>
+                  <circle cx="24.8" cy="24.8" r="2.15" fill="#eab308" stroke="#713f12" stroke-width="0.4"/>
+                  <!-- Fiber cores (tiny dark centers) -->
+                  <circle cx="32" cy="22.2" r="0.55" fill="#0f172a"/>
+                  <circle cx="39.2" cy="24.8" r="0.55" fill="#0f172a"/>
+                  <circle cx="41.8" cy="32" r="0.55" fill="#0f172a"/>
+                  <circle cx="39.2" cy="39.2" r="0.55" fill="#0f172a"/>
+                  <circle cx="32" cy="41.8" r="0.55" fill="#0f172a"/>
+                  <circle cx="24.8" cy="39.2" r="0.55" fill="#0f172a"/>
+                  <circle cx="22.2" cy="32" r="0.55" fill="#0f172a"/>
+                  <circle cx="24.8" cy="24.8" r="0.55" fill="#0f172a"/>
+                </svg>
+                <span class="hero__node-label hero__node-label--center">Fiber Cable · كابل فايبر</span>
+              </div>
+
+              <!-- 12:00 OLT -->
+              <div class="hero__network-node hero__network-node--1" title="OLT">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="8" y="16" width="48" height="30" rx="3" stroke="#94a3b8" stroke-width="1.6"/>
+                  <path d="M8 24h48" stroke="#64748b" stroke-width="1.2"/>
+                  <rect x="12" y="28" width="10" height="12" rx="1" stroke="#64748b" stroke-width="1.2"/>
+                  <rect x="27" y="28" width="10" height="12" rx="1" stroke="#64748b" stroke-width="1.2"/>
+                  <rect x="42" y="28" width="10" height="12" rx="1" stroke="#38bdf8" stroke-width="1.2"/>
+                  <circle cx="15" cy="34" r="1.1" fill="#22c55e"/><circle cx="19" cy="34" r="1.1" fill="#22c55e"/>
+                  <circle cx="30" cy="34" r="1.1" fill="#eab308"/><circle cx="34" cy="34" r="1.1" fill="#22c55e"/>
+                  <path d="M14 48v4M32 48v4M50 48v4" stroke="#64748b" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+                <span class="hero__node-label">OLT</span>
+              </div>
+
+              <!-- 1:30 FDT -->
+              <div class="hero__network-node hero__network-node--2" title="FDT">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="18" y="8" width="28" height="44" rx="2" stroke="#94a3b8" stroke-width="1.6"/>
+                  <path d="M18 16h28" stroke="#64748b" stroke-width="1.2"/>
+                  <path d="M18 16 L10 18 V48 L18 50" stroke="#64748b" stroke-width="1.3" stroke-linejoin="round"/>
+                  <rect x="22" y="20" width="20" height="7" rx="1" stroke="#38bdf8" stroke-width="1.1"/>
+                  <rect x="22" y="30" width="20" height="7" rx="1" stroke="#64748b" stroke-width="1.1"/>
+                  <path d="M24 23h10M24 33h14" stroke="#94a3b8" stroke-width="1"/>
+                  <circle cx="26" cy="44" r="1.3" stroke="#22c55e" stroke-width="1"/><circle cx="32" cy="44" r="1.3" stroke="#38bdf8" stroke-width="1"/><circle cx="38" cy="44" r="1.3" stroke="#22c55e" stroke-width="1"/>
+                </svg>
+                <span class="hero__node-label">FDT</span>
+              </div>
+
+              <!-- 3:00 ONT -->
+              <div class="hero__network-node hero__network-node--3" title="ONT">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <path d="M10 30 L32 12 L54 30" stroke="#94a3b8" stroke-width="1.6" stroke-linejoin="round"/>
+                  <path d="M14 28 V50 H50 V28" stroke="#94a3b8" stroke-width="1.5" stroke-linejoin="round"/>
+                  <rect x="28" y="36" width="8" height="14" stroke="#64748b" stroke-width="1.2"/>
+                  <rect x="36" y="20" width="14" height="10" rx="1.5" stroke="#38bdf8" stroke-width="1.4"/>
+                  <circle cx="40" cy="25" r="1.2" fill="#22c55e"/>
+                  <circle cx="45" cy="25" r="1.2" fill="#ef4444"/>
+                  <path d="M32 12 V7" stroke="#64748b" stroke-width="1.2" stroke-linecap="round"/>
+                </svg>
+                <span class="hero__node-label">ONT</span>
+              </div>
+
+              <!-- 4:30 SFP / Splitter -->
+              <div class="hero__network-node hero__network-node--4" title="SFP / Splitter">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <!-- Splitter Y topology -->
+                  <circle cx="14" cy="32" r="3" stroke="#38bdf8" stroke-width="1.4"/>
+                  <path d="M17 32 H30" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round"/>
+                  <rect x="28" y="26" width="10" height="12" rx="1.5" stroke="#94a3b8" stroke-width="1.5"/>
+                  <path d="M38 29 L50 18" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round"/>
+                  <path d="M38 32 L52 32" stroke="#64748b" stroke-width="1.4" stroke-linecap="round"/>
+                  <path d="M38 35 L50 46" stroke="#94a3b8" stroke-width="1.4" stroke-linecap="round"/>
+                  <circle cx="50" cy="18" r="2.4" stroke="#22c55e" stroke-width="1.3"/>
+                  <circle cx="52" cy="32" r="2.4" stroke="#38bdf8" stroke-width="1.3"/>
+                  <circle cx="50" cy="46" r="2.4" stroke="#22c55e" stroke-width="1.3"/>
+                  <!-- SFP module hint -->
+                  <rect x="8" y="44" width="14" height="8" rx="1" stroke="#64748b" stroke-width="1.1"/>
+                  <path d="M11 48h8" stroke="#38bdf8" stroke-width="1"/>
+                </svg>
+                <span class="hero__node-label">SFP / Splitter</span>
+              </div>
+
+              <!-- 6:00 OPM -->
+              <div class="hero__network-node hero__network-node--5" title="Optical Power Meter">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="16" y="8" width="32" height="46" rx="4" stroke="#94a3b8" stroke-width="1.6"/>
+                  <rect x="20" y="14" width="24" height="16" rx="1.5" stroke="#38bdf8" stroke-width="1.3"/>
+                  <path d="M24 21h16M28 27h8" stroke="#94a3b8" stroke-width="1.2" stroke-linecap="round"/>
+                  <circle cx="26" cy="40" r="3" stroke="#64748b" stroke-width="1.2"/>
+                  <circle cx="38" cy="40" r="3" stroke="#64748b" stroke-width="1.2"/>
+                  <rect x="28" y="4" width="8" height="5" rx="1" stroke="#64748b" stroke-width="1.1"/>
+                </svg>
+                <span class="hero__node-label">OPM</span>
+              </div>
+
+              <!-- 7:30 Splicer -->
+              <div class="hero__network-node hero__network-node--6" title="Fusion Splicer">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="8" y="20" width="48" height="26" rx="3" stroke="#94a3b8" stroke-width="1.6"/>
+                  <rect x="12" y="25" width="18" height="12" rx="1.2" stroke="#38bdf8" stroke-width="1.2"/>
+                  <path d="M15 31h12" stroke="#94a3b8" stroke-width="1.2"/>
+                  <rect x="36" y="25" width="16" height="14" rx="1.2" stroke="#64748b" stroke-width="1.2"/>
+                  <path d="M40 32h8" stroke="#94a3b8" stroke-width="1.2"/>
+                  <path d="M2 33 H10 M54 33 H62" stroke="#38bdf8" stroke-width="1.4" stroke-linecap="round"/>
+                  <rect x="24" y="10" width="16" height="8" rx="1.2" stroke="#64748b" stroke-width="1.2"/>
+                </svg>
+                <span class="hero__node-label">Splicer</span>
+              </div>
+
+              <!-- 9:00 OTDR -->
+              <div class="hero__network-node hero__network-node--7" title="OTDR">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="10" y="12" width="44" height="38" rx="3" stroke="#94a3b8" stroke-width="1.6"/>
+                  <rect x="14" y="18" width="36" height="18" rx="1.5" stroke="#38bdf8" stroke-width="1.2"/>
+                  <polyline points="17,32 23,26 28,28 34,20 40,24 46,22" stroke="#f97316" stroke-width="1.4" stroke-linejoin="round" fill="none"/>
+                  <circle cx="20" cy="44" r="2.2" stroke="#64748b" stroke-width="1.1"/>
+                  <circle cx="32" cy="44" r="2.2" stroke="#64748b" stroke-width="1.1"/>
+                  <circle cx="44" cy="44" r="2.2" stroke="#22c55e" stroke-width="1.1"/>
+                </svg>
+                <span class="hero__node-label">OTDR</span>
+              </div>
+
+              <!-- 10:30 NMS -->
+              <div class="hero__network-node hero__network-node--8" title="NMS">
+                <svg class="hero__eq-svg" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                  <rect x="8" y="10" width="48" height="30" rx="2.5" stroke="#94a3b8" stroke-width="1.6"/>
+                  <rect x="12" y="14" width="40" height="22" rx="1" stroke="#64748b" stroke-width="1.1"/>
+                  <circle cx="20" cy="24" r="2.4" stroke="#38bdf8" stroke-width="1.2"/>
+                  <circle cx="32" cy="20" r="2.4" stroke="#22c55e" stroke-width="1.2"/>
+                  <circle cx="44" cy="26" r="2.4" stroke="#eab308" stroke-width="1.2"/>
+                  <path d="M22 24 L30 21 M34 21 L42 25" stroke="#64748b" stroke-width="1.1"/>
+                  <path d="M28 40 V46 H36 V40" stroke="#64748b" stroke-width="1.3" stroke-linejoin="round"/>
+                  <path d="M20 50 H44" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span class="hero__node-label">NMS</span>
+              </div>
             </div>
-            <div class="hero__float-badge hero__float-badge--1">OTDR Ready</div>
-            <div class="hero__float-badge hero__float-badge--2">FTTH Sim</div>
+            <div class="hero__float-badge hero__float-badge--1">OTDR Readout</div>
+            <div class="hero__float-badge hero__float-badge--2">FTH Simulator</div>
           </div>
         </div>
       </div>
