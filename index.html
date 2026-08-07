@@ -49,8 +49,6 @@
                   <span class="user-menu__info-status">غير مشترك</span>
                 </div>
                 <div class="user-menu__divider" role="separator"></div>
-                <a href="#" class="user-menu__item" role="menuitem" data-panel="student">لوحة الطالب</a>
-                <a href="#" class="user-menu__item user-menu__item--instructor is-locked" role="menuitem" data-panel="instructor" data-instructor-locked aria-disabled="true">لوحة المدرب</a>
                 <a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>
                 <a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>
                 <div class="user-menu__divider" role="separator"></div>
@@ -421,6 +419,50 @@
   </div>
 
   <script src="js/instructor-applications.js"></script>
+  <script>
+    /* Immediate approval sync for file:// / page load — before auth module settles */
+    (function () {
+      function syncInstructorMenu() {
+        if (!window.InstructorApps) return;
+        window.InstructorApps.absorbApprovalFromUrl();
+        var slot = document.querySelector('[data-auth-slot][data-auth-variant="landing"]');
+        if (!slot) return;
+        var approved = window.InstructorApps.getInstructorApprovedFlag();
+        var menu = slot.querySelector('#userMenu, .user-menu');
+        if (!menu) return;
+
+        var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
+        var instructor = menu.querySelector('.user-menu__item--instructor');
+        var divider = menu.querySelector('.user-menu__divider');
+
+        if (approved) {
+          menu.classList.add('is-instructor');
+          if (join) join.remove();
+          if (!instructor) {
+            var adminLink = menu.querySelector('.user-menu__item--admin, [data-admin-only]');
+            var item = document.createElement('a');
+            item.href = 'instructor.html';
+            item.className = 'user-menu__item user-menu__item--instructor';
+            item.setAttribute('role', 'menuitem');
+            item.textContent = 'لوحة المدرب';
+            if (adminLink && adminLink.parentNode) {
+              adminLink.parentNode.insertBefore(item, adminLink);
+            } else if (divider && divider.parentNode) {
+              divider.parentNode.insertBefore(item, divider.nextSibling);
+            }
+          }
+        }
+      }
+
+      syncInstructorMenu();
+      window.addEventListener('load', syncInstructorMenu);
+      window.addEventListener('focus', syncInstructorMenu);
+      window.addEventListener('pageshow', syncInstructorMenu);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') syncInstructorMenu();
+      });
+    })();
+  </script>
   <script src="js/navigation.js"></script>
   <script src="js/animations.js"></script>
   <script src="js/main.js"></script>

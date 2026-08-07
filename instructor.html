@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="لوحة المدرب — أكاديمية الفايبر العراقية">
+  <title>لوحة المدرب | أكاديمية الفايبر العراقية</title>
+  <link rel="icon" type="image/png" href="images/logo.png" />
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/instructor.css">
+</head>
+<body class="inst-body">
+
+  <div id="instructorGate" class="inst-gate" hidden>
+    <div class="inst-gate__card">
+      <h1 class="inst-gate__title">الوصول مرفوض</h1>
+      <p class="inst-gate__text">لوحة المدرب متاحة فقط للمدربين المعتمدين. لا تتضمن هذه اللوحة أي صلاحيات إدارية عامة.</p>
+      <a href="index.html" class="btn btn--primary">العودة للموقع</a>
+    </div>
+  </div>
+
+  <div id="instructorApp" hidden>
+    <div class="admin-overlay" id="instOverlay" aria-hidden="true"></div>
+
+    <aside class="admin-sidebar" id="instSidebar" aria-label="قائمة لوحة المدرب">
+      <a href="index.html" class="admin-sidebar__brand">
+        <img class="admin-sidebar__brand-img" src="images/logo.png" alt="Iraqi Fiber Academy" width="40" height="40" />
+        <div class="admin-sidebar__brand-text">
+          <span class="admin-sidebar__brand-name">أكاديمية الفايبر</span>
+          <span class="admin-sidebar__brand-role inst-role">INSTRUCTOR DASHBOARD</span>
+        </div>
+      </a>
+
+      <nav class="admin-sidebar__nav">
+        <p class="admin-sidebar__label">مساحة المدرب</p>
+        <a href="#overview" class="admin-nav__link active" data-inst-section="overview">نظرة عامة</a>
+        <a href="#courses" class="admin-nav__link" data-inst-section="courses">كورساتي وحلقاتي</a>
+        <a href="#quizzes" class="admin-nav__link" data-inst-section="quizzes">امتحانات الحلقات</a>
+        <a href="#qa" class="admin-nav__link" data-inst-section="qa">أسئلة وتعليقات الطلاب</a>
+        <a href="#analytics" class="admin-nav__link" data-inst-section="analytics">التقدم والإحصائيات</a>
+      </nav>
+
+      <p class="inst-scope-note">نطاق صلاحيات محدود: يمكنك إدارة كورساتك فقط. لا يوجد وصول إلى لوحة الإدارة أو بيانات المدربين الآخرين.</p>
+
+      <div class="admin-sidebar__footer">
+        <a href="index.html" class="admin-sidebar__back">العودة للموقع</a>
+      </div>
+    </aside>
+
+    <div class="inst-main">
+      <header class="admin-topbar">
+        <div style="display:flex;align-items:center;gap:0.75rem;">
+          <button class="admin-menu-toggle" id="instMenuToggle" type="button" aria-label="فتح القائمة">☰</button>
+          <div>
+            <h1 class="admin-topbar__title">لوحة المدرب</h1>
+            <p class="admin-topbar__subtitle" id="instSubtitle">إدارة كورساتك وحلقاتك وامتحاناتك</p>
+          </div>
+        </div>
+        <div class="admin-topbar__actions">
+          <div class="admin-user-chip">
+            <div class="admin-user-chip__avatar">م</div>
+            <div class="admin-user-chip__meta">
+              <div class="admin-user-chip__name" id="instNameChip">مدرب</div>
+              <div class="admin-user-chip__role" id="instEmailChip">—</div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="inst-content">
+        <!-- Overview -->
+        <section class="inst-section active" id="section-overview">
+          <div class="admin-stats" id="instStats"></div>
+          <div class="inst-panel">
+            <div class="inst-panel__header">
+              <div>
+                <h2 class="inst-panel__title">مرحباً بك في لوحة المدرب</h2>
+                <p class="inst-panel__desc">أنشئ الكورسات، أضف الحلقات والفيديوهات والقوالب، وابنِ امتحانات MCQ، ورد على أسئلة الطلاب.</p>
+              </div>
+            </div>
+            <div class="inst-panel__body">
+              <div class="inst-actions">
+                <button type="button" class="admin-btn admin-btn--primary" data-goto="courses">إدارة الكورسات</button>
+                <button type="button" class="admin-btn admin-btn--ghost" data-goto="quizzes">بناء امتحان</button>
+                <button type="button" class="admin-btn admin-btn--ghost" data-goto="qa">الرد على الأسئلة</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Courses -->
+        <section class="inst-section" id="section-courses">
+          <div class="inst-panel">
+            <div class="inst-panel__header">
+              <div>
+                <h2 class="inst-panel__title">كورساتي وحلقاتي</h2>
+                <p class="inst-panel__desc">إدارة كورساتك فقط — أضف فيديوهات وقوالب لكل حلقة</p>
+              </div>
+            </div>
+            <div class="inst-panel__body">
+              <form id="courseForm" class="inst-form-grid">
+                <div class="inst-field">
+                  <label class="inst-label" for="courseTitle">عنوان الكورس</label>
+                  <input class="inst-input" id="courseTitle" required placeholder="مثال: لحام الألياف الضوئية" />
+                </div>
+                <div class="inst-field">
+                  <label class="inst-label" for="courseEnrolled">عدد المسجّلين (اختياري)</label>
+                  <input class="inst-input" id="courseEnrolled" type="number" min="0" value="0" />
+                </div>
+                <div class="inst-field inst-field--full">
+                  <label class="inst-label" for="courseDesc">وصف مختصر</label>
+                  <textarea class="inst-textarea" id="courseDesc" placeholder="نبذة عن محتوى الكورس..."></textarea>
+                </div>
+                <div class="inst-field inst-field--full">
+                  <button type="submit" class="admin-btn admin-btn--primary">إضافة كورس</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          <div id="coursesList"></div>
+        </section>
+
+        <!-- Quizzes -->
+        <section class="inst-section" id="section-quizzes">
+          <div class="inst-panel">
+            <div class="inst-panel__header">
+              <div>
+                <h2 class="inst-panel__title">امتحان بعد كل حلقة</h2>
+                <p class="inst-panel__desc">أنشئ أسئلة اختيار من متعدد (MCQ) لكل حلقة</p>
+              </div>
+            </div>
+            <div class="inst-panel__body">
+              <div class="inst-form-grid">
+                <div class="inst-field">
+                  <label class="inst-label" for="quizCourseSelect">الكورس</label>
+                  <select class="inst-select" id="quizCourseSelect"></select>
+                </div>
+                <div class="inst-field">
+                  <label class="inst-label" for="quizLessonSelect">الحلقة</label>
+                  <select class="inst-select" id="quizLessonSelect"></select>
+                </div>
+              </div>
+
+              <form id="quizForm" style="margin-top:1rem;">
+                <div class="inst-field">
+                  <label class="inst-label" for="quizQuestion">نص السؤال</label>
+                  <input class="inst-input" id="quizQuestion" required placeholder="اكتب السؤال هنا..." />
+                </div>
+                <div class="inst-form-grid" style="margin-top:0.75rem;">
+                  <div class="inst-field"><label class="inst-label">خيار أ</label><input class="inst-input" id="quizOpt0" required /></div>
+                  <div class="inst-field"><label class="inst-label">خيار ب</label><input class="inst-input" id="quizOpt1" required /></div>
+                  <div class="inst-field"><label class="inst-label">خيار ج</label><input class="inst-input" id="quizOpt2" required /></div>
+                  <div class="inst-field"><label class="inst-label">خيار د</label><input class="inst-input" id="quizOpt3" required /></div>
+                </div>
+                <div class="inst-field" style="margin-top:0.75rem;max-width:220px;">
+                  <label class="inst-label" for="quizCorrect">الإجابة الصحيحة</label>
+                  <select class="inst-select" id="quizCorrect">
+                    <option value="0">أ</option>
+                    <option value="1">ب</option>
+                    <option value="2">ج</option>
+                    <option value="3">د</option>
+                  </select>
+                </div>
+                <div class="inst-actions">
+                  <button type="submit" class="admin-btn admin-btn--primary">إضافة السؤال للامتحان</button>
+                </div>
+              </form>
+
+              <div id="quizQuestionsList" style="margin-top:1.25rem;"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Q&A -->
+        <section class="inst-section" id="section-qa">
+          <div class="inst-panel">
+            <div class="inst-panel__header">
+              <div>
+                <h2 class="inst-panel__title">أسئلة وتعليقات الطلاب</h2>
+                <p class="inst-panel__desc">اعرض تعليقات طلابك على حلقاتك وردّ عليها مباشرة</p>
+              </div>
+            </div>
+            <div class="inst-panel__body" id="qaList"></div>
+          </div>
+        </section>
+
+        <!-- Analytics -->
+        <section class="inst-section" id="section-analytics">
+          <div class="admin-stats" id="analyticsStats"></div>
+          <div class="inst-panel">
+            <div class="inst-panel__header">
+              <div>
+                <h2 class="inst-panel__title">تقدم الطلاب</h2>
+                <p class="inst-panel__desc">ملخص سريع للتسجيل والمشاهدات ومعدلات الإكمال لكورساتك فقط</p>
+              </div>
+            </div>
+            <div class="inst-panel__body" id="analyticsTable"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Lesson modal -->
+  <div class="instructor-modal" id="lessonModal" hidden>
+    <div class="instructor-modal__backdrop" data-close-lesson-modal></div>
+    <div class="instructor-modal__dialog" role="dialog" aria-modal="true" style="max-width:520px;">
+      <div class="instructor-modal__header">
+        <div>
+          <h2 class="instructor-modal__title">إضافة / تعديل حلقة</h2>
+          <p class="instructor-modal__subtitle">عنوان الفيديو، ملف الفيديو، وقوالب مرفقة</p>
+        </div>
+        <button type="button" class="instructor-modal__close" data-close-lesson-modal aria-label="إغلاق">×</button>
+      </div>
+      <form id="lessonForm">
+        <input type="hidden" id="lessonCourseId" />
+        <input type="hidden" id="lessonId" />
+        <div class="inst-field" style="margin-bottom:0.75rem;">
+          <label class="inst-label" for="lessonTitle">عنوان الحلقة</label>
+          <input class="inst-input" id="lessonTitle" required />
+        </div>
+        <div class="inst-field" style="margin-bottom:0.75rem;">
+          <label class="inst-label" for="lessonVideoTitle">عنوان الفيديو</label>
+          <input class="inst-input" id="lessonVideoTitle" placeholder="عنوان يظهر للطالب" />
+        </div>
+        <div class="inst-field" style="margin-bottom:0.75rem;">
+          <label class="inst-label" for="lessonVideoFile">ملف الفيديو</label>
+          <input class="inst-input" id="lessonVideoFile" type="file" accept="video/*" />
+          <p class="instructor-form__hint" id="lessonVideoFileName" style="margin-top:0.35rem;font-size:0.75rem;color:var(--color-text-muted);">لم يتم اختيار ملف</p>
+        </div>
+        <div class="inst-field" style="margin-bottom:0.75rem;">
+          <label class="inst-label" for="lessonTemplates">ملفات القوالب (PDF / DOC / ZIP)</label>
+          <input class="inst-input" id="lessonTemplates" type="file" multiple accept=".pdf,.doc,.docx,.zip,.xlsx,.ppt,.pptx" />
+          <p class="instructor-form__hint" id="lessonTemplatesNames" style="margin-top:0.35rem;font-size:0.75rem;color:var(--color-text-muted);">لا توجد قوالب</p>
+        </div>
+        <div class="inst-actions">
+          <button type="submit" class="admin-btn admin-btn--primary">حفظ الحلقة</button>
+          <button type="button" class="admin-btn admin-btn--ghost" data-close-lesson-modal>إلغاء</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <link rel="stylesheet" href="css/instructor-apply.css">
+  <script src="js/instructor-applications.js"></script>
+  <script src="js/instructor-dashboard-data.js"></script>
+  <script src="js/instructor-dashboard-ui.js"></script>
+</body>
+</html>

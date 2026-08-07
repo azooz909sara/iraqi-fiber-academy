@@ -39,12 +39,12 @@
         </svg>
         إدارة المستخدمين
       </a>
-      <a href="#instructor-requests" class="admin-nav__link" data-section="instructor-requests">
+      <a href="#instructors" class="admin-nav__link" data-section="instructors">
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
           <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
         </svg>
-        طلبات المدربين
+        إدارة المدربين
       </a>
       <a href="#courses" class="admin-nav__link" data-section="courses">
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -155,18 +155,27 @@
         </article>
       </section>
 
-      <section class="admin-panel" id="users" aria-labelledby="usersHeading">
+      <section class="admin-panel admin-panel--users" id="users" aria-labelledby="usersHeading">
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="usersHeading">إدارة المستخدمين</h2>
-            <p class="admin-panel__desc">عرض وإدارة حسابات الطلاب والمدربين والمسؤولين</p>
+            <p class="admin-panel__desc" id="usersDesc">عرض وإدارة حسابات الطلاب</p>
           </div>
           <div class="admin-panel__tools">
-            <label class="admin-search">
+            <label class="admin-search" id="userSearchWrap">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
               </svg>
               <input class="admin-search__input" type="search" id="userSearch" placeholder="بحث بالاسم أو البريد..." aria-label="بحث عن مستخدم" />
+            </label>
+            <label class="admin-filter" id="usersFilterWrap">
+              <span class="admin-filter__label">تصفية</span>
+              <select class="admin-filter__select" id="usersStatusFilter" aria-label="تصفية المستخدمين">
+                <option value="all">الكل</option>
+                <option value="active">نشط</option>
+                <option value="expired">منتهي الاشتراك</option>
+                <option value="suspended">موقوف</option>
+              </select>
             </label>
             <button class="admin-btn admin-btn--primary" type="button" id="addUserBtn">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -174,171 +183,167 @@
               </svg>
               إضافة مستخدم
             </button>
+
+            <div class="admin-tools-menu" id="usersToolsMenu">
+              <button
+                class="admin-btn admin-btn--ghost admin-btn--icon"
+                type="button"
+                id="usersMenuBtn"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-label="قائمة الإجراءات"
+                title="قائمة الإجراءات"
+              >☰</button>
+              <button
+                class="admin-btn admin-btn--ghost admin-btn--sm"
+                type="button"
+                id="usersCancelMode"
+                hidden
+                title="إلغاء وضع التحديد"
+              >إلغاء</button>
+              <div class="admin-tools-menu__dropdown" id="usersMenuDropdown" role="menu" hidden>
+                <button type="button" role="menuitem" data-users-menu="select-delete">تحديد عناصر للحذف</button>
+                <div class="admin-tools-menu__divider" role="separator" data-users-menu-main></div>
+                <button type="button" role="menuitem" data-users-menu="view-archive">سجل الأرشيف</button>
+                <button type="button" role="menuitem" data-users-menu="exit-archive" hidden>العودة للمستخدمين</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="admin-table-wrap">
-          <table class="admin-table">
+        <div class="admin-table-wrap admin-table-wrap--users">
+          <table class="admin-table" id="usersTable">
             <thead>
               <tr>
+                <th scope="col" class="admin-th-check">
+                  <input type="checkbox" id="usersSelectAll" aria-label="تحديد الكل" />
+                </th>
                 <th scope="col">المستخدم</th>
                 <th scope="col">الدور</th>
                 <th scope="col">الحالة</th>
+                <th scope="col">الاشتراك</th>
                 <th scope="col">تاريخ التسجيل</th>
                 <th scope="col">الإجراءات</th>
               </tr>
             </thead>
             <tbody id="usersTableBody">
-              <tr data-name="سارة العلي" data-email="sara.ali@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">س</div>
-                    <div>
-                      <div class="admin-user-cell__name">سارة العلي</div>
-                      <div class="admin-user-cell__email">sara.ali@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--student">طالب</span></td>
-                <td><span class="admin-badge admin-badge--active">نشط</span></td>
-                <td>12 مارس 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
-                  </div>
-                </td>
-              </tr>
-              <tr data-name="محمد حسن" data-email="m.hassan@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">م</div>
-                    <div>
-                      <div class="admin-user-cell__name">محمد حسن</div>
-                      <div class="admin-user-cell__email">m.hassan@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--instructor">مدرب</span></td>
-                <td><span class="admin-badge admin-badge--active">نشط</span></td>
-                <td>28 فبراير 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
-                  </div>
-                </td>
-              </tr>
-              <tr data-name="نور الكاظم" data-email="noor.k@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">ن</div>
-                    <div>
-                      <div class="admin-user-cell__name">نور الكاظم</div>
-                      <div class="admin-user-cell__email">noor.k@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--student">طالب</span></td>
-                <td><span class="admin-badge admin-badge--pending">قيد المراجعة</span></td>
-                <td>5 أبريل 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
-                  </div>
-                </td>
-              </tr>
-              <tr data-name="علي جاسم" data-email="ali.j@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">ع</div>
-                    <div>
-                      <div class="admin-user-cell__name">علي جاسم</div>
-                      <div class="admin-user-cell__email">ali.j@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--admin">مسؤول</span></td>
-                <td><span class="admin-badge admin-badge--active">نشط</span></td>
-                <td>10 يناير 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
-                  </div>
-                </td>
-              </tr>
-              <tr data-name="زينب محمود" data-email="zainab.m@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">ز</div>
-                    <div>
-                      <div class="admin-user-cell__name">زينب محمود</div>
-                      <div class="admin-user-cell__email">zainab.m@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--student">طالب</span></td>
-                <td><span class="admin-badge admin-badge--suspended">موقوف</span></td>
-                <td>18 فبراير 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تفعيل</button>
-                  </div>
-                </td>
-              </tr>
-              <tr data-name="حسام الراوي" data-email="hussam.r@example.com">
-                <td>
-                  <div class="admin-user-cell">
-                    <div class="admin-user-cell__avatar">ح</div>
-                    <div>
-                      <div class="admin-user-cell__name">حسام الراوي</div>
-                      <div class="admin-user-cell__email">hussam.r@example.com</div>
-                    </div>
-                  </div>
-                </td>
-                <td><span class="admin-badge admin-badge--instructor">مدرب</span></td>
-                <td><span class="admin-badge admin-badge--active">نشط</span></td>
-                <td>3 مارس 2026</td>
-                <td>
-                  <div class="admin-table__actions">
-                    <button class="admin-btn admin-btn--ghost admin-btn--sm" type="button">تعديل</button>
-                    <button class="admin-btn admin-btn--danger admin-btn--sm" type="button">إيقاف</button>
-                  </div>
-                </td>
+              <tr>
+                <td colspan="7" class="admin-empty-cell">جاري التحميل...</td>
               </tr>
             </tbody>
           </table>
         </div>
 
         <div class="admin-panel__footer">
-          <p class="admin-panel__meta" id="usersMeta">عرض 1–6 من 2,547 مستخدم</p>
-          <div class="admin-pagination" aria-label="تصفح الصفحات">
-            <button class="admin-pagination__btn active" type="button">1</button>
-            <button class="admin-pagination__btn" type="button">2</button>
-            <button class="admin-pagination__btn" type="button">3</button>
-            <button class="admin-pagination__btn" type="button">…</button>
-          </div>
+          <p class="admin-panel__meta" id="usersMeta">0 مستخدم</p>
         </div>
       </section>
 
-      <section class="admin-panel" id="instructor-requests" aria-labelledby="instructorRequestsHeading" style="margin-top: 2rem;">
+      <div class="admin-modal" id="userEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-user-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--compact" role="dialog" aria-modal="true" aria-labelledby="userEditorTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="userEditorTitle">إضافة مستخدم</h3>
+            <button class="admin-modal__close" type="button" data-close-user-modal aria-label="إغلاق">×</button>
+          </div>
+          <form class="admin-modal__body admin-modal__body--compact" id="userEditorForm">
+            <input type="hidden" id="userEditorId" value="" />
+            <label class="admin-field">
+              <span class="admin-field__label">الاسم الكامل</span>
+              <input class="admin-field__input" type="text" id="userEditorName" required autocomplete="name" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">البريد الإلكتروني</span>
+              <input class="admin-field__input" type="email" id="userEditorEmail" required autocomplete="email" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">الحالة</span>
+              <select class="admin-field__input" id="userEditorStatus">
+                <option value="active">نشط</option>
+                <option value="pending">قيد المراجعة</option>
+                <option value="suspended">موقوف</option>
+                <option value="expired">منتهي</option>
+              </select>
+            </label>
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-user-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit" id="userEditorSubmit">حفظ</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <section class="admin-panel admin-panel--requests" id="instructors" aria-labelledby="instructorsHeading" style="margin-top: 2rem;">
         <div class="admin-panel__header">
           <div>
-            <h2 class="admin-panel__title" id="instructorRequestsHeading">طلبات المدربين</h2>
-            <p class="admin-panel__desc">مراجعة طلبات الانضمام كمدرب والموافقة أو الرفض</p>
+            <h2 class="admin-panel__title" id="instructorsHeading">إدارة المدربين</h2>
+            <p class="admin-panel__desc" id="instructorsDesc">مراجعة طلبات الانضمام وإدارة حسابات المدربين المعتمدين</p>
           </div>
           <div class="admin-panel__tools">
+            <label class="admin-filter" id="instructorFilterWrap">
+              <span class="admin-filter__label">تصفية</span>
+              <select class="admin-filter__select" id="instructorRequestsFilter" aria-label="تصفية">
+                <option value="all">الكل</option>
+                <option value="pending">قيد المراجعة</option>
+                <option value="on_hold">معلّق</option>
+                <option value="rejected">مرفوض</option>
+              </select>
+            </label>
             <button class="admin-btn admin-btn--ghost" type="button" id="refreshInstructorRequests">تحديث</button>
+
+            <div class="admin-tools-menu" id="instructorToolsMenu">
+              <button
+                class="admin-btn admin-btn--ghost admin-btn--icon"
+                type="button"
+                id="instructorMenuBtn"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-label="قائمة الإجراءات"
+                title="قائمة الإجراءات"
+              >☰</button>
+              <button
+                class="admin-btn admin-btn--ghost admin-btn--sm"
+                type="button"
+                id="instructorCancelMode"
+                hidden
+                title="إلغاء وضع التحديد"
+              >إلغاء</button>
+              <div class="admin-tools-menu__dropdown" id="instructorMenuDropdown" role="menu" hidden>
+                <button type="button" role="menuitem" data-menu-action="select-delete">تحديد عناصر للحذف</button>
+                <div class="admin-tools-menu__divider" role="separator" data-menu-main></div>
+                <button type="button" role="menuitem" data-menu-action="view-archive">سجل الأرشيف</button>
+                <button type="button" role="menuitem" data-menu-action="exit-archive" hidden>العودة لإدارة المدربين</button>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="admin-table-wrap">
-          <table class="admin-table">
-            <thead>
+        <div class="admin-tabs" id="instructorTabs" role="tablist" aria-label="أقسام إدارة المدربين">
+          <button
+            class="admin-tabs__btn is-active"
+            type="button"
+            role="tab"
+            id="tabRequests"
+            aria-selected="true"
+            data-instructor-tab="requests"
+          >طلبات الانضمام</button>
+          <button
+            class="admin-tabs__btn"
+            type="button"
+            role="tab"
+            id="tabRoster"
+            aria-selected="false"
+            data-instructor-tab="roster"
+          >قائمة المدربين</button>
+        </div>
+
+        <div class="admin-table-wrap admin-table-wrap--requests">
+          <table class="admin-table" id="instructorRequestsTable">
+            <thead id="instructorTableHead">
               <tr>
+                <th scope="col" class="admin-th-check">
+                  <input type="checkbox" id="instructorSelectAll" aria-label="تحديد الكل" />
+                </th>
                 <th scope="col">المتقدم</th>
                 <th scope="col">النبذة</th>
                 <th scope="col">الكورسات المقترحة</th>
@@ -350,7 +355,7 @@
             </thead>
             <tbody id="instructorRequestsBody">
               <tr>
-                <td colspan="7" class="admin-empty-cell">لا توجد طلبات حالياً</td>
+                <td colspan="8" class="admin-empty-cell">لا توجد طلبات حالياً</td>
               </tr>
             </tbody>
           </table>
@@ -360,17 +365,49 @@
           <p class="admin-panel__meta" id="instructorRequestsMeta">0 طلب قيد المراجعة</p>
         </div>
       </section>
+
+      <div class="admin-modal" id="instructorEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-instructor-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--compact" role="dialog" aria-modal="true" aria-labelledby="instructorEditorTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="instructorEditorTitle">تعديل مدرب</h3>
+            <button class="admin-modal__close" type="button" data-close-instructor-modal aria-label="إغلاق">×</button>
+          </div>
+          <form class="admin-modal__body admin-modal__body--compact" id="instructorEditorForm">
+            <input type="hidden" id="instructorEditorId" value="" />
+            <label class="admin-field">
+              <span class="admin-field__label">الاسم الكامل</span>
+              <input class="admin-field__input" type="text" id="instructorEditorName" required />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">البريد الإلكتروني</span>
+              <input class="admin-field__input" type="email" id="instructorEditorEmail" disabled />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">النبذة</span>
+              <textarea class="admin-field__input admin-field__textarea" id="instructorEditorBio" rows="3"></textarea>
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">الكورسات</span>
+              <textarea class="admin-field__input admin-field__textarea" id="instructorEditorCourses" rows="2"></textarea>
+            </label>
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-instructor-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ</button>
+            </div>
+          </form>
+        </div>
+      </div>
     </main>
   </div>
 
+  <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script>
     (function () {
       var sidebar = document.getElementById('adminSidebar');
       var overlay = document.getElementById('adminOverlay');
       var toggle = document.getElementById('adminMenuToggle');
-      var search = document.getElementById('userSearch');
-      var rows = document.querySelectorAll('#usersTableBody tr');
       var navLinks = document.querySelectorAll('.admin-nav__link');
 
       function closeSidebar() {
@@ -400,21 +437,628 @@
         });
       });
 
-      if (search) {
-        search.addEventListener('input', function () {
-          var q = search.value.trim().toLowerCase();
-          var visible = 0;
-          rows.forEach(function (row) {
-            var name = (row.getAttribute('data-name') || '').toLowerCase();
-            var email = (row.getAttribute('data-email') || '').toLowerCase();
-            var match = !q || name.indexOf(q) !== -1 || email.indexOf(q) !== -1;
-            row.style.display = match ? '' : 'none';
-            if (match) visible += 1;
-          });
-          var meta = document.getElementById('usersMeta');
-          if (meta) meta.textContent = 'عرض ' + visible + ' من 2,547 مستخدم';
+      /* ── Users management ── */
+      var usersSearchQuery = '';
+      var usersStatusFilter = 'all';
+      var usersSelectionMode = null;
+      var usersShowingArchive = false;
+      var usersToolsMenuOpen = false;
+      var usersFloatingMenu = null;
+
+      function usersIsArchiveView() {
+        return usersShowingArchive === true;
+      }
+
+      function getSelectedUserIds() {
+        return Array.prototype.map
+          .call(document.querySelectorAll('.user-row-check:checked'), function (el) {
+            return el.value;
+          })
+          .filter(Boolean);
+      }
+
+      function clearUserChecks() {
+        document.querySelectorAll('.user-row-check').forEach(function (cb) {
+          cb.checked = false;
+        });
+        var selectAll = document.getElementById('usersSelectAll');
+        if (selectAll) selectAll.checked = false;
+      }
+
+      function closeUsersToolsMenu() {
+        var dropdown = document.getElementById('usersMenuDropdown');
+        var btn = document.getElementById('usersMenuBtn');
+        usersToolsMenuOpen = false;
+        if (dropdown) dropdown.hidden = true;
+        if (btn) {
+          btn.setAttribute('aria-expanded', 'false');
+          if (!usersSelectionMode) btn.classList.remove('is-active');
+        }
+      }
+
+      function openUsersToolsMenu() {
+        var dropdown = document.getElementById('usersMenuDropdown');
+        var btn = document.getElementById('usersMenuBtn');
+        if (!dropdown) return;
+        var exitItem = dropdown.querySelector('[data-users-menu="exit-archive"]');
+        var selectItem = dropdown.querySelector('[data-users-menu="select-delete"]');
+        var viewItem = dropdown.querySelector('[data-users-menu="view-archive"]');
+        var divider = dropdown.querySelector('[data-users-menu-main]');
+        if (exitItem) exitItem.hidden = !usersShowingArchive;
+        if (selectItem) selectItem.hidden = usersShowingArchive;
+        if (viewItem) viewItem.hidden = usersShowingArchive;
+        if (divider) divider.hidden = usersShowingArchive;
+        usersToolsMenuOpen = true;
+        dropdown.hidden = false;
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      }
+
+      function syncUsersSelectionUi() {
+        var panel = document.getElementById('users');
+        var modeBtn = document.getElementById('usersMenuBtn');
+        var cancelBtn = document.getElementById('usersCancelMode');
+        var addBtn = document.getElementById('addUserBtn');
+        var ids = getSelectedUserIds();
+        var inSelection = !!usersSelectionMode;
+
+        if (panel) panel.classList.toggle('is-selection-mode', inSelection);
+        if (cancelBtn) cancelBtn.hidden = !inSelection;
+        if (addBtn) addBtn.hidden = usersShowingArchive || inSelection;
+
+        if (modeBtn) {
+          modeBtn.classList.toggle('is-active', inSelection || usersToolsMenuOpen);
+          modeBtn.classList.toggle('is-execute', inSelection);
+          modeBtn.classList.toggle('admin-btn--danger', inSelection);
+
+          if (inSelection) {
+            modeBtn.textContent = 'حذف المحدد (' + ids.length + ')';
+            modeBtn.title = 'حذف المحدد (إلى الأرشيف)';
+          } else {
+            modeBtn.textContent = '☰';
+            modeBtn.title = 'قائمة الإجراءات';
+            modeBtn.classList.remove('admin-btn--danger', 'admin-btn--primary');
+          }
+        }
+      }
+
+      function exitUsersSelectionMode() {
+        usersSelectionMode = null;
+        clearUserChecks();
+        closeUsersToolsMenu();
+        syncUsersSelectionUi();
+      }
+
+      function enterUsersSelectionMode() {
+        usersShowingArchive = false;
+        usersSelectionMode = 'delete';
+        clearUserChecks();
+        closeUsersToolsMenu();
+        renderUsersTable();
+        syncUsersSelectionUi();
+      }
+
+      function openUsersArchiveView() {
+        usersSelectionMode = null;
+        usersShowingArchive = true;
+        clearUserChecks();
+        closeUsersToolsMenu();
+        renderUsersTable();
+        syncUsersSelectionUi();
+      }
+
+      function exitUsersArchiveView() {
+        usersShowingArchive = false;
+        usersSelectionMode = null;
+        clearUserChecks();
+        closeUsersToolsMenu();
+        renderUsersTable();
+        syncUsersSelectionUi();
+      }
+
+      function executeUsersSelectionAction() {
+        if (!window.AdminUsers) return;
+        var ids = getSelectedUserIds();
+        if (!ids.length) {
+          alert('حدد عنصراً واحداً على الأقل.');
+          return;
+        }
+        try {
+          if (!window.confirm('نقل ' + ids.length + ' مستخدم إلى الأرشيف؟')) return;
+          window.AdminUsers.archiveUsers(ids);
+          exitUsersSelectionMode();
+          renderUsersTable();
+        } catch (err) {
+          alert((err && err.message) || 'تعذر تنفيذ الإجراء');
+        }
+      }
+
+      function userRoleBadge(role) {
+        var cls = 'admin-badge--student';
+        if (role === 'instructor') cls = 'admin-badge--instructor';
+        if (role === 'admin') cls = 'admin-badge--admin';
+        return (
+          '<span class="admin-badge ' +
+          cls +
+          '">' +
+          escapeHtml(window.AdminUsers.roleLabel(role)) +
+          '</span>'
+        );
+      }
+
+      function userStatusBadge(status) {
+        var cls = 'admin-badge--active';
+        if (status === 'pending') cls = 'admin-badge--pending';
+        if (status === 'suspended') cls = 'admin-badge--suspended';
+        if (status === 'expired') cls = 'admin-badge--expired';
+        return (
+          '<span class="admin-badge ' +
+          cls +
+          '">' +
+          escapeHtml(window.AdminUsers.statusLabel(status)) +
+          '</span>'
+        );
+      }
+
+      function closeUsersRowMenus() {
+        if (usersFloatingMenu) {
+          usersFloatingMenu.remove();
+          usersFloatingMenu = null;
+        }
+        document.querySelectorAll('[data-user-more].open').forEach(function (el) {
+          el.classList.remove('open');
         });
       }
+
+      function openUsersRowMenu(toggle, userId) {
+        closeUsersRowMenus();
+        var user = window.AdminUsers.findUser(userId);
+        if (!user && !usersShowingArchive) return;
+
+        var archived = usersShowingArchive
+          ? window.AdminUsers.getArchivedUsers().filter(function (u) {
+              return u.id === userId;
+            })[0]
+          : null;
+        var target = user || archived;
+        if (!target) return;
+
+        toggle.classList.add('open');
+        var menu = document.createElement('div');
+        menu.className = 'admin-row-more__menu';
+        menu.setAttribute('role', 'menu');
+
+        var items = [];
+        if (target.role === 'student' && (target.status === 'expired' || window.AdminUsers.isSubscriptionEnded(target))) {
+          items.push(
+            '<button type="button" role="menuitem" data-renew-user="' +
+              escapeHtml(userId) +
+              '">تجديد الاشتراك</button>'
+          );
+        }
+        items.push(
+          '<button type="button" role="menuitem" data-archive-user="' +
+            escapeHtml(userId) +
+            '">أرشفة</button>'
+        );
+        menu.innerHTML = items.join('');
+        document.body.appendChild(menu);
+        usersFloatingMenu = menu;
+
+        var rect = toggle.getBoundingClientRect();
+        var menuW = menu.offsetWidth || 160;
+        var left = Math.min(window.innerWidth - menuW - 8, Math.max(8, rect.left + rect.width - menuW));
+        menu.style.position = 'fixed';
+        menu.style.top = rect.bottom + 6 + 'px';
+        menu.style.left = left + 'px';
+        menu.style.right = 'auto';
+        menu.hidden = false;
+      }
+
+      function closeUserEditor() {
+        var modal = document.getElementById('userEditorModal');
+        if (modal) modal.hidden = true;
+      }
+
+      function openUserEditor(user) {
+        var modal = document.getElementById('userEditorModal');
+        var title = document.getElementById('userEditorTitle');
+        var idEl = document.getElementById('userEditorId');
+        var nameEl = document.getElementById('userEditorName');
+        var emailEl = document.getElementById('userEditorEmail');
+        var statusEl = document.getElementById('userEditorStatus');
+        if (!modal) return;
+
+        if (title) title.textContent = user ? 'تعديل مستخدم' : 'إضافة مستخدم';
+        if (idEl) idEl.value = user ? user.id : '';
+        if (nameEl) nameEl.value = user ? user.name : '';
+        if (emailEl) emailEl.value = user ? user.email : '';
+        if (statusEl) statusEl.value = user ? user.status : 'active';
+        modal.hidden = false;
+        if (nameEl) nameEl.focus();
+      }
+
+      function renderUsersTable() {
+        var body = document.getElementById('usersTableBody');
+        var meta = document.getElementById('usersMeta');
+        var heading = document.getElementById('usersHeading');
+        var desc = document.getElementById('usersDesc');
+        var selectAll = document.getElementById('usersSelectAll');
+        var showingArchive = usersIsArchiveView();
+        if (!body || !window.AdminUsers) return;
+
+        closeUsersRowMenus();
+        if (selectAll) selectAll.checked = false;
+
+        var filterWrap = document.getElementById('usersFilterWrap');
+        if (filterWrap) filterWrap.hidden = showingArchive;
+
+        if (heading) heading.textContent = showingArchive ? 'أرشيف المستخدمين' : 'إدارة المستخدمين';
+        if (desc) {
+          desc.textContent = showingArchive
+            ? 'المستخدمون المؤرشفون — يمكنك الاستعادة أو الحذف النهائي'
+            : 'عرض وإدارة حسابات الطلاب';
+        }
+
+        var list = showingArchive
+          ? window.AdminUsers.getArchivedUsers().slice()
+          : window.AdminUsers.getUsers().slice();
+
+        list.sort(function (a, b) {
+          var ka = showingArchive ? a.archivedAt || a.createdAt : a.createdAt;
+          var kb = showingArchive ? b.archivedAt || b.createdAt : b.createdAt;
+          return String(kb || '').localeCompare(String(ka || ''));
+        });
+
+        var q = usersSearchQuery;
+        var statusFilter = usersStatusFilter || 'all';
+        var filtered = list.filter(function (u) {
+          if (!showingArchive && statusFilter !== 'all') {
+            if (statusFilter === 'expired') {
+              var isExpired =
+                u.status === 'expired' || window.AdminUsers.isSubscriptionEnded(u);
+              if (!isExpired) return false;
+            } else if (u.status !== statusFilter) {
+              return false;
+            }
+          }
+          if (!q) return true;
+          return (
+            String(u.name || '').toLowerCase().indexOf(q) !== -1 ||
+            String(u.email || '').toLowerCase().indexOf(q) !== -1
+          );
+        });
+
+        var archiveCount = window.AdminUsers.getArchivedUsers().length;
+        if (meta) {
+          meta.textContent = showingArchive
+            ? archiveCount + ' في الأرشيف · عرض ' + filtered.length
+            : 'عرض ' + filtered.length + ' من ' + list.length +
+              (archiveCount ? ' · الأرشيف: ' + archiveCount : '');
+        }
+
+        if (!filtered.length) {
+          body.innerHTML =
+            '<tr><td colspan="7" class="admin-empty-cell">' +
+            (showingArchive
+              ? q
+                ? 'لا نتائج في الأرشيف.'
+                : 'الأرشيف فارغ.'
+              : list.length
+                ? 'لا نتائج مطابقة للتصفية أو البحث.'
+                : 'لا يوجد مستخدمون.') +
+            '</td></tr>';
+          syncUsersSelectionUi();
+          return;
+        }
+
+        body.innerHTML = filtered
+          .map(function (user) {
+            var id = escapeHtml(user.id);
+            var initial = escapeHtml((user.name || '?').charAt(0));
+            var subLabel =
+              user.role === 'student'
+                ? user.subscriptionEndsAt
+                  ? window.AdminUsers.formatDate(user.subscriptionEndsAt)
+                  : '—'
+                : '—';
+            if (user.role === 'student' && (user.status === 'expired' || window.AdminUsers.isSubscriptionEnded(user))) {
+              subLabel = '<span class="admin-sub-ended">منتهي · ' + escapeHtml(window.AdminUsers.formatDate(user.subscriptionEndsAt)) + '</span>';
+            } else {
+              subLabel = escapeHtml(subLabel);
+            }
+
+            var actions;
+            if (showingArchive) {
+              actions =
+                '<div class="admin-table__actions admin-table__actions--row">' +
+                '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-restore-user="' +
+                id +
+                '">استعادة</button>' +
+                '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-purge-user="' +
+                id +
+                '">حذف نهائي</button>' +
+                '</div>';
+            } else {
+              var suspendLabel = user.status === 'suspended' ? 'تفعيل' : 'إيقاف';
+              var suspendCls =
+                user.status === 'suspended'
+                  ? 'admin-btn admin-btn--ghost admin-btn--sm admin-btn--activate'
+                  : 'admin-btn admin-btn--danger admin-btn--sm';
+              var moreNeeded =
+                user.role === 'student' ||
+                user.status === 'expired' ||
+                window.AdminUsers.isSubscriptionEnded(user);
+
+              actions =
+                '<div class="admin-table__actions admin-table__actions--row">' +
+                '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-edit-user="' +
+                id +
+                '">تعديل</button>' +
+                '<button class="' +
+                suspendCls +
+                '" type="button" data-toggle-suspend="' +
+                id +
+                '">' +
+                suspendLabel +
+                '</button>';
+
+              if (user.status === 'expired') {
+                actions +=
+                  '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-renew-user="' +
+                  id +
+                  '">تجديد</button>';
+              }
+
+              if (moreNeeded) {
+                actions +=
+                  '<div class="admin-row-more">' +
+                  '<button class="admin-row-more__toggle" type="button" aria-label="المزيد" data-user-more="' +
+                  id +
+                  '">⋯</button>' +
+                  '</div>';
+              }
+              actions += '</div>';
+            }
+
+            return (
+              '<tr data-user-id="' +
+              id +
+              '" data-name="' +
+              escapeHtml(user.name) +
+              '" data-email="' +
+              escapeHtml(user.email) +
+              '">' +
+              '<td class="admin-td-check">' +
+              '<input type="checkbox" class="user-row-check" value="' +
+              id +
+              '" aria-label="تحديد المستخدم" />' +
+              '</td>' +
+              '<td>' +
+              '<div class="admin-user-cell">' +
+              '<div class="admin-user-cell__avatar">' +
+              initial +
+              '</div>' +
+              '<div>' +
+              '<div class="admin-user-cell__name">' +
+              escapeHtml(user.name) +
+              '</div>' +
+              '<div class="admin-user-cell__email">' +
+              escapeHtml(user.email) +
+              '</div>' +
+              '</div>' +
+              '</div>' +
+              '</td>' +
+              '<td>' +
+              userRoleBadge(user.role) +
+              '</td>' +
+              '<td>' +
+              userStatusBadge(user.status) +
+              '</td>' +
+              '<td>' +
+              subLabel +
+              '</td>' +
+              '<td>' +
+              escapeHtml(
+                window.AdminUsers.formatDate(showingArchive ? user.archivedAt || user.createdAt : user.createdAt)
+              ) +
+              '</td>' +
+              '<td>' +
+              actions +
+              '</td>' +
+              '</tr>'
+            );
+          })
+          .join('');
+
+        syncUsersSelectionUi();
+      }
+
+      var userSearch = document.getElementById('userSearch');
+      if (userSearch) {
+        userSearch.addEventListener('input', function () {
+          usersSearchQuery = userSearch.value.trim().toLowerCase();
+          renderUsersTable();
+        });
+      }
+
+      var usersFilterEl = document.getElementById('usersStatusFilter');
+      if (usersFilterEl) {
+        usersFilterEl.addEventListener('change', function () {
+          usersStatusFilter = usersFilterEl.value || 'all';
+          renderUsersTable();
+        });
+      }
+
+      var usersMenuBtn = document.getElementById('usersMenuBtn');
+      if (usersMenuBtn) {
+        usersMenuBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (usersSelectionMode) {
+            executeUsersSelectionAction();
+            return;
+          }
+          if (usersToolsMenuOpen) closeUsersToolsMenu();
+          else openUsersToolsMenu();
+          syncUsersSelectionUi();
+        });
+      }
+
+      var usersCancelBtn = document.getElementById('usersCancelMode');
+      if (usersCancelBtn) {
+        usersCancelBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          exitUsersSelectionMode();
+        });
+      }
+
+      var usersMenuDropdown = document.getElementById('usersMenuDropdown');
+      if (usersMenuDropdown) {
+        usersMenuDropdown.addEventListener('click', function (e) {
+          var item = e.target.closest ? e.target.closest('[data-users-menu]') : null;
+          if (!item) return;
+          e.stopPropagation();
+          var action = item.getAttribute('data-users-menu');
+          if (action === 'select-delete') enterUsersSelectionMode();
+          else if (action === 'view-archive') openUsersArchiveView();
+          else if (action === 'exit-archive') exitUsersArchiveView();
+        });
+      }
+
+      var addUserBtn = document.getElementById('addUserBtn');
+      if (addUserBtn) {
+        addUserBtn.addEventListener('click', function () {
+          openUserEditor(null);
+        });
+      }
+
+      var userEditorForm = document.getElementById('userEditorForm');
+      if (userEditorForm) {
+        userEditorForm.addEventListener('submit', function (e) {
+          e.preventDefault();
+          if (!window.AdminUsers) return;
+          var id = (document.getElementById('userEditorId') || {}).value || '';
+          var payload = {
+            name: (document.getElementById('userEditorName') || {}).value,
+            email: (document.getElementById('userEditorEmail') || {}).value,
+            role: 'student',
+            status: (document.getElementById('userEditorStatus') || {}).value,
+          };
+          try {
+            if (id) window.AdminUsers.updateUser(id, payload);
+            else window.AdminUsers.addUser(payload);
+            closeUserEditor();
+            renderUsersTable();
+          } catch (err) {
+            alert((err && err.message) || 'تعذر حفظ المستخدم');
+          }
+        });
+      }
+
+      document.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('[data-close-user-modal]')) {
+          closeUserEditor();
+        }
+
+        if (usersToolsMenuOpen) {
+          var tools = document.getElementById('usersToolsMenu');
+          if (tools && !tools.contains(e.target)) closeUsersToolsMenu();
+        }
+
+        if (!window.AdminUsers) return;
+
+        var moreToggle = e.target.closest ? e.target.closest('[data-user-more]') : null;
+        if (moreToggle) {
+          e.preventDefault();
+          e.stopPropagation();
+          var mid = moreToggle.getAttribute('data-user-more');
+          if (moreToggle.classList.contains('open')) closeUsersRowMenus();
+          else openUsersRowMenu(moreToggle, mid);
+          return;
+        }
+
+        if (
+          usersFloatingMenu &&
+          !e.target.closest('.admin-row-more__menu') &&
+          !e.target.closest('[data-user-more]')
+        ) {
+          closeUsersRowMenus();
+        }
+
+        var editBtn = e.target.closest ? e.target.closest('[data-edit-user]') : null;
+        var suspendBtn = e.target.closest ? e.target.closest('[data-toggle-suspend]') : null;
+        var renewBtn = e.target.closest ? e.target.closest('[data-renew-user]') : null;
+        var archiveBtn = e.target.closest ? e.target.closest('[data-archive-user]') : null;
+        var restoreBtn = e.target.closest ? e.target.closest('[data-restore-user]') : null;
+        var purgeBtn = e.target.closest ? e.target.closest('[data-purge-user]') : null;
+
+        try {
+          if (editBtn) {
+            var editUser = window.AdminUsers.findUser(editBtn.getAttribute('data-edit-user'));
+            if (editUser) openUserEditor(editUser);
+            return;
+          }
+          if (suspendBtn) {
+            window.AdminUsers.toggleSuspend(suspendBtn.getAttribute('data-toggle-suspend'));
+            closeUsersRowMenus();
+            renderUsersTable();
+            return;
+          }
+          if (renewBtn) {
+            window.AdminUsers.renewSubscription(renewBtn.getAttribute('data-renew-user'), 90);
+            closeUsersRowMenus();
+            renderUsersTable();
+            return;
+          }
+          if (archiveBtn) {
+            if (!window.confirm('نقل هذا المستخدم إلى الأرشيف؟')) return;
+            window.AdminUsers.archiveUser(archiveBtn.getAttribute('data-archive-user'));
+            closeUsersRowMenus();
+            renderUsersTable();
+            return;
+          }
+          if (restoreBtn) {
+            window.AdminUsers.restoreUser(restoreBtn.getAttribute('data-restore-user'));
+            renderUsersTable();
+            return;
+          }
+          if (purgeBtn) {
+            if (!window.confirm('حذف نهائي؟ لا يمكن التراجع.')) return;
+            window.AdminUsers.permanentDeleteUser(purgeBtn.getAttribute('data-purge-user'));
+            renderUsersTable();
+          }
+        } catch (err) {
+          alert((err && err.message) || 'تعذر تنفيذ الإجراء');
+        }
+      });
+
+      document.addEventListener('change', function (e) {
+        if (e.target && e.target.id === 'usersSelectAll') {
+          document.querySelectorAll('.user-row-check').forEach(function (cb) {
+            cb.checked = e.target.checked;
+          });
+          syncUsersSelectionUi();
+          return;
+        }
+        if (e.target && e.target.classList && e.target.classList.contains('user-row-check')) {
+          syncUsersSelectionUi();
+        }
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var modal = document.getElementById('userEditorModal');
+        if (modal && !modal.hidden) {
+          closeUserEditor();
+          return;
+        }
+        if (usersToolsMenuOpen) closeUsersToolsMenu();
+        else if (usersSelectionMode) exitUsersSelectionMode();
+      });
+
+      window.addEventListener('scroll', closeUsersRowMenus, true);
+      window.addEventListener('resize', closeUsersRowMenus);
+
+      renderUsersTable();
 
       function escapeHtml(value) {
         return String(value == null ? '' : value)
@@ -427,6 +1071,7 @@
       function statusBadge(status) {
         if (status === 'approved') return '<span class="admin-badge admin-badge--active">موافق عليه</span>';
         if (status === 'rejected') return '<span class="admin-badge admin-badge--suspended">مرفوض</span>';
+        if (status === 'on_hold') return '<span class="admin-badge admin-badge--hold">معلّق</span>';
         return '<span class="admin-badge admin-badge--pending">قيد المراجعة</span>';
       }
 
@@ -441,97 +1086,894 @@
         return parts.length ? parts.join('<br>') : '—';
       }
 
-      function renderInstructorRequests() {
+      var instructorFilter = 'all';
+      var instructorTab = 'requests'; /* requests | roster */
+      var selectionModeType = null; /* null | 'delete' */
+      var showingArchiveView = false;
+      var floatingMenu = null;
+      var toolsMenuOpen = false;
+
+      function isArchiveView() {
+        return showingArchiveView === true;
+      }
+
+      function isRosterTab() {
+        return instructorTab === 'roster' && !showingArchiveView;
+      }
+
+      function getSelectedIds() {
+        return Array.prototype.map
+          .call(document.querySelectorAll('.instructor-row-check:checked'), function (el) {
+            return el.value;
+          })
+          .filter(Boolean);
+      }
+
+      function clearRowChecks() {
+        document.querySelectorAll('.instructor-row-check').forEach(function (cb) {
+          cb.checked = false;
+        });
+        var selectAll = document.getElementById('instructorSelectAll');
+        if (selectAll) selectAll.checked = false;
+      }
+
+      function syncInstructorTabsUi() {
+        var tabs = document.getElementById('instructorTabs');
+        if (tabs) tabs.hidden = showingArchiveView;
+        document.querySelectorAll('[data-instructor-tab]').forEach(function (btn) {
+          var active = btn.getAttribute('data-instructor-tab') === instructorTab;
+          btn.classList.toggle('is-active', active);
+          btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+      }
+
+      function setInstructorTab(tab) {
+        instructorTab = tab === 'roster' ? 'roster' : 'requests';
+        showingArchiveView = false;
+        selectionModeType = null;
+        clearRowChecks();
+        closeToolsMenu();
+        var filterEl = document.getElementById('instructorRequestsFilter');
+        if (filterEl) {
+          if (instructorTab === 'roster') {
+            filterEl.innerHTML =
+              '<option value="all">الكل</option>' +
+              '<option value="active">نشط</option>' +
+              '<option value="suspended">موقوف</option>';
+          } else {
+            filterEl.innerHTML =
+              '<option value="all">الكل</option>' +
+              '<option value="pending">قيد المراجعة</option>' +
+              '<option value="on_hold">معلّق</option>' +
+              '<option value="rejected">مرفوض</option>';
+          }
+          instructorFilter = 'all';
+          filterEl.value = 'all';
+        }
+        renderInstructorPanel();
+      }
+
+      function closeToolsMenu() {
+        var dropdown = document.getElementById('instructorMenuDropdown');
+        var btn = document.getElementById('instructorMenuBtn');
+        toolsMenuOpen = false;
+        if (dropdown) dropdown.hidden = true;
+        if (btn) {
+          btn.setAttribute('aria-expanded', 'false');
+          if (!selectionModeType) btn.classList.remove('is-active');
+        }
+      }
+
+      function openToolsMenu() {
+        var dropdown = document.getElementById('instructorMenuDropdown');
+        var btn = document.getElementById('instructorMenuBtn');
+        var exitArchiveItem = dropdown
+          ? dropdown.querySelector('[data-menu-action="exit-archive"]')
+          : null;
+        var selectItem = dropdown
+          ? dropdown.querySelector('[data-menu-action="select-delete"]')
+          : null;
+        var viewArchiveItem = dropdown
+          ? dropdown.querySelector('[data-menu-action="view-archive"]')
+          : null;
+        var divider = dropdown ? dropdown.querySelector('[data-menu-main]') : null;
+
+        if (exitArchiveItem) exitArchiveItem.hidden = !showingArchiveView;
+        if (selectItem) selectItem.hidden = showingArchiveView;
+        if (viewArchiveItem) viewArchiveItem.hidden = showingArchiveView;
+        if (divider) divider.hidden = showingArchiveView;
+
+        toolsMenuOpen = true;
+        if (dropdown) dropdown.hidden = false;
+        if (btn) btn.setAttribute('aria-expanded', 'true');
+      }
+
+      function syncSelectionUi() {
+        var panel = document.getElementById('instructors');
+        var modeBtn = document.getElementById('instructorMenuBtn');
+        var cancelBtn = document.getElementById('instructorCancelMode');
+        var ids = getSelectedIds();
+        var inSelection = !!selectionModeType;
+
+        if (panel) panel.classList.toggle('is-selection-mode', inSelection);
+        if (cancelBtn) cancelBtn.hidden = !inSelection;
+
+        if (modeBtn) {
+          modeBtn.classList.toggle('is-active', inSelection || toolsMenuOpen);
+          modeBtn.classList.toggle('is-execute', inSelection);
+          modeBtn.classList.toggle('admin-btn--danger', inSelection);
+
+          if (inSelection) {
+            modeBtn.textContent = 'حذف المحدد (' + ids.length + ')';
+            modeBtn.setAttribute('aria-label', 'حذف المحدد');
+            modeBtn.title = 'حذف المحدد';
+          } else {
+            modeBtn.textContent = '☰';
+            modeBtn.setAttribute('aria-label', 'قائمة الإجراءات');
+            modeBtn.title = 'قائمة الإجراءات';
+            modeBtn.classList.remove('admin-btn--danger', 'admin-btn--primary');
+          }
+        }
+      }
+
+      function updateBatchBar() {
+        syncSelectionUi();
+      }
+
+      function exitSelectionMode() {
+        selectionModeType = null;
+        clearRowChecks();
+        closeToolsMenu();
+        syncSelectionUi();
+      }
+
+      function enterSelectionMode() {
+        showingArchiveView = false;
+        selectionModeType = 'delete';
+        clearRowChecks();
+        closeToolsMenu();
+        renderInstructorPanel();
+        syncSelectionUi();
+      }
+
+      function openArchiveView() {
+        selectionModeType = null;
+        showingArchiveView = true;
+        clearRowChecks();
+        closeToolsMenu();
+        renderInstructorPanel();
+        syncSelectionUi();
+      }
+
+      function exitArchiveView() {
+        showingArchiveView = false;
+        selectionModeType = null;
+        clearRowChecks();
+        closeToolsMenu();
+        renderInstructorPanel();
+        syncSelectionUi();
+      }
+
+      function executeSelectionAction() {
+        var ids = getSelectedIds();
+        if (!ids.length) {
+          alert('حدد عنصراً واحداً على الأقل.');
+          return;
+        }
+        try {
+          if (isRosterTab()) {
+            if (!window.confirm('حذف ' + ids.length + ' مدرب ونقلهم إلى الأرشيف؟')) return;
+            window.InstructorApps.removeInstructors(ids);
+            refreshAfterAction({ type: 'batch-remove-instructors', ids: ids });
+          } else {
+            if (!window.confirm('نقل ' + ids.length + ' عنصر إلى الأرشيف؟')) return;
+            window.InstructorApps.archiveApplications(ids);
+            refreshAfterAction({ type: 'batch-delete-to-archive', ids: ids });
+          }
+          exitSelectionMode();
+        } catch (err) {
+          alert((err && err.message) || 'تعذر تنفيذ الإجراء');
+        }
+      }
+
+      function closeAllRowMenus() {
+        document.querySelectorAll('.admin-row-more__toggle.open').forEach(function (t) {
+          t.classList.remove('open');
+        });
+        if (floatingMenu && floatingMenu.parentNode) {
+          floatingMenu.parentNode.removeChild(floatingMenu);
+        }
+        floatingMenu = null;
+      }
+
+      function openRowMenu(toggleBtn, id) {
+        closeAllRowMenus();
+        toggleBtn.classList.add('open');
+        var rect = toggleBtn.getBoundingClientRect();
+        var menu = document.createElement('div');
+        menu.className = 'admin-row-more__menu admin-row-more__menu--fixed';
+        menu.setAttribute('data-row-more-menu', id);
+
+        if (isArchiveView()) {
+          menu.innerHTML =
+            '<button type="button" data-restore-instructor="' + id + '">استعادة</button>' +
+            '<button type="button" class="is-danger" data-purge-instructor="' + id + '">حذف نهائي</button>';
+        } else if (isRosterTab()) {
+          menu.innerHTML =
+            '<button type="button" class="is-danger" data-remove-instructor="' + id + '">حذف المدرب</button>';
+        } else {
+          var app =
+            window.InstructorApps &&
+            window.InstructorApps.getApplications().filter(function (a) {
+              return a.id === id;
+            })[0];
+          var status = app ? app.status : 'pending';
+          var items = [];
+          if (status !== 'pending') {
+            items.push(
+              '<button type="button" data-reset-instructor="' + id + '">إعادة قيد المراجعة</button>'
+            );
+          }
+          if (status !== 'on_hold') {
+            items.push(
+              '<button type="button" data-hold-instructor="' + id + '">تعليق الطلب</button>'
+            );
+          }
+          items.push(
+            '<button type="button" class="is-danger" data-delete-instructor="' + id + '">حذف الطلب</button>'
+          );
+          menu.innerHTML = items.join('');
+        }
+
+        document.body.appendChild(menu);
+        floatingMenu = menu;
+
+        var menuWidth = menu.offsetWidth || 150;
+        var left = rect.left;
+        if (left + menuWidth > window.innerWidth - 8) {
+          left = Math.max(8, rect.right - menuWidth);
+        }
+        var top = rect.bottom + 6;
+        if (top + menu.offsetHeight > window.innerHeight - 8) {
+          top = Math.max(8, rect.top - menu.offsetHeight - 6);
+        }
+        menu.style.position = 'fixed';
+        menu.style.top = top + 'px';
+        menu.style.left = left + 'px';
+        menu.style.right = 'auto';
+        menu.hidden = false;
+      }
+
+      function closeInstructorEditor() {
+        var modal = document.getElementById('instructorEditorModal');
+        if (modal) modal.hidden = true;
+      }
+
+      function openInstructorEditor(instructor) {
+        var modal = document.getElementById('instructorEditorModal');
+        if (!modal || !instructor) return;
+        var idEl = document.getElementById('instructorEditorId');
+        var nameEl = document.getElementById('instructorEditorName');
+        var emailEl = document.getElementById('instructorEditorEmail');
+        var bioEl = document.getElementById('instructorEditorBio');
+        var coursesEl = document.getElementById('instructorEditorCourses');
+        if (idEl) idEl.value = instructor.id || instructor.email;
+        if (nameEl) nameEl.value = instructor.fullName || '';
+        if (emailEl) emailEl.value = instructor.email || '';
+        if (bioEl) bioEl.value = instructor.bio || '';
+        if (coursesEl) coursesEl.value = instructor.courses || '';
+        modal.hidden = false;
+        if (nameEl) nameEl.focus();
+      }
+
+      function setTableHead(mode) {
+        var head = document.getElementById('instructorTableHead');
+        if (!head) return;
+        if (mode === 'roster') {
+          head.innerHTML =
+            '<tr>' +
+            '<th scope="col" class="admin-th-check"><input type="checkbox" id="instructorSelectAll" aria-label="تحديد الكل" /></th>' +
+            '<th scope="col">المدرب</th>' +
+            '<th scope="col">النبذة</th>' +
+            '<th scope="col">الكورسات</th>' +
+            '<th scope="col">تاريخ الاعتماد</th>' +
+            '<th scope="col">الحالة</th>' +
+            '<th scope="col">الإجراءات</th>' +
+            '</tr>';
+        } else {
+          head.innerHTML =
+            '<tr>' +
+            '<th scope="col" class="admin-th-check"><input type="checkbox" id="instructorSelectAll" aria-label="تحديد الكل" /></th>' +
+            '<th scope="col">المتقدم</th>' +
+            '<th scope="col">النبذة</th>' +
+            '<th scope="col">الكورسات المقترحة</th>' +
+            '<th scope="col">السيرة الذاتية</th>' +
+            '<th scope="col">التاريخ</th>' +
+            '<th scope="col">الحالة</th>' +
+            '<th scope="col">الإجراءات</th>' +
+            '</tr>';
+        }
+      }
+
+      function accountStatusBadge(status) {
+        if (status === 'suspended') {
+          return '<span class="admin-badge admin-badge--suspended">موقوف</span>';
+        }
+        return '<span class="admin-badge admin-badge--active">نشط</span>';
+      }
+
+      function renderInstructorPanel() {
         var body = document.getElementById('instructorRequestsBody');
         var meta = document.getElementById('instructorRequestsMeta');
+        var heading = document.getElementById('instructorsHeading');
+        var desc = document.getElementById('instructorsDesc');
+        var showingArchive = isArchiveView();
+        var roster = isRosterTab();
         if (!body || !window.InstructorApps) return;
 
-        var apps = window.InstructorApps.getApplications().slice().sort(function (a, b) {
-          return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
-        });
+        closeAllRowMenus();
+        syncInstructorTabsUi();
+        setTableHead(showingArchive ? 'requests' : roster ? 'roster' : 'requests');
 
-        var pendingCount = apps.filter(function (a) { return a.status === 'pending'; }).length;
-        if (meta) meta.textContent = pendingCount + ' طلب قيد المراجعة · إجمالي ' + apps.length;
+        var filterWrap = document.getElementById('instructorFilterWrap');
+        if (filterWrap) filterWrap.hidden = showingArchive;
 
-        if (!apps.length) {
-          body.innerHTML = '<tr><td colspan="7" class="admin-empty-cell">لا توجد طلبات حالياً. ستظهر هنا بعد الإرسال من صفحة الموقع.</td></tr>';
+        if (heading) {
+          heading.textContent = showingArchive ? 'سجل الأرشيف' : 'إدارة المدربين';
+        }
+        if (desc) {
+          desc.textContent = showingArchive
+            ? 'العناصر المؤرشفة — يمكنك الاستعادة أو الحذف النهائي'
+            : roster
+              ? 'إدارة حسابات المدربين المعتمدين'
+              : 'مراجعة طلبات الانضمام كمدرب والموافقة أو الرفض';
+        }
+
+        var pendingCount = window.InstructorApps.getPendingApplications().length;
+        var rosterCount = window.InstructorApps.getActiveInstructors().length;
+        var archiveCount = window.InstructorApps.getArchivedApplications().length;
+
+        if (showingArchive) {
+          var archived = window.InstructorApps.getArchivedApplications().slice();
+          archived.sort(function (a, b) {
+            return String(b.archivedAt || b.createdAt || '').localeCompare(
+              String(a.archivedAt || a.createdAt || '')
+            );
+          });
+          if (meta) meta.textContent = archiveCount + ' عنصر في الأرشيف · عرض ' + archived.length;
+          if (!archived.length) {
+            body.innerHTML = '<tr><td colspan="8" class="admin-empty-cell">الأرشيف فارغ.</td></tr>';
+            syncSelectionUi();
+            return;
+          }
+          body.innerHTML = archived
+            .map(function (app) {
+              return renderRequestRow(app, true);
+            })
+            .join('');
+          syncSelectionUi();
           return;
         }
 
-        body.innerHTML = apps.map(function (app) {
-          var initial = escapeHtml((app.fullName || '?').charAt(0));
-          var actions = '';
-          if (app.status === 'pending') {
-            actions =
-              '<div class="admin-table__actions">' +
-                '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-approve-instructor="' + escapeHtml(app.id) + '">موافقة</button>' +
-                '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-reject-instructor="' + escapeHtml(app.id) + '">رفض</button>' +
-              '</div>';
-          } else {
-            actions = '<span class="admin-panel__meta">تمت المراجعة</span>';
+        if (roster) {
+          var instructors = window.InstructorApps.getActiveInstructors().slice();
+          var filteredRoster = instructors.filter(function (inst) {
+            return instructorFilter === 'all' || inst.accountStatus === instructorFilter;
+          });
+          if (meta) {
+            meta.textContent =
+              rosterCount +
+              ' مدرب معتمد · عرض ' +
+              filteredRoster.length +
+              (archiveCount ? ' · الأرشيف: ' + archiveCount : '');
           }
+          if (!filteredRoster.length) {
+            body.innerHTML =
+              '<tr><td colspan="7" class="admin-empty-cell">' +
+              (instructors.length
+                ? 'لا يوجد مدربون ضمن التصفية المحددة.'
+                : 'لا يوجد مدربون معتمدون بعد. وافق على طلب من تبويب «طلبات الانضمام».') +
+              '</td></tr>';
+            syncSelectionUi();
+            return;
+          }
+          body.innerHTML = filteredRoster.map(renderRosterRow).join('');
+          syncSelectionUi();
+          return;
+        }
 
-          return (
-            '<tr data-app-id="' + escapeHtml(app.id) + '">' +
-              '<td>' +
-                '<div class="admin-user-cell">' +
-                  '<div class="admin-user-cell__avatar">' + initial + '</div>' +
-                  '<div>' +
-                    '<div class="admin-user-cell__name">' + escapeHtml(app.fullName) + '</div>' +
-                    '<div class="admin-user-cell__email">' + escapeHtml(app.email) + '</div>' +
-                  '</div>' +
-                '</div>' +
-              '</td>' +
-              '<td><div class="admin-cell-clamp">' + escapeHtml(app.bio) + '</div></td>' +
-              '<td><div class="admin-cell-clamp">' + escapeHtml(app.courses) + '</div></td>' +
-              '<td>' + cvCell(app) + '</td>' +
-              '<td>' + escapeHtml(window.InstructorApps.formatDate(app.createdAt)) + '</td>' +
-              '<td>' + statusBadge(app.status) + '</td>' +
-              '<td>' + actions + '</td>' +
-            '</tr>'
-          );
-        }).join('');
+        /* Requests tab — exclude approved (they live in roster) */
+        var apps = window.InstructorApps.getApplications()
+          .slice()
+          .filter(function (a) {
+            return a.status !== 'approved';
+          });
+        apps.sort(function (a, b) {
+          return String(b.createdAt || '').localeCompare(String(a.createdAt || ''));
+        });
+        var filtered = apps.filter(function (a) {
+          return instructorFilter === 'all' || a.status === instructorFilter;
+        });
+
+        if (meta) {
+          meta.textContent =
+            pendingCount +
+            ' طلب قيد المراجعة · ' +
+            rosterCount +
+            ' مدرب · عرض ' +
+            filtered.length +
+            (archiveCount ? ' · الأرشيف: ' + archiveCount : '');
+        }
+
+        if (!filtered.length) {
+          body.innerHTML =
+            '<tr><td colspan="8" class="admin-empty-cell">' +
+            (apps.length
+              ? 'لا توجد طلبات ضمن التصفية المحددة.'
+              : 'لا توجد طلبات حالياً. ستظهر هنا بعد الإرسال من صفحة الموقع.') +
+            '</td></tr>';
+          syncSelectionUi();
+          return;
+        }
+
+        body.innerHTML = filtered
+          .map(function (app) {
+            return renderRequestRow(app, false);
+          })
+          .join('');
+        syncSelectionUi();
+      }
+
+      function renderRequestRow(app, showingArchive) {
+        var initial = escapeHtml((app.fullName || '?').charAt(0));
+        var id = escapeHtml(app.id);
+        var canDecide = !showingArchive && app.status === 'pending';
+        var dateLabel = showingArchive
+          ? window.InstructorApps.formatDate(app.archivedAt || app.createdAt)
+          : window.InstructorApps.formatDate(app.createdAt);
+
+        var actions =
+          '<div class="admin-table__actions admin-table__actions--row">' +
+          (showingArchive
+            ? '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-restore-instructor="' +
+              id +
+              '">استعادة</button>' +
+              '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-purge-instructor="' +
+              id +
+              '">حذف نهائي</button>'
+            : (canDecide
+                ? '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-approve-instructor="' +
+                  id +
+                  '">موافقة</button>' +
+                  '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-reject-instructor="' +
+                  id +
+                  '">رفض</button>'
+                : '<span class="admin-row-status-note">' +
+                  (app.status === 'on_hold'
+                    ? 'معلّق'
+                    : app.status === 'rejected'
+                      ? 'مرفوض'
+                      : 'تمت المراجعة') +
+                  '</span>') +
+              '<div class="admin-row-more">' +
+              '<button class="admin-row-more__toggle" type="button" aria-label="المزيد" aria-haspopup="true" data-row-more="' +
+              id +
+              '">⋯</button>' +
+              '</div>') +
+          '</div>';
+
+        return (
+          '<tr data-app-id="' +
+          id +
+          '">' +
+          '<td class="admin-td-check">' +
+          '<input type="checkbox" class="instructor-row-check" value="' +
+          id +
+          '" aria-label="تحديد الطلب" />' +
+          '</td>' +
+          '<td>' +
+          '<div class="admin-user-cell">' +
+          '<div class="admin-user-cell__avatar">' +
+          initial +
+          '</div>' +
+          '<div>' +
+          '<div class="admin-user-cell__name">' +
+          escapeHtml(app.fullName) +
+          '</div>' +
+          '<div class="admin-user-cell__email">' +
+          escapeHtml(app.email) +
+          '</div>' +
+          '</div>' +
+          '</div>' +
+          '</td>' +
+          '<td><div class="admin-cell-clamp">' +
+          escapeHtml(app.bio) +
+          '</div></td>' +
+          '<td><div class="admin-cell-clamp">' +
+          escapeHtml(app.courses) +
+          '</div></td>' +
+          '<td>' +
+          cvCell(app) +
+          '</td>' +
+          '<td>' +
+          escapeHtml(dateLabel) +
+          '</td>' +
+          '<td>' +
+          statusBadge(app.status) +
+          '</td>' +
+          '<td>' +
+          actions +
+          '</td>' +
+          '</tr>'
+        );
+      }
+
+      function renderRosterRow(inst) {
+        var initial = escapeHtml((inst.fullName || '?').charAt(0));
+        var id = escapeHtml(inst.id);
+        var suspendLabel = inst.accountStatus === 'suspended' ? 'تفعيل' : 'إيقاف';
+        var suspendCls =
+          inst.accountStatus === 'suspended'
+            ? 'admin-btn admin-btn--ghost admin-btn--sm admin-btn--activate'
+            : 'admin-btn admin-btn--danger admin-btn--sm';
+
+        var actions =
+          '<div class="admin-table__actions admin-table__actions--row">' +
+          '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-edit-instructor="' +
+          id +
+          '">تعديل</button>' +
+          '<button class="' +
+          suspendCls +
+          '" type="button" data-toggle-instructor="' +
+          id +
+          '">' +
+          suspendLabel +
+          '</button>' +
+          '<div class="admin-row-more">' +
+          '<button class="admin-row-more__toggle" type="button" aria-label="المزيد" data-row-more="' +
+          id +
+          '">⋯</button>' +
+          '</div>' +
+          '</div>';
+
+        return (
+          '<tr data-instructor-id="' +
+          id +
+          '">' +
+          '<td class="admin-td-check">' +
+          '<input type="checkbox" class="instructor-row-check" value="' +
+          id +
+          '" aria-label="تحديد المدرب" />' +
+          '</td>' +
+          '<td>' +
+          '<div class="admin-user-cell">' +
+          '<div class="admin-user-cell__avatar">' +
+          initial +
+          '</div>' +
+          '<div>' +
+          '<div class="admin-user-cell__name">' +
+          escapeHtml(inst.fullName) +
+          '</div>' +
+          '<div class="admin-user-cell__email">' +
+          escapeHtml(inst.email) +
+          '</div>' +
+          '</div>' +
+          '</div>' +
+          '</td>' +
+          '<td><div class="admin-cell-clamp">' +
+          escapeHtml(inst.bio) +
+          '</div></td>' +
+          '<td><div class="admin-cell-clamp">' +
+          escapeHtml(inst.courses) +
+          '</div></td>' +
+          '<td>' +
+          escapeHtml(window.InstructorApps.formatDate(inst.approvedAt)) +
+          '</td>' +
+          '<td>' +
+          accountStatusBadge(inst.accountStatus) +
+          '</td>' +
+          '<td>' +
+          actions +
+          '</td>' +
+          '</tr>'
+        );
+      }
+
+      function refreshAfterAction(detail) {
+        document.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: detail || null }));
+        renderInstructorPanel();
       }
 
       document.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('[data-close-instructor-modal]')) {
+          closeInstructorEditor();
+        }
+
+        var tabBtn = e.target.closest ? e.target.closest('[data-instructor-tab]') : null;
+        if (tabBtn) {
+          setInstructorTab(tabBtn.getAttribute('data-instructor-tab'));
+          return;
+        }
+
+        if (!window.InstructorApps) return;
+
+        var moreToggle = e.target.closest ? e.target.closest('[data-row-more]') : null;
+        if (moreToggle) {
+          e.preventDefault();
+          e.stopPropagation();
+          var mid = moreToggle.getAttribute('data-row-more');
+          if (moreToggle.classList.contains('open')) closeAllRowMenus();
+          else openRowMenu(moreToggle, mid);
+          return;
+        }
+
+        if (floatingMenu && !e.target.closest('.admin-row-more__menu') && !e.target.closest('[data-row-more]')) {
+          closeAllRowMenus();
+        }
+
         var approveBtn = e.target.closest ? e.target.closest('[data-approve-instructor]') : null;
         var rejectBtn = e.target.closest ? e.target.closest('[data-reject-instructor]') : null;
+        var resetBtn = e.target.closest ? e.target.closest('[data-reset-instructor]') : null;
+        var holdBtn = e.target.closest ? e.target.closest('[data-hold-instructor]') : null;
+        var deleteBtn = e.target.closest ? e.target.closest('[data-delete-instructor]') : null;
+        var removeBtn = e.target.closest ? e.target.closest('[data-remove-instructor]') : null;
+        var editInstBtn = e.target.closest ? e.target.closest('[data-edit-instructor]') : null;
+        var toggleInstBtn = e.target.closest ? e.target.closest('[data-toggle-instructor]') : null;
+        var restoreBtn = e.target.closest ? e.target.closest('[data-restore-instructor]') : null;
+        var purgeBtn = e.target.closest ? e.target.closest('[data-purge-instructor]') : null;
 
-        if (approveBtn && window.InstructorApps) {
-          var approveId = approveBtn.getAttribute('data-approve-instructor');
+        if (approveBtn) {
           try {
-            var approved = window.InstructorApps.approveApplication(approveId);
-            document.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: approved }));
-            renderInstructorRequests();
-            alert('تمت الموافقة. تم تفعيل لوحة المدرب للمتقدم: ' + approved.email);
+            var approved = window.InstructorApps.approveApplication(
+              approveBtn.getAttribute('data-approve-instructor')
+            );
+            if (approved && approved.email) {
+              window.InstructorApps.setInstructorApprovedFlag(approved.email, true);
+              window.InstructorApps.setSessionEmail(approved.email);
+            }
+            closeAllRowMenus();
+            document.dispatchEvent(
+              new CustomEvent('ifa:instructor-status-changed', { detail: approved || null })
+            );
+            setInstructorTab('roster');
+            var unlockUrl = window.InstructorApps.buildIndexUnlockUrl(approved.email);
+            if (
+              window.confirm(
+                'تمت الموافقة وإضافة المدرب إلى قائمة المدربين.\n\nلفتح الموقع وتفعيل «لوحة المدرب»، اضغط موافق.'
+              )
+            ) {
+              window.location.href = unlockUrl;
+            }
           } catch (err) {
             alert((err && err.message) || 'تعذر تنفيذ الموافقة');
           }
           return;
         }
 
-        if (rejectBtn && window.InstructorApps) {
-          var rejectId = rejectBtn.getAttribute('data-reject-instructor');
+        if (rejectBtn) {
           try {
-            var rejected = window.InstructorApps.rejectApplication(rejectId);
-            document.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: rejected }));
-            renderInstructorRequests();
+            var rejected = window.InstructorApps.rejectApplication(
+              rejectBtn.getAttribute('data-reject-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction(rejected);
           } catch (err) {
             alert((err && err.message) || 'تعذر تنفيذ الرفض');
+          }
+          return;
+        }
+
+        if (resetBtn) {
+          try {
+            var resetApp = window.InstructorApps.resetApplication(
+              resetBtn.getAttribute('data-reset-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction(resetApp);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر إعادة الطلب لقيد المراجعة');
+          }
+          return;
+        }
+
+        if (holdBtn) {
+          try {
+            var held = window.InstructorApps.holdApplication(holdBtn.getAttribute('data-hold-instructor'));
+            closeAllRowMenus();
+            refreshAfterAction(held);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر تعليق الطلب');
+          }
+          return;
+        }
+
+        if (deleteBtn) {
+          if (!window.confirm('نقل هذا الطلب إلى سجل الأرشيف؟')) return;
+          try {
+            var deleted = window.InstructorApps.archiveApplication(
+              deleteBtn.getAttribute('data-delete-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction(deleted);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر حذف الطلب');
+          }
+          return;
+        }
+
+        if (editInstBtn) {
+          var editTarget = window.InstructorApps.findActiveInstructor(
+            editInstBtn.getAttribute('data-edit-instructor')
+          );
+          if (editTarget) openInstructorEditor(editTarget);
+          return;
+        }
+
+        if (toggleInstBtn) {
+          try {
+            window.InstructorApps.toggleInstructorSuspend(
+              toggleInstBtn.getAttribute('data-toggle-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction({ type: 'toggle-suspend' });
+          } catch (err) {
+            alert((err && err.message) || 'تعذر تحديث حالة المدرب');
+          }
+          return;
+        }
+
+        if (removeBtn) {
+          if (!window.confirm('حذف هذا المدرب ونقله إلى الأرشيف؟')) return;
+          try {
+            window.InstructorApps.removeInstructor(removeBtn.getAttribute('data-remove-instructor'));
+            closeAllRowMenus();
+            refreshAfterAction({ type: 'remove-instructor' });
+          } catch (err) {
+            alert((err && err.message) || 'تعذر حذف المدرب');
+          }
+          return;
+        }
+
+        if (restoreBtn) {
+          try {
+            var restored = window.InstructorApps.restoreApplication(
+              restoreBtn.getAttribute('data-restore-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction(restored);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر الاستعادة');
+          }
+          return;
+        }
+
+        if (purgeBtn) {
+          if (!window.confirm('حذف نهائي؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+          try {
+            var purged = window.InstructorApps.permanentDeleteApplication(
+              purgeBtn.getAttribute('data-purge-instructor')
+            );
+            closeAllRowMenus();
+            refreshAfterAction(purged);
+          } catch (err) {
+            alert((err && err.message) || 'تعذر الحذف النهائي');
           }
         }
       });
 
-      var refreshBtn = document.getElementById('refreshInstructorRequests');
-      if (refreshBtn) refreshBtn.addEventListener('click', renderInstructorRequests);
+      var instructorEditorForm = document.getElementById('instructorEditorForm');
+      if (instructorEditorForm) {
+        instructorEditorForm.addEventListener('submit', function (e) {
+          e.preventDefault();
+          if (!window.InstructorApps) return;
+          var id = (document.getElementById('instructorEditorId') || {}).value || '';
+          try {
+            window.InstructorApps.updateInstructor(id, {
+              fullName: (document.getElementById('instructorEditorName') || {}).value,
+              bio: (document.getElementById('instructorEditorBio') || {}).value,
+              courses: (document.getElementById('instructorEditorCourses') || {}).value,
+            });
+            closeInstructorEditor();
+            refreshAfterAction({ type: 'edit-instructor' });
+          } catch (err) {
+            alert((err && err.message) || 'تعذر حفظ المدرب');
+          }
+        });
+      }
 
-      window.addEventListener('storage', function (e) {
-        if (e.key === 'ifa_instructor_applications' || e.key === 'ifa_approved_instructors') {
-          renderInstructorRequests();
+      document.addEventListener('change', function (e) {
+        if (e.target && e.target.id === 'instructorSelectAll') {
+          document.querySelectorAll('.instructor-row-check').forEach(function (cb) {
+            cb.checked = e.target.checked;
+          });
+          updateBatchBar();
+          return;
+        }
+        if (e.target && e.target.classList && e.target.classList.contains('instructor-row-check')) {
+          updateBatchBar();
         }
       });
 
-      renderInstructorRequests();
+      var refreshBtn = document.getElementById('refreshInstructorRequests');
+      if (refreshBtn) refreshBtn.addEventListener('click', renderInstructorPanel);
+
+      var filterEl = document.getElementById('instructorRequestsFilter');
+      if (filterEl) {
+        filterEl.addEventListener('change', function () {
+          instructorFilter = filterEl.value || 'all';
+          renderInstructorPanel();
+        });
+      }
+
+      var menuBtn = document.getElementById('instructorMenuBtn');
+      if (menuBtn) {
+        menuBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          if (selectionModeType) {
+            executeSelectionAction();
+            return;
+          }
+          if (toolsMenuOpen) closeToolsMenu();
+          else openToolsMenu();
+          syncSelectionUi();
+        });
+      }
+
+      var cancelModeBtn = document.getElementById('instructorCancelMode');
+      if (cancelModeBtn) {
+        cancelModeBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          exitSelectionMode();
+        });
+      }
+
+      var menuDropdown = document.getElementById('instructorMenuDropdown');
+      if (menuDropdown) {
+        menuDropdown.addEventListener('click', function (e) {
+          var item = e.target.closest ? e.target.closest('[data-menu-action]') : null;
+          if (!item) return;
+          e.stopPropagation();
+          var action = item.getAttribute('data-menu-action');
+          if (action === 'select-delete') enterSelectionMode();
+          else if (action === 'view-archive') openArchiveView();
+          else if (action === 'exit-archive') exitArchiveView();
+        });
+      }
+
+      document.addEventListener('click', function (e) {
+        if (!toolsMenuOpen) return;
+        var tools = document.getElementById('instructorToolsMenu');
+        if (tools && !tools.contains(e.target)) closeToolsMenu();
+      });
+
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          var instModal = document.getElementById('instructorEditorModal');
+          if (instModal && !instModal.hidden) {
+            closeInstructorEditor();
+            return;
+          }
+          if (toolsMenuOpen) closeToolsMenu();
+          else if (selectionModeType) exitSelectionMode();
+        }
+      });
+
+      window.addEventListener('scroll', closeAllRowMenus, true);
+      window.addEventListener('resize', closeAllRowMenus);
+
+      window.addEventListener('storage', function (e) {
+        if (
+          e.key === 'ifa_instructor_applications' ||
+          e.key === 'ifa_instructor_archive' ||
+          e.key === 'ifa_approved_instructors' ||
+          e.key === 'isInstructorApproved' ||
+          e.key === 'approvedInstructorEmail'
+        ) {
+          renderInstructorPanel();
+        }
+      });
+
+      renderInstructorPanel();
     })();
   </script>
 </body>

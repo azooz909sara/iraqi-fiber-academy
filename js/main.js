@@ -112,13 +112,16 @@
           alert('لوحة المدرب مقفلة. قدّم طلب انضمام وانتظر موافقة الإدارة.');
           return;
         }
+        const panel = panelLink.getAttribute('data-panel');
+        if (panel === 'student') return;
+        if (panel === 'instructor') {
+          window.location.href = 'instructor.html';
+          return;
+        }
         const routes = {
           login: '/auth/login',
-          student: '/dashboard/student',
-          instructor: '/dashboard/instructor',
-          admin: '/dashboard/admin',
+          admin: 'admin.html',
         };
-        const panel = panelLink.getAttribute('data-panel');
         alert('سيتم ربط هذه الواجهة بلوحة التحكم قريباً.\nالوجهة: ' + (routes[panel] || panel));
         return;
       }

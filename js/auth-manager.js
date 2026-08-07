@@ -47,10 +47,13 @@ function isAdminUser(profile) {
 }
 
 function isInstructorUser(profile, email) {
+  var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
+  if (Apps && Apps.getInstructorApprovedFlag && Apps.getInstructorApprovedFlag()) {
+    return true;
+  }
   if (profile && (profile.isInstructor === true || String(profile.role || '').toLowerCase() === 'instructor')) {
     return true;
   }
-  var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
   if (!Apps) return false;
   var checkEmail = email || (profile && profile.email) || Apps.getSessionEmail();
   return Apps.isApprovedInstructor(checkEmail);
@@ -115,8 +118,8 @@ function userMenuHtml(options) {
   if (isInstructor) menuClasses += ' is-instructor';
 
   var instructorItem = isInstructor
-    ? '<a href="#" class="user-menu__item user-menu__item--instructor" role="menuitem" data-panel="instructor">لوحة المدرب</a>'
-    : '<a href="#" class="user-menu__item user-menu__item--instructor is-locked" role="menuitem" data-panel="instructor" data-instructor-locked aria-disabled="true">لوحة المدرب</a>';
+    ? '<a href="instructor.html" class="user-menu__item user-menu__item--instructor" role="menuitem">لوحة المدرب</a>'
+    : '';
 
   var joinItem = isInstructor
     ? ''
@@ -139,7 +142,6 @@ function userMenuHtml(options) {
           '<span class="user-menu__info-status">' + subscription + '</span>' +
         '</div>' +
         '<div class="user-menu__divider" role="separator"></div>' +
-        '<a href="#" class="user-menu__item" role="menuitem" data-panel="student">لوحة الطالب</a>' +
         instructorItem +
         '<a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only' +
           (isAdmin ? '' : ' hidden') + '>لوحة الإدارة</a>' +
@@ -251,10 +253,16 @@ function initAuthUI() {
   var lastProfile = null;
 
   function refreshSlots() {
+    if (window.InstructorApps && window.InstructorApps.absorbApprovalFromUrl) {
+      window.InstructorApps.absorbApprovalFromUrl();
+    }
     slots.forEach(function (slot) {
       renderAuthSlot(slot, lastUser, lastProfile);
     });
   }
+
+  /* Immediate check on script load (before auth settles) */
+  refreshSlots();
 
   onAuthStateChanged(auth, function (user) {
     lastUser = user || null;
@@ -285,12 +293,22 @@ function initAuthUI() {
   document.addEventListener('ifa:instructor-status-changed', refreshSlots);
   window.addEventListener('storage', function (e) {
     if (
+      !e.key ||
       e.key === 'ifa_instructor_applications' ||
       e.key === 'ifa_approved_instructors' ||
-      e.key === 'ifa_session_email'
+      e.key === 'ifa_session_email' ||
+      e.key === 'isInstructorApproved' ||
+      e.key === 'approvedInstructorEmail' ||
+      e.key === 'ifa_instructor_last_action' ||
+      e.key.indexOf('ifa_instructor_status_') === 0
     ) {
       refreshSlots();
     }
+  });
+  window.addEventListener('focus', refreshSlots);
+  window.addEventListener('pageshow', refreshSlots);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshSlots();
   });
 }
 
