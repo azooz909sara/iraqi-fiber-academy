@@ -13,6 +13,9 @@ import { syncUserProfile } from './db-manager.js';
 /** Local testing: show بروفايل instead of sign-in in the same slot (set false for production). */
 var DEV_SHOW_PROFILE_MENU = true;
 
+/** Hard allow-list for admin dashboard access (normalized lowercase). */
+var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
+
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -20,6 +23,12 @@ function escapeHtml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function normalizeEmail(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
 }
 
 function getFirstName(user) {
@@ -39,31 +48,90 @@ function getSubscriptionLabel(profile) {
   return 'غير مشترك';
 }
 
-function isAdminUser(profile) {
+function readLocalSessionEmail() {
+  try {
+    var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
+    if (Apps && typeof Apps.getSessionEmail === 'function') {
+      var fromApps = normalizeEmail(Apps.getSessionEmail());
+      if (fromApps) return fromApps;
+    }
+    var keys = ['ifa_session_email', 'approvedInstructorEmail', 'ifa_user_email', 'currentUserEmail'];
+    for (var i = 0; i < keys.length; i++) {
+      var v = normalizeEmail(localStorage.getItem(keys[i]));
+      if (v) return v;
+    }
+  } catch (err) {
+    /* ignore */
+  }
+  return '';
+}
+
+function isAdminEmail(email) {
+  var key = normalizeEmail(email);
+  if (!key) return false;
+  for (var i = 0; i < ADMIN_EMAILS.length; i++) {
+    if (key === ADMIN_EMAILS[i]) return true;
+  }
+  return false;
+}
+
+/**
+ * Admin = profile flag/role OR allow-listed developer email.
+ * Never grant admin to guest/test "مستخدم تجريبي" sessions.
+ */
+function isAdminUser(profile, email) {
+  var resolved = normalizeEmail(email || (profile && profile.email) || '');
+  if (isAdminEmail(resolved)) return true;
   if (!profile) return false;
   if (profile.isAdmin === true) return true;
   if (String(profile.role || '').toLowerCase() === 'admin') return true;
   return false;
 }
 
-function isInstructorUser(profile, email) {
+/**
+ * Instructor dashboard: approved instructor OR admin.
+ * Requires a real session email / authenticated profile — not a bare guest menu.
+ */
+function isInstructorUser(profile, email, options) {
+  var requireAuth = !options || options.requireAuth !== false;
   var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
-  if (Apps && Apps.getInstructorApprovedFlag && Apps.getInstructorApprovedFlag()) {
-    return true;
+  var checkEmail = normalizeEmail(
+    email || (profile && profile.email) || (Apps && Apps.getSessionEmail ? Apps.getSessionEmail() : '') || readLocalSessionEmail()
+  );
+
+  if (isAdminUser(profile, checkEmail)) return true;
+
+  if (requireAuth && !checkEmail && !(profile && (profile.isInstructor || profile.role))) {
+    return false;
   }
+
   if (profile && (profile.isInstructor === true || String(profile.role || '').toLowerCase() === 'instructor')) {
     return true;
   }
+
   if (!Apps) return false;
-  var checkEmail = email || (profile && profile.email) || Apps.getSessionEmail();
-  return Apps.isApprovedInstructor(checkEmail);
+
+  if (checkEmail && typeof Apps.isApprovedInstructor === 'function' && Apps.isApprovedInstructor(checkEmail)) {
+    return true;
+  }
+
+  /* Flag alone is not enough without a matching session email (blocks guest test user). */
+  if (
+    checkEmail &&
+    typeof Apps.getInstructorApprovedFlag === 'function' &&
+    Apps.getInstructorApprovedFlag() &&
+    typeof Apps.getApprovedInstructorEmail === 'function'
+  ) {
+    return normalizeEmail(Apps.getApprovedInstructorEmail()) === checkEmail;
+  }
+
+  return false;
 }
 
 function resolveMenuEmail(user, profile) {
   if (user && user.email) return user.email;
   if (profile && profile.email) return profile.email;
-  var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
-  return Apps ? Apps.getSessionEmail() : '';
+  return readLocalSessionEmail();
 }
 
 function slotVariant(slot) {
@@ -107,18 +175,30 @@ function userMenuHtml(options) {
   var subscription = escapeHtml(options.subscription || 'غير مشترك');
   var isAdmin = options.isAdmin === true;
   var isInstructor = options.isInstructor === true;
+  var isAuthenticated = options.isAuthenticated === true;
   var avatar =
     options.avatarHtml ||
     '<span class="user-menu__avatar" aria-hidden="true">' +
       escapeHtml((options.fullName || 'ت').charAt(0)) +
       '</span>';
 
+  /* Guests / test users never see privileged dashboards */
+  if (!isAuthenticated) {
+    isAdmin = false;
+    isInstructor = false;
+  }
+
   var menuClasses = 'user-menu';
   if (isAdmin) menuClasses += ' is-admin';
   if (isInstructor) menuClasses += ' is-instructor';
 
+  /* Omit privileged links from DOM entirely when unauthorized */
   var instructorItem = isInstructor
     ? '<a href="instructor.html" class="user-menu__item user-menu__item--instructor" role="menuitem">لوحة المدرب</a>'
+    : '';
+
+  var adminItem = isAdmin
+    ? '<a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>'
     : '';
 
   var joinItem = isInstructor
@@ -126,7 +206,8 @@ function userMenuHtml(options) {
     : '<a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>';
 
   return (
-    '<div class="' + menuClasses + '" id="userMenu">' +
+    '<div class="' + menuClasses + '" id="userMenu"' +
+      (isAuthenticated ? '' : ' data-auth-guest="1"') + '>' +
       '<button type="button" class="user-menu__toggle" id="userMenuToggle" ' +
         'aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">' +
         avatar +
@@ -143,8 +224,7 @@ function userMenuHtml(options) {
         '</div>' +
         '<div class="user-menu__divider" role="separator"></div>' +
         instructorItem +
-        '<a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only' +
-          (isAdmin ? '' : ' hidden') + '>لوحة الإدارة</a>' +
+        adminItem +
         joinItem +
         '<div class="user-menu__divider" role="separator"></div>' +
         '<a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>' +
@@ -165,15 +245,15 @@ function loggedOutHtml(variant) {
   var loginBtn =
     '<a href="#" class="header__login" data-auth-login role="button">تسجيل الدخول</a>';
 
-  /* Same auth-slot child: profile replaces sign-in (never both). */
+  /* Same auth-slot child: profile replaces sign-in (never both).
+     Guest/test profile must NOT expose admin or instructor dashboards. */
   if (DEV_SHOW_PROFILE_MENU) {
-    var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
-    var sessionEmail = Apps ? Apps.getSessionEmail() : '';
     return userMenuHtml({
       fullName: 'مستخدم تجريبي',
       subscription: 'غير مشترك',
-      isAdmin: true,
-      isInstructor: isInstructorUser(null, sessionEmail),
+      isAuthenticated: false,
+      isAdmin: false,
+      isInstructor: false,
     });
   }
 
@@ -198,8 +278,9 @@ function loggedInHtml(user, variant, profile) {
     fullName: getFullName(user, profile),
     subscription: getSubscriptionLabel(profile),
     avatarHtml: avatarHtml(user, firstName),
-    isAdmin: isAdminUser(profile),
-    isInstructor: isInstructorUser(profile, email),
+    isAuthenticated: true,
+    isAdmin: isAdminUser(profile, email),
+    isInstructor: isInstructorUser(profile, email, { requireAuth: true }),
   });
 }
 

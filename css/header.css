@@ -285,14 +285,19 @@
   color: #fca5a5;
 }
 
-/* Admin-only menu item — hidden unless .user-menu.is-admin */
+/* Privileged dashboards — hidden unless authorized class is present */
 .user-menu__item--admin,
-.user-menu__item[data-admin-only] {
+.user-menu__item[data-admin-only],
+.user-menu__item--instructor {
   display: none !important;
 }
 
 .user-menu.is-admin .user-menu__item--admin,
 .user-menu.is-admin .user-menu__item[data-admin-only] {
+  display: flex !important;
+}
+
+.user-menu.is-instructor .user-menu__item--instructor {
   display: flex !important;
 }
 

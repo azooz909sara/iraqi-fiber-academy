@@ -36,8 +36,8 @@
         </ul>
         <div class="header__actions">
           <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <!-- DEV: profile replaces sign-in in the same slot (toggled by auth-manager) -->
-            <div class="user-menu is-admin" id="userMenu">
+            <!-- Role menus (admin/instructor) injected only by auth-manager after authorization checks -->
+            <div class="user-menu" id="userMenu" data-auth-guest="1">
               <button type="button" class="user-menu__toggle" id="userMenuToggle" aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">
                 <span class="user-menu__avatar" aria-hidden="true">ت</span>
                 <span class="user-menu__label">Profile</span>
@@ -49,7 +49,6 @@
                   <span class="user-menu__info-status">غير مشترك</span>
                 </div>
                 <div class="user-menu__divider" role="separator"></div>
-                <a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>
                 <a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>
                 <div class="user-menu__divider" role="separator"></div>
                 <a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>
@@ -540,46 +539,142 @@
   <script src="js/platform-plans.js"></script>
   <script src="js/platform-plans-public.js"></script>
   <script>
-    /* Immediate approval sync for file:// / page load — before auth module settles */
+    /* Role-gated menu hardening before/alongside auth-manager */
     (function () {
-      function syncInstructorMenu() {
-        if (!window.InstructorApps) return;
-        window.InstructorApps.absorbApprovalFromUrl();
+      var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
+
+      function normalizeEmail(value) {
+        return String(value || '').trim().toLowerCase();
+      }
+
+      function readSessionEmail() {
+        try {
+          if (window.InstructorApps && typeof window.InstructorApps.getSessionEmail === 'function') {
+            var fromApps = normalizeEmail(window.InstructorApps.getSessionEmail());
+            if (fromApps) return fromApps;
+          }
+          var keys = ['ifa_session_email', 'approvedInstructorEmail', 'ifa_user_email', 'currentUserEmail'];
+          for (var i = 0; i < keys.length; i++) {
+            var v = normalizeEmail(localStorage.getItem(keys[i]));
+            if (v) return v;
+          }
+        } catch (err) { /* ignore */ }
+        return '';
+      }
+
+      function isAdminEmail(email) {
+        var key = normalizeEmail(email);
+        return !!key && ADMIN_EMAILS.indexOf(key) !== -1;
+      }
+
+      function isGuestTestUser(menu) {
+        if (!menu) return true;
+        var nameEl = menu.querySelector('.user-menu__info-name');
+        var name = nameEl ? String(nameEl.textContent || '').trim() : '';
+        return name === 'مستخدم تجريبي' || menu.getAttribute('data-auth-guest') === '1';
+      }
+
+      function isAuthorizedInstructor(email) {
+        if (!email || !window.InstructorApps) return false;
+        if (typeof window.InstructorApps.isApprovedInstructor === 'function' &&
+            window.InstructorApps.isApprovedInstructor(email)) {
+          return true;
+        }
+        if (typeof window.InstructorApps.getApprovedInstructorEmail === 'function' &&
+            normalizeEmail(window.InstructorApps.getApprovedInstructorEmail()) === email) {
+          return true;
+        }
+        return false;
+      }
+
+      function applyRoleMenuVisibility() {
+        if (window.InstructorApps && typeof window.InstructorApps.absorbApprovalFromUrl === 'function') {
+          window.InstructorApps.absorbApprovalFromUrl();
+        }
+
         var slot = document.querySelector('[data-auth-slot][data-auth-variant="landing"]');
         if (!slot) return;
-        var approved = window.InstructorApps.getInstructorApprovedFlag();
         var menu = slot.querySelector('#userMenu, .user-menu');
         if (!menu) return;
 
-        var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
-        var instructor = menu.querySelector('.user-menu__item--instructor');
-        var divider = menu.querySelector('.user-menu__divider');
+        var email = readSessionEmail();
+        var guest = isGuestTestUser(menu);
 
-        if (approved) {
-          menu.classList.add('is-instructor');
+        /* Guests / test users: never show privileged dashboards */
+        if (guest) {
+          menu.classList.remove('is-admin', 'is-instructor');
+          menu.querySelectorAll(
+            '.user-menu__item--admin, [data-admin-only], .user-menu__item--instructor'
+          ).forEach(function (el) {
+            el.remove();
+          });
+          return;
+        }
+
+        var admin = isAdminEmail(email) || menu.classList.contains('is-admin');
+        var instructor =
+          admin ||
+          isAuthorizedInstructor(email) ||
+          menu.classList.contains('is-instructor');
+
+        menu.classList.toggle('is-admin', admin);
+        menu.classList.toggle('is-instructor', instructor);
+
+        menu.querySelectorAll('.user-menu__item--admin, [data-admin-only]').forEach(function (el) {
+          if (!admin) el.remove();
+        });
+        menu.querySelectorAll('.user-menu__item--instructor').forEach(function (el) {
+          if (!instructor) el.remove();
+        });
+
+        if (instructor && !menu.querySelector('.user-menu__item--instructor')) {
+          var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
           if (join) join.remove();
-          if (!instructor) {
-            var adminLink = menu.querySelector('.user-menu__item--admin, [data-admin-only]');
-            var item = document.createElement('a');
-            item.href = 'instructor.html';
-            item.className = 'user-menu__item user-menu__item--instructor';
-            item.setAttribute('role', 'menuitem');
-            item.textContent = 'لوحة المدرب';
-            if (adminLink && adminLink.parentNode) {
-              adminLink.parentNode.insertBefore(item, adminLink);
-            } else if (divider && divider.parentNode) {
-              divider.parentNode.insertBefore(item, divider.nextSibling);
-            }
+          var item = document.createElement('a');
+          item.href = 'instructor.html';
+          item.className = 'user-menu__item user-menu__item--instructor';
+          item.setAttribute('role', 'menuitem');
+          item.textContent = 'لوحة المدرب';
+          var divider = menu.querySelector('.user-menu__divider');
+          if (divider && divider.parentNode) {
+            divider.parentNode.insertBefore(item, divider.nextSibling);
+          }
+        }
+
+        if (admin && !menu.querySelector('.user-menu__item--admin, [data-admin-only]')) {
+          var inst = menu.querySelector('.user-menu__item--instructor');
+          var join2 = menu.querySelector('[data-join-instructor], .user-menu__item--join');
+          var adminItem = document.createElement('a');
+          adminItem.href = 'admin.html';
+          adminItem.className = 'user-menu__item user-menu__item--admin';
+          adminItem.setAttribute('role', 'menuitem');
+          adminItem.setAttribute('data-admin-only', '');
+          adminItem.textContent = 'لوحة الإدارة';
+          if (inst && inst.parentNode) {
+            inst.parentNode.insertBefore(adminItem, inst.nextSibling);
+          } else if (join2 && join2.parentNode) {
+            join2.parentNode.insertBefore(adminItem, join2);
           }
         }
       }
 
-      syncInstructorMenu();
-      window.addEventListener('load', syncInstructorMenu);
-      window.addEventListener('focus', syncInstructorMenu);
-      window.addEventListener('pageshow', syncInstructorMenu);
+      applyRoleMenuVisibility();
+      window.addEventListener('load', applyRoleMenuVisibility);
+      window.addEventListener('focus', applyRoleMenuVisibility);
+      window.addEventListener('pageshow', applyRoleMenuVisibility);
       document.addEventListener('visibilitychange', function () {
-        if (document.visibilityState === 'visible') syncInstructorMenu();
+        if (document.visibilityState === 'visible') applyRoleMenuVisibility();
+      });
+      window.addEventListener('storage', function (e) {
+        if (
+          !e.key ||
+          e.key === 'ifa_session_email' ||
+          e.key === 'approvedInstructorEmail' ||
+          e.key === 'isInstructorApproved' ||
+          e.key === 'ifa_approved_instructors'
+        ) {
+          applyRoleMenuVisibility();
+        }
       });
     })();
   </script>
