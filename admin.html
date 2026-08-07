@@ -430,10 +430,11 @@
             <label class="admin-filter" id="coursesFilterWrap">
               <span class="admin-filter__label">تصفية</span>
               <select class="admin-filter__select" id="coursesStatusFilter" aria-label="تصفية الكورسات">
-                <option value="all">الكل</option>
+                <option value="active">النشطة</option>
                 <option value="published">منشور</option>
-                <option value="draft">مسودة</option>
                 <option value="suspended">معلّق</option>
+                <option value="draft">مسودة</option>
+                <option value="all">الكل</option>
               </select>
             </label>
             <button class="admin-btn admin-btn--ghost" type="button" id="refreshCoursesBtn">تحديث</button>
@@ -444,6 +445,16 @@
               إضافة كورس
             </button>
           </div>
+        </div>
+
+        <div class="admin-courses-tabs" role="tablist" aria-label="عرض الكورسات">
+          <button type="button" class="admin-courses-tab is-active" role="tab" aria-selected="true" data-courses-tab="active" id="coursesTabActive">
+            الكورسات النشطة
+          </button>
+          <button type="button" class="admin-courses-tab" role="tab" aria-selected="false" data-courses-tab="draft" id="coursesTabDraft">
+            مسودة
+            <span class="admin-courses-tab__count" id="coursesDraftCount">0</span>
+          </button>
         </div>
 
         <div class="admin-table-wrap">
@@ -481,8 +492,16 @@
           </div>
           <form class="admin-modal__body admin-modal__body--course" id="courseEditorForm">
             <input type="hidden" id="courseEditorId" value="" />
+            <input type="hidden" id="courseEditorCategory" value="individual" />
 
             <div class="admin-form-grid">
+              <label class="admin-field admin-field--full">
+                <span class="admin-field__label">اقتراح جاهز من الكتالوج</span>
+                <select class="admin-field__input" id="coursePresetSelect" aria-label="اختيار كورس جاهز">
+                  <option value="">— اختر لتعبئة النموذج فوراً —</option>
+                </select>
+                <span class="admin-field__hint">الكورسات المنفردة · البرامج الاحترافية · الكورس الشامل</span>
+              </label>
               <label class="admin-field admin-field--full">
                 <span class="admin-field__label">عنوان الكورس</span>
                 <input class="admin-field__input" type="text" id="courseEditorName" required />
@@ -494,6 +513,7 @@
               <label class="admin-field">
                 <span class="admin-field__label">المدرب المسؤول</span>
                 <select class="admin-field__input" id="courseEditorInstructor"></select>
+                <span class="admin-field__hint">اترك «أكاديمية الفايبر العراقية» لكورس رسمي من المنصة</span>
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">حالة النشر</span>
@@ -650,7 +670,11 @@
         if (window.PlatformCourses) {
           var allCourses = window.PlatformCourses.getCourses();
           var published = window.PlatformCourses.getPublishedCount();
-          var drafts = allCourses.length - published;
+          var drafts = typeof window.PlatformCourses.getDraftCount === 'function'
+            ? window.PlatformCourses.getDraftCount()
+            : allCourses.filter(function (c) {
+                return c.status === 'draft' || c.softDeleted;
+              }).length;
           if (publishedEl) publishedEl.textContent = String(published);
           if (totalCoursesEl) totalCoursesEl.textContent = String(allCourses.length);
           if (coursesTrendEl) coursesTrendEl.textContent = drafts + ' مسودة';

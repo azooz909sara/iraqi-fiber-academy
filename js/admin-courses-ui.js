@@ -1,11 +1,12 @@
 /**
  * Admin courses management UI for admin.html
+ * Catalog presets, drafts soft-delete, academy instructor assignment.
  */
 (function () {
   'use strict';
 
   var searchQuery = '';
-  var statusFilter = 'all';
+  var statusFilter = 'active';
   var lessonDrafts = [];
   var uploadTimer = null;
   var toastTimer = null;
@@ -16,6 +17,15 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function normalize(email) {
+    return String(email || '').trim().toLowerCase();
+  }
+
+  function academyName() {
+    return (window.PlatformCourses && window.PlatformCourses.ACADEMY_NAME) ||
+      'أكاديمية الفايبر العراقية';
   }
 
   function showToast(message, type) {
@@ -75,14 +85,21 @@
     var select = document.getElementById('courseEditorInstructor');
     if (!select) return;
     var instructors = getInstructorOptions();
-    var html = '<option value="">— بدون مدرب —</option>';
+    var selected = normalize(selectedEmail);
+    var academySelected = !selected ? ' selected' : '';
+    var html =
+      '<option value=""' +
+      academySelected +
+      '>' +
+      escapeHtml(academyName()) +
+      '</option>';
     instructors.forEach(function (inst) {
-      var selected = normalize(inst.email) === normalize(selectedEmail) ? ' selected' : '';
+      var isSelected = normalize(inst.email) === selected ? ' selected' : '';
       html +=
         '<option value="' +
         escapeHtml(inst.email) +
         '"' +
-        selected +
+        isSelected +
         '>' +
         escapeHtml(inst.fullName + ' (' + inst.email + ')') +
         '</option>';
@@ -90,18 +107,78 @@
     select.innerHTML = html;
   }
 
-  function normalize(email) {
-    return String(email || '').trim().toLowerCase();
+  function fillPresetSelect() {
+    var select = document.getElementById('coursePresetSelect');
+    if (!select || !window.PlatformCourses) return;
+    var grouped = window.PlatformCourses.getPresetsGrouped();
+    var html = '<option value="">— اختر لتعبئة النموذج فوراً —</option>';
+
+    function addGroup(label, items) {
+      if (!items || !items.length) return;
+      html += '<optgroup label="' + escapeHtml(label) + '">';
+      items.forEach(function (p) {
+        html +=
+          '<option value="' +
+          escapeHtml(p.id) +
+          '">' +
+          escapeHtml(p.title) +
+          '</option>';
+      });
+      html += '</optgroup>';
+    }
+
+    addGroup('الكورسات المنفردة', grouped.individual);
+    addGroup('البرامج الاحترافية المجمعة', grouped.program);
+    addGroup('الكورس الشامل', grouped.master);
+    select.innerHTML = html;
   }
 
-  function statusBadge(status) {
-    if (status === 'published') {
+  function applyPreset(presetId) {
+    if (!window.PlatformCourses || !presetId) return;
+    var preset = window.PlatformCourses.findPreset(presetId);
+    if (!preset) return;
+
+    document.getElementById('courseEditorName').value = preset.title || '';
+    document.getElementById('courseEditorDescription').value = preset.description || '';
+    document.getElementById('courseEditorHours').value = preset.durationHours || '';
+    document.getElementById('courseEditorWeeks').value = preset.durationWeeks || '';
+    document.getElementById('courseEditorSchedule').value = preset.weeklySchedule || '';
+    document.getElementById('courseEditorCategory').value = preset.category || 'individual';
+    document.getElementById('courseEditorStatus').value = 'draft';
+    fillInstructorSelect('');
+
+    lessonDrafts = (preset.lessons || []).map(function (l, index) {
+      return {
+        id: l.id || 'lesson_' + Date.now().toString(36) + '_' + index,
+        title: l.title || '',
+        description: l.description || '',
+        videoUrl: l.videoUrl || '',
+        videoFileName: l.videoFileName || '',
+        order: index + 1,
+        createdAt: l.createdAt || new Date().toISOString(),
+      };
+    });
+    renderLessonDrafts();
+    showToast('تم تعبئة النموذج من الكتالوج — راجع ثم احفظ', 'info');
+  }
+
+  function statusBadge(course) {
+    if (course.softDeleted) {
+      return '<span class="admin-badge admin-badge--pending">مسودة (محذوف)</span>';
+    }
+    if (course.status === 'published') {
       return '<span class="admin-badge admin-badge--active">منشور</span>';
     }
-    if (status === 'suspended') {
+    if (course.status === 'suspended') {
       return '<span class="admin-badge admin-badge--suspended">معلّق</span>';
     }
     return '<span class="admin-badge admin-badge--pending">مسودة</span>';
+  }
+
+  function categoryLabel(category) {
+    if (category === 'program') return 'برنامج احترافي';
+    if (category === 'master') return 'كورس شامل';
+    return 'كورس منفرد';
   }
 
   function closeCourseModal() {
@@ -182,28 +259,38 @@
     var titleEl = document.getElementById('courseEditorTitle');
     if (!modal) return;
 
+    fillPresetSelect();
+    document.getElementById('coursePresetSelect').value = '';
     document.getElementById('courseEditorId').value = course ? course.id : '';
     document.getElementById('courseEditorName').value = course ? course.title : '';
     document.getElementById('courseEditorDescription').value = course ? course.description : '';
     document.getElementById('courseEditorHours').value = course ? course.durationHours || '' : '';
     document.getElementById('courseEditorWeeks').value = course ? course.durationWeeks || '' : '';
     document.getElementById('courseEditorSchedule').value = course ? course.weeklySchedule || '' : '';
-    document.getElementById('courseEditorStatus').value = course ? course.status || 'draft' : 'draft';
+    document.getElementById('courseEditorStatus').value = course
+      ? course.softDeleted
+        ? 'draft'
+        : course.status || 'draft'
+      : 'draft';
+    document.getElementById('courseEditorCategory').value = course
+      ? course.category || 'individual'
+      : 'individual';
 
-    fillInstructorSelect(course ? course.instructorEmail : '');
-    lessonDrafts = course && Array.isArray(course.lessons)
-      ? course.lessons.map(function (l) {
-          return {
-            id: l.id,
-            title: l.title || '',
-            description: l.description || '',
-            videoUrl: l.videoUrl || '',
-            videoFileName: l.videoFileName || '',
-            order: l.order,
-            createdAt: l.createdAt,
-          };
-        })
-      : [];
+    fillInstructorSelect(course && !course.isAcademy ? course.instructorEmail : '');
+    lessonDrafts =
+      course && Array.isArray(course.lessons)
+        ? course.lessons.map(function (l) {
+            return {
+              id: l.id,
+              title: l.title || '',
+              description: l.description || '',
+              videoUrl: l.videoUrl || '',
+              videoFileName: l.videoFileName || '',
+              order: l.order,
+              createdAt: l.createdAt,
+            };
+          })
+        : [];
     renderLessonDrafts();
 
     if (titleEl) titleEl.textContent = course ? 'تعديل كورس' : 'إضافة كورس';
@@ -235,6 +322,35 @@
     return lessonDrafts;
   }
 
+  function syncTabsUi() {
+    var tabs = document.querySelectorAll('[data-courses-tab]');
+    tabs.forEach(function (tab) {
+      var key = tab.getAttribute('data-courses-tab');
+      var active = key === statusFilter || (statusFilter === 'draft' && key === 'draft');
+      if (statusFilter === 'published' || statusFilter === 'suspended' || statusFilter === 'all') {
+        active = key === 'active';
+      }
+      if (statusFilter === 'draft') active = key === 'draft';
+      if (statusFilter === 'active') active = key === 'active';
+      tab.classList.toggle('is-active', active);
+      tab.setAttribute('aria-selected', active ? 'true' : 'false');
+    });
+
+    var filter = document.getElementById('coursesStatusFilter');
+    if (filter && filter.value !== statusFilter) filter.value = statusFilter;
+
+    var countEl = document.getElementById('coursesDraftCount');
+    if (countEl && window.PlatformCourses) {
+      countEl.textContent = String(window.PlatformCourses.getDraftCount());
+    }
+  }
+
+  function setCoursesView(view) {
+    statusFilter = view || 'active';
+    syncTabsUi();
+    renderCoursesTable();
+  }
+
   function renderCoursesTable() {
     var body = document.getElementById('coursesTableBody');
     var meta = document.getElementById('coursesMeta');
@@ -249,7 +365,16 @@
     });
 
     var filtered = list.filter(function (c) {
-      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      if (statusFilter === 'active') {
+        if (c.softDeleted || c.status === 'draft') return false;
+      } else if (statusFilter === 'draft') {
+        if (!(c.status === 'draft' || c.softDeleted)) return false;
+      } else if (statusFilter === 'published') {
+        if (c.status !== 'published' || c.softDeleted) return false;
+      } else if (statusFilter === 'suspended') {
+        if (c.status !== 'suspended' || c.softDeleted) return false;
+      }
+
       if (!searchQuery) return true;
       var hay =
         String(c.title || '').toLowerCase() +
@@ -258,7 +383,9 @@
         ' ' +
         String(c.instructorName || '').toLowerCase() +
         ' ' +
-        String(c.instructorEmail || '').toLowerCase();
+        String(c.instructorEmail || '').toLowerCase() +
+        ' ' +
+        String(c.category || '').toLowerCase();
       return hay.indexOf(searchQuery) !== -1;
     });
 
@@ -266,36 +393,85 @@
     if (typeof window.refreshAdminOverviewStats === 'function') {
       window.refreshAdminOverviewStats();
     }
+    syncTabsUi();
+
     if (meta) {
       meta.textContent =
         'عرض ' +
         filtered.length +
-        ' من ' +
-        list.length +
         ' · منشور: ' +
-        window.PlatformCourses.getPublishedCount();
+        window.PlatformCourses.getPublishedCount() +
+        ' · مسودة: ' +
+        window.PlatformCourses.getDraftCount();
     }
 
     if (!filtered.length) {
+      var emptyMsg =
+        statusFilter === 'draft'
+          ? 'لا توجد مسودات حالياً.'
+          : list.length
+            ? 'لا نتائج مطابقة للتصفية أو البحث.'
+            : 'لا توجد كورسات. أضف كورساً أو اختر من الكتالوج.';
       body.innerHTML =
-        '<tr><td colspan="7" class="admin-empty-cell">' +
-        (list.length ? 'لا نتائج مطابقة للتصفية أو البحث.' : 'لا توجد كورسات. أضف كورساً للبدء.') +
-        '</td></tr>';
+        '<tr><td colspan="7" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
       return;
     }
+
+    var draftsView = statusFilter === 'draft';
 
     body.innerHTML = filtered
       .map(function (course) {
         var id = escapeHtml(course.id);
         var lessonsCount = Array.isArray(course.lessons) ? course.lessons.length : 0;
-        var instructorLabel = course.instructorName || course.instructorEmail || '—';
+        var instructorLabel =
+          course.isAcademy || !course.instructorEmail
+            ? academyName()
+            : course.instructorName || course.instructorEmail || '—';
         var sourceLabel = course.source === 'instructor' ? 'مدرب' : 'إدارة';
-        var publishLabel = course.status === 'published' ? 'إلغاء النشر' : 'نشر';
-        var publishCls =
-          course.status === 'published'
-            ? 'admin-btn admin-btn--ghost admin-btn--sm'
-            : 'admin-btn admin-btn--primary admin-btn--sm';
-        var suspendLabel = course.status === 'suspended' ? 'إلغاء التعليق' : 'تعليق';
+        var actions = '';
+
+        if (draftsView) {
+          actions =
+            '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-edit-course="' +
+            id +
+            '">تعديل</button>' +
+            '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-restore-course="' +
+            id +
+            '">استعادة</button>' +
+            '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-purge-course="' +
+            id +
+            '">حذف نهائي</button>';
+        } else {
+          var publishLabel = course.status === 'published' ? 'إلغاء النشر' : 'نشر';
+          var publishCls =
+            course.status === 'published'
+              ? 'admin-btn admin-btn--ghost admin-btn--sm'
+              : 'admin-btn admin-btn--primary admin-btn--sm';
+          var suspendLabel = course.status === 'suspended' ? 'إلغاء التعليق' : 'تعليق';
+          actions =
+            '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-edit-course="' +
+            id +
+            '">تعديل</button>' +
+            '<button class="' +
+            publishCls +
+            '" type="button" data-toggle-course-status="' +
+            id +
+            '" data-next-status="' +
+            (course.status === 'published' ? 'draft' : 'published') +
+            '">' +
+            publishLabel +
+            '</button>' +
+            '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-toggle-course-status="' +
+            id +
+            '" data-next-status="' +
+            (course.status === 'suspended' ? 'published' : 'suspended') +
+            '">' +
+            suspendLabel +
+            '</button>' +
+            '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-delete-course="' +
+            id +
+            '">حذف</button>';
+        }
 
         return (
           '<tr data-course-id="' +
@@ -308,6 +484,8 @@
           '<div class="admin-user-cell__email">' +
           lessonsCount +
           ' درس · ' +
+          escapeHtml(categoryLabel(course.category)) +
+          ' · ' +
           escapeHtml(sourceLabel) +
           '</div>' +
           '</td>' +
@@ -321,7 +499,7 @@
           escapeHtml(course.weeklySchedule || '—') +
           '</div></td>' +
           '<td>' +
-          statusBadge(course.status) +
+          statusBadge(course) +
           '</td>' +
           '<td>' +
           escapeHtml(
@@ -332,34 +510,27 @@
           '</td>' +
           '<td>' +
           '<div class="admin-table__actions admin-table__actions--row">' +
-          '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-edit-course="' +
-          id +
-          '">تعديل</button>' +
-          '<button class="' +
-          publishCls +
-          '" type="button" data-toggle-course-status="' +
-          id +
-          '" data-next-status="' +
-          (course.status === 'published' ? 'draft' : 'published') +
-          '">' +
-          publishLabel +
-          '</button>' +
-          '<button class="admin-btn admin-btn--ghost admin-btn--sm" type="button" data-toggle-course-status="' +
-          id +
-          '" data-next-status="' +
-          (course.status === 'suspended' ? 'draft' : 'suspended') +
-          '">' +
-          suspendLabel +
-          '</button>' +
-          '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-delete-course="' +
-          id +
-          '">حذف</button>' +
+          actions +
           '</div>' +
           '</td>' +
           '</tr>'
         );
       })
       .join('');
+  }
+
+  function resolveInstructorFromForm() {
+    var instructorSelect = document.getElementById('courseEditorInstructor');
+    var instructorEmail = instructorSelect ? instructorSelect.value : '';
+    var instructorName = academyName();
+    if (instructorEmail && instructorSelect && instructorSelect.selectedIndex >= 0) {
+      var opt = instructorSelect.options[instructorSelect.selectedIndex];
+      instructorName = String(opt.textContent || '').split(' (')[0];
+    } else {
+      instructorEmail = '';
+      instructorName = academyName();
+    }
+    return { instructorEmail: instructorEmail, instructorName: instructorName };
   }
 
   function bind() {
@@ -374,10 +545,15 @@
     var filter = document.getElementById('coursesStatusFilter');
     if (filter) {
       filter.addEventListener('change', function () {
-        statusFilter = filter.value || 'all';
-        renderCoursesTable();
+        setCoursesView(filter.value || 'active');
       });
     }
+
+    document.querySelectorAll('[data-courses-tab]').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        setCoursesView(tab.getAttribute('data-courses-tab') || 'active');
+      });
+    });
 
     var addBtn = document.getElementById('addCourseBtn');
     if (addBtn) {
@@ -389,6 +565,13 @@
     var refreshBtn = document.getElementById('refreshCoursesBtn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', renderCoursesTable);
+    }
+
+    var presetSelect = document.getElementById('coursePresetSelect');
+    if (presetSelect) {
+      presetSelect.addEventListener('change', function () {
+        if (presetSelect.value) applyPreset(presetSelect.value);
+      });
     }
 
     var addLessonBtn = document.getElementById('addCourseLessonBtn');
@@ -414,15 +597,7 @@
         e.preventDefault();
         if (!window.PlatformCourses) return;
         var id = (document.getElementById('courseEditorId') || {}).value || '';
-        var instructorSelect = document.getElementById('courseEditorInstructor');
-        var instructorEmail = instructorSelect ? instructorSelect.value : '';
-        var instructorName = '';
-        if (instructorSelect && instructorSelect.selectedIndex >= 0) {
-          var opt = instructorSelect.options[instructorSelect.selectedIndex];
-          if (opt && instructorEmail) {
-            instructorName = String(opt.textContent || '').split(' (')[0];
-          }
-        }
+        var instructor = resolveInstructorFromForm();
         var payload = {
           title: (document.getElementById('courseEditorName') || {}).value,
           description: (document.getElementById('courseEditorDescription') || {}).value,
@@ -430,9 +605,13 @@
           durationWeeks: (document.getElementById('courseEditorWeeks') || {}).value,
           weeklySchedule: (document.getElementById('courseEditorSchedule') || {}).value,
           status: (document.getElementById('courseEditorStatus') || {}).value,
-          instructorEmail: instructorEmail,
-          instructorName: instructorName,
+          category: (document.getElementById('courseEditorCategory') || {}).value || 'individual',
+          instructorEmail: instructor.instructorEmail,
+          instructorName: instructor.instructorName,
           lessons: collectLessonDraftsFromDom(),
+          softDeleted: false,
+          deletedAt: '',
+          source: 'admin',
         };
         try {
           var wasPublish = payload.status === 'published';
@@ -470,6 +649,8 @@
       var editBtn = e.target.closest ? e.target.closest('[data-edit-course]') : null;
       var toggleBtn = e.target.closest ? e.target.closest('[data-toggle-course-status]') : null;
       var deleteBtn = e.target.closest ? e.target.closest('[data-delete-course]') : null;
+      var restoreBtn = e.target.closest ? e.target.closest('[data-restore-course]') : null;
+      var purgeBtn = e.target.closest ? e.target.closest('[data-purge-course]') : null;
 
       if (editBtn) {
         var course = window.PlatformCourses.findCourse(editBtn.getAttribute('data-edit-course'));
@@ -490,21 +671,44 @@
           renderCoursesTable();
           if (next === 'published') showToast('تم النشر بنجاح!', 'success');
           else if (next === 'suspended') showToast('تم تعليق الكورس', 'info');
-          else showToast('تم تحديث حالة الكورس', 'info');
+          else showToast('تم نقل الكورس إلى المسودة', 'info');
         } catch (err) {
           alert((err && err.message) || 'تعذر تحديث حالة النشر');
         }
         return;
       }
 
-      if (deleteBtn) {
-        if (!window.confirm('حذف هذا الكورس نهائياً؟')) return;
+      if (restoreBtn) {
         try {
-          window.PlatformCourses.deleteCourse(deleteBtn.getAttribute('data-delete-course'));
+          window.PlatformCourses.restoreCourse(restoreBtn.getAttribute('data-restore-course'));
           renderCoursesTable();
-          showToast('تم حذف الكورس من المنصة', 'info');
+          showToast('تمت استعادة الكورس', 'success');
         } catch (err) {
-          alert((err && err.message) || 'تعذر حذف الكورس');
+          alert((err && err.message) || 'تعذر استعادة الكورس');
+        }
+        return;
+      }
+
+      if (purgeBtn) {
+        if (!window.confirm('حذف هذا الكورس نهائياً من المنصة؟ لا يمكن التراجع.')) return;
+        try {
+          window.PlatformCourses.deleteCourse(purgeBtn.getAttribute('data-purge-course'));
+          renderCoursesTable();
+          showToast('تم الحذف النهائي من المنصة', 'info');
+        } catch (err) {
+          alert((err && err.message) || 'تعذر الحذف النهائي');
+        }
+        return;
+      }
+
+      if (deleteBtn) {
+        if (!window.confirm('نقل هذا الكورس إلى المسودات؟ يمكن استعادته لاحقاً.')) return;
+        try {
+          window.PlatformCourses.softDeleteCourse(deleteBtn.getAttribute('data-delete-course'));
+          renderCoursesTable();
+          showToast('تم نقل الكورس إلى المسودة', 'info');
+        } catch (err) {
+          alert((err && err.message) || 'تعذر نقل الكورس للمسودة');
         }
       }
     });
@@ -513,14 +717,14 @@
       if (!e.target || !e.target.getAttribute) return;
       var fileIndex = e.target.getAttribute('data-lesson-file');
       if (fileIndex == null) return;
-      var idx = Number(fileIndex);
+      var lessonIdx = Number(fileIndex);
       var file = e.target.files && e.target.files[0];
-      if (!file || isNaN(idx) || !lessonDrafts[idx]) return;
+      if (!file || isNaN(lessonIdx) || !lessonDrafts[lessonIdx]) return;
       collectLessonDraftsFromDom();
       simulateVideoUpload(file.name, function () {
-        lessonDrafts[idx].videoFileName = file.name;
+        lessonDrafts[lessonIdx].videoFileName = file.name;
         var nameInput = document.querySelector(
-          '[data-lesson-field="videoFileName"][data-lesson-index="' + idx + '"]'
+          '[data-lesson-field="videoFileName"][data-lesson-index="' + lessonIdx + '"]'
         );
         if (nameInput) nameInput.value = file.name;
         showToast('تم ربط ملف الفيديو: ' + file.name, 'success');
@@ -554,6 +758,7 @@
       }
     });
 
+    fillPresetSelect();
     renderCoursesTable();
   }
 
