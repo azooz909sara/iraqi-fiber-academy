@@ -281,6 +281,36 @@
 
   var COURSE_PRESETS = buildPresets();
 
+  function normalizeQuizQuestions(questions) {
+    if (!Array.isArray(questions)) return [];
+    return questions
+      .map(function (q) {
+        if (!q || typeof q !== 'object') return null;
+        var options = Array.isArray(q.options) ? q.options.slice(0, 4) : [];
+        while (options.length < 4) options.push('');
+        options = options.map(function (o) {
+          return String(o == null ? '' : o).trim();
+        });
+        var text = String(q.text || q.question || '').trim();
+        if (!text) return null;
+        var correctIndex = Number(q.correctIndex);
+        if (!isFinite(correctIndex) || correctIndex < 0 || correctIndex > 3) correctIndex = 0;
+        return {
+          id: q.id || uid('q'),
+          text: text,
+          options: options,
+          correctIndex: correctIndex,
+          createdAt: q.createdAt || new Date().toISOString(),
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function normalizeQuiz(quiz) {
+    if (!quiz || typeof quiz !== 'object') return { questions: [] };
+    return { questions: normalizeQuizQuestions(quiz.questions) };
+  }
+
   function normalizeLessons(lessons) {
     if (!Array.isArray(lessons)) return [];
     return lessons
@@ -293,7 +323,7 @@
           videoFileName: String(l.videoFileName || '').trim(),
           videoTitle: String(l.videoTitle || l.title || '').trim(),
           templateFiles: Array.isArray(l.templateFiles) ? l.templateFiles : [],
-          quiz: l.quiz && typeof l.quiz === 'object' ? l.quiz : { questions: [] },
+          quiz: normalizeQuiz(l.quiz),
           comments: Array.isArray(l.comments) ? l.comments : [],
           views: Number(l.views) || 0,
           completions: Number(l.completions) || 0,

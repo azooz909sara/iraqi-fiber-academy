@@ -923,6 +923,117 @@
   gap: 0.5rem;
 }
 
+.admin-lesson-quiz {
+  margin-top: 0.85rem;
+  padding: 0.85rem;
+  border: 1px solid rgba(0, 229, 255, 0.18);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.admin-lesson-quiz__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.admin-lesson-quiz__title {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.admin-lesson-quiz__count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-accent-cyan);
+  background: rgba(0, 229, 255, 0.1);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+}
+
+.admin-lesson-quiz__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-lesson-quiz__empty {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+}
+
+.admin-lesson-quiz__item {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+}
+
+.admin-lesson-quiz__item-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.65rem;
+  font-size: 0.86rem;
+  line-height: 1.5;
+}
+
+.admin-lesson-quiz__options {
+  margin-top: 0.45rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-lesson-quiz__option {
+  font-size: 0.78rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-lesson-quiz__option.is-correct {
+  color: var(--color-accent-cyan);
+  font-weight: 700;
+}
+
+.admin-lesson-quiz__builder {
+  border-top: 1px dashed rgba(148, 163, 184, 0.22);
+  padding-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.admin-lesson-quiz__opts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+}
+
+.admin-lesson-quiz__builder-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-lesson-quiz__builder-row .admin-field {
+  min-width: 8rem;
+  flex: 1;
+}
+
+@media (max-width: 720px) {
+  .admin-lesson-quiz__opts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .admin-lesson-card__order {
   font-size: 0.8rem;
   font-weight: 700;
