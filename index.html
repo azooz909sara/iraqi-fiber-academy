@@ -36,22 +36,20 @@
         </ul>
         <div class="header__actions">
           <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <!-- Role menus (admin/instructor) injected only by auth-manager after authorization checks -->
+            <!--
+              Account menu (auth-manager):
+              - Toggle label always: الحساب + chevron
+              - Guest: تسجيل الدخول only
+              - Logged in: name + email, انضم إلينا كمدرب, تسجيل خروج at bottom
+            -->
             <div class="user-menu" id="userMenu" data-auth-guest="1">
               <button type="button" class="user-menu__toggle" id="userMenuToggle" aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">
-                <span class="user-menu__avatar" aria-hidden="true">ت</span>
-                <span class="user-menu__label">Profile</span>
+                <span class="user-menu__avatar" aria-hidden="true">?</span>
+                <span class="user-menu__label">الحساب</span>
                 <svg class="user-menu__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
               </button>
               <div class="user-menu__dropdown" id="userMenuDropdown" role="menu" hidden>
-                <div class="user-menu__info" role="none">
-                  <span class="user-menu__info-name">مستخدم تجريبي</span>
-                  <span class="user-menu__info-status">غير مشترك</span>
-                </div>
-                <div class="user-menu__divider" role="separator"></div>
-                <a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>
-                <div class="user-menu__divider" role="separator"></div>
-                <a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>
+                <button type="button" class="user-menu__item user-menu__item--login" role="menuitem" data-auth-login>تسجيل الدخول</button>
               </div>
             </div>
           </div>
@@ -549,6 +547,12 @@
 
       function readSessionEmail() {
         try {
+          var authRaw = localStorage.getItem('ifa_auth_user');
+          if (authRaw) {
+            var authUser = JSON.parse(authRaw);
+            var authEmail = normalizeEmail(authUser && authUser.email);
+            if (authEmail) return authEmail;
+          }
           if (window.InstructorApps && typeof window.InstructorApps.getSessionEmail === 'function') {
             var fromApps = normalizeEmail(window.InstructorApps.getSessionEmail());
             if (fromApps) return fromApps;
@@ -569,9 +573,16 @@
 
       function isGuestTestUser(menu) {
         if (!menu) return true;
-        var nameEl = menu.querySelector('.user-menu__info-name');
-        var name = nameEl ? String(nameEl.textContent || '').trim() : '';
-        return name === 'مستخدم تجريبي' || menu.getAttribute('data-auth-guest') === '1';
+        if (menu.getAttribute('data-auth-guest') === '1') return true;
+        if (menu.querySelector('[data-auth-login]') && !menu.querySelector('.user-menu__info-name')) {
+          return true;
+        }
+        try {
+          if (!localStorage.getItem('ifa_auth_user')) return true;
+        } catch (err) {
+          return true;
+        }
+        return false;
       }
 
       function isAuthorizedInstructor(email) {
@@ -629,15 +640,18 @@
 
         if (instructor && !menu.querySelector('.user-menu__item--instructor')) {
           var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
-          if (join) join.remove();
           var item = document.createElement('a');
           item.href = 'instructor.html';
           item.className = 'user-menu__item user-menu__item--instructor';
           item.setAttribute('role', 'menuitem');
           item.textContent = 'لوحة المدرب';
-          var divider = menu.querySelector('.user-menu__divider');
-          if (divider && divider.parentNode) {
-            divider.parentNode.insertBefore(item, divider.nextSibling);
+          if (join && join.parentNode) {
+            join.parentNode.insertBefore(item, join);
+          } else {
+            var logout = menu.querySelector('[data-auth-logout], .user-menu__item--logout');
+            if (logout && logout.parentNode) {
+              logout.parentNode.insertBefore(item, logout);
+            }
           }
         }
 
@@ -668,6 +682,7 @@
       window.addEventListener('storage', function (e) {
         if (
           !e.key ||
+          e.key === 'ifa_auth_user' ||
           e.key === 'ifa_session_email' ||
           e.key === 'approvedInstructorEmail' ||
           e.key === 'isInstructorApproved' ||
@@ -676,6 +691,7 @@
           applyRoleMenuVisibility();
         }
       });
+      document.addEventListener('ifa:local-auth-changed', applyRoleMenuVisibility);
     })();
   </script>
   <script src="js/navigation.js"></script>

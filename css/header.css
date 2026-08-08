@@ -248,9 +248,52 @@
   white-space: nowrap;
 }
 
+.user-menu__info-email {
+  font-size: 0.78rem;
+  color: var(--color-text-muted);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+}
+
 .user-menu__info-status {
   font-size: 0.8rem;
   color: var(--color-accent-cyan);
+}
+
+.user-menu__item--login {
+  width: 100%;
+  justify-content: center;
+  border: none;
+  background: rgba(0, 229, 255, 0.12);
+  color: var(--color-accent-cyan);
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.user-menu__item--login:hover {
+  background: rgba(0, 229, 255, 0.2);
+  color: #7af6ff;
+}
+
+.user-menu[data-auth-guest='1'] .user-menu__info,
+.user-menu[data-auth-guest='1'] .user-menu__item--logout,
+.user-menu[data-auth-guest='1'] .user-menu__item--admin,
+.user-menu[data-auth-guest='1'] .user-menu__item--instructor,
+.user-menu[data-auth-guest='1'] .user-menu__item--join,
+.user-menu[data-auth-guest='1'] .user-menu__divider {
+  display: none !important;
+}
+
+.user-menu:not([data-auth-guest='1']) .user-menu__item--login {
+  display: none !important;
+}
+
+.user-menu:not([data-auth-guest='1']) .user-menu__item--join {
+  display: flex !important;
 }
 
 .user-menu__divider {
