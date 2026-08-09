@@ -1718,6 +1718,16 @@
         if (entry.type === 'fat_handhole' && (entry.key === 'unified' || entry.role === 'fat-system')) {
           return;
         }
+        /*
+         * Defense: when a FAT pole is mounted, never paint FH# (or any handhole overlay)
+         * — pole DOM label is the sole identity.
+         */
+        if (entry.type === 'fat_handhole') {
+          var world = api?.getNodeWorldXY?.(entry.nodeId);
+          if (world && world.isPole) return;
+          var dev = deviceIndex[String(entry.nodeId)];
+          if (dev && dev.isPole) return;
+        }
         var size = measureLabel(entry.label, fontSize);
         var rect = pickEntitySlot(entry, size, ctx);
         rect.labelKind = 'tool';
@@ -1750,8 +1760,16 @@
     }
 
     /* Skip DOM wipe when label markup is unchanged - prevents 1-frame flicker
-       after pen vertex SVG rebuilds / redundant scheduled passes. */
+       after pen vertex SVG rebuilds / redundant scheduled passes.
+       Exception: empty html must always clear — otherwise stale FH## survives pole attach
+       after refresh() resets lastRenderedHtml to ''. */
     if (html === lastRenderedHtml && overlay.childElementCount > 0) {
+      if (html === '') {
+        overlay.innerHTML = '';
+        lastRenderedHtml = '';
+        lastRenderSignature = signature;
+        return;
+      }
       lastRenderSignature = signature;
       return;
     }

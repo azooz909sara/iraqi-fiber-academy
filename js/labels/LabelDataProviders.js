@@ -20,10 +20,12 @@
       if (!node) return;
       var center = deps.getNodeCenterXY(node);
       if (!center || !isFinite(center.x) || !isFinite(center.y)) return;
+      /* Pole-attached FAT handhole: no overlay labels at all (DOM .pole-label only). */
+      if (node.type === 'fat_handhole' && node.hasFatPole) return;
       deps.getNodeLabelEntries(node).forEach(function (entry) {
         if (!entry || !entry.text) return;
         /* FAT Pole unified label lives inside .fat-unified-map-marker — skip overlay duplicate */
-        if (node.type === 'fat_handhole' && node.hasFatPole && entry.key === 'unified') return;
+        if (node.type === 'fat_handhole' && (entry.key === 'unified' || entry.cls === 'fat-system')) return;
         var tier = (entry.cls === 'handhole' || entry.cls === 'fat-handhole') ? 'handhole' : 'equipment';
         entries.push({
           id: node.id + ':' + entry.key,

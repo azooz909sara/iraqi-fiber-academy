@@ -3672,10 +3672,13 @@
   function getEntityLabelEntries() {
     var entries = global.FTTHLabelDataProviders.getEntityLabelEntries();
     var VM = global.FTTHVisibilityManager;
-    if (!VM || !VM.isNodeVisible) return entries;
     return entries.filter(function (entry) {
       var node = findNode(entry.nodeId);
-      return VM.isNodeVisible(node);
+      if (!node) return false;
+      if (VM && VM.isNodeVisible && !VM.isNodeVisible(node)) return false;
+      /* Pole-attached FAT handhole: suppress all overlay labels (FH# must not overlap FAT#). */
+      if (node.type === 'fat_handhole' && node.hasFatPole) return false;
+      return true;
     });
   }
 
@@ -9289,8 +9292,8 @@
     } else {
       global.FTTHDrawingEngine?.requestMapLabelsRedraw?.();
     }
-    /* Drop stale LabelManager overlay text (FH##) — do not wait for pan/click */
-    global.FTTHLabelManager?.refresh?.();
+    /* Drop stale LabelManager overlay text (FH##) — force clear, do not wait for pan/click */
+    global.FTTHLabelManager?.refresh?.({ force: true });
     rememberLastInstalledElement(target.fatSystemName);
     notifyFiberDesignTopologyChanged();
     updateStatus('FAT Pole mounted — ' + target.fatSystemName + ' ✓');
