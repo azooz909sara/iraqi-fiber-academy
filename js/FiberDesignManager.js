@@ -787,16 +787,33 @@
     return null;
   }
 
+  function formatRingPigtailNo(n) {
+    var num = Number(n) || 0;
+    return 'IN' + (num < 10 ? '0' + num : String(num));
+  }
+
   /**
    * Ring Fiber Design rows: OLT feeder → one tube per cabinet,
-   * expanded to 24 directional rows (Main IN1–12 / Backup IN13–24).
+   * as two independent 12-row blocks (Main / Backup).
    */
   function buildRingMatrixRows() {
     var rows = [];
     var cables = getMapCables() || [];
     var RING_SEGMENTS = [
-      { id: 'main', pigtailOffset: 0, splitterPort: 'IN1' },
-      { id: 'backup', pigtailOffset: 12, splitterPort: 'IN2' },
+      {
+        id: 'main',
+        layer: 'Main',
+        spliceTray: 'S1',
+        pigtailOffset: 0,
+        splitterPort: 'IN1',
+      },
+      {
+        id: 'backup',
+        layer: 'Backup',
+        spliceTray: 'S2',
+        pigtailOffset: 12,
+        splitterPort: 'IN2',
+      },
     ];
 
     cables.forEach(function (cable) {
@@ -823,6 +840,12 @@
         var segIdx;
         for (segIdx = 0; segIdx < RING_SEGMENTS.length; segIdx++) {
           var segment = RING_SEGMENTS[segIdx];
+          var blockId = [
+            String(cable.id || cableId),
+            String(tube.tube_number),
+            segment.id,
+            String(cab.id),
+          ].join('|');
           var f;
           for (f = 0; f < RING_FIBERS_PER_TUBE; f++) {
             var fiberColor = RING_FIBER_COLORS[f];
@@ -837,11 +860,15 @@
               tube_striped: tube.tube_striped,
               tube_label: tube.tube_label,
               ring_segment: segment.id,
+              ring_block_id: blockId,
+              cable_layer: segment.layer,
+              splice_tray: segment.spliceTray,
               fiber_number: pigtailNo,
               fiber_color: fiberColor,
               fiber_label: fiberColor,
+              tray_fiber_color: fiberColor,
               cabinet_id: cabinetLabel,
-              pigtail_no: 'IN' + pigtailNo,
+              pigtail_no: formatRingPigtailNo(pigtailNo),
               spliter: String(spliterNo),
               splitter_port: segment.splitterPort,
               cabinet_node_id: String(cab.id),
@@ -859,6 +886,9 @@
       }
       if ((a.tube_number || 0) !== (b.tube_number || 0)) {
         return (a.tube_number || 0) - (b.tube_number || 0);
+      }
+      if (a.ring_segment !== b.ring_segment) {
+        return a.ring_segment === 'main' ? -1 : 1;
       }
       return (a.fiber_number || 0) - (b.fiber_number || 0);
     });

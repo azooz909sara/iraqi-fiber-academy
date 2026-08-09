@@ -48,10 +48,12 @@
 
   var RING_MATRIX_COLUMNS = [
     { key: 'feeder_cable_id', label: 'CABLE ID' },
+    { key: 'cable_layer', label: 'Cable Layer' },
     { key: 'tube_label', label: 'TUBE Colour', tubeCell: true },
-    { key: 'fiber_label', label: 'FIBER', fiberCell: true },
     { key: 'cabinet_id', label: 'FDT_ID' },
-    { key: 'pigtail_no', label: 'Pigtail No' },
+    { key: 'splice_tray', label: 'Splice Tray' },
+    { key: 'fiber_label', label: 'Tray Fiber Color', fiberCell: true },
+    { key: 'pigtail_no', label: 'Pigtail_No' },
     { key: 'spliter', label: 'Spliter' },
     { key: 'splitter_port', label: 'Splitter Port' },
   ];
@@ -65,10 +67,14 @@
     'fat_id',
   ];
 
+  /* ring_block_id isolates Main vs Backup so shared cells span only within each 12-row unit */
   var RING_ROWSPAN_GROUP_KEYS = [
+    'ring_block_id',
     'feeder_cable_id',
+    'cable_layer',
     'tube_label',
     'cabinet_id',
+    'splice_tray',
     'splitter_port',
   ];
 
@@ -793,7 +799,7 @@
       : renderMatrixTable(rows || []);
     var meta = isRing
       ? ('<strong>Generated:</strong> ' + escapeHtml(stampText) +
-        ' · <strong>Rule:</strong> 1 tube / cabinet · Main (IN1–12→IN1) + Backup (IN13–24→IN2)' +
+        ' · <strong>Rule:</strong> 1 tube / cabinet · Main S1 (IN01–12→IN1) + Backup S2 (IN13–24→IN2)' +
         ' · <strong>Rows:</strong> ' + String((rows && rows.length) || 0))
       : ('<strong>Generated:</strong> ' + escapeHtml(stampText) + ' · ' +
         '<strong>Cabinet:</strong> ' + escapeHtml(summary.cabinet) + ' · ' +
@@ -946,8 +952,8 @@
 
   function renderRingToolbar(rows) {
     return '<div class="fd-float__toolbar">' +
-      '<span class="fd-float__badge">Ring Feeder · Main + Backup (24 rows / tube)</span>' +
-      '<span class="fd-float__hint-inline">Main IN1–12→IN1 · Backup IN13–24→IN2 · 48F→4 · 72F→6 · 144F→12 · 288F→24</span>' +
+      '<span class="fd-float__badge">Ring Feeder · Main (S1) + Backup (S2)</span>' +
+      '<span class="fd-float__hint-inline">Independent 12-row blocks · Main IN01–12/IN1 · Backup IN13–24/IN2</span>' +
       '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export ring matrix as PDF">' +
       'Export PDF</button>' +
       '<span class="fd-float__row-count">' + rows.length + ' fiber row(s)</span>' +
