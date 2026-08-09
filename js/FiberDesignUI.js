@@ -41,9 +41,8 @@
   var RING_MATRIX_COLUMNS = [
     { key: 'olt_source', label: 'OLT Source' },
     { key: 'feeder_cable_id', label: 'Feeder Cable ID' },
-    { key: 'tube_label', label: 'Allocated Tube', tubeCell: true },
-    { key: 'fiber_range', label: 'Fiber Range (1–12)' },
-    { key: 'fiber_colors', label: 'Fiber Colors (1–12)' },
+    { key: 'tube_label', label: 'TUBE Colour', tubeCell: true },
+    { key: 'fiber_label', label: 'FIBER', fiberCell: true },
     { key: 'cabinet_id', label: 'Destination Cabinet ID' },
   ];
 
@@ -59,6 +58,8 @@
   var RING_ROWSPAN_GROUP_KEYS = [
     'olt_source',
     'feeder_cable_id',
+    'tube_label',
+    'cabinet_id',
   ];
 
   var FIBER_COLOR_CSS = {
@@ -477,6 +478,10 @@
             if (row.tube_striped) cls += ' fd-matrix-cell--striped';
             style = fiberColorStyle(row.tube_color || val, !!row.tube_striped);
           }
+          if (col.fiberCell) {
+            cls += ' fd-matrix-cell--color fd-matrix-cell--fiber';
+            style = fiberColorStyle(row.fiber_color || val);
+          }
           if (col.key === 'fiber_type') {
             cls += ' fd-matrix-cell--type-' + escapeAttr(val.toLowerCase());
           }
@@ -772,7 +777,7 @@
       '<span class="fd-float__hint-inline">48F→4 · 72F→6 · 144F→12 · 288F→24 (T13–T24 black-striped)</span>' +
       '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export ring matrix as PDF">' +
       'Export PDF</button>' +
-      '<span class="fd-float__row-count">' + rows.length + ' cabinet allocation(s)</span>' +
+      '<span class="fd-float__row-count">' + rows.length + ' fiber row(s)</span>' +
       '</div>';
   }
 

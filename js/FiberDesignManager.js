@@ -704,7 +704,10 @@
     'Blue', 'Orange', 'Green', 'Brown', 'Grey', 'White',
     'Red', 'Black', 'Yellow', 'Violet', 'Pink', 'Cyan',
   ];
-  var RING_FIBER_COLORS = RING_NATURAL_TUBE_COLORS.slice();
+  var RING_FIBER_COLORS = [
+    'Blue', 'Orange', 'Green', 'Brown', 'Gray', 'White',
+    'Red', 'Black', 'Yellow', 'Violet', 'Pink', 'Aqua',
+  ];
   var RING_FEEDER_SPECS = {
     48: { tubeCount: 4, maxCabinets: 4, stripedFrom: 0 },
     72: { tubeCount: 6, maxCabinets: 6, stripedFrom: 0 },
@@ -741,8 +744,7 @@
       tube_number: tubeNumber,
       tube_color: color,
       tube_striped: striped,
-      tube_label: 'T' + tubeNumber + ' · ' + label,
-      fiber_range: '1–12',
+      tube_label: label,
       fiber_colors: RING_FIBER_COLORS.slice(),
     };
   }
@@ -786,7 +788,8 @@
   }
 
   /**
-   * Ring Fiber Design rows: OLT feeder → one tube (12F) per destination cabinet.
+   * Ring Fiber Design rows: OLT feeder → one tube (12F) per cabinet,
+   * expanded to one matrix row per fiber (12 rows per tube).
    */
   function buildRingMatrixRows() {
     var rows = [];
@@ -811,21 +814,28 @@
         var tube = getRingTubeDescriptor(capacity, i);
         if (!tube) break;
         var cab = cabinets[i];
-        rows.push({
-          olt_source: oltLabel,
-          feeder_cable_id: cableId,
-          capacity: capacity,
-          tube_number: tube.tube_number,
-          tube_color: tube.tube_color,
-          tube_striped: tube.tube_striped,
-          tube_label: tube.tube_label,
-          fiber_range: tube.fiber_range,
-          fiber_colors: tube.fiber_colors.join(', '),
-          cabinet_id: getCabinetLabel(cab),
-          cabinet_node_id: String(cab.id),
-          olt_node_id: String(olt.id),
-          cable_id: String(cable.id || ''),
-        });
+        var cabinetLabel = getCabinetLabel(cab);
+        var f;
+        for (f = 0; f < RING_FIBERS_PER_TUBE; f++) {
+          var fiberColor = RING_FIBER_COLORS[f];
+          var fiberNumber = f + 1;
+          rows.push({
+            olt_source: oltLabel,
+            feeder_cable_id: cableId,
+            capacity: capacity,
+            tube_number: tube.tube_number,
+            tube_color: tube.tube_color,
+            tube_striped: tube.tube_striped,
+            tube_label: tube.tube_label,
+            fiber_number: fiberNumber,
+            fiber_color: fiberColor,
+            fiber_label: fiberColor,
+            cabinet_id: cabinetLabel,
+            cabinet_node_id: String(cab.id),
+            olt_node_id: String(olt.id),
+            cable_id: String(cable.id || ''),
+          });
+        }
       }
     });
 
@@ -833,7 +843,10 @@
       if (a.feeder_cable_id !== b.feeder_cable_id) {
         return String(a.feeder_cable_id).localeCompare(String(b.feeder_cable_id), undefined, { numeric: true });
       }
-      return (a.tube_number || 0) - (b.tube_number || 0);
+      if ((a.tube_number || 0) !== (b.tube_number || 0)) {
+        return (a.tube_number || 0) - (b.tube_number || 0);
+      }
+      return (a.fiber_number || 0) - (b.fiber_number || 0);
     });
     return rows;
   }
