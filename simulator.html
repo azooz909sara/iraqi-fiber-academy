@@ -510,7 +510,14 @@
 </head>
 <body class="bg-fiber-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden simulator-page-active">
 
-  <!-- Subscriber access gate (overlay only — does not remove canvas / workspace) -->
+  <!-- Subscriber access gate (overlay only — does not remove canvas / workspace). Hidden immediately on local file:// / localhost. -->
+  <script src="js/env-access.js"></script>
+  <script>
+    (function () {
+      var bypass = window.IFA_ENV && window.IFA_ENV.shouldBypassAccessControl && window.IFA_ENV.shouldBypassAccessControl();
+      if (bypass) document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
+    })();
+  </script>
   <div id="subscriber-gate" class="subscriber-gate subscriber-gate--visible" role="dialog" aria-modal="true" aria-labelledby="subscriber-gate-title" aria-hidden="false">
     <div class="subscriber-gate__backdrop" aria-hidden="true"></div>
     <div class="subscriber-gate__card" dir="rtl">
@@ -524,6 +531,17 @@
       </div>
     </div>
   </div>
+  <script>
+    (function () {
+      if (!window.IFA_ENV || !window.IFA_ENV.shouldBypassAccessControl || !window.IFA_ENV.shouldBypassAccessControl()) return;
+      var gate = document.getElementById('subscriber-gate');
+      if (!gate) return;
+      gate.hidden = true;
+      gate.setAttribute('aria-hidden', 'true');
+      gate.classList.remove('subscriber-gate--visible');
+      document.body.classList.remove('subscriber-gate-active');
+    })();
+  </script>
 
   <!-- Startup / Welcome (entry gate — map engine loads after project selection) -->
   <div id="startup-view" class="startup-view" role="main" aria-label="Welcome">

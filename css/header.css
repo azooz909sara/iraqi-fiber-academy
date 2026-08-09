@@ -344,6 +344,16 @@
   display: flex !important;
 }
 
+/* Local-dev bypass: force privileged dashboards visible even before auth settles */
+.user-menu.is-local-dev.is-admin .user-menu__item--admin,
+.user-menu.is-local-dev.is-admin .user-menu__item[data-admin-only],
+.user-menu.is-local-dev.is-instructor .user-menu__item--instructor,
+.user-menu.is-file-local.is-admin .user-menu__item--admin,
+.user-menu.is-file-local.is-admin .user-menu__item[data-admin-only],
+.user-menu.is-file-local.is-instructor .user-menu__item--instructor {
+  display: flex !important;
+}
+
 .nav__toggle {
   display: none; flex-direction: column; justify-content: center; gap: 5px;
   width: 32px; height: 32px; padding: 4px; z-index: 1001;

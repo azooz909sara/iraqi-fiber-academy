@@ -531,6 +531,7 @@
     </div>
   </div>
 
+  <script src="js/env-access.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
@@ -543,6 +544,14 @@
 
       function normalizeEmail(value) {
         return String(value || '').trim().toLowerCase();
+      }
+
+      function isLocalDev() {
+        return !!(window.IFA_ENV && window.IFA_ENV.shouldBypassAccessControl && window.IFA_ENV.shouldBypassAccessControl());
+      }
+
+      function isLiveDomain() {
+        return !!(window.IFA_ENV && window.IFA_ENV.isProductionEnvironment && window.IFA_ENV.isProductionEnvironment());
       }
 
       function readSessionEmail() {
@@ -610,10 +619,12 @@
 
         var email = readSessionEmail();
         var guest = isGuestTestUser(menu);
+        var localDev = isLocalDev();
+        var liveDomain = isLiveDomain();
 
-        /* Guests / test users: never show privileged dashboards */
-        if (guest) {
-          menu.classList.remove('is-admin', 'is-instructor');
+        /* Guests: hide privileged dashboards — except local-dev bypass */
+        if (guest && !localDev) {
+          menu.classList.remove('is-admin', 'is-instructor', 'is-file-local', 'is-local-dev');
           menu.querySelectorAll(
             '.user-menu__item--admin, [data-admin-only], .user-menu__item--instructor'
           ).forEach(function (el) {
@@ -622,56 +633,83 @@
           return;
         }
 
-        var admin = isAdminEmail(email) || menu.classList.contains('is-admin');
-        var instructor =
-          admin ||
-          isAuthorizedInstructor(email) ||
-          menu.classList.contains('is-instructor');
+        /*
+         * local (file:// / localhost) → always show Admin + Instructor
+         * production domain → ONLY abdulazizyassin909@gmail.com
+         */
+        var admin = localDev || isAdminEmail(email);
+        var instructor = localDev || isAdminEmail(email) || isAuthorizedInstructor(email);
 
+        menu.classList.toggle('is-file-local', localDev);
+        menu.classList.toggle('is-local-dev', localDev);
+        menu.classList.toggle('is-live-domain', liveDomain);
+        menu.setAttribute('data-env', localDev ? 'local' : liveDomain ? 'production' : 'other');
         menu.classList.toggle('is-admin', admin);
         menu.classList.toggle('is-instructor', instructor);
 
         menu.querySelectorAll('.user-menu__item--admin, [data-admin-only]').forEach(function (el) {
-          if (!admin) el.remove();
+          if (!admin) {
+            el.remove();
+          } else {
+            el.style.setProperty('display', 'flex', 'important');
+            el.setAttribute('aria-hidden', 'false');
+          }
         });
         menu.querySelectorAll('.user-menu__item--instructor').forEach(function (el) {
-          if (!instructor) el.remove();
+          if (!instructor) {
+            el.remove();
+          } else {
+            el.style.setProperty('display', 'flex', 'important');
+            el.setAttribute('aria-hidden', 'false');
+          }
         });
 
+        function insertMenuItem(el, beforeSelector) {
+          var drop = menu.querySelector('#userMenuDropdown, .user-menu__dropdown');
+          var before = beforeSelector ? menu.querySelector(beforeSelector) : null;
+          if (before && before.parentNode) {
+            before.parentNode.insertBefore(el, before);
+            return;
+          }
+          if (drop) drop.appendChild(el);
+        }
+
         if (instructor && !menu.querySelector('.user-menu__item--instructor')) {
-          var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
           var item = document.createElement('a');
           item.href = 'instructor.html';
+          item.id = 'instructor-dashboard';
           item.className = 'user-menu__item user-menu__item--instructor';
           item.setAttribute('role', 'menuitem');
           item.textContent = 'لوحة المدرب';
-          if (join && join.parentNode) {
-            join.parentNode.insertBefore(item, join);
-          } else {
-            var logout = menu.querySelector('[data-auth-logout], .user-menu__item--logout');
-            if (logout && logout.parentNode) {
-              logout.parentNode.insertBefore(item, logout);
-            }
-          }
+          item.style.setProperty('display', 'flex', 'important');
+          insertMenuItem(
+            item,
+            '[data-join-instructor], .user-menu__item--join, [data-auth-logout], .user-menu__item--logout'
+          );
         }
 
         if (admin && !menu.querySelector('.user-menu__item--admin, [data-admin-only]')) {
-          var inst = menu.querySelector('.user-menu__item--instructor');
-          var join2 = menu.querySelector('[data-join-instructor], .user-menu__item--join');
           var adminItem = document.createElement('a');
           adminItem.href = 'admin.html';
+          adminItem.id = 'admin-dashboard';
           adminItem.className = 'user-menu__item user-menu__item--admin';
           adminItem.setAttribute('role', 'menuitem');
           adminItem.setAttribute('data-admin-only', '');
           adminItem.textContent = 'لوحة الإدارة';
-          if (inst && inst.parentNode) {
-            inst.parentNode.insertBefore(adminItem, inst.nextSibling);
-          } else if (join2 && join2.parentNode) {
-            join2.parentNode.insertBefore(adminItem, join2);
+          adminItem.style.setProperty('display', 'flex', 'important');
+          var afterInst = menu.querySelector('.user-menu__item--instructor');
+          if (afterInst && afterInst.parentNode) {
+            afterInst.parentNode.insertBefore(adminItem, afterInst.nextSibling);
+          } else {
+            insertMenuItem(
+              adminItem,
+              '[data-join-instructor], .user-menu__item--join, [data-auth-logout], .user-menu__item--logout'
+            );
           }
         }
       }
 
+      window.applyRoleMenuVisibility = applyRoleMenuVisibility;
       applyRoleMenuVisibility();
       window.addEventListener('load', applyRoleMenuVisibility);
       window.addEventListener('focus', applyRoleMenuVisibility);
@@ -692,6 +730,15 @@
         }
       });
       document.addEventListener('ifa:local-auth-changed', applyRoleMenuVisibility);
+
+      var authSlot = document.querySelector('[data-auth-slot]');
+      if (authSlot && typeof MutationObserver !== 'undefined') {
+        var timer = null;
+        new MutationObserver(function () {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(applyRoleMenuVisibility, 0);
+        }).observe(authSlot, { childList: true, subtree: true });
+      }
     })();
   </script>
   <script src="js/navigation.js"></script>

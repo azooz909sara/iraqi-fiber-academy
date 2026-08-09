@@ -18,6 +18,7 @@ import { syncUserProfile } from './db-manager.js';
 /** Hard allow-list for admin dashboard access (normalized lowercase). */
 var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
 var LOCAL_AUTH_KEY = 'ifa_auth_user';
+var LOCAL_DEV_EMAIL = 'abdulazizyassin909@gmail.com';
 
 var slots = [];
 var lastUser = null;
@@ -155,7 +156,64 @@ function isAdminEmail(email) {
   return false;
 }
 
+/** file:// or localhost / 127.0.0.1 — local development bypass */
+function isLocalDevEnvironment() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isLocalDevEnvironment === 'function') {
+    return window.IFA_ENV.isLocalDevEnvironment();
+  }
+  try {
+    if (!window || !window.location) return false;
+    if (window.location.protocol === 'file:') return true;
+    var host = String(window.location.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch (err) {
+    return false;
+  }
+}
+
+function isProductionEnvironment() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isProductionEnvironment === 'function') {
+    return window.IFA_ENV.isProductionEnvironment();
+  }
+  try {
+    var host = String((window && window.location && window.location.hostname) || '').toLowerCase();
+    return host === 'irabi-fiber-academy.web.app' || host === 'irabi-fiber-academy.firebaseapp.com';
+  } catch (err) {
+    return false;
+  }
+}
+
+function shouldBypassAccessControl() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.shouldBypassAccessControl === 'function') {
+    return window.IFA_ENV.shouldBypassAccessControl();
+  }
+  return isLocalDevEnvironment();
+}
+
+/** Local → always show Admin + Instructor; production → admin email allow-list only */
+function shouldShowDashboardLinks(email) {
+  if (shouldBypassAccessControl()) return true;
+  return isAdminEmail(email);
+}
+
+/** Seed / upgrade a full-privilege local session for free local development. */
+function ensureLocalDevSession() {
+  if (!shouldBypassAccessControl()) return null;
+  var existing = getLocalAuthUser();
+  var email = (existing && existing.email) || LOCAL_DEV_EMAIL;
+  return setLocalAuthUser({
+    name: (existing && existing.name) || 'Local Dev',
+    email: email,
+    photoURL: (existing && existing.photoURL) || '',
+    isSubscriber: true,
+    isAdmin: true,
+    isInstructor: true,
+    role: 'admin',
+  });
+}
+
 function isAdminUser(profile, email) {
+  if (shouldBypassAccessControl()) return true;
   var resolved = normalizeEmail(email || (profile && profile.email) || '');
   if (isAdminEmail(resolved)) return true;
   if (!profile) return false;
@@ -165,6 +223,7 @@ function isAdminUser(profile, email) {
 }
 
 function isInstructorUser(profile, email) {
+  if (shouldBypassAccessControl()) return true;
   var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
   var checkEmail = normalizeEmail(
     email ||
@@ -268,8 +327,7 @@ function guestMenuHtml() {
 function userMenuHtml(options) {
   var fullName = escapeHtml(options.fullName || 'مستخدم');
   var email = escapeHtml(options.email || '');
-  var isAdmin = options.isAdmin === true;
-  var isInstructor = options.isInstructor === true;
+  var showDashboards = options.showDashboards === true;
   var avatar =
     options.avatarHtml ||
     '<span class="user-menu__avatar" aria-hidden="true">' +
@@ -277,15 +335,15 @@ function userMenuHtml(options) {
       '</span>';
 
   var menuClasses = 'user-menu';
-  if (isAdmin) menuClasses += ' is-admin';
-  if (isInstructor) menuClasses += ' is-instructor';
+  if (showDashboards) menuClasses += ' is-admin is-instructor';
+  if (shouldBypassAccessControl()) menuClasses += ' is-file-local is-local-dev';
 
-  var instructorItem = isInstructor
-    ? '<a href="instructor.html" class="user-menu__item user-menu__item--instructor" role="menuitem">لوحة المدرب</a>'
+  var instructorItem = showDashboards
+    ? '<a href="instructor.html" id="instructor-dashboard" class="user-menu__item user-menu__item--instructor" role="menuitem">لوحة المدرب</a>'
     : '';
 
-  var adminItem = isAdmin
-    ? '<a href="admin.html" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>'
+  var adminItem = showDashboards
+    ? '<a href="admin.html" id="admin-dashboard" class="user-menu__item user-menu__item--admin" role="menuitem" data-admin-only>لوحة الإدارة</a>'
     : '';
 
   /* Always shown when logged in (per account-menu workflow) */
@@ -348,8 +406,7 @@ function loggedInHtml(user, variant, profile) {
     fullName: getFullName(user, profile),
     email: email,
     avatarHtml: avatarHtml(user, firstName),
-    isAdmin: isAdminUser(profile, email),
-    isInstructor: isInstructorUser(profile, email),
+    showDashboards: shouldShowDashboardLinks(email),
   });
 }
 
@@ -387,6 +444,13 @@ function renderAuthSlot(slot) {
   slot.innerHTML = identity.user
     ? loggedInHtml(identity.user, variant, identity.profile)
     : loggedOutHtml(variant);
+  if (typeof window.applyRoleMenuVisibility === 'function') {
+    try {
+      window.applyRoleMenuVisibility();
+    } catch (err) {
+      /* ignore */
+    }
+  }
 }
 
 function openUserMenuDropdown() {
@@ -415,19 +479,21 @@ function nameFromEmail(email) {
 /** Instant localStorage login used by the landing account menu. */
 function loginLocalSession(options) {
   options = options || {};
-  var email = normalizeEmail(options.email || readLocalSessionEmail() || 'user@fiberacademy.iq');
+  var localBypass = shouldBypassAccessControl();
+  var defaultEmail = localBypass ? LOCAL_DEV_EMAIL : 'user@fiberacademy.iq';
+  var email = normalizeEmail(options.email || readLocalSessionEmail() || defaultEmail);
   if (!email || email.indexOf('@') === -1) {
-    email = 'user@fiberacademy.iq';
+    email = defaultEmail;
   }
-  var name = String(options.name || '').trim() || nameFromEmail(email) || 'مستخدم';
+  var name = String(options.name || '').trim() || nameFromEmail(email) || (localBypass ? 'Local Dev' : 'مستخدم');
   setLocalAuthUser({
     name: name,
     email: email,
     photoURL: options.photoURL || '',
-    isSubscriber: !!options.isSubscriber,
-    isAdmin: options.isAdmin === true || isAdminEmail(email),
-    isInstructor: !!options.isInstructor,
-    role: options.role || (isAdminEmail(email) ? 'admin' : 'student'),
+    isSubscriber: localBypass ? true : !!options.isSubscriber,
+    isAdmin: localBypass ? true : options.isAdmin === true || isAdminEmail(email),
+    isInstructor: localBypass ? true : !!options.isInstructor,
+    role: localBypass ? 'admin' : options.role || (isAdminEmail(email) ? 'admin' : 'student'),
   });
   refreshSlots();
   notifyLocalAuthChanged({ type: 'login', email: email });
@@ -525,10 +591,17 @@ function initAuthUI() {
     if (window.InstructorApps && window.InstructorApps.absorbApprovalFromUrl) {
       window.InstructorApps.absorbApprovalFromUrl();
     }
+    if (shouldBypassAccessControl()) {
+      ensureLocalDevSession();
+    }
     slots.forEach(function (slot) {
       renderAuthSlot(slot);
     });
   };
+
+  if (shouldBypassAccessControl()) {
+    ensureLocalDevSession();
+  }
 
   refreshSlots();
 
@@ -536,6 +609,9 @@ function initAuthUI() {
     lastUser = user || null;
     if (!user) {
       lastProfile = null;
+      if (shouldBypassAccessControl()) {
+        ensureLocalDevSession();
+      }
       /* Keep local session if Firebase signed out but local auth still set */
       refreshSlots();
       notifyLocalAuthChanged({ type: getLocalAuthUser() ? 'local-session' : 'logout' });
@@ -543,12 +619,15 @@ function initAuthUI() {
     }
 
     var email = normalizeEmail(user.email || '');
+    var localBypass = shouldBypassAccessControl();
     setLocalAuthUser({
       name: user.displayName || '',
       email: email,
       photoURL: user.photoURL || '',
-      isAdmin: isAdminEmail(email),
-      role: isAdminEmail(email) ? 'admin' : 'student',
+      isSubscriber: localBypass ? true : false,
+      isAdmin: localBypass ? true : isAdminEmail(email),
+      isInstructor: localBypass ? true : false,
+      role: localBypass || isAdminEmail(email) ? 'admin' : 'student',
     });
     refreshSlots();
     notifyLocalAuthChanged({ type: 'login', email: email });
@@ -561,10 +640,10 @@ function initAuthUI() {
             name: profile.name || user.displayName || '',
             email: profile.email || user.email || '',
             photoURL: user.photoURL || profile.photo || '',
-            isSubscriber: !!profile.isSubscriber,
-            isAdmin: !!profile.isAdmin || isAdminEmail(profile.email || user.email),
-            isInstructor: !!profile.isInstructor,
-            role: profile.role || '',
+            isSubscriber: localBypass ? true : !!profile.isSubscriber,
+            isAdmin: localBypass ? true : !!profile.isAdmin || isAdminEmail(profile.email || user.email),
+            isInstructor: localBypass ? true : !!profile.isInstructor,
+            role: localBypass ? 'admin' : profile.role || '',
           });
         }
         refreshSlots();

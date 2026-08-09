@@ -1,6 +1,14 @@
 /* FTTH Simulator — Google Maps × Residential Complex */
 
 /* ─── Subscriber access gate (overlay; canvas stays in DOM) ─── */
+/* Local-dev (file:// / localhost): never show the subscriber wall */
+html[data-ifa-access='local-bypass'] .subscriber-gate,
+html[data-ifa-access='local-bypass'] #subscriber-gate {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .subscriber-gate {
   position: fixed;
   inset: 0;
