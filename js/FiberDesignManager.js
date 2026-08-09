@@ -80,6 +80,71 @@
   ];
 
   /**
+   * Per PLC pair (01/13 … 12/24), cycle this 4-color block before advancing:
+   * PLC01+Blue, PLC13+Blue, PLC01+Orange, PLC13+Orange, … Brown, then PLC02/14.
+   */
+  var DIST_PLC_BLOCK_COLORS = ['Blue', 'Orange', 'Green', 'Brown'];
+  var DIST_PLC_PAIR_COUNT = 12;
+
+  function formatPlcSplitterNo(n) {
+    var num = Number(n) || 0;
+    return 'PLC ' + (num < 10 ? '0' + num : String(num));
+  }
+
+  /** pairIndex 0..∞ → { plcMain, plcExpansion, color } for the 4-color × 12-PLC loop. */
+  function resolvePlcPairMapping(pairIndex) {
+    var idx = Math.max(0, Number(pairIndex) || 0);
+    var colorIdx = idx % DIST_PLC_BLOCK_COLORS.length;
+    var plcPair = Math.floor(idx / DIST_PLC_BLOCK_COLORS.length) % DIST_PLC_PAIR_COUNT;
+    return {
+      plcMain: plcPair + 1,
+      plcExpansion: plcPair + 13,
+      color: DIST_PLC_BLOCK_COLORS[colorIdx],
+      colorIndex: colorIdx,
+      plcPairIndex: plcPair,
+    };
+  }
+
+  /**
+   * Map distribution rows to PLC Main/Expansion with the 4-color block loop:
+   * PLC01 Blue→PLC13 Blue→PLC01 Orange→…→PLC01 Brown, then PLC02/14, … PLC12/24.
+   */
+  function applyPlcSplitterMapping(rows) {
+    if (!rows || !rows.length) return rows;
+    var stateByCab = Object.create(null);
+    var i;
+    for (i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (!row) continue;
+      var cabKey = String(row.cabinet_id || row.cabinet_label || '_');
+      if (!stateByCab[cabKey]) {
+        stateByCab[cabKey] = { nextPairIndex: 0, lastPairIndex: -1 };
+      }
+      var st = stateByCab[cabKey];
+      var ft = String(row.fiber_type || '').trim().toLowerCase();
+      if (ft === 'main') {
+        var pairIndex = st.nextPairIndex;
+        st.lastPairIndex = pairIndex;
+        st.nextPairIndex += 1;
+        var mainMap = resolvePlcPairMapping(pairIndex);
+        row.splitter_fiber_no = formatPlcSplitterNo(mainMap.plcMain);
+        row.pigtails_fiber_color = mainMap.color;
+        row.plc_pair_index = pairIndex;
+      } else if (ft === 'expansion') {
+        var ePair = st.lastPairIndex >= 0 ? st.lastPairIndex : Math.max(0, st.nextPairIndex - 1);
+        var expMap = resolvePlcPairMapping(ePair);
+        row.splitter_fiber_no = formatPlcSplitterNo(expMap.plcExpansion);
+        row.pigtails_fiber_color = expMap.color;
+        row.plc_pair_index = ePair;
+      } else {
+        if (!row.splitter_fiber_no) row.splitter_fiber_no = '—';
+        if (!row.pigtails_fiber_color) row.pigtails_fiber_color = '—';
+      }
+    }
+    return rows;
+  }
+
+  /**
    * Validate 48F cable standard before rendering matrix.
    * Throws error if tube count, tube order, fiber count, or fiber order is incorrect.
    */
@@ -1897,6 +1962,9 @@
       },
     ];
 
+    var plcPairIndex = Math.floor((mainAsg.global_fiber_index || 0) / FIBERS_PER_FAT);
+    var plcMap = resolvePlcPairMapping(plcPairIndex);
+
     specs.forEach(function (spec) {
       var mFiber = mainTube.fibers[spec.mIndex] || findFiberByColor(mainTube, spec.mColor);
       var sFiber = subTube.fibers[spec.sIndex] || findFiberByColor(subTube, spec.sColor);
@@ -1915,6 +1983,13 @@
       if (row) {
         row.fat_id = fatId;
         row.fat_distance = fatDistance || 0;
+        row.plc_pair_index = plcPairIndex;
+        if (spec.type === 'Main') {
+          row.splitter_fiber_no = formatPlcSplitterNo(plcMap.plcMain);
+        } else {
+          row.splitter_fiber_no = formatPlcSplitterNo(plcMap.plcExpansion);
+        }
+        row.pigtails_fiber_color = plcMap.color;
         matrixRows.push(row);
       }
     });
@@ -2450,8 +2525,7 @@
   }
 
   function sortMatrixRows(rows) {
-    /* Stable sort: keep sub-cable / fiber insertion order from DFS allocation.
-       Do not re-order by ascending S-Cable ID or artificial tube comparators. */
+    /* Stable sort: preserve Main→Expansion push order within each closure. */
     return rows.slice().sort(function (a, b) {
       if (a.cabinet_label !== b.cabinet_label) {
         return String(a.cabinet_label || '').localeCompare(String(b.cabinet_label || ''), undefined, { numeric: true });
@@ -2462,6 +2536,16 @@
       if (a.closure_order !== b.closure_order) {
         return (a.closure_order || 0) - (b.closure_order || 0);
       }
+      /* Same closure: keep allocation pair index, Main before Expansion. */
+      var aPair = a.plc_pair_index != null ? Number(a.plc_pair_index) : NaN;
+      var bPair = b.plc_pair_index != null ? Number(b.plc_pair_index) : NaN;
+      if (isFinite(aPair) && isFinite(bPair) && aPair !== bPair) {
+        return aPair - bPair;
+      }
+      var aType = String(a.fiber_type || '').toLowerCase();
+      var bType = String(b.fiber_type || '').toLowerCase();
+      if (aType === 'main' && bType === 'expansion') return -1;
+      if (aType === 'expansion' && bType === 'main') return 1;
       return 0;
     });
   }
@@ -2552,6 +2636,7 @@
         console.log('[FiberDesignManager] regenerate: matrix rows before sort = ' + matrixRows.length);
         }
         matrixRows = sortMatrixRows(matrixRows);
+        applyPlcSplitterMapping(matrixRows);
         if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: matrix rows after sort = ' + matrixRows.length);
         }
@@ -2745,6 +2830,7 @@
     var row = buildMatrixRow(node, splice);
     if (row) matrixRows.push(row);
     matrixRows = sortMatrixRows(matrixRows);
+    applyPlcSplitterMapping(matrixRows);
     lastDesignVersion += 1;
     emitDesignChanged();
 
@@ -2884,6 +2970,7 @@
       });
     });
     matrixRows = sortMatrixRows(matrixRows);
+    applyPlcSplitterMapping(matrixRows);
     lastDesignVersion += 1;
     emitDesignChanged();
     return true;
@@ -2979,5 +3066,7 @@
     RING_NATURAL_TUBE_COLORS: RING_NATURAL_TUBE_COLORS.slice(),
     RING_FIBER_COLORS: RING_FIBER_COLORS.slice(),
     RING_FEEDER_SPECS: deepClone(RING_FEEDER_SPECS),
+    DIST_PLC_BLOCK_COLORS: DIST_PLC_BLOCK_COLORS.slice(),
+    DIST_PLC_PAIR_COUNT: DIST_PLC_PAIR_COUNT,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

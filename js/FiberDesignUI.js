@@ -35,6 +35,8 @@
   var COL_WIDTHS_STORAGE_KEY = 'ifa_fd_matrix_col_widths';
 
   var MATRIX_COLUMNS = [
+    { key: 'splitter_fiber_no', label: 'Splitter Fiber No.' },
+    { key: 'pigtails_fiber_color', label: 'Pigtails (fiber color)', colorCell: true },
     { key: 'm_cable_id', label: 'M-Cable ID' },
     { key: 'm_tube_color', label: 'Cable tube color', colorCell: true },
     { key: 'm_fiber_color', label: 'Cable (Fiber color)', colorCell: true },

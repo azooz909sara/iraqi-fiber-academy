@@ -9897,3 +9897,10 @@ body.fd-matrix-col-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Distribution Matrix: PLC splitter / pigtail columns */
+.fd-matrix-table th[data-col-key=" splitter_fiber_no\],
+.fd-matrix-table td.fd-matrix-cell[data-col-key=\splitter_fiber_no\] {
+ white-space: nowrap;
+ font-variant-numeric: tabular-nums;
+}
