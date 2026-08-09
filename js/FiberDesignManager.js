@@ -749,29 +749,141 @@
     };
   }
 
+  function cabinetNumericId(node) {
+    var label = getCabinetLabel(node);
+    var m = String(label == null ? '' : label).match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function getNodeDistAlongCable(cable, node) {
+    if (!cable || !node) return null;
+    var pts = cable.points || [];
+    if (pts.length < 2) return null;
+    var xy = getNodeXY(node);
+    if (!xy) return null;
+    return projectOntoCablePolyline(xy, pts).distAlong;
+  }
+
+  /**
+   * FDTs on a feeder, from both sides of the OLT, ordered by distance from OLT.
+   * Index 0 = nearest cabinet → Blue tube.
+   */
   function collectCabinetsOnFeeder(cable, oltNode) {
-    var ordered = getOrderedNodesOnCable(cable, oltNode || null);
-    var cabinets = [];
-    var seen = Object.create(null);
-    var i;
-    for (i = 0; i < ordered.length; i++) {
-      var n = ordered[i];
-      if (!isCabinetNode(n)) continue;
-      var id = String(n.id);
-      if (seen[id]) continue;
-      seen[id] = true;
-      cabinets.push(n);
+    if (!cable) return [];
+    var pts = cable.points || [];
+    var linkDist = (deps && deps.getCableLinkDistance) ? deps.getCableLinkDistance() : 80;
+    var byId = Object.create(null);
+
+    function addCabinet(node, distHint, force) {
+      if (!isCabinetNode(node) || !node.id) return;
+      var id = String(node.id);
+      var distAlong = null;
+      var xy = getNodeXY(node);
+      if (xy && pts.length >= 2) {
+        var proj = projectOntoCablePolyline(xy, pts);
+        if (proj.distToLine <= linkDist) distAlong = proj.distAlong;
+        else if (!force) return;
+        else distAlong = proj.distAlong;
+      }
+      if (distAlong == null) {
+        if (!force && pts.length >= 2) return;
+        distAlong = distHint != null && isFinite(distHint) ? distHint : 0;
+      }
+      var prev = byId[id];
+      if (prev) {
+        var prevDelta = Math.abs(prev.distAlong);
+        var nextDelta = Math.abs(distAlong);
+        if (prev.forced && !force && nextDelta >= prevDelta) return;
+        if (prev.forced && force && nextDelta >= prevDelta) return;
+        if (!force && nextDelta >= prevDelta) return;
+      }
+      byId[id] = { node: node, distAlong: distAlong, forced: !!force };
     }
-    if (cabinets.length) return cabinets;
+
+    var snapIds = cable.pointSnapNodeIds || [];
+    var i;
+    for (i = 0; i < snapIds.length; i++) {
+      if (!snapIds[i]) continue;
+      var snapped = resolveMapNode(snapIds[i]);
+      if (!snapped) continue;
+      var alongSnap = i;
+      if (pts.length >= 2) {
+        var sxy = getNodeXY(snapped);
+        if (sxy) alongSnap = projectOntoCablePolyline(sxy, pts).distAlong;
+      }
+      addCabinet(snapped, alongSnap, true);
+    }
+
+    var labels = cable.snapLabels || [];
+    for (i = 0; i < labels.length; i++) {
+      if (!labels[i]) continue;
+      var byLabel = resolveSnapLabel(labels[i]);
+      if (!byLabel) continue;
+      var alongLabel = i;
+      if (pts.length >= 2) {
+        var lxy = getNodeXY(byLabel);
+        if (lxy) alongLabel = projectOntoCablePolyline(lxy, pts).distAlong;
+      }
+      addCabinet(byLabel, alongLabel, true);
+    }
+
+    if (pts.length >= 2) {
+      getMapNodes().forEach(function (node) {
+        if (!isCabinetNode(node)) return;
+        var xy = getNodeXY(node);
+        if (!xy) return;
+        var proj = projectOntoCablePolyline(xy, pts);
+        if (proj.distToLine > linkDist) return;
+        addCabinet(node, proj.distAlong, false);
+      });
+    }
 
     var ends = resolveCableEndpoints(cable);
-    [ends.start, ends.end].forEach(function (n) {
-      if (!isCabinetNode(n)) return;
-      var id = String(n.id);
-      if (seen[id]) return;
-      seen[id] = true;
-      cabinets.push(n);
+    if (ends.start) addCabinet(ends.start, 0, true);
+    if (ends.end && pts.length) {
+      var totalLen = 0;
+      for (i = 0; i < pts.length - 1; i++) {
+        totalLen += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+      }
+      addCabinet(ends.end, totalLen, true);
+    }
+
+    /* Include any FDTs from full path walk (both sides of OLT — no short-span drop). */
+    var walked = getOrderedNodesOnCable(cable, oltNode || null);
+    for (i = 0; i < walked.length; i++) {
+      addCabinet(walked[i], null, true);
+    }
+
+    var oltDist = 0;
+    if (oltNode) {
+      var od = getNodeDistAlongCable(cable, oltNode);
+      if (od != null && isFinite(od)) oltDist = od;
+    }
+
+    var ranked = [];
+    Object.keys(byId).forEach(function (id) {
+      var entry = byId[id];
+      ranked.push({
+        node: entry.node,
+        distFromOlt: Math.abs(entry.distAlong - oltDist),
+        distAlong: entry.distAlong,
+      });
     });
+
+    ranked.sort(function (a, b) {
+      if (Math.abs(a.distFromOlt - b.distFromOlt) > 0.5) {
+        return a.distFromOlt - b.distFromOlt;
+      }
+      var na = cabinetNumericId(a.node);
+      var nb = cabinetNumericId(b.node);
+      if (na !== nb) return na - nb;
+      return String(a.node.id).localeCompare(String(b.node.id));
+    });
+
+    var cabinets = ranked.map(function (r) { return r.node; });
+    console.log('[Ring] cabinets:', cabinets.map(function (c) {
+      return c.autoName || c.id;
+    }));
     return cabinets;
   }
 
@@ -837,6 +949,7 @@
         if (!tube) break;
         var cab = cabinets[i];
         var cabinetLabel = getCabinetLabel(cab);
+        var pathOrder = i;
         var segIdx;
         for (segIdx = 0; segIdx < RING_SEGMENTS.length; segIdx++) {
           var segment = RING_SEGMENTS[segIdx];
@@ -859,6 +972,7 @@
               tube_color: tube.tube_color,
               tube_striped: tube.tube_striped,
               tube_label: tube.tube_label,
+              path_order: pathOrder,
               ring_segment: segment.id,
               ring_block_id: blockId,
               cable_layer: segment.layer,
@@ -883,6 +997,9 @@
     rows.sort(function (a, b) {
       if (a.feeder_cable_id !== b.feeder_cable_id) {
         return String(a.feeder_cable_id).localeCompare(String(b.feeder_cable_id), undefined, { numeric: true });
+      }
+      if ((a.path_order || 0) !== (b.path_order || 0)) {
+        return (a.path_order || 0) - (b.path_order || 0);
       }
       if ((a.tube_number || 0) !== (b.tube_number || 0)) {
         return (a.tube_number || 0) - (b.tube_number || 0);
@@ -1260,16 +1377,26 @@
           }
         }
       }
-      if (oIdx > 0) {
-        var towardEnd = hits.slice(oIdx);
-        var towardStart = hits.slice(0, oIdx + 1).reverse();
-        var endSpan = towardEnd.length > 1
-          ? towardEnd[towardEnd.length - 1].distAlong - towardEnd[0].distAlong
-          : 0;
-        var startSpan = towardStart.length > 1
-          ? Math.abs(towardStart[towardStart.length - 1].distAlong - towardStart[0].distAlong)
-          : 0;
-        hits = endSpan >= startSpan ? towardEnd : towardStart;
+      /*
+       * Keep BOTH sides of the origin (do not drop the short stub).
+       * Order: origin first, then all other nodes by |distAlong - originDist|
+       * so a cabinet sitting before the OLT on the polyline (e.g. FDT1) is kept.
+       */
+      if (oIdx >= 0) {
+        var originDist = hits[oIdx].distAlong;
+        var originHit = hits[oIdx];
+        var others = [];
+        for (i = 0; i < hits.length; i++) {
+          if (i === oIdx) continue;
+          others.push(hits[i]);
+        }
+        others.sort(function (a, b) {
+          var da = Math.abs(a.distAlong - originDist);
+          var db = Math.abs(b.distAlong - originDist);
+          if (Math.abs(da - db) > 1e-6) return da - db;
+          return a.distAlong - b.distAlong;
+        });
+        hits = [originHit].concat(others);
       }
     }
 
