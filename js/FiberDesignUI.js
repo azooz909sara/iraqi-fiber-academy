@@ -23,8 +23,16 @@
   var activeSortMode = 'cindex'; // insertion, chronological, cindex
   var dragState = null;
   var resizeState = null;
+  var colResizeState = null;
   var MIN_WIN_W = 360;
   var MIN_WIN_H = 220;
+  var MIN_COL_W = 48;
+  /** @type {Object<string, Object<string, number>>} persisted col widths per matrix tab */
+  var matrixColumnWidths = {
+    distribution: Object.create(null),
+    ring: Object.create(null),
+  };
+  var COL_WIDTHS_STORAGE_KEY = 'ifa_fd_matrix_col_widths';
 
   var MATRIX_COLUMNS = [
     { key: 'm_cable_id', label: 'M-Cable ID' },
@@ -43,7 +51,10 @@
     { key: 'feeder_cable_id', label: 'Feeder Cable ID' },
     { key: 'tube_label', label: 'TUBE Colour', tubeCell: true },
     { key: 'fiber_label', label: 'FIBER', fiberCell: true },
-    { key: 'cabinet_id', label: 'Destination Cabinet ID' },
+    { key: 'cabinet_id', label: 'FDT_ID' },
+    { key: 'pigtail_no', label: 'Pigtail No' },
+    { key: 'spliter', label: 'Spliter' },
+    { key: 'splitter_port', label: 'Splitter Port' },
   ];
 
   var ROWSPAN_GROUP_KEYS = [
@@ -60,6 +71,7 @@
     'feeder_cable_id',
     'tube_label',
     'cabinet_id',
+    'splitter_port',
   ];
 
   var FIBER_COLOR_CSS = {
@@ -81,8 +93,43 @@
     cyan: '#06b6d4',
   };
 
+  function loadColumnWidths() {
+    try {
+      var raw = global.localStorage && global.localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      ['distribution', 'ring'].forEach(function (tab) {
+        if (!parsed[tab] || typeof parsed[tab] !== 'object') return;
+        matrixColumnWidths[tab] = Object.create(null);
+        Object.keys(parsed[tab]).forEach(function (key) {
+          var n = Number(parsed[tab][key]);
+          if (n >= MIN_COL_W && isFinite(n)) matrixColumnWidths[tab][key] = Math.round(n);
+        });
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function persistColumnWidths() {
+    try {
+      if (global.localStorage) {
+        global.localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify({
+          distribution: matrixColumnWidths.distribution || {},
+          ring: matrixColumnWidths.ring || {},
+        }));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function getColumnWidthMap(tabId) {
+    var tab = tabId || activeMatrixTab || 'distribution';
+    if (!matrixColumnWidths[tab]) matrixColumnWidths[tab] = Object.create(null);
+    return matrixColumnWidths[tab];
+  }
+
   function init(api) {
     deps = Object.assign({}, deps || {}, api || {});
+    loadColumnWidths();
     ensureStyles();
   }
 
@@ -446,13 +493,30 @@
     return html;
   }
 
+  function renderColGroup(columns) {
+    var widths = getColumnWidthMap();
+    return '<colgroup>' + columns.map(function (col) {
+      var w = widths[col.key];
+      return '<col data-col-key="' + escapeAttr(col.key) + '"' +
+        (w ? ' style="width:' + w + 'px"' : '') + '>';
+    }).join('') + '</colgroup>';
+  }
+
   function renderMatrixTable(rows, options) {
     options = options || {};
     var columns = options.columns || MATRIX_COLUMNS;
     var rowspanKeys = options.rowspanKeys || ROWSPAN_GROUP_KEYS;
+    var widths = getColumnWidthMap();
     // Always render table headers, even with no data
     var head = columns.map(function (col) {
-      return '<th scope="col">' + escapeHtml(col.label) + '</th>';
+      var w = widths[col.key];
+      var thStyle = w ? ('width:' + w + 'px;min-width:' + w + 'px') : '';
+      return '<th scope="col" data-col-key="' + escapeAttr(col.key) + '"' +
+        (thStyle ? ' style="' + thStyle + '"' : '') + '>' +
+        '<span class="fd-matrix-th__label">' + escapeHtml(col.label) + '</span>' +
+        '<span class="fd-matrix-col-resizer" data-col-resize="' + escapeAttr(col.key) +
+        '" role="separator" aria-orientation="vertical" title="Drag to resize column"></span>' +
+        '</th>';
     }).join('');
 
     var body = '';
@@ -499,9 +563,119 @@
 
     return '<div class="fd-matrix-scroll">' +
       '<table class="fd-matrix-table" cellspacing="0" cellpadding="0">' +
+      renderColGroup(columns) +
       '<thead><tr>' + head + '</tr></thead>' +
       '<tbody>' + body + '</tbody>' +
       '</table></div>';
+  }
+
+  function findColByKey(table, key) {
+    if (!table || !key) return null;
+    var cols = table.querySelectorAll('col[data-col-key]');
+    var i;
+    for (i = 0; i < cols.length; i++) {
+      if (cols[i].getAttribute('data-col-key') === key) return cols[i];
+    }
+    return null;
+  }
+
+  function findThByKey(table, key) {
+    if (!table || !key) return null;
+    var ths = table.querySelectorAll('th[data-col-key]');
+    var i;
+    for (i = 0; i < ths.length; i++) {
+      if (ths[i].getAttribute('data-col-key') === key) return ths[i];
+    }
+    return null;
+  }
+
+  function applyColumnWidth(table, key, widthPx) {
+    if (!table || !key) return;
+    var w = Math.max(MIN_COL_W, Math.round(widthPx));
+    getColumnWidthMap()[key] = w;
+    var col = findColByKey(table, key);
+    if (col) col.style.width = w + 'px';
+    var th = findThByKey(table, key);
+    if (th) {
+      th.style.width = w + 'px';
+      th.style.minWidth = w + 'px';
+    }
+    var sum = 0;
+    var hasAny = false;
+    var cols = table.querySelectorAll('col[data-col-key]');
+    var i;
+    for (i = 0; i < cols.length; i++) {
+      var ck = cols[i].getAttribute('data-col-key');
+      var stored = getColumnWidthMap()[ck];
+      if (stored) {
+        hasAny = true;
+        sum += stored;
+      } else {
+        sum += Math.max(MIN_COL_W, Math.round(cols[i].getBoundingClientRect().width) || 96);
+      }
+    }
+    if (hasAny) table.style.minWidth = sum + 'px';
+  }
+
+  function endColumnResize() {
+    if (!colResizeState) return;
+    var handle = colResizeState.handle;
+    var pointerId = colResizeState.pointerId;
+    colResizeState = null;
+    if (handle) {
+      handle.removeEventListener('pointermove', onColumnResizePointerMove);
+      handle.removeEventListener('pointerup', onColumnResizePointerUp);
+      handle.removeEventListener('pointercancel', onColumnResizePointerUp);
+      if (pointerId != null) {
+        try { handle.releasePointerCapture(pointerId); } catch (e) { /* ignore */ }
+      }
+    }
+    if (document.body) document.body.classList.remove('fd-matrix-col-resizing');
+    persistColumnWidths();
+  }
+
+  function onColumnResizePointerMove(e) {
+    if (!colResizeState) return;
+    var next = colResizeState.startW + (e.clientX - colResizeState.startX);
+    applyColumnWidth(colResizeState.table, colResizeState.key, next);
+  }
+
+  function onColumnResizePointerUp() {
+    endColumnResize();
+  }
+
+  function bindColumnResize(scope) {
+    var root = scope || matrixEl;
+    if (!root) return;
+    var table = root.querySelector('.fd-matrix-table');
+    if (!table || table._fdColResizeBound) return;
+    table._fdColResizeBound = true;
+
+    table.addEventListener('pointerdown', function (e) {
+      var handle = e.target && e.target.closest
+        ? e.target.closest('[data-col-resize]')
+        : null;
+      if (!handle || !table.contains(handle)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var key = handle.getAttribute('data-col-resize');
+      var th = handle.closest('th');
+      if (!key || !th) return;
+      if (colResizeState) endColumnResize();
+      colResizeState = {
+        key: key,
+        table: table,
+        handle: handle,
+        startX: e.clientX,
+        startW: th.getBoundingClientRect().width,
+        pointerId: e.pointerId,
+      };
+      if (document.body) document.body.classList.add('fd-matrix-col-resizing');
+      handle.addEventListener('pointermove', onColumnResizePointerMove);
+      handle.addEventListener('pointerup', onColumnResizePointerUp);
+      handle.addEventListener('pointercancel', onColumnResizePointerUp);
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
   }
 
   function renderSortOptions() {
@@ -595,6 +769,7 @@
       '.fd-matrix-cell--type-main{font-weight:700;color:#166534;}',
       '.fd-matrix-cell--type-expansion{font-weight:700;color:#1d4ed8;}',
       '.fd-matrix-empty,.fd-matrix-error{padding:12px;border:1px dashed #94a3b8;color:#475569;text-align:center;}',
+      '.fd-matrix-col-resizer{display:none!important;}',
       '.fd-print-no-print{display:none!important;}',
       '@media print{',
       'body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}',
@@ -875,10 +1050,13 @@
         refreshMatrix();
       });
     });
+
+    bindColumnResize(root);
   }
 
   function refreshMatrix(payload) {
     if (!matrixEl || !matrixOpen) return;
+    if (colResizeState) endColumnResize();
     var body = matrixEl.querySelector('.fd-float__body');
     if (!body) return;
     body.innerHTML = renderMatrixBody();
@@ -1431,14 +1609,25 @@
       '.fd-float__resize--se{bottom:-4px;right:-4px;width:14px;height:14px;cursor:nwse-resize;}',
       '.fd-float__resize--sw{bottom:-4px;left:-4px;width:14px;height:14px;cursor:nesw-resize;}',
       '.fd-matrix-scroll{overflow:auto;max-width:100%;border:1px solid rgba(51,65,85,0.75);border-radius:0.4rem;}',
-      '.fd-matrix-table{width:100%;border-collapse:collapse;min-width:900px;font-size:0.65rem;}',
+      '.fd-matrix-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:900px;font-size:0.65rem;}',
       '.fd-matrix-table thead th{',
-      'position:sticky;top:0;z-index:2;padding:0.4rem 0.5rem;text-align:left;',
+      'position:sticky;top:0;z-index:2;padding:0.4rem 0.65rem 0.4rem 0.5rem;text-align:left;',
       'background:#1e293b;color:#cbd5e1;font-weight:700;border-bottom:1px solid rgba(71,85,105,0.85);',
-      'white-space:nowrap;font-size:0.58rem;text-transform:uppercase;letter-spacing:0.04em;}',
+      'border-right:1px solid rgba(71,85,105,0.55);',
+      'white-space:nowrap;font-size:0.58rem;text-transform:uppercase;letter-spacing:0.04em;',
+      'overflow:hidden;user-select:none;-webkit-user-select:none;',
+      'box-sizing:border-box;}',
+      '.fd-matrix-th__label{display:block;overflow:hidden;text-overflow:ellipsis;}',
+      '.fd-matrix-col-resizer{',
+      'position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:3;',
+      'touch-action:none;}',
+      '.fd-matrix-col-resizer:hover,.fd-matrix-col-resizer:active{',
+      'background:linear-gradient(90deg,transparent 2px,rgba(56,189,248,0.85) 2px,rgba(56,189,248,0.85) 4px,transparent 4px);}',
+      'body.fd-matrix-col-resizing,body.fd-matrix-col-resizing *{cursor:col-resize!important;user-select:none!important;}',
       '.fd-matrix-table tbody td{',
       'padding:0.3rem 0.5rem;border-bottom:1px solid rgba(30,41,59,0.85);',
-      'border-right:1px solid rgba(30,41,59,0.55);color:#e2e8f0;vertical-align:middle;}',
+      'border-right:1px solid rgba(30,41,59,0.55);color:#e2e8f0;vertical-align:middle;',
+      'overflow:hidden;text-overflow:ellipsis;}',
       '.fd-matrix-table tbody tr:nth-child(even) td{background:rgba(15,23,42,0.35);}',
       '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;text-shadow:0 1px 1px rgba(0,0,0,0.35);}',
       '.fd-matrix-cell--tube{white-space:nowrap;}',

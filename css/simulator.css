@@ -9842,3 +9842,58 @@ body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
   paint-order: normal;
   opacity: 0.95;
 }
+
+/* -- Fiber Design Matrix: Excel-style column resize -- */
+.fd-matrix-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.fd-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  border-right: 1px solid rgba(71, 85, 105, 0.55);
+}
+
+.fd-matrix-th__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fd-matrix-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+
+.fd-matrix-col-resizer:hover,
+.fd-matrix-col-resizer:active {
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    rgba(56, 189, 248, 0.85) 2px,
+    rgba(56, 189, 248, 0.85) 4px,
+    transparent 4px
+  );
+}
+
+body.fd-matrix-col-resizing,
+body.fd-matrix-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.fd-matrix-table tbody td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
