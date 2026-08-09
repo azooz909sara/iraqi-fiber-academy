@@ -684,11 +684,162 @@
     return !!(node && node.type === 'fdt');
   }
 
+  function isOltNode(node) {
+    return !!(node && node.type === 'olt');
+  }
+
   function isClosureNode(node) {
     if (!node) return false;
     if (node.type === 'handhole' && (node.hasClosure || node.closureName)) return true;
     if (node.type === 'fat_handhole' && node.hasClosure) return true;
     return false;
+  }
+
+  /*
+   * Ring feeder (OLT → Cabinets): one tube (12 fibers) per cabinet.
+   * Natural tube sequence + black-striped repeat for tubes 13–24 on 288F.
+   */
+  var RING_FIBERS_PER_TUBE = 12;
+  var RING_NATURAL_TUBE_COLORS = [
+    'Blue', 'Orange', 'Green', 'Brown', 'Grey', 'White',
+    'Red', 'Black', 'Yellow', 'Violet', 'Pink', 'Cyan',
+  ];
+  var RING_FIBER_COLORS = RING_NATURAL_TUBE_COLORS.slice();
+  var RING_FEEDER_SPECS = {
+    48: { tubeCount: 4, maxCabinets: 4, stripedFrom: 0 },
+    72: { tubeCount: 6, maxCabinets: 6, stripedFrom: 0 },
+    144: { tubeCount: 12, maxCabinets: 12, stripedFrom: 0 },
+    288: { tubeCount: 24, maxCabinets: 24, stripedFrom: 13 },
+  };
+
+  function getOltLabel(node) {
+    if (!node) return 'OLT';
+    return String(node.autoName || node.code || 'OLT');
+  }
+
+  function resolveFeederCapacity(cable) {
+    if (!cable) return 0;
+    var fromField = Number(cable.capacity_f) || Number(cable.capacity) || 0;
+    if (fromField === 48 || fromField === 72 || fromField === 144 || fromField === 288) return fromField;
+    var label = getCableLabel(cable);
+    var fromLabel = parseCapacityFromLabel(label);
+    if (fromLabel === 48 || fromLabel === 72 || fromLabel === 144 || fromLabel === 288) return fromLabel;
+    return 0;
+  }
+
+  function getRingTubeDescriptor(capacityF, tubeIndex0) {
+    var spec = RING_FEEDER_SPECS[capacityF];
+    if (!spec || tubeIndex0 < 0 || tubeIndex0 >= spec.tubeCount) return null;
+    var tubeNumber = tubeIndex0 + 1;
+    var naturalIndex = tubeIndex0 % RING_NATURAL_TUBE_COLORS.length;
+    var color = RING_NATURAL_TUBE_COLORS[naturalIndex];
+    var striped = !!(spec.stripedFrom && tubeNumber >= spec.stripedFrom);
+    var label = striped
+      ? (color + ' (Black Stripe)')
+      : color;
+    return {
+      tube_number: tubeNumber,
+      tube_color: color,
+      tube_striped: striped,
+      tube_label: 'T' + tubeNumber + ' · ' + label,
+      fiber_range: '1–12',
+      fiber_colors: RING_FIBER_COLORS.slice(),
+    };
+  }
+
+  function collectCabinetsOnFeeder(cable, oltNode) {
+    var ordered = getOrderedNodesOnCable(cable, oltNode || null);
+    var cabinets = [];
+    var seen = Object.create(null);
+    var i;
+    for (i = 0; i < ordered.length; i++) {
+      var n = ordered[i];
+      if (!isCabinetNode(n)) continue;
+      var id = String(n.id);
+      if (seen[id]) continue;
+      seen[id] = true;
+      cabinets.push(n);
+    }
+    if (cabinets.length) return cabinets;
+
+    var ends = resolveCableEndpoints(cable);
+    [ends.start, ends.end].forEach(function (n) {
+      if (!isCabinetNode(n)) return;
+      var id = String(n.id);
+      if (seen[id]) return;
+      seen[id] = true;
+      cabinets.push(n);
+    });
+    return cabinets;
+  }
+
+  function findOltOnCable(cable) {
+    var ends = resolveCableEndpoints(cable);
+    if (isOltNode(ends.start)) return ends.start;
+    if (isOltNode(ends.end)) return ends.end;
+    var ordered = getOrderedNodesOnCable(cable, ends.start || ends.end || null);
+    var i;
+    for (i = 0; i < ordered.length; i++) {
+      if (isOltNode(ordered[i])) return ordered[i];
+    }
+    return null;
+  }
+
+  /**
+   * Ring Fiber Design rows: OLT feeder → one tube (12F) per destination cabinet.
+   */
+  function buildRingMatrixRows() {
+    var rows = [];
+    var cables = getMapCables() || [];
+    cables.forEach(function (cable) {
+      if (!cable) return;
+      var capacity = resolveFeederCapacity(cable);
+      var spec = RING_FEEDER_SPECS[capacity];
+      if (!spec) return;
+
+      var olt = findOltOnCable(cable);
+      if (!olt) return;
+
+      var cabinets = collectCabinetsOnFeeder(cable, olt);
+      if (!cabinets.length) return;
+
+      var cableId = getCableLabel(cable) || cableDisplayId(cable);
+      var oltLabel = getOltLabel(olt);
+      var maxCab = Math.min(cabinets.length, spec.maxCabinets);
+      var i;
+      for (i = 0; i < maxCab; i++) {
+        var tube = getRingTubeDescriptor(capacity, i);
+        if (!tube) break;
+        var cab = cabinets[i];
+        rows.push({
+          olt_source: oltLabel,
+          feeder_cable_id: cableId,
+          capacity: capacity,
+          tube_number: tube.tube_number,
+          tube_color: tube.tube_color,
+          tube_striped: tube.tube_striped,
+          tube_label: tube.tube_label,
+          fiber_range: tube.fiber_range,
+          fiber_colors: tube.fiber_colors.join(', '),
+          cabinet_id: getCabinetLabel(cab),
+          cabinet_node_id: String(cab.id),
+          olt_node_id: String(olt.id),
+          cable_id: String(cable.id || ''),
+        });
+      }
+    });
+
+    rows.sort(function (a, b) {
+      if (a.feeder_cable_id !== b.feeder_cable_id) {
+        return String(a.feeder_cable_id).localeCompare(String(b.feeder_cable_id), undefined, { numeric: true });
+      }
+      return (a.tube_number || 0) - (b.tube_number || 0);
+    });
+    return rows;
+  }
+
+  function getRingMatrixRows() {
+    return deepClone(buildRingMatrixRows());
   }
 
   function isFatOrPoleNode(node) {
@@ -1010,7 +1161,8 @@
     if (pts.length >= 2) {
       getMapNodes().forEach(function (node) {
         if (!node) return;
-        if (!isFatOrPoleNode(node) && !isClosureNode(node) && !isCabinetNode(node)) return;
+        if (!isFatOrPoleNode(node) && !isClosureNode(node) &&
+            !isCabinetNode(node) && !isOltNode(node)) return;
         var xy = getNodeXY(node);
         if (!xy) return;
         var proj = projectOntoCablePolyline(xy, pts);
@@ -2253,6 +2405,10 @@
       return AutoFiberEngine.regenerate();
     },
 
+    getRingMatrixRows: function () {
+      return getRingMatrixRows();
+    },
+
     getMatrixRows: function (filters) {
       if (DEBUG) {
       console.log('[FiberDesignManager] getMatrixRows START');
@@ -2605,6 +2761,8 @@
     getClosureRegistry: getClosureRegistry,
     getCabinetRegistry: getCabinetRegistry,
     getSpliceMatrixRows: getSpliceMatrixRows,
+    getRingMatrixRows: getRingMatrixRows,
+    buildRingMatrixRows: buildRingMatrixRows,
     ensureDisplayData: ensureDisplayData,
     projectHasRealFiberDesignData: projectHasRealFiberDesignData,
     generateMockNodeDesign: generateMockNodeDesign,
@@ -2633,5 +2791,9 @@
     TUBE_FAT_FIBER_PAIRS: TUBE_FAT_FIBER_PAIRS.map(function (p) {
       return { main: p.main, expansion: p.expansion };
     }),
+    RING_FIBERS_PER_TUBE: RING_FIBERS_PER_TUBE,
+    RING_NATURAL_TUBE_COLORS: RING_NATURAL_TUBE_COLORS.slice(),
+    RING_FIBER_COLORS: RING_FIBER_COLORS.slice(),
+    RING_FEEDER_SPECS: deepClone(RING_FEEDER_SPECS),
   };
 })(typeof window !== 'undefined' ? window : globalThis);

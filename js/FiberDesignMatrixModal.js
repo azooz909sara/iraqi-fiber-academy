@@ -39,6 +39,11 @@
     if (u && u.refresh) return u.refresh();
   }
 
+  function exportPdf() {
+    var u = ui();
+    if (u && u.exportMatrixPdf) return u.exportMatrixPdf();
+  }
+
   function isOpen() {
     var u = ui();
     if (u && u.isMatrixOpen) return u.isMatrixOpen();
@@ -51,5 +56,6 @@
     close: close,
     isOpen: isOpen,
     refresh: refresh,
+    exportPdf: exportPdf,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

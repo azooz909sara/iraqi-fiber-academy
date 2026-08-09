@@ -17,6 +17,7 @@
   var matrixEl = null;
   var matrixOpen = false;
   var matrixEventsBound = false;
+  var activeMatrixTab = 'distribution'; // distribution | ring
   var activeCabinetFilter = 'all';
   var activeClosureFilter = 'all';
   var activeSortMode = 'cindex'; // insertion, chronological, cindex
@@ -37,6 +38,15 @@
     { key: 'fat_id', label: 'FAT ID' },
   ];
 
+  var RING_MATRIX_COLUMNS = [
+    { key: 'olt_source', label: 'OLT Source' },
+    { key: 'feeder_cable_id', label: 'Feeder Cable ID' },
+    { key: 'tube_label', label: 'Allocated Tube', tubeCell: true },
+    { key: 'fiber_range', label: 'Fiber Range (1–12)' },
+    { key: 'fiber_colors', label: 'Fiber Colors (1–12)' },
+    { key: 'cabinet_id', label: 'Destination Cabinet ID' },
+  ];
+
   var ROWSPAN_GROUP_KEYS = [
     'm_cable_id',
     'm_tube_color',
@@ -46,19 +56,28 @@
     'fat_id',
   ];
 
+  var RING_ROWSPAN_GROUP_KEYS = [
+    'olt_source',
+    'feeder_cable_id',
+  ];
+
   var FIBER_COLOR_CSS = {
     blue: '#2563eb',
     orange: '#ea580c',
     green: '#16a34a',
     brown: '#92400e',
     slate: '#64748b',
+    grey: '#64748b',
+    gray: '#64748b',
     white: '#f8fafc',
     red: '#dc2626',
     black: '#1e293b',
     yellow: '#eab308',
     violet: '#7c3aed',
     rose: '#e11d48',
+    pink: '#e11d48',
     aqua: '#06b6d4',
+    cyan: '#06b6d4',
   };
 
   function init(api) {
@@ -331,11 +350,16 @@
 
   /* ═══════════════ Floating Matrix Viewer ═══════════════ */
 
-  function fiberColorStyle(colorName) {
+  function fiberColorStyle(colorName, striped) {
     var key = String(colorName || '').trim().toLowerCase();
     var bg = FIBER_COLOR_CSS[key] || '#334155';
     var fg = (key === 'white' || key === 'yellow') ? '#0f172a' : '#f8fafc';
-    return 'background-color:' + bg + ';color:' + fg + ';';
+    var style = 'background-color:' + bg + ';color:' + fg + ';';
+    if (striped) {
+      style +=
+        'background-image:repeating-linear-gradient(135deg,rgba(0,0,0,0.55) 0 3px,transparent 3px 7px);';
+    }
+    return style;
   }
 
   function groupKeyForRow(row, fields) {
@@ -347,14 +371,15 @@
     return parts.join('\u0001');
   }
 
-  function applyRowspanMetadata(rows) {
+  function applyRowspanMetadata(rows, groupKeys) {
     if (!rows || !rows.length) return rows;
+    var keys = groupKeys && groupKeys.length ? groupKeys : ROWSPAN_GROUP_KEYS;
     var r;
     var col;
-    for (col = 0; col < ROWSPAN_GROUP_KEYS.length; col++) {
-      var field = ROWSPAN_GROUP_KEYS[col];
+    for (col = 0; col < keys.length; col++) {
+      var field = keys[col];
       // CRITICAL FIX: closure_id and s_cable_id must merge independently of parent fields
-      var parentFields = (field === 'closure_id' || field === 's_cable_id') ? [field] : ROWSPAN_GROUP_KEYS.slice(0, col + 1);
+      var parentFields = (field === 'closure_id' || field === 's_cable_id') ? [field] : keys.slice(0, col + 1);
       var i = 0;
       while (i < rows.length) {
         var baseKey = groupKeyForRow(rows[i], parentFields);
@@ -420,17 +445,20 @@
     return html;
   }
 
-  function renderMatrixTable(rows) {
+  function renderMatrixTable(rows, options) {
+    options = options || {};
+    var columns = options.columns || MATRIX_COLUMNS;
+    var rowspanKeys = options.rowspanKeys || ROWSPAN_GROUP_KEYS;
     // Always render table headers, even with no data
-    var head = MATRIX_COLUMNS.map(function (col) {
+    var head = columns.map(function (col) {
       return '<th scope="col">' + escapeHtml(col.label) + '</th>';
     }).join('');
 
     var body = '';
     if (rows && rows.length) {
-      var annotated = applyRowspanMetadata(rows.slice());
+      var annotated = applyRowspanMetadata(rows.slice(), rowspanKeys);
       body = annotated.map(function (row) {
-        var cells = MATRIX_COLUMNS.map(function (col) {
+        var cells = columns.map(function (col) {
           if (row['_skip_' + col.key]) return '';
           var val = row[col.key] != null ? String(row[col.key]) : '—';
           if (col.key === 'fat_id') {
@@ -444,6 +472,11 @@
             cls += ' fd-matrix-cell--color';
             style = fiberColorStyle(val);
           }
+          if (col.tubeCell) {
+            cls += ' fd-matrix-cell--color fd-matrix-cell--tube';
+            if (row.tube_striped) cls += ' fd-matrix-cell--striped';
+            style = fiberColorStyle(row.tube_color || val, !!row.tube_striped);
+          }
           if (col.key === 'fiber_type') {
             cls += ' fd-matrix-cell--type-' + escapeAttr(val.toLowerCase());
           }
@@ -453,6 +486,10 @@
         }).join('');
         return '<tr>' + cells + '</tr>';
       }).join('');
+    } else {
+      body = '<tr><td class="fd-matrix-empty" colspan="' + columns.length + '">' +
+        escapeHtml(options.emptyText || 'No splice rows for the current filters.') +
+        '</td></tr>';
     }
 
     return '<div class="fd-matrix-scroll">' +
@@ -475,6 +512,176 @@
         opt.label + '</option>';
     });
     return html;
+  }
+
+  function getCurrentMatrixRows() {
+    var mgr = getManager();
+    if (activeMatrixTab === 'ring') {
+      return mgr && mgr.getRingMatrixRows ? mgr.getRingMatrixRows() : [];
+    }
+    var rows = mgr && mgr.getSpliceMatrixRows
+      ? mgr.getSpliceMatrixRows({
+        cabinet: activeCabinetFilter,
+        closure: activeClosureFilter,
+      })
+      : [];
+    return sortRowsByMode(rows);
+  }
+
+  function renderMatrixTabs() {
+    return '<div class="fd-float__tabs" role="tablist" aria-label="Fiber Design Matrix views">' +
+      '<button type="button" class="fd-float__tab' +
+      (activeMatrixTab === 'distribution' ? ' is-active' : '') +
+      '" role="tab" aria-selected="' + (activeMatrixTab === 'distribution' ? 'true' : 'false') +
+      '" data-matrix-tab="distribution">Distribution Matrix</button>' +
+      '<button type="button" class="fd-float__tab' +
+      (activeMatrixTab === 'ring' ? ' is-active' : '') +
+      '" role="tab" aria-selected="' + (activeMatrixTab === 'ring' ? 'true' : 'false') +
+      '" data-matrix-tab="ring">Ring Fiber Design (OLT to Cabinets)</button>' +
+      '</div>';
+  }
+
+  function getMatrixFilterSummary() {
+    var cabLabel = activeCabinetFilter === 'all' ? 'All Cabinets' : String(activeCabinetFilter);
+    var cloLabel = activeClosureFilter === 'all' ? 'All Closures' : String(activeClosureFilter);
+    var sortLabel = 'Ascending C-Index';
+    if (activeSortMode === 'insertion') sortLabel = 'Insertion Order';
+    else if (activeSortMode === 'chronological') sortLabel = 'Chronological/Path Order';
+    else if (activeSortMode === 'cindex') sortLabel = 'Ascending C-Index';
+
+    if (matrixEl) {
+      var cabSel = matrixEl.querySelector('#fd-matrix-cabinet-filter');
+      var cloSel = matrixEl.querySelector('#fd-matrix-closure-filter');
+      if (cabSel && cabSel.selectedOptions && cabSel.selectedOptions[0]) {
+        cabLabel = cabSel.selectedOptions[0].textContent || cabLabel;
+      }
+      if (cloSel && cloSel.selectedOptions && cloSel.selectedOptions[0]) {
+        cloLabel = cloSel.selectedOptions[0].textContent || cloLabel;
+      }
+    }
+    return {
+      cabinet: cabLabel,
+      closure: cloLabel,
+      sort: sortLabel,
+    };
+  }
+
+  function buildMatrixPrintStyles() {
+    return [
+      '@page{size:A4 landscape;margin:10mm;}',
+      '*{box-sizing:border-box;}',
+      'html,body{margin:0;padding:0;background:#ffffff;color:#111111;',
+      'font-family:Arial,Helvetica,sans-serif;}',
+      'body{padding:8px 12px;}',
+      '.fd-print-report__title{margin:0 0 4px;font-size:16px;font-weight:700;color:#0f172a;}',
+      '.fd-print-report__meta{margin:0 0 10px;font-size:10px;color:#334155;line-height:1.45;}',
+      '.fd-print-report__meta strong{color:#0f172a;}',
+      '.fd-matrix-scroll{overflow:visible!important;max-width:none!important;border:1px solid #cbd5e1;border-radius:0;}',
+      '.fd-matrix-table{width:100%;border-collapse:collapse;min-width:0!important;font-size:9px;table-layout:auto;}',
+      '.fd-matrix-table thead{display:table-header-group;}',
+      '.fd-matrix-table thead th{',
+      'position:static!important;padding:5px 6px;text-align:left;background:#e2e8f0!important;color:#0f172a!important;',
+      'font-weight:700;border:1px solid #94a3b8;white-space:nowrap;font-size:8px;text-transform:uppercase;}',
+      '.fd-matrix-table tbody td{',
+      'padding:4px 6px;border:1px solid #94a3b8;color:#0f172a;vertical-align:middle;background:#ffffff;}',
+      '.fd-matrix-table tbody tr{page-break-inside:avoid;}',
+      '.fd-matrix-table tbody tr:nth-child(even) td{background:#f8fafc;}',
+      '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;}',
+      '.fd-matrix-cell--type-main{font-weight:700;color:#166534;}',
+      '.fd-matrix-cell--type-expansion{font-weight:700;color:#1d4ed8;}',
+      '.fd-matrix-empty,.fd-matrix-error{padding:12px;border:1px dashed #94a3b8;color:#475569;text-align:center;}',
+      '.fd-print-no-print{display:none!important;}',
+      '@media print{',
+      'body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}',
+      '.fd-print-no-print{display:none!important;}',
+      '}',
+    ].join('');
+  }
+
+  function buildMatrixPrintDocument(rows) {
+    var summary = getMatrixFilterSummary();
+    var stamp = new Date();
+    var stampText = stamp.toLocaleString();
+    var isRing = activeMatrixTab === 'ring';
+    var title = isRing
+      ? 'Ring Fiber Design (OLT to Cabinets)'
+      : 'Fiber Design Matrix';
+    var tableHtml = isRing
+      ? renderMatrixTable(rows || [], {
+        columns: RING_MATRIX_COLUMNS,
+        rowspanKeys: RING_ROWSPAN_GROUP_KEYS,
+        emptyText: 'No OLT feeder → cabinet allocations found.',
+      })
+      : renderMatrixTable(rows || []);
+    var meta = isRing
+      ? ('<strong>Generated:</strong> ' + escapeHtml(stampText) +
+        ' · <strong>Rule:</strong> 1 tube (12 fibers) per cabinet' +
+        ' · <strong>Rows:</strong> ' + String((rows && rows.length) || 0))
+      : ('<strong>Generated:</strong> ' + escapeHtml(stampText) + ' · ' +
+        '<strong>Cabinet:</strong> ' + escapeHtml(summary.cabinet) + ' · ' +
+        '<strong>Closure:</strong> ' + escapeHtml(summary.closure) + ' · ' +
+        '<strong>Sort:</strong> ' + escapeHtml(summary.sort) + ' · ' +
+        '<strong>Rows:</strong> ' + String((rows && rows.length) || 0));
+    return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>' +
+      '<title>' + escapeHtml(title) + '</title>' +
+      '<style>' + buildMatrixPrintStyles() + '</style></head><body>' +
+      '<header class="fd-print-report__header">' +
+      '<h1 class="fd-print-report__title">' + escapeHtml(title) + '</h1>' +
+      '<p class="fd-print-report__meta">' + meta + '</p></header>' +
+      tableHtml +
+      '</body></html>';
+  }
+
+  function exportMatrixPdf() {
+    try {
+      var rows = getCurrentMatrixRows();
+      var html = buildMatrixPrintDocument(rows);
+      var iframe = document.createElement('iframe');
+      iframe.setAttribute('title', 'Fiber Design Matrix Print');
+      iframe.setAttribute('aria-hidden', 'true');
+      iframe.style.cssText =
+        'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
+      document.body.appendChild(iframe);
+
+      var win = iframe.contentWindow;
+      var doc = iframe.contentDocument || (win && win.document);
+      if (!doc || !win) {
+        iframe.remove();
+        window.alert('Unable to open the print preview for PDF export.');
+        return;
+      }
+
+      doc.open();
+      doc.write(html);
+      doc.close();
+
+      var printed = false;
+      function runPrint() {
+        if (printed) return;
+        printed = true;
+        try {
+          win.focus();
+          win.print();
+        } catch (err) {
+          console.error('[FiberDesignUI] exportMatrixPdf print failed:', err);
+          window.alert('Print dialog could not be opened. Please try again.');
+        } finally {
+          setTimeout(function () {
+            if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+          }, 1500);
+        }
+      }
+
+      if (doc.readyState === 'complete') {
+        setTimeout(runPrint, 50);
+      } else {
+        iframe.onload = function () { setTimeout(runPrint, 50); };
+        setTimeout(runPrint, 300);
+      }
+    } catch (e) {
+      console.error('[FiberDesignUI] exportMatrixPdf EXCEPTION:', e.message || e);
+      window.alert('Failed to export Fiber Design Matrix PDF.');
+    }
   }
 
   function sortRowsByMode(rows) {
@@ -533,6 +740,42 @@
     return sorted;
   }
 
+  function renderDistributionToolbar(rows) {
+    return '<div class="fd-float__toolbar">' +
+      '<label class="fd-float__filter-label" for="fd-matrix-cabinet-filter">Cabinet Filter</label>' +
+      '<select id="fd-matrix-cabinet-filter" class="fd-float__filter-select">' +
+      renderCabinetFilterOptions() +
+      '</select>' +
+      '<label class="fd-float__filter-label" for="fd-matrix-closure-filter">Closure Filter</label>' +
+      '<select id="fd-matrix-closure-filter" class="fd-float__filter-select">' +
+      renderClosureFilterOptions() +
+      '</select>' +
+      '<label class="fd-float__filter-label" for="fd-matrix-sort-mode" style="margin-left: 20px;">Sort By</label>' +
+      '<select id="fd-matrix-sort-mode" class="fd-float__filter-select">' +
+      renderSortOptions() +
+      '</select>' +
+      '<div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">' +
+      '<button id="btn-zoom-out" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">-</button>' +
+      '<span id="zoom-text-display" style="color: #a0aabf; font-size: 13px;">100%</span>' +
+      '<button id="btn-zoom-in" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">+</button>' +
+      '</div>' +
+      '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export current matrix as PDF">' +
+      'Export PDF</button>' +
+      '<span class="fd-float__badge">AutoFiberEngine · DFS</span>' +
+      '<span class="fd-float__row-count">' + rows.length + ' splice row(s)</span>' +
+      '</div>';
+  }
+
+  function renderRingToolbar(rows) {
+    return '<div class="fd-float__toolbar">' +
+      '<span class="fd-float__badge">Ring Feeder · 1 tube (12F) / cabinet</span>' +
+      '<span class="fd-float__hint-inline">48F→4 · 72F→6 · 144F→12 · 288F→24 (T13–T24 black-striped)</span>' +
+      '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export ring matrix as PDF">' +
+      'Export PDF</button>' +
+      '<span class="fd-float__row-count">' + rows.length + ' cabinet allocation(s)</span>' +
+      '</div>';
+  }
+
   function renderMatrixBody() {
     if (DEBUG) {
     console.log('[FiberDesignUI] renderMatrixBody START');
@@ -540,61 +783,36 @@
     try {
       var mgr = getManager();
       if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: manager=' + (mgr ? 'found' : 'null'));
+      console.log('[FiberDesignUI] renderMatrixBody: manager=' + (mgr ? 'found' : 'null') +
+        ', tab=' + activeMatrixTab);
       }
+
+      var rows = getCurrentMatrixRows();
+      var tableHtml;
+      var toolbar;
+
+      if (activeMatrixTab === 'ring') {
+        toolbar = renderRingToolbar(rows);
+        tableHtml = renderMatrixTable(rows, {
+          columns: RING_MATRIX_COLUMNS,
+          rowspanKeys: RING_ROWSPAN_GROUP_KEYS,
+          emptyText: 'No OLT→Cabinet feeder allocations found. Draw an FTTH feeder (48/72/144/288F) from OLT to FDT cabinets.',
+        });
+      } else {
+        toolbar = renderDistributionToolbar(rows);
+        tableHtml = renderMatrixTable(rows);
+      }
+
       if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: activeCabinetFilter=' + activeCabinetFilter + ', activeClosureFilter=' + activeClosureFilter + ', activeSortMode=' + activeSortMode);
+      console.log('[FiberDesignUI] renderMatrixBody SUCCESS rows=' + (rows ? rows.length : 0));
       }
 
-      var rows = mgr && mgr.getSpliceMatrixRows
-        ? mgr.getSpliceMatrixRows({
-          cabinet: activeCabinetFilter,
-          closure: activeClosureFilter,
-        })
-        : [];
-
-      // Apply sorting based on selected mode
-      rows = sortRowsByMode(rows);
-
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: rows=' + (rows ? rows.length : 0));
-      }
-      var engineBadge = '<span class="fd-float__badge">AutoFiberEngine · DFS</span>';
-
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: calling renderMatrixTable');
-      }
-      var tableHtml = renderMatrixTable(rows);
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody SUCCESS');
-      }
-
-      return '<div class="fd-float__toolbar">' +
-        '<label class="fd-float__filter-label" for="fd-matrix-cabinet-filter">Cabinet Filter</label>' +
-        '<select id="fd-matrix-cabinet-filter" class="fd-float__filter-select">' +
-        renderCabinetFilterOptions() +
-        '</select>' +
-        '<label class="fd-float__filter-label" for="fd-matrix-closure-filter">Closure Filter</label>' +
-        '<select id="fd-matrix-closure-filter" class="fd-float__filter-select">' +
-        renderClosureFilterOptions() +
-        '</select>' +
-        '<label class="fd-float__filter-label" for="fd-matrix-sort-mode" style="margin-left: 20px;">Sort By</label>' +
-        '<select id="fd-matrix-sort-mode" class="fd-float__filter-select">' +
-        renderSortOptions() +
-        '</select>' +
-        '<div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">' +
-        '<button id="btn-zoom-out" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">-</button>' +
-        '<span id="zoom-text-display" style="color: #a0aabf; font-size: 13px;">100%</span>' +
-        '<button id="btn-zoom-in" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">+</button>' +
-        '</div>' +
-        engineBadge +
-        '<span class="fd-float__row-count">' + rows.length + ' splice row(s)</span>' +
-        '</div>' +
-        tableHtml;
+      return renderMatrixTabs() + toolbar + tableHtml;
     } catch (e) {
       console.error('[FiberDesignUI] renderMatrixBody EXCEPTION:', e.message);
       console.error('[FiberDesignUI] renderMatrixBody STACK:', e.stack);
-      return '<div class="fd-matrix-error">Error rendering matrix: ' + e.message + '</div>';
+      return renderMatrixTabs() +
+        '<div class="fd-matrix-error">Error rendering matrix: ' + e.message + '</div>';
     }
   }
 
@@ -629,6 +847,29 @@
         refreshMatrix();
       });
     }
+
+    var exportBtn = root.querySelector('#btn-export-matrix-pdf');
+    if (exportBtn && !exportBtn._fdBound) {
+      exportBtn._fdBound = true;
+      exportBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        exportMatrixPdf();
+      });
+    }
+
+    root.querySelectorAll('[data-matrix-tab]').forEach(function (tabBtn) {
+      if (tabBtn._fdBound) return;
+      tabBtn._fdBound = true;
+      tabBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var next = tabBtn.getAttribute('data-matrix-tab') || 'distribution';
+        if (next === activeMatrixTab) return;
+        activeMatrixTab = next;
+        refreshMatrix();
+      });
+    });
   }
 
   function refreshMatrix(payload) {
@@ -879,6 +1120,10 @@
           currentMatrixZoom -= ZOOM_STEP;
           applyMatrixZoom();
         }
+      } else if (target.closest('#btn-export-matrix-pdf')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (matrixOpen) exportMatrixPdf();
       }
     });
 
@@ -1155,6 +1400,21 @@
       'font-size:0.58rem;padding:0.12rem 0.4rem;border-radius:0.25rem;',
       'background:rgba(56,189,248,0.12);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);}',
       '.fd-float__row-count{margin-left:auto;font-size:0.6rem;color:#64748b;font-family:ui-monospace,Consolas,monospace;}',
+      '.fd-float__export-btn{',
+      'margin-left:0.35rem;padding:0.28rem 0.65rem;border-radius:0.3rem;cursor:pointer;',
+      'border:1px solid rgba(56,189,248,0.45);background:rgba(14,165,233,0.18);color:#7dd3fc;',
+      'font-size:0.65rem;font-weight:700;letter-spacing:0.02em;}',
+      '.fd-float__export-btn:hover{background:rgba(14,165,233,0.32);color:#e0f2fe;}',
+      '.fd-float__tabs{display:flex;flex-wrap:wrap;gap:0.35rem;margin:0 0 0.65rem;}',
+      '.fd-float__tab{',
+      'border:1px solid rgba(71,85,105,0.85);background:#1e293b;color:#94a3b8;',
+      'border-radius:0.35rem;padding:0.35rem 0.65rem;font-size:0.68rem;font-weight:700;',
+      'cursor:pointer;}',
+      '.fd-float__tab:hover{color:#e2e8f0;border-color:rgba(148,163,184,0.7);}',
+      '.fd-float__tab.is-active{',
+      'background:rgba(14,165,233,0.2);border-color:rgba(56,189,248,0.55);color:#7dd3fc;}',
+      '.fd-float__hint-inline{font-size:0.6rem;color:#64748b;}',
+      '.fd-matrix-cell--striped{box-shadow:inset 0 0 0 1px rgba(255,255,255,0.25);}',
       /* OS-style resize handles (all edges + corners) */
       '.fd-float__resize{position:absolute;z-index:5;background:transparent;}',
       '.fd-float__resize--n{left:8px;right:8px;top:-3px;height:8px;cursor:ns-resize;}',
@@ -1176,6 +1436,7 @@
       'border-right:1px solid rgba(30,41,59,0.55);color:#e2e8f0;vertical-align:middle;}',
       '.fd-matrix-table tbody tr:nth-child(even) td{background:rgba(15,23,42,0.35);}',
       '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;text-shadow:0 1px 1px rgba(0,0,0,0.35);}',
+      '.fd-matrix-cell--tube{white-space:nowrap;}',
       '.fd-matrix-cell--type-main{font-weight:700;color:#4ade80;}',
       '.fd-matrix-cell--type-expansion{font-weight:700;color:#60a5fa;}',
       '.fd-matrix-empty{',
@@ -1194,6 +1455,7 @@
     openMatrix: openMatrix,
     closeMatrix: closeMatrix,
     refreshMatrix: refreshMatrix,
+    exportMatrixPdf: exportMatrixPdf,
     onPathMerged: onPathMerged,
     isMatrixOpen: function () { return matrixOpen; },
     open: openMatrix,
