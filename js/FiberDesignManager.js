@@ -788,12 +788,17 @@
   }
 
   /**
-   * Ring Fiber Design rows: OLT feeder → one tube (12F) per cabinet,
-   * expanded to one matrix row per fiber (12 rows per tube).
+   * Ring Fiber Design rows: OLT feeder → one tube per cabinet,
+   * expanded to 24 directional rows (Main IN1–12 / Backup IN13–24).
    */
   function buildRingMatrixRows() {
     var rows = [];
     var cables = getMapCables() || [];
+    var RING_SEGMENTS = [
+      { id: 'main', pigtailOffset: 0, splitterPort: 'IN1' },
+      { id: 'backup', pigtailOffset: 12, splitterPort: 'IN2' },
+    ];
+
     cables.forEach(function (cable) {
       if (!cable) return;
       var capacity = resolveFeederCapacity(cable);
@@ -815,29 +820,35 @@
         if (!tube) break;
         var cab = cabinets[i];
         var cabinetLabel = getCabinetLabel(cab);
-        var f;
-        for (f = 0; f < RING_FIBERS_PER_TUBE; f++) {
-          var fiberColor = RING_FIBER_COLORS[f];
-          var fiberNumber = f + 1;
-          rows.push({
-            olt_source: oltLabel,
-            feeder_cable_id: cableId,
-            capacity: capacity,
-            tube_number: tube.tube_number,
-            tube_color: tube.tube_color,
-            tube_striped: tube.tube_striped,
-            tube_label: tube.tube_label,
-            fiber_number: fiberNumber,
-            fiber_color: fiberColor,
-            fiber_label: fiberColor,
-            cabinet_id: cabinetLabel,
-            pigtail_no: 'IN' + fiberNumber,
-            spliter: String(fiberNumber),
-            splitter_port: 'IN1',
-            cabinet_node_id: String(cab.id),
-            olt_node_id: String(olt.id),
-            cable_id: String(cable.id || ''),
-          });
+        var segIdx;
+        for (segIdx = 0; segIdx < RING_SEGMENTS.length; segIdx++) {
+          var segment = RING_SEGMENTS[segIdx];
+          var f;
+          for (f = 0; f < RING_FIBERS_PER_TUBE; f++) {
+            var fiberColor = RING_FIBER_COLORS[f];
+            var spliterNo = f + 1;
+            var pigtailNo = segment.pigtailOffset + spliterNo;
+            rows.push({
+              olt_source: oltLabel,
+              feeder_cable_id: cableId,
+              capacity: capacity,
+              tube_number: tube.tube_number,
+              tube_color: tube.tube_color,
+              tube_striped: tube.tube_striped,
+              tube_label: tube.tube_label,
+              ring_segment: segment.id,
+              fiber_number: pigtailNo,
+              fiber_color: fiberColor,
+              fiber_label: fiberColor,
+              cabinet_id: cabinetLabel,
+              pigtail_no: 'IN' + pigtailNo,
+              spliter: String(spliterNo),
+              splitter_port: segment.splitterPort,
+              cabinet_node_id: String(cab.id),
+              olt_node_id: String(olt.id),
+              cable_id: String(cable.id || ''),
+            });
+          }
         }
       }
     });
