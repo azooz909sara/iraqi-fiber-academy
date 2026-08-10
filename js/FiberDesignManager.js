@@ -20,6 +20,10 @@
   var mainPointers = Object.create(null);
   // FACTORY RESET: Main Backbone Names registry for origin name tracking
   var mainBackboneNames = [];
+  /** Phase 4: active interactive trail context stamped onto matrix rows */
+  var interactivePathCtx = null;
+  /** Phase 4: sub-cable ids already allocated from interactive trails (skip DFS guesswork) */
+  var interactiveSkipSubCableIds = Object.create(null);
 
   var FIBERS_PER_TUBE = 6;
   var FATS_PER_TUBE = 3;
@@ -106,32 +110,29 @@
   }
 
   /**
-   * Map distribution rows to PLC Main/Expansion with the 4-color block loop:
-   * PLC01 Blue→PLC13 Blue→PLC01 Orange→…→PLC01 Brown, then PLC02/14, … PLC12/24.
+   * Map distribution rows to PLC Main/Expansion with the 4-color block loop.
+   * Pair index is GLOBAL across the whole design (all cabinets / all main cables) —
+   * never reset when the feeder cable changes.
    */
   function applyPlcSplitterMapping(rows) {
     if (!rows || !rows.length) return rows;
-    var stateByCab = Object.create(null);
+    var nextPairIndex = 0;
+    var lastPairIndex = -1;
     var i;
     for (i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (!row) continue;
-      var cabKey = String(row.cabinet_id || row.cabinet_label || '_');
-      if (!stateByCab[cabKey]) {
-        stateByCab[cabKey] = { nextPairIndex: 0, lastPairIndex: -1 };
-      }
-      var st = stateByCab[cabKey];
       var ft = String(row.fiber_type || '').trim().toLowerCase();
       if (ft === 'main') {
-        var pairIndex = st.nextPairIndex;
-        st.lastPairIndex = pairIndex;
-        st.nextPairIndex += 1;
+        var pairIndex = nextPairIndex;
+        lastPairIndex = pairIndex;
+        nextPairIndex += 1;
         var mainMap = resolvePlcPairMapping(pairIndex);
         row.splitter_fiber_no = formatPlcSplitterNo(mainMap.plcMain);
         row.pigtails_fiber_color = mainMap.color;
         row.plc_pair_index = pairIndex;
       } else if (ft === 'expansion') {
-        var ePair = st.lastPairIndex >= 0 ? st.lastPairIndex : Math.max(0, st.nextPairIndex - 1);
+        var ePair = lastPairIndex >= 0 ? lastPairIndex : Math.max(0, nextPairIndex - 1);
         var expMap = resolvePlcPairMapping(ePair);
         row.splitter_fiber_no = formatPlcSplitterNo(expMap.plcExpansion);
         row.pigtails_fiber_color = expMap.color;
@@ -552,39 +553,54 @@
     return false;
   }
 
-  // FACTORY RESET: New topology-based Main Cable identification with Origin Name Tracking
-  // A cable is Main Cable IF AND ONLY IF:
-  // 1. It originates from or is directly connected to a Cabinet node, OR
-  // 2. Its name matches a registered Main Backbone Name (cable that originated from Cabinet)
+  /** Resolve a design-cable wrapper back to its map cable when possible. */
+  function resolveToMapCable(cable) {
+    if (!cable) return null;
+    if (cable.points || cable.pointSnapNodeIds || cable.snapLabels) return cable;
+    var mapId = cable.map_cable_id != null ? String(cable.map_cable_id) : '';
+    if (!mapId && cable.id != null) {
+      var m = String(cable.id).match(/^design_(.+)_(inbound|outbound)$/i);
+      if (m) mapId = m[1];
+    }
+    if (!mapId) return cable;
+    var cables = getMapCables() || [];
+    var i;
+    for (i = 0; i < cables.length; i++) {
+      if (cables[i] && String(cables[i].id) === mapId) return cables[i];
+    }
+    return cable;
+  }
+
+  /**
+   * HARD RULE: Main Cable = only feeders that touch a Cabinet/FDT endpoint.
+   * Mid-span continuations, last-mile, and branch cables are never Main —
+   * name/backbone registry matching alone must not promote them.
+   */
   function isMainCableFromCabinet(cable, nodes) {
     if (!cable) return false;
 
-    var cableName = String(cable.name || cable.id || '').trim().toUpperCase();
-
-    // Check if cable name matches a registered Main Backbone Name
-    if (mainBackboneNames.length > 0) {
-      var isBackbone = mainBackboneNames.some(function (backboneName) {
-        return cableName === String(backboneName).toUpperCase();
-      });
-      if (isBackbone) return true;
+    /* Explicit design sub / outbound last-mile never occupies M-Cable columns */
+    var role = String(cable.role || '').toLowerCase();
+    if (role === 'sub' || role === 'sub_cable') return false;
+    if (String(cable.direction || '').toLowerCase() === 'outbound' && role !== 'main') {
+      return false;
     }
 
-    // Fallback: Check if cable originates from a Cabinet node (for initial registration)
-    var ends = resolveCableEndpoints(cable);
+    var mapCable = resolveToMapCable(cable) || cable;
+    var ends = resolveCableEndpoints(mapCable);
     if (ends.start && isCabinetNode(ends.start)) return true;
     if (ends.end && isCabinetNode(ends.end)) return true;
 
-    // If nodes array provided, check if either endpoint is a Cabinet in the nodes list
     if (nodes && Array.isArray(nodes)) {
       if (ends.start) {
         var startIsCabinet = nodes.some(function (n) {
-          return n.id === ends.start.id && isCabinetNode(n);
+          return n && ends.start && String(n.id) === String(ends.start.id) && isCabinetNode(n);
         });
         if (startIsCabinet) return true;
       }
       if (ends.end) {
         var endIsCabinet = nodes.some(function (n) {
-          return n.id === ends.end.id && isCabinetNode(n);
+          return n && ends.end && String(n.id) === String(ends.end.id) && isCabinetNode(n);
         });
         if (endIsCabinet) return true;
       }
@@ -1622,15 +1638,18 @@
     var closureTraversalDebug = [];
 
     mainMapCables.forEach(function (startMapCable) {
-      var mainCableName = String(getCableLabel(startMapCable)).trim().toLowerCase();
+      /* Always display / key the Cabinet-origin feeder — never a mid-span segment id */
+      var originMainLabel = getCableLabel(startMapCable);
+      var mainCableName = String(originMainLabel).trim().toLowerCase();
       var visitedClosures = Object.create(null);
       var visitedCableSegments = Object.create(null);
 
       // Create running allocation cursor for this Main Cable
       var designCableForCursor = createCable('outbound', {
-        name: getCableLabel(startMapCable),
-        capacity_f: Number(startMapCable.capacity) || parseCapacityFromLabel(getCableLabel(startMapCable)) || 12,
+        name: originMainLabel,
+        capacity_f: Number(startMapCable.capacity) || parseCapacityFromLabel(originMainLabel) || 12,
         map_cable_id: startMapCable.id,
+        role: 'main',
       });
       var cableCursor = getOrCreateMainPointer(designCableForCursor);
 
@@ -1666,10 +1685,12 @@
                 closureTraversalDebug.push(globalClosureOrder + ' - ' + closureLabel);
               }
               
+              /* M-Cable identity stays on the Cabinet feeder even across named hops */
               var designCable = createCable('outbound', {
-                name: getCableLabel(currentMapCable),
-                capacity_f: Number(currentMapCable.capacity) || parseCapacityFromLabel(getCableLabel(currentMapCable)) || 12,
-                map_cable_id: currentMapCable.id,
+                name: originMainLabel,
+                capacity_f: Number(startMapCable.capacity) || parseCapacityFromLabel(originMainLabel) || 12,
+                map_cable_id: startMapCable.id,
+                role: 'main',
               });
               
               var closureLabel = getClosureLabel(node.id) || node.id;
@@ -1755,6 +1776,7 @@
 
   function generateMainCableRowsForClosure(designCable, closureNode, cabinetNode, cableCursor, closureOrder) {
     var rows = [];
+    if (!designCable || !isMainCableFromCabinet(designCable)) return rows;
     var capacity = Number(designCable.capacity_f) || 48;
     var tubeColors = CAPACITY_COLOR_MAPPING[capacity] || CAPACITY_COLOR_MAPPING[48];
     var closureIdStr = String(getClosureLabel(closureNode.id) || closureNode.id);
@@ -1861,7 +1883,7 @@
       return null;
     }
 
-    // Assign Main and Sub sides
+    // Assign Main and Sub sides — Main ONLY if cable originates at Cabinet/FDT
     if (fromIsMain && !toIsMain) {
       mainSide = fromR;
       subSide = toR;
@@ -1869,20 +1891,21 @@
       mainSide = toR;
       subSide = fromR;
     } else if (!fromIsMain && !toIsMain) {
-      // Both are Sub cables - this is a distribution-to-distribution splice
-      // Use direction to determine which is "primary" for display
-      if (fromR.cable.direction === 'inbound' && toR.cable.direction === 'outbound') {
-        mainSide = fromR;
-        subSide = toR;
-      } else if (toR.cable.direction === 'inbound' && fromR.cable.direction === 'outbound') {
-        mainSide = toR;
+      /*
+       * HARD RULE: do not promote any intermediate/branch cable into M-Cable columns.
+       * Keep the outbound/last-mile as S-Cable; leave Main columns empty.
+       */
+      if (fromR.cable.direction === 'outbound' && toR.cable.direction !== 'outbound') {
         subSide = fromR;
+      } else if (toR.cable.direction === 'outbound' && fromR.cable.direction !== 'outbound') {
+        subSide = toR;
       } else {
-        // Default: from is primary, to is secondary
-        mainSide = fromR;
         subSide = toR;
       }
+      mainSide = null;
     }
+
+    if (!subSide) return null;
 
     var cab = cabinetNode || currentCabinetCtx || findServingCabinet(
       (deps && deps.resolveNodeById) ? deps.resolveNodeById(node.node_id) : null
@@ -1910,9 +1933,13 @@
       closure_id: actualClosureId, // Use actual closure node ID
       cabinet_id: cab ? String(cab.id) : '',
       cabinet_label: cab ? getCabinetLabel(cab) : '—',
-      m_cable_id: cableDisplayId(mainSide.cable),
-      m_tube_color: explicitMainTubeColor || mainSide.tube.tube_color,
-      m_fiber_color: explicitMainFiberColor || mainSide.fiber.fiber_color,
+      m_cable_id: mainSide ? cableDisplayId(mainSide.cable) : '—',
+      m_tube_color: mainSide
+        ? (explicitMainTubeColor || mainSide.tube.tube_color)
+        : '—',
+      m_fiber_color: mainSide
+        ? (explicitMainFiberColor || mainSide.fiber.fiber_color)
+        : '—',
       s_cable_id: cableDisplayId(subSide.cable),
       s_tube_color: subSide.tube.tube_color,
       s_fiber_color: subSide.fiber.fiber_color,
@@ -1925,6 +1952,13 @@
   function assignFatAtClosure(closureNode, inboundMapCable, outboundMapCable, fatNode, mainPointer, subPointer, cabinetNode, fatDistance) {
     var designNode = ensureEngineNode(closureNode);
     if (!designNode || !subPointer) return;
+
+    /* HARD RULE: inbound must be a Cabinet/FDT-origin feeder; outbound must not be */
+    if (!inboundMapCable || !isMainCableFromCabinet(inboundMapCable)) return;
+    if (isMainCableFromCabinet(outboundMapCable) ||
+        isSameMainBackboneCable(inboundMapCable, outboundMapCable)) {
+      return;
+    }
 
     var mainCable = findOrAddDesignCable(designNode, 'inbound', inboundMapCable, 'main');
     var subCable = findOrAddDesignCable(designNode, 'outbound', outboundMapCable, 'sub');
@@ -1990,6 +2024,15 @@
           row.splitter_fiber_no = formatPlcSplitterNo(plcMap.plcExpansion);
         }
         row.pigtails_fiber_color = plcMap.color;
+        if (interactivePathCtx) {
+          row.path_source = interactivePathCtx.source || 'interactive_trail';
+          row.main_path_label = interactivePathCtx.main_path_label || '';
+          row.sub_path_label = interactivePathCtx.sub_path_label || '';
+          row.design_path = interactivePathCtx.design_path || '';
+          if (interactivePathCtx.closure_order != null) {
+            row.closure_order = interactivePathCtx.closure_order;
+          }
+        }
         matrixRows.push(row);
       }
     });
@@ -2279,11 +2322,173 @@
     return results;
   }
 
+  function findMapNodeById(nodeId) {
+    if (nodeId == null || nodeId === '') return null;
+    var want = String(nodeId);
+    if (deps && deps.resolveNodeById) {
+      var viaDeps = deps.resolveNodeById(want);
+      if (viaDeps) return viaDeps;
+    }
+    var nodes = getMapNodes() || [];
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      if (nodes[i] && String(nodes[i].id) === want) return nodes[i];
+    }
+    return null;
+  }
+
+  function findMapCableById(cableId) {
+    if (cableId == null || cableId === '') return null;
+    var want = String(cableId);
+    var cables = getMapCables() || [];
+    var i;
+    for (i = 0; i < cables.length; i++) {
+      if (cables[i] && String(cables[i].id) === want) return cables[i];
+    }
+    return null;
+  }
+
+  /**
+   * Phase 4: allocate matrix rows from interactive Main/Sub draw trails.
+   * Trail sequences are definitive truth — DFS must not re-guess those sub-cables.
+   */
+  function applyInteractiveTrailAllocations() {
+    interactiveSkipSubCableIds = Object.create(null);
+    interactivePathCtx = null;
+
+    var mainPacks = getMainCableVisualSequences();
+    var subPacks = getSubCableVisualSequences();
+    if (!mainPacks.length && !subPacks.length) {
+      return { allocated: 0, skipSubCableIds: interactiveSkipSubCableIds };
+    }
+
+    mainPacks.forEach(function (pack) {
+      pack.mapCable = findMapCableById(pack.cableId);
+      if (pack.mapCable) {
+        pack.mainPointer = getOrCreateMainPointer(pack.mapCable);
+      }
+    });
+
+    var closureOrder = Object.create(null);
+    var ord = 0;
+    mainPacks.forEach(function (pack) {
+      (pack.trail.closures || []).forEach(function (c) {
+        if (c && c.id && closureOrder[String(c.id)] == null) {
+          ord += 1;
+          closureOrder[String(c.id)] = ord;
+        }
+      });
+    });
+
+    subPacks.sort(function (a, b) {
+      var ao = closureOrder[String(a.trail.closureId)] || 9999;
+      var bo = closureOrder[String(b.trail.closureId)] || 9999;
+      if (ao !== bo) return ao - bo;
+      return String(a.cableId || '').localeCompare(String(b.cableId || ''), undefined, { numeric: true });
+    });
+
+    var allocated = 0;
+
+    subPacks.forEach(function (pack) {
+      var subCable = findMapCableById(pack.cableId);
+      if (!subCable) return;
+
+      var closureNode = findMapNodeById(pack.trail.closureId);
+      if (!closureNode || !isClosureNode(closureNode)) return;
+
+      var mainPack = null;
+      var mi;
+      for (mi = 0; mi < mainPacks.length; mi++) {
+        var mp = mainPacks[mi];
+        var hit = (mp.trail.closures || []).some(function (c) {
+          return c && String(c.id) === String(pack.trail.closureId);
+        });
+        if (!hit && Array.isArray(mp.trail.nodeIds)) {
+          hit = mp.trail.nodeIds.indexOf(String(pack.trail.closureId)) >= 0;
+        }
+        if (hit) {
+          mainPack = mp;
+          break;
+        }
+      }
+
+      var mainCable = mainPack && mainPack.mapCable;
+      var cabinetNode = mainPack
+        ? findMapNodeById(mainPack.trail.cabinetId)
+        : findServingCabinet(closureNode);
+
+      if (!mainCable && cabinetNode) {
+        var cables = getMapCables() || [];
+        var ci;
+        for (ci = 0; ci < cables.length; ci++) {
+          var cand = cables[ci];
+          if (!isMainCableFromCabinet(cand)) continue;
+          var ends = resolveCableEndpoints(cand);
+          if ((ends.start && String(ends.start.id) === String(cabinetNode.id)) ||
+              (ends.end && String(ends.end.id) === String(cabinetNode.id))) {
+            mainCable = cand;
+            break;
+          }
+        }
+      }
+
+      if (!mainCable || !isMainCableFromCabinet(mainCable)) return;
+
+      var mainPtr = (mainPack && mainPack.mainPointer) || getOrCreateMainPointer(mainCable);
+      if (mainPack) mainPack.mainPointer = mainPtr;
+      currentCabinetCtx = cabinetNode || findServingCabinet(closureNode);
+
+      var mainPathLabel = mainPack
+        ? formatMainCableTrailPath(mainPack.trail)
+        : ((currentCabinetCtx ? getCabinetLabel(currentCabinetCtx) : 'FDT') + ' M-CABLE');
+      var subPathLabel = formatSubCableTrailPath(pack.trail);
+
+      interactivePathCtx = {
+        source: 'interactive_trail',
+        main_path_label: mainPathLabel,
+        sub_path_label: subPathLabel,
+        design_path: mainPathLabel + (subPathLabel ? ' · ' + subPathLabel : ''),
+        closure_order: closureOrder[String(pack.trail.closureId)] || 0,
+      };
+
+      var subPointer = createSubCablePointer(Number(subCable.capacity) || 12);
+      var drops = pack.trail.drops || [];
+      var di;
+      for (di = 0; di < drops.length; di++) {
+        var fatNode = findMapNodeById(drops[di].id);
+        if (!fatNode || !isFatOrPoleNode(fatNode)) continue;
+        var before = matrixRows.length;
+        assignFatAtClosure(
+          closureNode,
+          mainCable,
+          subCable,
+          fatNode,
+          mainPtr,
+          subPointer,
+          currentCabinetCtx,
+          nodeDistance(closureNode, fatNode)
+        );
+        allocated += Math.max(0, matrixRows.length - before);
+      }
+
+      interactiveSkipSubCableIds[String(subCable.id)] = true;
+      interactivePathCtx = null;
+    });
+
+    if (DEBUG) {
+      console.log('[FiberDesignManager] interactive trails: mains=' + mainPacks.length +
+        ', subs=' + subPacks.length + ', rows+=' + allocated);
+    }
+
+    return { allocated: allocated, skipSubCableIds: interactiveSkipSubCableIds };
+  }
+
   /**
    * DFS from cabinet. At each Closure (strict two-phase):
    * Phase 1 — allocate ALL local FATs across every outbound branch (no child recursion)
    * Phase 2 — ONLY THEN recurse into downstream closures so they inherit the advanced pointer
    *    Sub-Cable pointer resets to Blue/0 for each new outbound cable
+   * Phase 4 — skip sub-cables already allocated from interactive trails
    */
   function dfsDesignFromRoot(root, graph) {
     var usedEdges = Object.create(null);
@@ -2341,6 +2546,41 @@
       for (i = 0; i < outbound.length; i++) {
         var out = outbound[i];
         var subCable = out.link.edge.cable;
+
+        /*
+         * Backbone hop Closure→Closure on a main feeder: never treat that cable as
+         * a Sub-Cable / last-mile. Only cascade the cabinet feeder + fiber pointer.
+         */
+        var edgeIsCabinetMain = isMainCableFromCabinet(subCable);
+        var edgeIsSameFeeder = !!(mainCable && isSameMainBackboneCable(mainCable, subCable));
+        if ((edgeIsCabinetMain || edgeIsSameFeeder) &&
+            isClosureNode(out.nextNode) && !isFatOrPoleNode(out.nextNode)) {
+          usedEdges[edgeKey(out.link.edge)] = true;
+          childCascade.push({
+            nextNode: out.nextNode,
+            nestedMain: mainCable,
+            nestedPtr: mainPointer || getOrCreateMainPointer(mainCable),
+          });
+          continue;
+        }
+
+        /*
+         * Phase 4: interactive Sub-Cable trail already allocated this cable —
+         * do not let DFS re-order or re-guess FATs on it.
+         */
+        var subCableId = subCable && subCable.id != null ? String(subCable.id) : '';
+        if (subCableId && interactiveSkipSubCableIds[subCableId]) {
+          usedEdges[edgeKey(out.link.edge)] = true;
+          if (isClosureNode(out.nextNode) && !isFatOrPoleNode(out.nextNode)) {
+            childCascade.push({
+              nextNode: out.nextNode,
+              nestedMain: mainCable,
+              nestedPtr: mainPointer || getOrCreateMainPointer(mainCable),
+            });
+          }
+          continue;
+        }
+
         var subPointer = createSubCablePointer(Number(subCable && subCable.capacity) || 12);
 
         var fats = collectFatsAlongBranch(graph, closureNode, out.link, usedEdges, edgeKey);
@@ -2357,6 +2597,15 @@
 
         var f;
         for (f = 0; f < fats.length; f++) {
+          /* Never splice a cabinet feeder / same-backbone segment into the S-Cable role */
+          if (isMainCableFromCabinet(subCable) ||
+              (mainCable && isSameMainBackboneCable(mainCable, subCable))) {
+            break;
+          }
+          if (!mainCable || !isMainCableFromCabinet(mainCable)) {
+            /* No valid cabinet-origin feeder — refuse to invent an M-Cable */
+            break;
+          }
           assignFatAtClosure(
             closureNode,
             mainCable,
@@ -2369,23 +2618,14 @@
           );
         }
 
-        /* Queue downstream closures only — do not recurse yet. */
+        /* Queue downstream closures only — do not recurse yet.
+           Always keep the original cabinet-origin feeder as nestedMain. */
         if (isClosureNode(out.nextNode) && !isFatOrPoleNode(out.nextNode)) {
           usedEdges[edgeKey(out.link.edge)] = true;
-          var edgeCable = out.link.edge.cable;
-          var nestedMain;
-          var nestedPtr;
-          if (mainCable && isSameMainBackboneCable(mainCable, edgeCable)) {
-            nestedMain = mainCable;
-            nestedPtr = mainPointer || getOrCreateMainPointer(mainCable);
-          } else {
-            nestedMain = edgeCable || mainCable;
-            nestedPtr = getOrCreateMainPointer(nestedMain);
-          }
           childCascade.push({
             nextNode: out.nextNode,
-            nestedMain: nestedMain,
-            nestedPtr: nestedPtr,
+            nestedMain: mainCable,
+            nestedPtr: mainPointer || getOrCreateMainPointer(mainCable),
           });
         } else if (isFatOrPoleNode(out.nextNode) && isClosureNode(out.nextNode)) {
           childCascade.push({
@@ -2427,13 +2667,15 @@
         if (!nextNode) continue;
 
         if (isCabinetNode(node)) {
-          var feederPtr = getOrCreateMainPointer(cable);
+          /* Leaving the FDT: only a cabinet-touching cable may become the main feeder */
+          var feederCable = isMainCableFromCabinet(cable) ? cable : null;
+          var feederPtr = feederCable ? getOrCreateMainPointer(feederCable) : null;
           usedEdges[ek] = true;
-          if (isClosureNode(nextNode) || isFatOrPoleNode(nextNode)) {
-            processClosureDistribution(nextNode, cable, feederPtr, nodeId);
+          if (feederCable && (isClosureNode(nextNode) || isFatOrPoleNode(nextNode))) {
+            processClosureDistribution(nextNode, feederCable, feederPtr, nodeId);
           }
           visitTowardClosures(nextId, nodeId, {
-            mainCable: cable,
+            mainCable: feederCable,
             mainPointer: feederPtr,
           });
           continue;
@@ -2441,9 +2683,20 @@
 
         if (isClosureNode(nextNode) || isFatOrPoleNode(nextNode)) {
           usedEdges[ek] = true;
-          var mainCab = ctx.mainCable || cable;
-          var ptr = ctx.mainPointer || getOrCreateMainPointer(mainCab);
-          processClosureDistribution(nextNode, mainCab, ptr, nodeId);
+          /*
+           * Keep cabinet feeder from pathCtx. Do not let a mid-span / last-mile
+           * edge replace Main Cable identity for downstream closures.
+           */
+          var mainCab = ctx.mainCable;
+          var ptr = ctx.mainPointer;
+          if (!mainCab && isMainCableFromCabinet(cable)) {
+            mainCab = cable;
+            ptr = getOrCreateMainPointer(mainCab);
+          }
+          if (!ptr && mainCab) ptr = getOrCreateMainPointer(mainCab);
+          if (mainCab && ptr) {
+            processClosureDistribution(nextNode, mainCab, ptr, nodeId);
+          }
           visitTowardClosures(nextId, nodeId, {
             mainCable: mainCab,
             mainPointer: ptr,
@@ -2550,16 +2803,21 @@
     });
   }
 
-  function emitDesignChanged() {
+  function emitDesignChanged(payload) {
+    var event = payload && typeof payload === 'object'
+      ? payload
+      : { version: lastDesignVersion, rows: matrixRows.length };
+    if (event.version == null) event.version = lastDesignVersion;
+    if (event.rows == null) event.rows = matrixRows.length;
     var i;
     for (i = 0; i < listeners.length; i++) {
-      try { listeners[i]({ version: lastDesignVersion, rows: matrixRows.length }); } catch (e) { /* ignore */ }
+      try { listeners[i](event); } catch (e) { /* ignore */ }
     }
     if (global.FTTHFiberDesignUI && global.FTTHFiberDesignUI.refreshMatrix) {
-      global.FTTHFiberDesignUI.refreshMatrix();
+      global.FTTHFiberDesignUI.refreshMatrix(event);
     }
     if (global.FTTHFiberDesignMatrixModal && global.FTTHFiberDesignMatrixModal.refresh) {
-      global.FTTHFiberDesignMatrixModal.refresh();
+      global.FTTHFiberDesignMatrixModal.refresh(event);
     }
   }
 
@@ -2580,6 +2838,8 @@
         matrixRows = [];
         currentCabinetCtx = null;
         mainPointers = Object.create(null); // reset per-regeneration
+        interactivePathCtx = null;
+        interactiveSkipSubCableIds = Object.create(null);
 
         if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: building topology graph');
@@ -2595,6 +2855,16 @@
         var roots = findRootCabinets(graph.nodeById);
         if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: roots count = ' + roots.length);
+        }
+
+        /*
+         * Phase 4: interactive Main/Sub trails are definitive truth.
+         * Allocate those rows first, then DFS fills only uncovered topology.
+         */
+        var interactiveResult = applyInteractiveTrailAllocations();
+        if (DEBUG) {
+          console.log('[FiberDesignManager] regenerate: interactive allocated rows≈' +
+            (interactiveResult && interactiveResult.allocated));
         }
 
         if (!roots.length) {
@@ -2626,11 +2896,19 @@
         }
         registerMainBackboneNames(mapCables, allNodes);
 
-        // FACTORY RESET: Generate Main Cable rows using fixed continuous traversal
-        if (DEBUG) {
-        console.log('[FiberDesignManager] regenerate: generating Main Cable rows with fixed traversal');
+        /*
+         * Fixed traversal only when DFS produced no distribution splices.
+         * Running both floods the matrix with placeholder Main rows and
+         * breaks continuous PLC numbering across feeders.
+         */
+        if (!matrixRows.length) {
+          if (DEBUG) {
+          console.log('[FiberDesignManager] regenerate: generating Main Cable rows with fixed traversal');
+          }
+          traverseMainCablePathFixed(mapCables, allNodes, roots[0]);
+        } else if (DEBUG) {
+          console.log('[FiberDesignManager] regenerate: skip fixed traversal (DFS rows=' + matrixRows.length + ')');
         }
-        traverseMainCablePathFixed(mapCables, allNodes, roots[0]);
 
         if (DEBUG) {
         console.log('[FiberDesignManager] regenerate: matrix rows before sort = ' + matrixRows.length);
@@ -2647,7 +2925,14 @@
         }
 
         lastDesignVersion += 1;
-        emitDesignChanged();
+        emitDesignChanged({
+          version: lastDesignVersion,
+          rows: matrixRows.length,
+          reason: (interactiveResult && interactiveResult.allocated)
+            ? 'interactive-trail'
+            : 'topology-regenerate',
+          interactiveRows: interactiveResult ? interactiveResult.allocated : 0,
+        });
 
         var endTime = Date.now();
         if (DEBUG) {
@@ -2660,6 +2945,7 @@
           cabinets: cabinetRegistry.length,
           roots: roots.map(function (r) { return r.id; }),
           edges: graph.edges.length,
+          interactiveRows: interactiveResult ? interactiveResult.allocated : 0,
         };
       } catch (e) {
         var endTime = Date.now();
@@ -2747,12 +3033,19 @@
     },
   };
 
-  function notifyTopologyChanged() {
+  function notifyTopologyChanged(opts) {
+    opts = opts || {};
     if (regenTimer) clearTimeout(regenTimer);
+    var delay = opts.immediate ? 0 : 60;
     regenTimer = setTimeout(function () {
       regenTimer = null;
       AutoFiberEngine.regenerate();
-    }, 60);
+    }, delay);
+  }
+
+  /** Phase 4: flush interactive path → matrix immediately after trail-bearing save. */
+  function notifyInteractivePathCommitted(payload) {
+    return notifyTopologyChanged({ immediate: true, interactive: true, path: payload || null });
   }
 
   function initNodeData(nodeId, nodeType, location, options) {
@@ -3017,6 +3310,102 @@
     lastDesignVersion = 0;
   }
 
+  /**
+   * Phase 2/4: read visual Main Cable trail metadata saved from interactive draw.
+   * Shape: { cabinetId, cabinetLabel, cableRoleLabel, closures:[{id,label}], nodeIds }
+   * Used as definitive matrix path truth in applyInteractiveTrailAllocations.
+   */
+  function getCableMainCableTrail(cable) {
+    if (!cable || !cable.mainCableTrail || typeof cable.mainCableTrail !== 'object') return null;
+    var trail = cable.mainCableTrail;
+    return {
+      cabinetId: trail.cabinetId != null ? String(trail.cabinetId) : '',
+      cabinetLabel: trail.cabinetLabel != null ? String(trail.cabinetLabel) : '',
+      cableRoleLabel: trail.cableRoleLabel || 'M-CABLE',
+      cableName: trail.cableName != null ? String(trail.cableName) : String(cable.name || cable.asBuiltId || ''),
+      closures: Array.isArray(trail.closures)
+        ? trail.closures.map(function (c) {
+          return {
+            id: c && c.id != null ? String(c.id) : '',
+            label: c && c.label != null ? String(c.label) : '',
+          };
+        })
+        : [],
+      nodeIds: Array.isArray(trail.nodeIds) ? trail.nodeIds.map(String) : [],
+    };
+  }
+
+  function formatMainCableTrailPath(trail) {
+    if (!trail || !trail.cabinetLabel) return '';
+    var parts = [String(trail.cabinetLabel) + ' ' + (trail.cableRoleLabel || 'M-CABLE')];
+    (trail.closures || []).forEach(function (c) {
+      if (c && c.label) parts.push(String(c.label));
+    });
+    return parts.join(' ---> ');
+  }
+
+  function getMainCableVisualSequences() {
+    var cables = getMapCables() || [];
+    var out = [];
+    cables.forEach(function (cable) {
+      var trail = getCableMainCableTrail(cable);
+      if (!trail || !trail.cabinetId) return;
+      out.push({
+        cableId: cable.id != null ? String(cable.id) : '',
+        cableLabel: getCableLabel(cable),
+        trail: trail,
+        pathLabel: formatMainCableTrailPath(trail),
+      });
+    });
+    return out;
+  }
+
+  /** Phase 3/4: Sub-Cable visual trail (closure → FH/poles) — definitive matrix drops. */
+  function getCableSubCableTrail(cable) {
+    if (!cable || !cable.subCableTrail || typeof cable.subCableTrail !== 'object') return null;
+    var trail = cable.subCableTrail;
+    return {
+      closureId: trail.closureId != null ? String(trail.closureId) : '',
+      closureLabel: trail.closureLabel != null ? String(trail.closureLabel) : '',
+      cableRoleLabel: trail.cableRoleLabel || 'S-CABLE',
+      cableName: trail.cableName != null ? String(trail.cableName) : String(cable.name || cable.asBuiltId || ''),
+      drops: Array.isArray(trail.drops)
+        ? trail.drops.map(function (d) {
+          return {
+            id: d && d.id != null ? String(d.id) : '',
+            label: d && d.label != null ? String(d.label) : '',
+          };
+        })
+        : [],
+      nodeIds: Array.isArray(trail.nodeIds) ? trail.nodeIds.map(String) : [],
+    };
+  }
+
+  function formatSubCableTrailPath(trail) {
+    if (!trail || !trail.closureLabel) return '';
+    var parts = [String(trail.closureLabel) + ' ' + (trail.cableRoleLabel || 'S-CABLE')];
+    (trail.drops || []).forEach(function (d) {
+      if (d && d.label) parts.push(String(d.label));
+    });
+    return parts.join(' ---> ');
+  }
+
+  function getSubCableVisualSequences() {
+    var cables = getMapCables() || [];
+    var out = [];
+    cables.forEach(function (cable) {
+      var trail = getCableSubCableTrail(cable);
+      if (!trail || !trail.closureId) return;
+      out.push({
+        cableId: cable.id != null ? String(cable.id) : '',
+        cableLabel: getCableLabel(cable),
+        trail: trail,
+        pathLabel: formatSubCableTrailPath(trail),
+      });
+    });
+    return out;
+  }
+
   global.FTTHFiberDesignManager = {
     init: init,
     initNodeData: initNodeData,
@@ -3032,6 +3421,13 @@
     getClosureRegistry: getClosureRegistry,
     getCabinetRegistry: getCabinetRegistry,
     getSpliceMatrixRows: getSpliceMatrixRows,
+    applyPlcSplitterMapping: applyPlcSplitterMapping,
+    getCableMainCableTrail: getCableMainCableTrail,
+    formatMainCableTrailPath: formatMainCableTrailPath,
+    getMainCableVisualSequences: getMainCableVisualSequences,
+    getCableSubCableTrail: getCableSubCableTrail,
+    formatSubCableTrailPath: formatSubCableTrailPath,
+    getSubCableVisualSequences: getSubCableVisualSequences,
     getRingMatrixRows: getRingMatrixRows,
     buildRingMatrixRows: buildRingMatrixRows,
     ensureDisplayData: ensureDisplayData,
@@ -3048,6 +3444,8 @@
     createTube: createTube,
     createCable: createCable,
     notifyTopologyChanged: notifyTopologyChanged,
+    notifyInteractivePathCommitted: notifyInteractivePathCommitted,
+    applyInteractiveTrailAllocations: applyInteractiveTrailAllocations,
     AutoFiberEngine: AutoFiberEngine,
     FIBERS_PER_TUBE: FIBERS_PER_TUBE,
     FATS_PER_TUBE: FATS_PER_TUBE,

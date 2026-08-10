@@ -16,6 +16,15 @@
   var CABLE_SNAP_MARKER_RADIUS = 6;
   var CABLE_ANCHOR_DOT_RADIUS = 4;
   var PEN_CLICK_PULSE_MS = 150;
+  /** Phase 1–3: Main/Sub Cable interactive cues (feedback only — no geometry changes). */
+  var MAIN_CABLE_START_CONFIRM_MS = 2800;
+  var MAIN_CABLE_CHECKPOINT_CONFIRM_MS = 2200;
+  var SUB_CABLE_CONFIRM_MS = 2200;
+  var MAIN_CABLE_HOVER_RING = '#dc2626';
+  var MAIN_CABLE_CONFIRM_RING = '#16a34a';
+  var MAIN_CABLE_CLOSURE_HOVER_RING = '#eab308';
+  var SUB_CABLE_START_HOVER_RING = '#38bdf8';
+  var SUB_CABLE_DROP_HOVER_RING = '#0284c7';
   var PEN_RUBBER_COLOR = '#f97316';
   var PEN_RUBBER_DASH = '5,5';
   var CUT_PREVIEW_COLOR = '#ef4444';
@@ -109,6 +118,10 @@
   var penDblClickCaptureBound = false;
   var lastPenSnapCache = null;
   var penClickPulseTimer = null;
+  var mainCableConfirmTimer = null;
+  var mainCableCheckpointTimer = null;
+  var subCableStartConfirmTimer = null;
+  var subCableDropConfirmTimer = null;
   var cableContinueOffer = null;
   var cableContinueFabEl = null;
   var cableContinueFabBound = false;
@@ -646,6 +659,8 @@
   function buildCableDeviceSnapHit(node, center) {
     if (!node || !center) return null;
     var isHandhole = node.type === 'handhole' || node.type === 'fat_handhole';
+    var isCabinet = node.type === 'fdt';
+    var isClosureCheckpoint = isClosureCheckpointNode(node);
     return {
       x: center.x,
       y: center.y,
@@ -659,8 +674,615 @@
         nodeId: node.id,
         label: center.label || nodeDisplayName(node),
         snapKind: isHandhole ? 'handhole' : 'device',
+        nodeType: node.type || null,
+        isCabinet: isCabinet,
+        isClosureCheckpoint: isClosureCheckpoint,
       },
     };
+  }
+
+  /** True closures only (hasClosure) — bare pass-through handholes are ignored. */
+  function isClosureCheckpointNode(node) {
+    if (!node) return false;
+    if (node.type !== 'handhole' && node.type !== 'fat_handhole') return false;
+    return !!node.hasClosure;
+  }
+
+  function getClosureCheckpointLabel(node) {
+    if (!node) return '';
+    var raw = node.closureName || '';
+    if (raw) {
+      var m = String(raw).match(/C(\d+)/i);
+      if (m) return 'C' + m[1];
+      return String(raw);
+    }
+    return b()?.getNodeAsBuiltCode?.(node) || nodeDisplayName(node) || 'Closure';
+  }
+
+  function resolveSnapNodeId(resolvedOrHit) {
+    if (!resolvedOrHit) return null;
+    return resolvedOrHit.snapNodeId ||
+      resolvedOrHit.target?.nodeId ||
+      resolvedOrHit.snapTarget?.nodeId ||
+      null;
+  }
+
+  /** Magnetic Cabinet/FDT probe for Main Cable start cue (visual only). */
+  function pickCableCabinetMagneticSnap(clientX, clientY) {
+    if (clientX == null || clientY == null) return null;
+    var limitSq = getCableEffectiveSnapRadiusSq();
+    var best = null;
+    (sim()?.nodes || []).forEach(function (node) {
+      if (!node || node.type !== 'fdt') return;
+      var center = getDeviceSnapCenter(node);
+      if (!center) return;
+      var d2 = screenDistSqToDevice(node, clientX, clientY);
+      if (d2 == null || d2 > limitSq) return;
+      if (!best || d2 < best.d2) best = { d2: d2, node: node, center: center };
+    });
+    if (!best) return null;
+    return buildCableDeviceSnapHit(best.node, best.center);
+  }
+
+  /** Magnetic closure probe (Main checkpoint or Sub start — visual only). */
+  function pickCableClosureMagneticSnap(clientX, clientY) {
+    if (clientX == null || clientY == null) return null;
+    var limitSq = Math.max(getCableEffectiveSnapRadiusSq(), 28 * 28);
+    var best = null;
+    (sim()?.nodes || []).forEach(function (node) {
+      if (!isClosureCheckpointNode(node)) return;
+      var center = getDeviceSnapCenter(node);
+      if (!center) return;
+      var d2 = screenDistSqToDevice(node, clientX, clientY);
+      if (d2 == null || d2 > limitSq) return;
+      if (!best || d2 < best.d2) best = { d2: d2, node: node, center: center };
+    });
+    if (!best) return null;
+    return buildCableDeviceSnapHit(best.node, best.center);
+  }
+
+  /** Poles / FAT handholes as Sub-Cable drop targets (visual only). */
+  function isSubCableDropTargetNode(node) {
+    if (!node) return false;
+    if (node.type === 'fat_handhole') return true;
+    if (node.type === 'pole_foundation' && node.hasPole) return true;
+    return false;
+  }
+
+  function getSubCableDropLabel(node) {
+    if (!node) return '';
+    if (node.type === 'fat_handhole') {
+      return node.autoName || node.fatSystemName ||
+        b()?.getNodeAsBuiltCode?.(node) || 'FH';
+    }
+    if (node.type === 'pole_foundation') {
+      return node.poleName || node.autoName ||
+        b()?.getNodeAsBuiltCode?.(node) || 'P';
+    }
+    return b()?.getNodeAsBuiltCode?.(node) || nodeDisplayName(node) || 'Drop';
+  }
+
+  function pickCableSubDropMagneticSnap(clientX, clientY, excludeNodeId) {
+    if (clientX == null || clientY == null) return null;
+    var limitSq = Math.max(getCableEffectiveSnapRadiusSq(), 28 * 28);
+    var skipId = excludeNodeId != null ? String(excludeNodeId) : '';
+    var best = null;
+    (sim()?.nodes || []).forEach(function (node) {
+      if (!isSubCableDropTargetNode(node)) return;
+      if (skipId && String(node.id) === skipId) return;
+      var center = getDeviceSnapCenter(node);
+      if (!center) return;
+      var d2 = screenDistSqToDevice(node, clientX, clientY);
+      if (d2 == null || d2 > limitSq) return;
+      if (!best || d2 < best.d2) best = { d2: d2, node: node, center: center };
+    });
+    if (!best) return null;
+    var hit = buildCableDeviceSnapHit(best.node, best.center);
+    if (hit && hit.target) hit.target.isSubDrop = true;
+    return hit;
+  }
+
+  function isCabinetFdtNode(node) {
+    return !!(node && node.type === 'fdt');
+  }
+
+  function resolveCabinetNodeFromSnap(resolvedOrHit) {
+    var node = findSimNodeById(resolveSnapNodeId(resolvedOrHit));
+    return isCabinetFdtNode(node) ? node : null;
+  }
+
+  function resolveClosureCheckpointFromSnap(resolvedOrHit) {
+    var node = findSimNodeById(resolveSnapNodeId(resolvedOrHit));
+    return isClosureCheckpointNode(node) ? node : null;
+  }
+
+  function resolveSubDropFromSnap(resolvedOrHit) {
+    var node = findSimNodeById(resolveSnapNodeId(resolvedOrHit));
+    return isSubCableDropTargetNode(node) ? node : null;
+  }
+
+  function isCableAwaitingTrailStart(draft) {
+    return !draft || !draft.points || draft.points.length === 0;
+  }
+
+  /** @deprecated alias */
+  function isCableAwaitingMainStart(draft) {
+    return isCableAwaitingTrailStart(draft);
+  }
+
+  function isMainCableTrailActive(draft) {
+    var trail = (draft && draft.mainCableTrail) || sim()?.mainCableTrail;
+    return !!(trail && trail.cabinetId);
+  }
+
+  function isSubCableTrailActive(draft) {
+    var trail = (draft && draft.subCableTrail) || sim()?.subCableTrail;
+    return !!(trail && trail.closureId);
+  }
+
+  function cloneMainCableTrail(trail) {
+    if (!trail) return null;
+    return {
+      cabinetId: trail.cabinetId,
+      cabinetLabel: trail.cabinetLabel,
+      cableRoleLabel: trail.cableRoleLabel || 'M-CABLE',
+      cableName: trail.cableName || '',
+      closures: Array.isArray(trail.closures)
+        ? trail.closures.map(function (c) {
+          return { id: c.id, label: c.label };
+        })
+        : [],
+      nodeIds: Array.isArray(trail.nodeIds) ? trail.nodeIds.slice() : [],
+    };
+  }
+
+  function cloneSubCableTrail(trail) {
+    if (!trail) return null;
+    return {
+      closureId: trail.closureId,
+      closureLabel: trail.closureLabel,
+      cableRoleLabel: trail.cableRoleLabel || 'S-CABLE',
+      cableName: trail.cableName || '',
+      drops: Array.isArray(trail.drops)
+        ? trail.drops.map(function (d) {
+          return { id: d.id, label: d.label };
+        })
+        : [],
+      nodeIds: Array.isArray(trail.nodeIds) ? trail.nodeIds.slice() : [],
+    };
+  }
+
+  function formatMainCableTrailLabel(trail) {
+    if (!trail || !trail.cabinetLabel) return '';
+    var role = trail.cableRoleLabel || 'M-CABLE';
+    var parts = [String(trail.cabinetLabel) + ' ' + role];
+    (trail.closures || []).forEach(function (c) {
+      if (c && c.label) parts.push(String(c.label));
+    });
+    return parts.join(' ---> ');
+  }
+
+  function formatSubCableTrailLabel(trail) {
+    if (!trail || !trail.closureLabel) return '';
+    var role = trail.cableRoleLabel || 'S-CABLE';
+    var parts = [String(trail.closureLabel) + ' ' + role];
+    (trail.drops || []).forEach(function (d) {
+      if (d && d.label) parts.push(String(d.label));
+    });
+    return parts.join(' ---> ');
+  }
+
+  function syncActiveCableTrailStatusHint() {
+    var S = sim();
+    var draft = S?.penDraft;
+    if (isSubCableTrailActive(draft)) {
+      var subLabel = formatSubCableTrailLabel((draft && draft.subCableTrail) || S.subCableTrail);
+      if (!subLabel) return;
+      var subMsg = 'Active Path · ' + subLabel;
+      if (S) S.subCableTrailStatusMsg = subMsg;
+      b()?.setPushHint?.(subMsg);
+      return;
+    }
+    if (isMainCableTrailActive(draft)) {
+      var mainLabel = formatMainCableTrailLabel((draft && draft.mainCableTrail) || S.mainCableTrail);
+      if (!mainLabel) return;
+      var mainMsg = 'Active Path · ' + mainLabel;
+      if (S) S.mainCableTrailStatusMsg = mainMsg;
+      b()?.setPushHint?.(mainMsg);
+    }
+  }
+
+  function syncMainCableTrailStatusHint() {
+    syncActiveCableTrailStatusHint();
+  }
+
+  function ensureMainCableTrailFromCabinet(cabinet, draft) {
+    if (!cabinet || !draft) return null;
+    var cabinetLabel = b()?.getNodeAsBuiltCode?.(cabinet) ||
+      nodeDisplayName(cabinet) ||
+      'Cabinet';
+    var trail = {
+      cabinetId: String(cabinet.id),
+      cabinetLabel: cabinetLabel,
+      cableRoleLabel: 'M-CABLE',
+      cableName: draft.cableName || '',
+      closures: [],
+      nodeIds: [String(cabinet.id)],
+    };
+    draft.mainCableTrail = trail;
+    draft.subCableTrail = null;
+    var S = sim();
+    if (S) {
+      S.mainCableTrail = trail;
+      S.subCableTrail = null;
+    }
+    return trail;
+  }
+
+  function ensureSubCableTrailFromClosure(closure, draft) {
+    if (!closure || !draft) return null;
+    var closureLabel = getClosureCheckpointLabel(closure);
+    var trail = {
+      closureId: String(closure.id),
+      closureLabel: closureLabel,
+      cableRoleLabel: 'S-CABLE',
+      cableName: draft.cableName || '',
+      drops: [],
+      nodeIds: [String(closure.id)],
+    };
+    draft.subCableTrail = trail;
+    draft.mainCableTrail = null;
+    var S = sim();
+    if (S) {
+      S.subCableTrail = trail;
+      S.mainCableTrail = null;
+    }
+    return trail;
+  }
+
+  function getCableInteractiveCursorPhase() {
+    var S = sim();
+    if (!S || S.pen?.lineMode !== 'cable' || !b()?.canPenDraw?.()) return null;
+    if (S.mainCableStartConfirmUntil && Date.now() < S.mainCableStartConfirmUntil) {
+      return 'main-confirm';
+    }
+    if (S.mainCableCheckpointConfirmUntil && Date.now() < S.mainCableCheckpointConfirmUntil) {
+      return 'main-closure-confirm';
+    }
+    if (S.subCableStartConfirmUntil && Date.now() < S.subCableStartConfirmUntil) {
+      return 'sub-confirm';
+    }
+    if (S.subCableDropConfirmUntil && Date.now() < S.subCableDropConfirmUntil) {
+      return 'sub-drop-confirm';
+    }
+    if (S.crosshair?.cabinetHover) return 'main-cabinet-hover';
+    if (S.crosshair?.mainClosureHover) return 'main-closure-hover';
+    if (S.crosshair?.subClosureHover) return 'sub-closure-hover';
+    if (S.crosshair?.subDropHover) return 'sub-drop-hover';
+    return null;
+  }
+
+  /** @deprecated alias for Phase 1–2 call sites */
+  function getMainCableCursorPhase() {
+    var phase = getCableInteractiveCursorPhase();
+    if (phase === 'main-confirm') return 'confirm';
+    if (phase === 'main-closure-confirm') return 'closure-confirm';
+    if (phase === 'main-cabinet-hover') return 'hover';
+    if (phase === 'main-closure-hover') return 'closure-hover';
+    if (phase === 'sub-confirm' || phase === 'sub-drop-confirm') return 'closure-confirm';
+    if (phase === 'sub-closure-hover') return 'sub-closure-hover';
+    if (phase === 'sub-drop-hover') return 'sub-drop-hover';
+    return null;
+  }
+
+  function clearMainCableCheckpointConfirm(restoreHint) {
+    if (mainCableCheckpointTimer) {
+      clearTimeout(mainCableCheckpointTimer);
+      mainCableCheckpointTimer = null;
+    }
+    var S = sim();
+    if (!S) return;
+    S.mainCableCheckpointConfirmUntil = 0;
+    S.mainCableCheckpointConfirmMsg = null;
+    if (restoreHint) syncActiveCableTrailStatusHint();
+  }
+
+  function clearMainCableStartConfirm(restoreHint) {
+    var S = sim();
+    if (mainCableConfirmTimer) {
+      clearTimeout(mainCableConfirmTimer);
+      mainCableConfirmTimer = null;
+    }
+    if (!S) return;
+    S.mainCableStartConfirmUntil = 0;
+    S.mainCableStartConfirmMsg = null;
+    S.mainCableStartConfirmCabinet = null;
+    if (!S.mainCableCheckpointConfirmUntil && !S.subCableStartConfirmUntil &&
+        !S.subCableDropConfirmUntil) {
+      S.mainCableConfirmOrigin = null;
+    }
+    if (restoreHint) {
+      if (isMainCableTrailActive(S.penDraft) || isSubCableTrailActive(S.penDraft)) {
+        syncActiveCableTrailStatusHint();
+      } else {
+        b()?.setPushHint?.(b()?.getActivePathStatusLabel?.() || 'Active Path · ...');
+      }
+    }
+  }
+
+  function clearSubCableConfirms(restoreHint) {
+    if (subCableStartConfirmTimer) {
+      clearTimeout(subCableStartConfirmTimer);
+      subCableStartConfirmTimer = null;
+    }
+    if (subCableDropConfirmTimer) {
+      clearTimeout(subCableDropConfirmTimer);
+      subCableDropConfirmTimer = null;
+    }
+    var S = sim();
+    if (!S) return;
+    S.subCableStartConfirmUntil = 0;
+    S.subCableStartConfirmMsg = null;
+    S.subCableDropConfirmUntil = 0;
+    S.subCableDropConfirmMsg = null;
+    if (!S.mainCableStartConfirmUntil && !S.mainCableCheckpointConfirmUntil) {
+      S.mainCableConfirmOrigin = null;
+    }
+    if (restoreHint) syncActiveCableTrailStatusHint();
+  }
+
+  function clearCableInteractiveVisualSession() {
+    clearMainCableStartConfirm(false);
+    clearMainCableCheckpointConfirm(false);
+    clearSubCableConfirms(false);
+    var S = sim();
+    if (!S) return;
+    S.mainCableTrail = null;
+    S.mainCableTrailStatusMsg = null;
+    S.subCableTrail = null;
+    S.subCableTrailStatusMsg = null;
+    S.mainCableConfirmOrigin = null;
+    if (S.penDraft) {
+      S.penDraft.mainCableTrail = null;
+      S.penDraft.subCableTrail = null;
+    }
+    if (S.crosshair) {
+      S.crosshair.cabinetHover = false;
+      S.crosshair.mainClosureHover = false;
+      S.crosshair.subClosureHover = false;
+      S.crosshair.subDropHover = false;
+      S.crosshair.closureHover = false;
+    }
+  }
+
+  function clearMainCableVisualSession() {
+    clearCableInteractiveVisualSession();
+  }
+
+  function pinInteractiveConfirmOrigin(node, resolved) {
+    var S = sim();
+    if (!S) return;
+    var ox = resolved && isFinite(resolved.x) ? resolved.x : 0;
+    var oy = resolved && isFinite(resolved.y) ? resolved.y : 0;
+    var center = node ? getDeviceSnapCenter(node) : null;
+    if (center) {
+      ox = center.x;
+      oy = center.y;
+    }
+    S.mainCableConfirmOrigin = { x: ox, y: oy };
+    S.crosshair = S.crosshair || {};
+    S.crosshair.cabinetHover = false;
+    S.crosshair.mainClosureHover = false;
+    S.crosshair.subClosureHover = false;
+    S.crosshair.subDropHover = false;
+    S.crosshair.closureHover = false;
+    S.crosshair.visible = true;
+    S.crosshair.snapped = true;
+    S.crosshair.snapX = ox;
+    S.crosshair.snapY = oy;
+    S.crosshair.x = ox;
+    S.crosshair.y = oy;
+  }
+
+  /**
+   * Phase 1 feedback only — does not alter points, snapLabels, or save geometry.
+   * Green ring + bottom-bar confirmation when first cable vertex pins a Cabinet/FDT.
+   */
+  function signalMainCableStartConfirmed(resolved) {
+    var cabinet = resolveCabinetNodeFromSnap(resolved);
+    if (!cabinet) return false;
+    var S = sim();
+    if (!S) return false;
+    var draft = S.penDraft || ensurePenDraft();
+    if (!draft) return false;
+
+    var cabinetName = b()?.getNodeAsBuiltCode?.(cabinet) ||
+      nodeDisplayName(cabinet) ||
+      'Cabinet';
+    ensureMainCableTrailFromCabinet(cabinet, draft);
+    var msg = 'Main Cable successfully registered from ' + cabinetName;
+
+    S.mainCableStartConfirmUntil = Date.now() + MAIN_CABLE_START_CONFIRM_MS;
+    S.mainCableStartConfirmMsg = msg;
+    S.mainCableStartConfirmCabinet = cabinetName;
+    pinInteractiveConfirmOrigin(cabinet, resolved);
+
+    b()?.setPushHint?.(msg);
+    b()?.updateStatus?.(msg);
+
+    if (mainCableConfirmTimer) clearTimeout(mainCableConfirmTimer);
+    mainCableConfirmTimer = setTimeout(function () {
+      mainCableConfirmTimer = null;
+      var live = sim();
+      if (!live) return;
+      if (live.mainCableStartConfirmUntil && Date.now() >= live.mainCableStartConfirmUntil) {
+        live.mainCableStartConfirmUntil = 0;
+        live.mainCableStartConfirmMsg = null;
+        live.mainCableStartConfirmCabinet = null;
+        if (!live.mainCableCheckpointConfirmUntil && !live.subCableStartConfirmUntil &&
+            !live.subCableDropConfirmUntil) {
+          live.mainCableConfirmOrigin = null;
+        }
+        syncActiveCableTrailStatusHint();
+      }
+      flushPenCursorVisuals();
+    }, MAIN_CABLE_START_CONFIRM_MS + 40);
+
+    flushPenCursorVisuals();
+    return true;
+  }
+
+  /**
+   * Phase 2 feedback only — sequential closure checkpoint on Main Cable trail.
+   * Yellow hover is separate; this green-flashes and appends C1/C2… to the path label.
+   */
+  function signalClosureCheckpointConfirmed(resolved) {
+    var closure = resolveClosureCheckpointFromSnap(resolved);
+    if (!closure) return false;
+    var S = sim();
+    if (!S) return false;
+    var draft = S.penDraft;
+    if (!isMainCableTrailActive(draft)) return false;
+
+    var trail = draft.mainCableTrail;
+    var closureId = String(closure.id);
+    if ((trail.nodeIds || []).indexOf(closureId) >= 0) return false;
+    if ((trail.closures || []).some(function (c) { return String(c.id) === closureId; })) {
+      return false;
+    }
+
+    var label = getClosureCheckpointLabel(closure);
+    trail.closures.push({ id: closureId, label: label });
+    trail.nodeIds.push(closureId);
+    S.mainCableTrail = trail;
+
+    pinInteractiveConfirmOrigin(closure, resolved);
+    S.mainCableCheckpointConfirmUntil = Date.now() + MAIN_CABLE_CHECKPOINT_CONFIRM_MS;
+    S.mainCableCheckpointConfirmMsg = 'Checkpoint ' + label + ' linked';
+
+    var pathMsg = 'Active Path · ' + formatMainCableTrailLabel(trail);
+    S.mainCableTrailStatusMsg = pathMsg;
+    b()?.setPushHint?.(pathMsg);
+    b()?.updateStatus?.('Closure ' + label + ' linked · ' + formatMainCableTrailLabel(trail));
+
+    if (mainCableCheckpointTimer) clearTimeout(mainCableCheckpointTimer);
+    mainCableCheckpointTimer = setTimeout(function () {
+      mainCableCheckpointTimer = null;
+      var live = sim();
+      if (!live) return;
+      if (live.mainCableCheckpointConfirmUntil &&
+          Date.now() >= live.mainCableCheckpointConfirmUntil) {
+        live.mainCableCheckpointConfirmUntil = 0;
+        live.mainCableCheckpointConfirmMsg = null;
+        if (!live.mainCableStartConfirmUntil && !live.subCableStartConfirmUntil &&
+            !live.subCableDropConfirmUntil) {
+          live.mainCableConfirmOrigin = null;
+        }
+        syncActiveCableTrailStatusHint();
+      }
+      flushPenCursorVisuals();
+    }, MAIN_CABLE_CHECKPOINT_CONFIRM_MS + 40);
+
+    flushPenCursorVisuals();
+    return true;
+  }
+
+  /**
+   * Phase 3: Sub-Cable start at a Closure (sky-blue hover → green confirm).
+   * Only when not already on a Main Cable trail.
+   */
+  function signalSubCableStartConfirmed(resolved) {
+    var closure = resolveClosureCheckpointFromSnap(resolved);
+    if (!closure) return false;
+    var S = sim();
+    if (!S) return false;
+    var draft = S.penDraft || ensurePenDraft();
+    if (!draft || isMainCableTrailActive(draft)) return false;
+
+    ensureSubCableTrailFromClosure(closure, draft);
+    var label = getClosureCheckpointLabel(closure);
+    var msg = 'Sub-Cable successfully registered from ' + label;
+
+    S.subCableStartConfirmUntil = Date.now() + SUB_CABLE_CONFIRM_MS;
+    S.subCableStartConfirmMsg = msg;
+    pinInteractiveConfirmOrigin(closure, resolved);
+
+    b()?.setPushHint?.(msg);
+    b()?.updateStatus?.(msg);
+
+    if (subCableStartConfirmTimer) clearTimeout(subCableStartConfirmTimer);
+    subCableStartConfirmTimer = setTimeout(function () {
+      subCableStartConfirmTimer = null;
+      var live = sim();
+      if (!live) return;
+      if (live.subCableStartConfirmUntil && Date.now() >= live.subCableStartConfirmUntil) {
+        live.subCableStartConfirmUntil = 0;
+        live.subCableStartConfirmMsg = null;
+        if (!live.mainCableStartConfirmUntil && !live.mainCableCheckpointConfirmUntil &&
+            !live.subCableDropConfirmUntil) {
+          live.mainCableConfirmOrigin = null;
+        }
+        syncActiveCableTrailStatusHint();
+      }
+      flushPenCursorVisuals();
+    }, SUB_CABLE_CONFIRM_MS + 40);
+
+    flushPenCursorVisuals();
+    return true;
+  }
+
+  /**
+   * Phase 3: Sub-Cable drop target (FH / pole) linkage — green flash + sequence append.
+   */
+  function signalSubCableDropConfirmed(resolved) {
+    var drop = resolveSubDropFromSnap(resolved);
+    if (!drop) return false;
+    var S = sim();
+    if (!S) return false;
+    var draft = S.penDraft;
+    if (!isSubCableTrailActive(draft)) return false;
+
+    var trail = draft.subCableTrail;
+    var dropId = String(drop.id);
+    if (String(trail.closureId) === dropId) return false;
+    if ((trail.nodeIds || []).indexOf(dropId) >= 0) return false;
+    if ((trail.drops || []).some(function (d) { return String(d.id) === dropId; })) {
+      return false;
+    }
+
+    var label = getSubCableDropLabel(drop);
+    trail.drops.push({ id: dropId, label: label });
+    trail.nodeIds.push(dropId);
+    S.subCableTrail = trail;
+
+    pinInteractiveConfirmOrigin(drop, resolved);
+    S.subCableDropConfirmUntil = Date.now() + SUB_CABLE_CONFIRM_MS;
+    S.subCableDropConfirmMsg = 'Drop ' + label + ' linked';
+
+    var pathMsg = 'Active Path · ' + formatSubCableTrailLabel(trail);
+    S.subCableTrailStatusMsg = pathMsg;
+    b()?.setPushHint?.(pathMsg);
+    b()?.updateStatus?.('Drop ' + label + ' linked · ' + formatSubCableTrailLabel(trail));
+
+    if (subCableDropConfirmTimer) clearTimeout(subCableDropConfirmTimer);
+    subCableDropConfirmTimer = setTimeout(function () {
+      subCableDropConfirmTimer = null;
+      var live = sim();
+      if (!live) return;
+      if (live.subCableDropConfirmUntil && Date.now() >= live.subCableDropConfirmUntil) {
+        live.subCableDropConfirmUntil = 0;
+        live.subCableDropConfirmMsg = null;
+        if (!live.mainCableStartConfirmUntil && !live.mainCableCheckpointConfirmUntil &&
+            !live.subCableStartConfirmUntil) {
+          live.mainCableConfirmOrigin = null;
+        }
+        syncActiveCableTrailStatusHint();
+      }
+      flushPenCursorVisuals();
+    }, SUB_CABLE_CONFIRM_MS + 40);
+
+    flushPenCursorVisuals();
+    return true;
   }
 
   function pickCableDeviceSnapOnClick(clientX, clientY) {
@@ -2039,7 +2661,31 @@
       if (draft.points.length === 1 && !draft.continueFromCable) {
         offerCableContinueAfterFirstVertex(draft, resolved);
       }
-      if (draft.continueFromCable) {
+      /* Phase 1/3: first vertex — Main from FDT or Sub from Closure */
+      var mainStartConfirmed = false;
+      var subStartConfirmed = false;
+      if (draft.points.length === 1 && !draft.continueFromCable) {
+        mainStartConfirmed = signalMainCableStartConfirmed(resolved);
+        if (!mainStartConfirmed) {
+          subStartConfirmed = signalSubCableStartConfirmed(resolved);
+        }
+      }
+      /* Phase 2: Main Cable closure checkpoints */
+      var closureLinked = false;
+      if (!mainStartConfirmed && !subStartConfirmed && isMainCableTrailActive(draft)) {
+        closureLinked = signalClosureCheckpointConfirmed(resolved);
+      }
+      /* Phase 3: Sub-Cable FH/pole drops */
+      var dropLinked = false;
+      if (!mainStartConfirmed && !subStartConfirmed && !closureLinked &&
+          isSubCableTrailActive(draft)) {
+        dropLinked = signalSubCableDropConfirmed(resolved);
+      }
+      if (mainStartConfirmed || subStartConfirmed || closureLinked || dropLinked) {
+        /* Bottom bar already shows Main/Sub Cable sequence. */
+      } else if (isMainCableTrailActive(draft) || isSubCableTrailActive(draft)) {
+        syncActiveCableTrailStatusHint();
+      } else if (draft.continueFromCable) {
         b()?.updateStatus?.(
           'Continuing ' + (draft.cableName || 'cable') +
           ' — draw next segment · double-click to merge'
@@ -2176,19 +2822,56 @@
         ? lastPenSnapCache.guidedSnap
         : resolveCableGuidedSnap(e, xy);
       var draft = S.penDraft;
-      var trackX = guidedSnap ? guidedSnap.x : null;
-      var trackY = guidedSnap ? guidedSnap.y : null;
+      /*
+       * Interactive cues (feedback only):
+       * - awaiting start → Cabinet (red) else Closure (sky) for Sub start
+       * - Main trail → closure checkpoint (yellow)
+       * - Sub trail → FH/pole drop (deep sky)
+       */
+      var cabinetSnap = null;
+      var mainClosureSnap = null;
+      var subClosureSnap = null;
+      var subDropSnap = null;
+      if (isCableAwaitingTrailStart(draft)) {
+        cabinetSnap = movedLittle && lastPenSnapCache && lastPenSnapCache.cabinetSnap !== undefined
+          ? lastPenSnapCache.cabinetSnap
+          : pickCableCabinetMagneticSnap(e.clientX, e.clientY);
+        if (!cabinetSnap) {
+          subClosureSnap = movedLittle && lastPenSnapCache && lastPenSnapCache.subClosureSnap !== undefined
+            ? lastPenSnapCache.subClosureSnap
+            : pickCableClosureMagneticSnap(e.clientX, e.clientY);
+        }
+      } else if (isMainCableTrailActive(draft)) {
+        mainClosureSnap = movedLittle && lastPenSnapCache && lastPenSnapCache.mainClosureSnap !== undefined
+          ? lastPenSnapCache.mainClosureSnap
+          : pickCableClosureMagneticSnap(e.clientX, e.clientY);
+      } else if (isSubCableTrailActive(draft)) {
+        var excludeStart = draft.subCableTrail && draft.subCableTrail.closureId;
+        subDropSnap = movedLittle && lastPenSnapCache && lastPenSnapCache.subDropSnap !== undefined
+          ? lastPenSnapCache.subDropSnap
+          : pickCableSubDropMagneticSnap(e.clientX, e.clientY, excludeStart);
+      }
+      var visualSnap = cabinetSnap || mainClosureSnap || subClosureSnap || subDropSnap || guidedSnap;
+      var trackX = visualSnap ? visualSnap.x : null;
+      var trackY = visualSnap ? visualSnap.y : null;
       if (!movedLittle) {
         updateCrosshairState(
-          xy.x, xy.y, !!guidedSnap,
+          xy.x, xy.y, !!visualSnap,
           trackX != null ? trackX : xy.x,
           trackY != null ? trackY : xy.y,
-          guidedSnap?.snapKind || guidedSnap?.target?.kind || null
+          visualSnap?.snapKind || visualSnap?.target?.kind || null
         );
-        if (draft && guidedSnap) {
-          draft.cursor = [guidedSnap.x, guidedSnap.y];
-          draft.cursorSnapNodeId = guidedSnap.snapNodeId || guidedSnap.target?.nodeId || null;
-          draft.magneticSnapTarget = guidedSnap.target || null;
+        if (S.crosshair) {
+          S.crosshair.cabinetHover = !!cabinetSnap;
+          S.crosshair.mainClosureHover = !!mainClosureSnap;
+          S.crosshair.subClosureHover = !!subClosureSnap;
+          S.crosshair.subDropHover = !!subDropSnap;
+          S.crosshair.closureHover = !!mainClosureSnap;
+        }
+        if (draft && visualSnap) {
+          draft.cursor = [visualSnap.x, visualSnap.y];
+          draft.cursorSnapNodeId = visualSnap.snapNodeId || visualSnap.target?.nodeId || null;
+          draft.magneticSnapTarget = visualSnap.target || null;
         } else if (draft) {
           draft.cursorSnapNodeId = null;
           draft.magneticSnapTarget = null;
@@ -2198,19 +2881,29 @@
           clientY: e.clientY,
           xy: xy,
           guidedSnap: guidedSnap,
+          cabinetSnap: cabinetSnap,
+          mainClosureSnap: mainClosureSnap,
+          subClosureSnap: subClosureSnap,
+          subDropSnap: subDropSnap,
+          closureSnap: mainClosureSnap,
         };
       } else if (S.crosshair) {
         S.crosshair.x = xy.x;
         S.crosshair.y = xy.y;
-        if (guidedSnap) {
+        S.crosshair.cabinetHover = !!cabinetSnap;
+        S.crosshair.mainClosureHover = !!mainClosureSnap;
+        S.crosshair.subClosureHover = !!subClosureSnap;
+        S.crosshair.subDropHover = !!subDropSnap;
+        S.crosshair.closureHover = !!mainClosureSnap;
+        if (visualSnap) {
           S.crosshair.snapped = true;
-          S.crosshair.snapX = guidedSnap.x;
-          S.crosshair.snapY = guidedSnap.y;
-          S.crosshair.snapKind = guidedSnap.snapKind || guidedSnap.target?.kind || null;
+          S.crosshair.snapX = visualSnap.x;
+          S.crosshair.snapY = visualSnap.y;
+          S.crosshair.snapKind = visualSnap.snapKind || visualSnap.target?.kind || null;
           if (draft) {
-            draft.cursor = [guidedSnap.x, guidedSnap.y];
-            draft.cursorSnapNodeId = guidedSnap.snapNodeId || guidedSnap.target?.nodeId || null;
-            draft.magneticSnapTarget = guidedSnap.target || null;
+            draft.cursor = [visualSnap.x, visualSnap.y];
+            draft.cursorSnapNodeId = visualSnap.snapNodeId || visualSnap.target?.nodeId || null;
+            draft.magneticSnapTarget = visualSnap.target || null;
           }
         } else {
           S.crosshair.snapped = false;
@@ -2463,6 +3156,9 @@
 
         var createdRef = null;
         var wasContinue = !!(draft.continueFromCable && draft.continueFromCable.id);
+        /* Phase 2–3: persist visual Main/Sub Cable sequences (metadata only). */
+        var mainCableTrailSnapshot = cloneMainCableTrail(draft.mainCableTrail);
+        var subCableTrailSnapshot = cloneSubCableTrail(draft.subCableTrail);
         if (wasContinue) {
           createdRef = b()?.extendCableInDatabase?.(draft.continueFromCable.id, pointsSnapshot, {
             continueEnd: draft.continueFromCable.end || 'end',
@@ -2477,6 +3173,8 @@
             pointSnapNodeIds: (draft.pointSnapNodeIds || []).slice(0, pointsSnapshot.length),
             snapLabels: snapLabelsSnapshot,
             userDrawn: true,
+            mainCableTrail: mainCableTrailSnapshot,
+            subCableTrail: subCableTrailSnapshot,
           });
         } else {
           createdRef = b()?.saveCableToDatabase?.(pointsSnapshot, {
@@ -2490,6 +3188,8 @@
             snapLabels: snapLabelsSnapshot,
             cornerRadii: draft.cornerRadii,
             userDrawn: true,
+            mainCableTrail: mainCableTrailSnapshot,
+            subCableTrail: subCableTrailSnapshot,
           });
         }
         if (!createdRef) {
@@ -2904,6 +3604,7 @@
   function hidePenDrawingOverlays() {
     var S = sim();
     if (S) S.crosshair = null;
+    clearMainCableVisualSession();
     var svg = b()?.ensureGlobalDrawingLayer?.();
     if (!svg) return;
     hideSvgEl(svg, 'qfield-crosshair');
@@ -2919,6 +3620,23 @@
   function penToolCrosshairInk() {
     var S = sim();
     if (S?.pen?.lineMode === 'cable') {
+      var phase = getCableInteractiveCursorPhase();
+      if (phase === 'main-confirm' || phase === 'main-closure-confirm' ||
+          phase === 'sub-confirm' || phase === 'sub-drop-confirm') {
+        return { ring: MAIN_CABLE_CONFIRM_RING, plus: MAIN_CABLE_CONFIRM_RING };
+      }
+      if (phase === 'main-cabinet-hover') {
+        return { ring: MAIN_CABLE_HOVER_RING, plus: MAIN_CABLE_HOVER_RING };
+      }
+      if (phase === 'main-closure-hover') {
+        return { ring: MAIN_CABLE_CLOSURE_HOVER_RING, plus: MAIN_CABLE_CLOSURE_HOVER_RING };
+      }
+      if (phase === 'sub-closure-hover') {
+        return { ring: SUB_CABLE_START_HOVER_RING, plus: SUB_CABLE_START_HOVER_RING };
+      }
+      if (phase === 'sub-drop-hover') {
+        return { ring: SUB_CABLE_DROP_HOVER_RING, plus: SUB_CABLE_DROP_HOVER_RING };
+      }
       return {
         ring: '#2563eb',
         plus: '#2563eb',
@@ -3066,9 +3784,20 @@
     var toolClass = S?.pen?.lineMode === 'cable'
       ? ' qfield-crosshair--cable-tool'
       : ' qfield-crosshair--excav-tool';
+    var cuePhase = getCableInteractiveCursorPhase();
+    var cueClass = '';
+    if (cuePhase === 'main-confirm') cueClass = ' qfield-crosshair--cabinet-confirm';
+    else if (cuePhase === 'main-closure-confirm' || cuePhase === 'sub-confirm' ||
+             cuePhase === 'sub-drop-confirm') {
+      cueClass = ' qfield-crosshair--closure-confirm';
+    } else if (cuePhase === 'main-cabinet-hover') cueClass = ' qfield-crosshair--cabinet-hover';
+    else if (cuePhase === 'main-closure-hover') cueClass = ' qfield-crosshair--closure-hover';
+    else if (cuePhase === 'sub-closure-hover') cueClass = ' qfield-crosshair--sub-closure-hover';
+    else if (cuePhase === 'sub-drop-hover') cueClass = ' qfield-crosshair--sub-drop-hover';
     g.setAttribute('class', 'qfield-crosshair qfield-crosshair--pen-target' + toolClass +
       (vertexLocked ? ' qfield-crosshair--vertex-locked' : '') +
-      (clickPulse ? ' qfield-crosshair--click-pulse' : ''));
+      (clickPulse ? ' qfield-crosshair--click-pulse' : '') +
+      cueClass);
     if (clickPulse) {
       g.style.transformOrigin = x + 'px ' + y + 'px';
     } else {
@@ -3123,17 +3852,42 @@
 
   function renderCrosshair(svg) {
     if (!svg) return;
-    var ch = sim()?.crosshair;
+    var S = sim();
+    var ch = S?.crosshair;
+    var cuePhase = getCableInteractiveCursorPhase();
+    var holdConfirmRing = (
+      cuePhase === 'main-confirm' || cuePhase === 'main-closure-confirm' ||
+      cuePhase === 'sub-confirm' || cuePhase === 'sub-drop-confirm'
+    ) && !!S?.mainCableConfirmOrigin;
     if (!ch?.visible || !shouldShowCrosshair()) {
+      /* Keep green confirm ring visible briefly even if crosshair was cleared mid-timer */
+      if (!holdConfirmRing) {
+        hideSvgEl(svg, 'qfield-crosshair');
+        return;
+      }
+      ch = {
+        visible: true,
+        snapped: true,
+        snapX: S.mainCableConfirmOrigin.x,
+        snapY: S.mainCableConfirmOrigin.y,
+        x: S.mainCableConfirmOrigin.x,
+        y: S.mainCableConfirmOrigin.y,
+      };
+    }
+    if (S?.pen?.lineMode === 'cable' && b()?.canPenDraw?.() && !ch.snapped && !holdConfirmRing) {
       hideSvgEl(svg, 'qfield-crosshair');
       return;
     }
-    if (sim()?.pen?.lineMode === 'cable' && b()?.canPenDraw?.() && !ch.snapped) {
-      hideSvgEl(svg, 'qfield-crosshair');
-      return;
-    }
-    var x = snapPixel(ch.snapped ? ch.snapX : ch.x);
-    var y = snapPixel(ch.snapped ? ch.snapY : ch.y);
+    var x = snapPixel(
+      (holdConfirmRing)
+        ? S.mainCableConfirmOrigin.x
+        : (ch.snapped ? ch.snapX : ch.x)
+    );
+    var y = snapPixel(
+      (holdConfirmRing)
+        ? S.mainCableConfirmOrigin.y
+        : (ch.snapped ? ch.snapY : ch.y)
+    );
     var g = svg.querySelector('#qfield-crosshair');
     if (!g) {
       g = document.createElementNS(SVG_NS, 'g');

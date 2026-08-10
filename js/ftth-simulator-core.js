@@ -787,6 +787,38 @@
   var ACTIVE_PATH_IDLE_LABEL = 'Active Path · ...';
 
   function getActivePathStatusLabel() {
+    /* Phase 1: keep Main Cable cabinet registration visible in Active Path slot */
+    if (Sim.mainCableStartConfirmUntil && Date.now() < Sim.mainCableStartConfirmUntil &&
+        Sim.mainCableStartConfirmMsg) {
+      return String(Sim.mainCableStartConfirmMsg);
+    }
+    /* Phase 3: Sub-Cable start confirmation */
+    if (Sim.subCableStartConfirmUntil && Date.now() < Sim.subCableStartConfirmUntil &&
+        Sim.subCableStartConfirmMsg) {
+      return String(Sim.subCableStartConfirmMsg);
+    }
+    /* Phase 3: progressive Sub-Cable → FH/pole sequence */
+    var subTrail = (Sim.penDraft && Sim.penDraft.subCableTrail) || Sim.subCableTrail;
+    if (subTrail && subTrail.closureLabel) {
+      if (Sim.subCableTrailStatusMsg) return String(Sim.subCableTrailStatusMsg);
+      var subRole = subTrail.cableRoleLabel || 'S-CABLE';
+      var subParts = [String(subTrail.closureLabel) + ' ' + subRole];
+      (subTrail.drops || []).forEach(function (d) {
+        if (d && d.label) subParts.push(String(d.label));
+      });
+      return 'Active Path · ' + subParts.join(' ---> ');
+    }
+    /* Phase 2: progressive Main Cable → closure sequence while drawing */
+    var trail = (Sim.penDraft && Sim.penDraft.mainCableTrail) || Sim.mainCableTrail;
+    if (trail && trail.cabinetLabel) {
+      if (Sim.mainCableTrailStatusMsg) return String(Sim.mainCableTrailStatusMsg);
+      var role = trail.cableRoleLabel || 'M-CABLE';
+      var parts = [String(trail.cabinetLabel) + ' ' + role];
+      (trail.closures || []).forEach(function (c) {
+        if (c && c.label) parts.push(String(c.label));
+      });
+      return 'Active Path · ' + parts.join(' ---> ');
+    }
     var draft = Sim.penDraft;
     if (draft && draft.points && draft.points.length > 0) {
       if (draft.lineMode === 'cable') {
@@ -1324,6 +1356,39 @@
       pointSnapNodeIds: pointSnapNodeIds.slice(),
       snapLabels: snapLabels.slice(),
     };
+    /* Phase 2–3: optional Main/Sub Cable visual sequences — metadata only */
+    if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
+      cableRef.mainCableTrail = {
+        cabinetId: meta.mainCableTrail.cabinetId || null,
+        cabinetLabel: meta.mainCableTrail.cabinetLabel || '',
+        cableRoleLabel: meta.mainCableTrail.cableRoleLabel || 'M-CABLE',
+        cableName: meta.mainCableTrail.cableName || toolboxLabel,
+        closures: Array.isArray(meta.mainCableTrail.closures)
+          ? meta.mainCableTrail.closures.map(function (c) {
+            return { id: c && c.id, label: c && c.label };
+          })
+          : [],
+        nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
+          ? meta.mainCableTrail.nodeIds.slice()
+          : [],
+      };
+    }
+    if (meta.subCableTrail && typeof meta.subCableTrail === 'object') {
+      cableRef.subCableTrail = {
+        closureId: meta.subCableTrail.closureId || null,
+        closureLabel: meta.subCableTrail.closureLabel || '',
+        cableRoleLabel: meta.subCableTrail.cableRoleLabel || 'S-CABLE',
+        cableName: meta.subCableTrail.cableName || toolboxLabel,
+        drops: Array.isArray(meta.subCableTrail.drops)
+          ? meta.subCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : [],
+        nodeIds: Array.isArray(meta.subCableTrail.nodeIds)
+          ? meta.subCableTrail.nodeIds.slice()
+          : [],
+      };
+    }
 
     Sim.fiberCablePaths.push(cableRef);
     finalizeSavedCableTopology(cableRef);
@@ -1343,7 +1408,20 @@
     if (DEBUG) {
       console.log('[saveCableToDatabase] saved cable:', cableId, pointsToSave.length, 'vertices');
     }
-    notifyFiberDesignTopologyChanged();
+    /* Phase 4: interactive trails → matrix immediately; otherwise debounced topology refresh */
+    if (cableRef.mainCableTrail || cableRef.subCableTrail) {
+      notifyFiberDesignTopologyChanged({
+        immediate: true,
+        interactive: true,
+        path: {
+          cableId: cableId,
+          mainCableTrail: cableRef.mainCableTrail || null,
+          subCableTrail: cableRef.subCableTrail || null,
+        },
+      });
+    } else {
+      notifyFiberDesignTopologyChanged();
+    }
 
     return { type: 'fiber', id: cableId, cable: cableRef };
   }
@@ -1466,6 +1544,39 @@
     };
     cable.userDrawn = true;
     cable.mergedToTrench = false;
+    /* Phase 2–3: merge visual Main/Sub Cable trail metadata when continuing a draw */
+    if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
+      cable.mainCableTrail = {
+        cabinetId: meta.mainCableTrail.cabinetId || (cable.mainCableTrail && cable.mainCableTrail.cabinetId) || null,
+        cabinetLabel: meta.mainCableTrail.cabinetLabel || (cable.mainCableTrail && cable.mainCableTrail.cabinetLabel) || '',
+        cableRoleLabel: meta.mainCableTrail.cableRoleLabel || 'M-CABLE',
+        cableName: meta.mainCableTrail.cableName || cable.name || cable.asBuiltId || '',
+        closures: Array.isArray(meta.mainCableTrail.closures)
+          ? meta.mainCableTrail.closures.map(function (c) {
+            return { id: c && c.id, label: c && c.label };
+          })
+          : ((cable.mainCableTrail && cable.mainCableTrail.closures) || []).slice(),
+        nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
+          ? meta.mainCableTrail.nodeIds.slice()
+          : ((cable.mainCableTrail && cable.mainCableTrail.nodeIds) || []).slice(),
+      };
+    }
+    if (meta.subCableTrail && typeof meta.subCableTrail === 'object') {
+      cable.subCableTrail = {
+        closureId: meta.subCableTrail.closureId || (cable.subCableTrail && cable.subCableTrail.closureId) || null,
+        closureLabel: meta.subCableTrail.closureLabel || (cable.subCableTrail && cable.subCableTrail.closureLabel) || '',
+        cableRoleLabel: meta.subCableTrail.cableRoleLabel || 'S-CABLE',
+        cableName: meta.subCableTrail.cableName || cable.name || cable.asBuiltId || '',
+        drops: Array.isArray(meta.subCableTrail.drops)
+          ? meta.subCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : ((cable.subCableTrail && cable.subCableTrail.drops) || []).slice(),
+        nodeIds: Array.isArray(meta.subCableTrail.nodeIds)
+          ? meta.subCableTrail.nodeIds.slice()
+          : ((cable.subCableTrail && cable.subCableTrail.nodeIds) || []).slice(),
+      };
+    }
 
     finalizeSavedCableTopology(cable);
     snapCableEndpointsToHandholeCenters(cable);
@@ -1482,7 +1593,19 @@
     if (DEBUG) {
       console.log('[extendCableInDatabase] extended cable:', cable.id, cable.points.length, 'vertices');
     }
-    notifyFiberDesignTopologyChanged();
+    if (cable.mainCableTrail || cable.subCableTrail) {
+      notifyFiberDesignTopologyChanged({
+        immediate: true,
+        interactive: true,
+        path: {
+          cableId: cable.id,
+          mainCableTrail: cable.mainCableTrail || null,
+          subCableTrail: cable.subCableTrail || null,
+        },
+      });
+    } else {
+      notifyFiberDesignTopologyChanged();
+    }
 
     return { type: 'fiber', id: cable.id, cable: cable };
   }
@@ -5365,10 +5488,16 @@
     var wrap = document.getElementById('canvas-wrapper');
     var canvas = getDrawingCanvas();
     if (!wrap) return;
+    var cablePenActive = !!(isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable');
     wrap.classList.toggle('pen-tool-active', isPenToolSelected());
     wrap.classList.toggle('pen-tool-ready', isPenToolActive());
-    wrap.classList.toggle('pen-cable-mode', !!(isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable'));
+    wrap.classList.toggle('pen-cable-mode', cablePenActive);
     wrap.classList.toggle('pen-drawing-active', !!(isPenToolActive() && Sim.penDraft && Sim.penDraft.points.length));
+    /* Phase 3: hide labels only while a cable stroke is in progress; restore on commit */
+    wrap.classList.toggle(
+      'cable-pen-labels-hidden',
+      !!(cablePenActive && hasActiveDrawingStroke())
+    );
     if (canvas) {
       canvas.classList.toggle('pen-tool-active', isPenToolSelected());
       canvas.classList.toggle('pen-tool-ready', isPenToolActive());
@@ -9909,9 +10038,15 @@
     }
   }
 
-  function notifyFiberDesignTopologyChanged() {
-    if (global.FTTHFiberDesignManager && global.FTTHFiberDesignManager.notifyTopologyChanged) {
-      global.FTTHFiberDesignManager.notifyTopologyChanged();
+  function notifyFiberDesignTopologyChanged(opts) {
+    opts = opts || {};
+    if (global.FTTHFiberDesignManager) {
+      if (opts.immediate && opts.interactive &&
+          typeof global.FTTHFiberDesignManager.notifyInteractivePathCommitted === 'function') {
+        global.FTTHFiberDesignManager.notifyInteractivePathCommitted(opts.path || null);
+      } else if (typeof global.FTTHFiberDesignManager.notifyTopologyChanged === 'function') {
+        global.FTTHFiberDesignManager.notifyTopologyChanged(opts);
+      }
     }
     syncSplicingToolbarState();
   }

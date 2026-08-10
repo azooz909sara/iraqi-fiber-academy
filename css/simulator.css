@@ -8118,6 +8118,80 @@ body.ftth-low-zoom-performance .map-label {
   stroke: #2563eb;
 }
 
+/* Phase 1 — Main Cable start cue at Cabinet/FDT (hover red → confirm green) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-hover circle {
+  stroke: #dc2626 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-hover .qfield-crosshair__plus line {
+  stroke: #dc2626 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-confirm circle {
+  stroke: #16a34a !important;
+  stroke-width: 2.2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-confirm .qfield-crosshair__plus line {
+  stroke: #16a34a !important;
+}
+
+/* Phase 2 — Main Cable closure checkpoint (hover yellow → confirm green) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-hover circle {
+  stroke: #eab308 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-hover .qfield-crosshair__plus line {
+  stroke: #eab308 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-confirm circle {
+  stroke: #16a34a !important;
+  stroke-width: 2.2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-confirm .qfield-crosshair__plus line {
+  stroke: #16a34a !important;
+}
+
+/* Phase 3 — Sub-Cable start (sky) / drop targets (deep sky) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-closure-hover circle {
+  stroke: #38bdf8 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-closure-hover .qfield-crosshair__plus line {
+  stroke: #38bdf8 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-drop-hover circle {
+  stroke: #0284c7 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-drop-hover .qfield-crosshair__plus line {
+  stroke: #0284c7 !important;
+}
+
+/* Phase 3 — hide map labels while cable pen is active; restore on complete */
+#canvas-wrapper.cable-pen-labels-hidden .field-node-label,
+#canvas-wrapper.cable-pen-labels-hidden .pole-label,
+#canvas-wrapper.cable-pen-labels-hidden #global-map-labels-layer,
+#canvas-wrapper.cable-pen-labels-hidden .global-map-labels-layer,
+#canvas-wrapper.cable-pen-labels-hidden .map-label {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .qfield-crosshair--pen-target.qfield-crosshair--excav-tool circle {
   stroke: #78716c;
 }

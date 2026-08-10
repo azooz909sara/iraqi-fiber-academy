@@ -46,6 +46,7 @@
     { key: 's_fiber_color', label: 'FAT Cable (Fiber color)', colorCell: true },
     { key: 'fiber_type', label: 'Fiber Type' },
     { key: 'fat_id', label: 'FAT ID' },
+    { key: 'design_path', label: 'Design Path' },
   ];
 
   var RING_MATRIX_COLUMNS = [
@@ -67,6 +68,7 @@
     's_cable_id',
     's_tube_color',
     'fat_id',
+    'design_path',
   ];
 
   /* ring_block_id isolates Main vs Backup so shared cells span only within each 12-row unit */
@@ -710,7 +712,17 @@
         closure: activeClosureFilter,
       })
       : [];
-    return sortRowsByMode(rows);
+    rows = sortRowsByMode(rows);
+    /*
+     * Full-matrix view: re-number PLC in display order so the sequence stays
+     * continuous across main-cable transitions after UI sort. Filtered views
+     * keep engine-assigned global numbers (do not restart at PLC 01).
+     */
+    if (activeCabinetFilter === 'all' && activeClosureFilter === 'all' &&
+        mgr && typeof mgr.applyPlcSplitterMapping === 'function') {
+      rows = mgr.applyPlcSplitterMapping(rows);
+    }
+    return rows;
   }
 
   function renderMatrixTabs() {
@@ -1069,6 +1081,10 @@
     bindMatrixFilter(body);
     if (payload && payload.reason === 'path-merged' && payload.merge) {
       matrixEl.setAttribute('data-last-merge-cable', String(payload.merge.cableId || ''));
+    }
+    if (payload && payload.reason === 'interactive-trail') {
+      matrixEl.setAttribute('data-last-path-source', 'interactive-trail');
+      matrixEl.setAttribute('data-design-version', String(payload.version || ''));
     }
   }
 
