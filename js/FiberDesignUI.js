@@ -406,9 +406,40 @@
 
   /* ═══════════════ Floating Matrix Viewer ═══════════════ */
 
+  function isBlankMatrixValue(val) {
+    if (val == null) return true;
+    var s = String(val).trim();
+    if (!s) return true;
+    if (s === '—' || s === '–' || s === '-') return true;
+    var lower = s.toLowerCase();
+    return lower === 'null' || lower === 'undefined' || lower === 'n/a';
+  }
+
+  /** Direct Cabinet→Pole rows (no HH-Closure / S-Cable) — always sort to matrix bottom. */
+  function isDirectNoClosureRow(row) {
+    if (!row) return false;
+    if (row.direct_cabinet_pole) return true;
+    if (String(row.path_source || '') === 'interactive_trail_direct') return true;
+    return false;
+  }
+
+  function compareDirectRowsLast(a, b) {
+    var ad = isDirectNoClosureRow(a) ? 1 : 0;
+    var bd = isDirectNoClosureRow(b) ? 1 : 0;
+    return ad - bd;
+  }
+
   function fiberColorStyle(colorName, striped) {
+    if (isBlankMatrixValue(colorName)) {
+      /* Empty sub-cable / unused color cells: no tint — match plain dark empty cells */
+      return '';
+    }
     var key = String(colorName || '').trim().toLowerCase();
-    var bg = FIBER_COLOR_CSS[key] || '#334155';
+    var bg = FIBER_COLOR_CSS[key];
+    if (!bg) {
+      /* Unknown non-blank token still blank-styled rather than slate fill */
+      return '';
+    }
     var fg = (key === 'white' || key === 'yellow') ? '#0f172a' : '#f8fafc';
     var style = 'background-color:' + bg + ';color:' + fg + ';';
     if (striped) {
@@ -533,8 +564,9 @@
       body = annotated.map(function (row) {
         var cells = columns.map(function (col) {
           if (row['_skip_' + col.key]) return '';
-          var val = row[col.key] != null ? String(row[col.key]) : '—';
-          if (col.key === 'fat_id') {
+          var rawVal = row[col.key];
+          var val = !isBlankMatrixValue(rawVal) ? String(rawVal) : '';
+          if (col.key === 'fat_id' && val) {
             var num = val.match(/(\d+)/);
             val = num ? num[1] : val;
           }
@@ -542,17 +574,37 @@
           var cls = 'fd-matrix-cell';
           var style = '';
           if (col.colorCell) {
-            cls += ' fd-matrix-cell--color';
-            style = fiberColorStyle(val);
+            if (isBlankMatrixValue(rawVal)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color';
+              style = fiberColorStyle(val);
+            }
           }
           if (col.tubeCell) {
-            cls += ' fd-matrix-cell--color fd-matrix-cell--tube';
-            if (row.tube_striped) cls += ' fd-matrix-cell--striped';
-            style = fiberColorStyle(row.tube_color || val, !!row.tube_striped);
+            var tubeSrc = row.tube_color || rawVal;
+            if (isBlankMatrixValue(tubeSrc)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color fd-matrix-cell--tube';
+              if (row.tube_striped) cls += ' fd-matrix-cell--striped';
+              style = fiberColorStyle(tubeSrc, !!row.tube_striped);
+            }
           }
           if (col.fiberCell) {
-            cls += ' fd-matrix-cell--color fd-matrix-cell--fiber';
-            style = fiberColorStyle(row.fiber_color || val);
+            var fiberSrc = row.fiber_color || rawVal;
+            if (isBlankMatrixValue(fiberSrc)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color fd-matrix-cell--fiber';
+              style = fiberColorStyle(fiberSrc);
+            }
           }
           if (col.key === 'fiber_type') {
             cls += ' fd-matrix-cell--type-' + escapeAttr(val.toLowerCase());
@@ -784,6 +836,7 @@
       '.fd-matrix-table tbody tr{page-break-inside:avoid;}',
       '.fd-matrix-table tbody tr:nth-child(even) td{background:#f8fafc;}',
       '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;}',
+      '.fd-matrix-cell--empty-color{background:transparent!important;color:inherit;font-weight:400;text-transform:none;}',
       '.fd-matrix-cell--type-main{font-weight:700;color:#166534;}',
       '.fd-matrix-cell--type-expansion{font-weight:700;color:#1d4ed8;}',
       '.fd-matrix-empty,.fd-matrix-error{padding:12px;border:1px dashed #94a3b8;color:#475569;text-align:center;}',
@@ -885,10 +938,12 @@
   function sortRowsByMode(rows) {
     if (!rows || !rows.length) return rows;
     var sorted = rows.slice();
-    
+
     if (activeSortMode === 'insertion') {
       // Sort by closure_order (insertion order)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         if (a.closure_order !== b.closure_order) {
           return (a.closure_order || 0) - (b.closure_order || 0);
         }
@@ -904,6 +959,8 @@
     } else if (activeSortMode === 'chronological') {
       // Sort by closure_id (chronological/path order)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         if (a.cabinet_label !== b.cabinet_label) {
           return String(a.cabinet_label || '').localeCompare(String(b.cabinet_label || ''), undefined, { numeric: true });
         }
@@ -918,6 +975,8 @@
     } else if (activeSortMode === 'cindex') {
       // Sort by C-index (extract numeric suffix from closure_id)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         function extractCIndex(closureId) {
           var m = String(closureId || '').match(/C(\d+)/i);
           return m ? parseInt(m[1], 10) : 0;
@@ -934,6 +993,8 @@
         }
         return 0;
       });
+    } else {
+      sorted.sort(compareDirectRowsLast);
     }
     return sorted;
   }
@@ -1652,6 +1713,8 @@
       'overflow:hidden;text-overflow:ellipsis;}',
       '.fd-matrix-table tbody tr:nth-child(even) td{background:rgba(15,23,42,0.35);}',
       '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;text-shadow:0 1px 1px rgba(0,0,0,0.35);}',
+      '.fd-matrix-cell--empty-color{background:transparent!important;background-image:none!important;',
+      'color:inherit;font-weight:400;text-transform:none;text-shadow:none;}',
       '.fd-matrix-cell--tube{white-space:nowrap;}',
       '.fd-matrix-cell--type-main{font-weight:700;color:#4ade80;}',
       '.fd-matrix-cell--type-expansion{font-weight:700;color:#60a5fa;}',

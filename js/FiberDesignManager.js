@@ -2422,7 +2422,7 @@
         main_path_label: '',
         sub_path_label: '',
         design_path: '',
-        closure_order: 0,
+        closure_order: 999999,
         direct_cabinet_pole: true,
       };
 
@@ -2486,50 +2486,6 @@
     });
 
     var allocated = 0;
-
-    /* Direct Cabinet→Pole mains: closures empty, drops present */
-    mainPacks.forEach(function (pack) {
-      var trail = pack.trail;
-      var drops = trail.drops || [];
-      if ((trail.closures || []).length || !drops.length) return;
-
-      var mainCable = pack.mapCable;
-      if (!mainCable || !isMainCableFromCabinet(mainCable)) return;
-
-      var cabinetNode = findMapNodeById(trail.cabinetId);
-      if (!cabinetNode || !isCabinetNode(cabinetNode)) return;
-
-      var mainPtr = pack.mainPointer || getOrCreateMainPointer(mainCable);
-      pack.mainPointer = mainPtr;
-      currentCabinetCtx = cabinetNode;
-
-      var mainPathLabel = formatMainCableTrailPath(trail);
-      interactivePathCtx = {
-        source: 'interactive_trail_direct',
-        main_path_label: mainPathLabel,
-        sub_path_label: '',
-        design_path: mainPathLabel,
-        closure_order: 0,
-      };
-
-      var di;
-      for (di = 0; di < drops.length; di++) {
-        var fatNode = findMapNodeById(drops[di].id);
-        if (!fatNode || !isFatOrPoleNode(fatNode)) continue;
-        var before = matrixRows.length;
-        assignFatDirectFromCabinet(
-          cabinetNode,
-          mainCable,
-          fatNode,
-          mainPtr,
-          nodeDistance(cabinetNode, fatNode)
-        );
-        allocated += Math.max(0, matrixRows.length - before);
-      }
-
-      interactiveSkipSubCableIds[String(mainCable.id)] = true;
-      interactivePathCtx = null;
-    });
 
     subPacks.forEach(function (pack) {
       var subCable = findMapCableById(pack.cableId);
@@ -2614,6 +2570,50 @@
       }
 
       interactiveSkipSubCableIds[String(subCable.id)] = true;
+      interactivePathCtx = null;
+    });
+
+    /* Direct Cabinet→Pole: allocate after closure-based rows so they sit at bottom */
+    mainPacks.forEach(function (pack) {
+      var trail = pack.trail;
+      var drops = trail.drops || [];
+      if ((trail.closures || []).length || !drops.length) return;
+
+      var mainCable = pack.mapCable;
+      if (!mainCable || !isMainCableFromCabinet(mainCable)) return;
+
+      var cabinetNode = findMapNodeById(trail.cabinetId);
+      if (!cabinetNode || !isCabinetNode(cabinetNode)) return;
+
+      var mainPtr = pack.mainPointer || getOrCreateMainPointer(mainCable);
+      pack.mainPointer = mainPtr;
+      currentCabinetCtx = cabinetNode;
+
+      var mainPathLabel = formatMainCableTrailPath(trail);
+      interactivePathCtx = {
+        source: 'interactive_trail_direct',
+        main_path_label: mainPathLabel,
+        sub_path_label: '',
+        design_path: mainPathLabel,
+        closure_order: 999999,
+      };
+
+      var di;
+      for (di = 0; di < drops.length; di++) {
+        var fatNode = findMapNodeById(drops[di].id);
+        if (!fatNode || !isFatOrPoleNode(fatNode)) continue;
+        var before = matrixRows.length;
+        assignFatDirectFromCabinet(
+          cabinetNode,
+          mainCable,
+          fatNode,
+          mainPtr,
+          nodeDistance(cabinetNode, fatNode)
+        );
+        allocated += Math.max(0, matrixRows.length - before);
+      }
+
+      interactiveSkipSubCableIds[String(mainCable.id)] = true;
       interactivePathCtx = null;
     });
 
