@@ -775,56 +775,95 @@
       activeEl.setAttribute('aria-hidden', 'false');
       var restore = Sim.ui.pushHint || getActivePathStatusLabel() || ACTIVE_PATH_IDLE_LABEL;
       activeEl.textContent = restore;
+      activeEl.title = restore;
     } else if (wrap) {
       wrap.textContent = Sim.ui.pushHint || ACTIVE_PATH_IDLE_LABEL;
     }
     if (wrap) {
       wrap.classList.remove('gis-status-bar__push-hint--alarm');
-      wrap.title = 'Active Path';
+      var restoreTitle = (activeEl && activeEl.textContent) ||
+        Sim.ui.pushHint || ACTIVE_PATH_IDLE_LABEL;
+      wrap.title = restoreTitle;
+      setStatusBarInteractivePathMode(isInteractiveCablePathStatusActive());
     }
   }
 
   var ACTIVE_PATH_IDLE_LABEL = 'Active Path · ...';
+  var ACTIVE_PATH_PREFIX_RE = /^Active Path\s*·\s*/i;
+
+  function stripActivePathPrefix(msg) {
+    return String(msg == null ? '' : msg).replace(ACTIVE_PATH_PREFIX_RE, '');
+  }
+
+  /** True while Main/Sub interactive trail is driving the status slot (no idle prefix). */
+  function isInteractiveCablePathStatusActive() {
+    if (Sim.mainCableStartConfirmUntil && Date.now() < Sim.mainCableStartConfirmUntil) return true;
+    if (Sim.subCableStartConfirmUntil && Date.now() < Sim.subCableStartConfirmUntil) return true;
+    if (Sim.mainCableCheckpointConfirmUntil && Date.now() < Sim.mainCableCheckpointConfirmUntil) {
+      return true;
+    }
+    if (Sim.subCableDropConfirmUntil && Date.now() < Sim.subCableDropConfirmUntil) return true;
+    var draft = Sim.penDraft;
+    if (draft && draft.subCableTrail && draft.subCableTrail.closureLabel) return true;
+    if (draft && draft.mainCableTrail && draft.mainCableTrail.cabinetLabel) return true;
+    if (!draft && Sim.subCableTrail && Sim.subCableTrail.closureLabel) return true;
+    if (!draft && Sim.mainCableTrail && Sim.mainCableTrail.cabinetLabel) return true;
+    return false;
+  }
+
+  function formatInteractiveSubCablePathLabel(subTrail) {
+    if (!subTrail || !subTrail.closureLabel) return '';
+    var subCableDes = String(subTrail.cableName || '').trim();
+    var subHead = subCableDes
+      ? (String(subTrail.closureLabel) + ' ' + subCableDes + ' S-Cable')
+      : (String(subTrail.closureLabel) + ' S-Cable');
+    var subParts = [subHead];
+    (subTrail.drops || []).forEach(function (d) {
+      if (d && d.label) subParts.push(String(d.label));
+    });
+    return subParts.join(' --> ');
+  }
+
+  function formatInteractiveMainCablePathLabel(trail) {
+    if (!trail || !trail.cabinetLabel) return '';
+    var mainCableDes = String(trail.cableName || '').trim();
+    var mainHead = mainCableDes
+      ? (String(trail.cabinetLabel) + ' ' + mainCableDes + ' M-Cable')
+      : (String(trail.cabinetLabel) + ' M-Cable');
+    var parts = [mainHead];
+    (trail.closures || []).forEach(function (c) {
+      if (c && c.label) parts.push(String(c.label));
+    });
+    return parts.join(' --> ');
+  }
 
   function getActivePathStatusLabel() {
     /* Phase 1: keep Main Cable cabinet registration visible in Active Path slot */
     if (Sim.mainCableStartConfirmUntil && Date.now() < Sim.mainCableStartConfirmUntil &&
         Sim.mainCableStartConfirmMsg) {
-      return String(Sim.mainCableStartConfirmMsg);
+      return stripActivePathPrefix(Sim.mainCableStartConfirmMsg);
     }
     /* Phase 3: Sub-Cable start confirmation */
     if (Sim.subCableStartConfirmUntil && Date.now() < Sim.subCableStartConfirmUntil &&
         Sim.subCableStartConfirmMsg) {
-      return String(Sim.subCableStartConfirmMsg);
+      return stripActivePathPrefix(Sim.subCableStartConfirmMsg);
     }
-    /* Phase 3: progressive Sub-Cable → FH/pole sequence
-       Format: C3 12F3 S-Cable --> FH45 --> FH46 --> FH47 */
+    /* Phase 3: progressive Sub-Cable → FH/pole sequence (no "Active Path" prefix while drawing)
+       Format: C3 12F8 S-Cable --> FH45 --> FH46 --> FH47 */
     var subTrail = (Sim.penDraft && Sim.penDraft.subCableTrail) || Sim.subCableTrail;
     if (subTrail && subTrail.closureLabel) {
-      if (Sim.subCableTrailStatusMsg) return String(Sim.subCableTrailStatusMsg);
-      var subCableDes = String(subTrail.cableName || '').trim();
-      var subHead = subCableDes
-        ? (String(subTrail.closureLabel) + ' ' + subCableDes + ' S-Cable')
-        : (String(subTrail.closureLabel) + ' S-Cable');
-      var subParts = [subHead];
-      (subTrail.drops || []).forEach(function (d) {
-        if (d && d.label) subParts.push(String(d.label));
-      });
-      return 'Active Path · ' + subParts.join(' --> ');
+      if (Sim.subCableTrailStatusMsg) {
+        return stripActivePathPrefix(Sim.subCableTrailStatusMsg);
+      }
+      return formatInteractiveSubCablePathLabel(subTrail);
     }
     /* Phase 2: progressive Main Cable → closure sequence while drawing */
     var trail = (Sim.penDraft && Sim.penDraft.mainCableTrail) || Sim.mainCableTrail;
     if (trail && trail.cabinetLabel) {
-      if (Sim.mainCableTrailStatusMsg) return String(Sim.mainCableTrailStatusMsg);
-      var mainCableDes = String(trail.cableName || '').trim();
-      var mainHead = mainCableDes
-        ? (String(trail.cabinetLabel) + ' ' + mainCableDes + ' M-Cable')
-        : (String(trail.cabinetLabel) + ' M-Cable');
-      var parts = [mainHead];
-      (trail.closures || []).forEach(function (c) {
-        if (c && c.label) parts.push(String(c.label));
-      });
-      return 'Active Path · ' + parts.join(' --> ');
+      if (Sim.mainCableTrailStatusMsg) {
+        return stripActivePathPrefix(Sim.mainCableTrailStatusMsg);
+      }
+      return formatInteractiveMainCablePathLabel(trail);
     }
     var draft = Sim.penDraft;
     if (draft && draft.points && draft.points.length > 0) {
@@ -11065,10 +11104,50 @@
     syncGisStatusBarCoords(Sim.ui?.lastKnownCanvasCoords || Sim.ui?.lastCanvasPointer || null);
   }
 
-  function setPushHint(msg) {
+  function setStatusBarInteractivePathMode(enabled) {
+    var wrap = document.getElementById('status-bar-push-hint');
+    var group = wrap && wrap.closest
+      ? wrap.closest('.gis-status-bar__group--rotation')
+      : null;
+    if (wrap) {
+      if (enabled) wrap.classList.add('is-interactive-path');
+      else wrap.classList.remove('is-interactive-path');
+    }
+    if (group) {
+      if (enabled) group.classList.add('is-interactive-path');
+      else group.classList.remove('is-interactive-path');
+    }
+  }
+
+  /**
+   * Update Active Path / push-hint slot.
+   * @param {string|null|undefined} msg
+   * @param {{ interactivePath?: boolean }} [opts]
+   *   interactivePath:true → full trail layout, no idle "Active Path" prefix.
+   *   interactivePath:false → idle layout. Omit → infer from live trail/confirm state.
+   */
+  function setPushHint(msg, opts) {
     if (!Sim.ui) Sim.ui = {};
+    opts = opts || {};
     var next = (msg == null || msg === '') ? ACTIVE_PATH_IDLE_LABEL : String(msg);
+    var interactive = typeof opts.interactivePath === 'boolean'
+      ? opts.interactivePath
+      : isInteractiveCablePathStatusActive();
+
+    if (interactive) {
+      next = stripActivePathPrefix(next);
+      if (!next) next = ACTIVE_PATH_IDLE_LABEL;
+    } else {
+      /* Idle / batch selection: always show the original "Active Path · …" form. */
+      if (next !== ACTIVE_PATH_IDLE_LABEL && !ACTIVE_PATH_PREFIX_RE.test(next) &&
+          !/^(Main Cable|Sub-Cable|Checkpoint|Drop)\b/i.test(next)) {
+        next = 'Active Path · ' + next;
+      }
+      interactive = false;
+    }
+
     Sim.ui.pushHint = next;
+    setStatusBarInteractivePathMode(!!interactive && next !== ACTIVE_PATH_IDLE_LABEL);
     var activeEl = document.getElementById('status-bar-active-path');
     if (activeEl) {
       activeEl.textContent = next;

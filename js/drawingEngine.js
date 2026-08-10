@@ -1064,20 +1064,19 @@
   function syncActiveCableTrailStatusHint() {
     var S = sim();
     var draft = S?.penDraft;
+    /* During interactive draw: status shows ONLY the path string (no "Active Path" prefix). */
     if (isSubCableTrailActive(draft)) {
       var subLabel = formatSubCableTrailLabel((draft && draft.subCableTrail) || S.subCableTrail);
       if (!subLabel) return;
-      var subMsg = 'Active Path · ' + subLabel;
-      if (S) S.subCableTrailStatusMsg = subMsg;
-      b()?.setPushHint?.(subMsg);
+      if (S) S.subCableTrailStatusMsg = subLabel;
+      b()?.setPushHint?.(subLabel, { interactivePath: true });
       return;
     }
     if (isMainCableTrailActive(draft)) {
       var mainLabel = formatMainCableTrailLabel((draft && draft.mainCableTrail) || S.mainCableTrail);
       if (!mainLabel) return;
-      var mainMsg = 'Active Path · ' + mainLabel;
-      if (S) S.mainCableTrailStatusMsg = mainMsg;
-      b()?.setPushHint?.(mainMsg);
+      if (S) S.mainCableTrailStatusMsg = mainLabel;
+      b()?.setPushHint?.(mainLabel, { interactivePath: true });
     }
   }
 
@@ -1250,6 +1249,10 @@
       S.crosshair.subDropHover = false;
       S.crosshair.closureHover = false;
     }
+    /* Idle: restore default "Active Path · …" / batch label behavior */
+    b()?.setPushHint?.(b()?.getActivePathStatusLabel?.() || 'Active Path · ...', {
+      interactivePath: false,
+    });
   }
 
   function clearMainCableVisualSession() {
@@ -1304,7 +1307,7 @@
     S.mainCableStartConfirmCabinet = cabinetName;
     pinInteractiveConfirmOrigin(cabinet, resolved);
 
-    b()?.setPushHint?.(msg);
+    b()?.setPushHint?.(msg, { interactivePath: true });
     b()?.updateStatus?.(msg);
 
     if (mainCableConfirmTimer) clearTimeout(mainCableConfirmTimer);
@@ -1357,10 +1360,10 @@
     S.mainCableCheckpointConfirmUntil = Date.now() + MAIN_CABLE_CHECKPOINT_CONFIRM_MS;
     S.mainCableCheckpointConfirmMsg = 'Checkpoint ' + label + ' linked';
 
-    var pathMsg = 'Active Path · ' + formatMainCableTrailLabel(trail);
+    var pathMsg = formatMainCableTrailLabel(trail);
     S.mainCableTrailStatusMsg = pathMsg;
-    b()?.setPushHint?.(pathMsg);
-    b()?.updateStatus?.('Closure ' + label + ' linked · ' + formatMainCableTrailLabel(trail));
+    b()?.setPushHint?.(pathMsg, { interactivePath: true });
+    b()?.updateStatus?.('Closure ' + label + ' linked · ' + pathMsg);
 
     if (mainCableCheckpointTimer) clearTimeout(mainCableCheckpointTimer);
     mainCableCheckpointTimer = setTimeout(function () {
@@ -1404,7 +1407,7 @@
     S.subCableStartConfirmMsg = msg;
     pinInteractiveConfirmOrigin(closure, resolved);
 
-    b()?.setPushHint?.(msg);
+    b()?.setPushHint?.(msg, { interactivePath: true });
     b()?.updateStatus?.(msg);
 
     if (subCableStartConfirmTimer) clearTimeout(subCableStartConfirmTimer);

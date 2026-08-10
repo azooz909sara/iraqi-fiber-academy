@@ -5045,6 +5045,12 @@ canvas {
   gap: 0.4rem;
 }
 
+.gis-status-bar__group--rotation.is-interactive-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .gis-status-bar__group--rotation .gis-status-bar__sep--hint {
   margin-left: 0.1rem;
   margin-right: 0.05rem;
@@ -5056,6 +5062,20 @@ canvas {
   justify-content: flex-start;
   text-align: left;
   margin: 0;
+}
+
+/* Interactive Main/Sub cable path: expand so full FH/pole chain is visible */
+.gis-status-bar__group--rotation .gis-status-bar__push-hint.is-interactive-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+}
+
+.gis-status-bar__group--rotation .gis-status-bar__push-hint.is-interactive-path .gis-status-bar__active-path {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gis-status-bar__label {
