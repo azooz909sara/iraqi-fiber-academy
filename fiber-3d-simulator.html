@@ -11,35 +11,7 @@
 </head>
 <body class="f3d-page">
 
-  <div id="subscriber-gate" class="subscriber-gate subscriber-gate--visible" role="dialog" aria-modal="true" aria-labelledby="subscriber-gate-title" aria-hidden="false">
-    <div class="subscriber-gate__backdrop" aria-hidden="true"></div>
-    <div class="subscriber-gate__card" dir="rtl">
-      <img class="subscriber-gate__logo" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="56" height="56" />
-      <h2 id="subscriber-gate-title" class="subscriber-gate__title">الوصول للمشتركين فقط</h2>
-      <p class="subscriber-gate__message">عذراً، محاكي التشريح ثلاثي الأبعاد متاح فقط للمشتركين الفعّالين في الأكاديمية.</p>
-      <p class="subscriber-gate__status" data-subscriber-gate-status>جاري التحقق من حالة الاشتراك…</p>
-      <div class="subscriber-gate__actions">
-        <button type="button" class="subscriber-gate__btn subscriber-gate__btn--primary" data-subscriber-login>تسجيل الدخول / تفعيل الاشتراك</button>
-        <a href="index.html" class="subscriber-gate__btn subscriber-gate__btn--ghost" data-subscriber-home>العودة للرئيسية</a>
-      </div>
-    </div>
-  </div>
-  <script>
-    (function () {
-      try {
-        if (window.IFA_ENV && typeof window.IFA_ENV.shouldBypassAccessControl === 'function' &&
-            window.IFA_ENV.shouldBypassAccessControl()) {
-          var gate = document.getElementById('subscriber-gate');
-          if (!gate) return;
-          gate.hidden = true;
-          gate.setAttribute('aria-hidden', 'true');
-          gate.classList.remove('subscriber-gate--visible');
-          document.body.classList.remove('subscriber-gate-active');
-        }
-      } catch (err) { /* ignore */ }
-    })();
-  </script>
-
+  <!-- Open access: no subscriber gate — workspace loads for all visitors -->
   <div class="f3d-app" id="f3d-app">
     <header class="f3d-header">
       <a class="f3d-brand" href="index.html" title="Iraqi Fiber Academy">
@@ -131,10 +103,8 @@
     </footer>
   </div>
 
-  <script src="js/env-access.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="js/fiber-3d-simulator.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
-  <script type="module" src="js/simulator-access.js"></script>
 </body>
 </html>
