@@ -1192,6 +1192,10 @@
   function findServingCabinet(node) {
     if (!node) return null;
     if (isCabinetNode(node)) return node;
+    if (node.ownerFdtId) {
+      var owned = findMapNodeById(node.ownerFdtId);
+      if (owned && isCabinetNode(owned)) return owned;
+    }
     if (deps && deps.findServingFdt) return deps.findServingFdt(node);
     return null;
   }
@@ -1281,15 +1285,20 @@
       getCableLabel(mainCable) || mainCable.name || mainCable.asBuiltId || ''
     ).trim();
     var batch = label.match(/(\d+\s*F\s*\d+)/i);
-    if (batch) return batch[1].replace(/\s+/g, '').toUpperCase();
-    if (label) return label.toUpperCase();
-    if (mainCable.map_cable_id != null && String(mainCable.map_cable_id)) {
-      return 'MAP:' + String(mainCable.map_cable_id).toUpperCase();
+    var base = '';
+    if (batch) base = batch[1].replace(/\s+/g, '').toUpperCase();
+    else if (label) base = label.toUpperCase();
+    else if (mainCable.map_cable_id != null && String(mainCable.map_cable_id)) {
+      base = 'MAP:' + String(mainCable.map_cable_id).toUpperCase();
+    } else if (mainCable.id != null && String(mainCable.id)) {
+      base = 'ID:' + String(mainCable.id).toUpperCase();
     }
-    if (mainCable.id != null && String(mainCable.id)) {
-      return 'ID:' + String(mainCable.id).toUpperCase();
-    }
-    return '';
+    if (!base) return '';
+    /* Isolate PLC / fiber pointers per owning FDT so FDT domains never share counters */
+    var cab = mainCable.ownerFdtId ||
+      (mainCable.mainCableTrail && mainCable.mainCableTrail.cabinetId) ||
+      '';
+    return cab ? (String(cab) + '::' + base) : base;
   }
 
   /**

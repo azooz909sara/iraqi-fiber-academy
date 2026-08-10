@@ -59,6 +59,8 @@
       pole: 0,
       cableByCapacity: {},
     },
+    /* Per-cabinet (FDT) naming domains — keyed by FDT node id */
+    countersByCabinet: {},
     excavationPaths: [],
     excavationPathId: 0,
     fiberCablePaths: [],
@@ -105,6 +107,8 @@
       topologyTreeFocus: null,
       pathHighlightFromSidebar: false,
       sidebarEditMode: false,
+      /** Active Cabinet/FDT node id — scopes naming, badges, and matrix */
+      activeFdtId: null,
       toolboxWidth: 250,
       evalPanelWidth: 256,
       sidePanelResizeBound: false,
@@ -236,6 +240,17 @@
     global.FTTHSimulatorSettings.saveSettings();
   }
 
+  function emptyCabinetCounters() {
+    return {
+      handhole: 0,
+      closure: 0,
+      fatHandhole: 0,
+      fatSystem: 0,
+      pole: 0,
+      cableByCapacity: {},
+    };
+  }
+
   function resetNameCounters() {
     Sim.counters.handhole = 0;
     Sim.counters.closure = 0;
@@ -244,6 +259,389 @@
     Sim.counters.fatSystem = 0;
     Sim.counters.pole = 0;
     Sim.counters.cableByCapacity = {};
+    Sim.countersByCabinet = {};
+  }
+
+  function getActiveFdtId() {
+    return Sim.ui && Sim.ui.activeFdtId ? String(Sim.ui.activeFdtId) : null;
+  }
+
+  function getActiveFdtNode() {
+    var id = getActiveFdtId();
+    return id ? findNode(id) : null;
+  }
+
+  function getActiveFdtLabel() {
+    var n = getActiveFdtNode();
+    if (!n) return '';
+    return getFdtCabinetCode(n) || n.autoName || ('FDT');
+  }
+
+  function getActiveFdtNumber() {
+    var label = getActiveFdtLabel();
+    var m = String(label || '').match(/(\d+)\s*$/);
+    return m ? m[1] : '';
+  }
+
+  function ensureCabinetCounterBucket(cabinetId) {
+    if (!cabinetId) return emptyCabinetCounters();
+    var key = String(cabinetId);
+    if (!Sim.countersByCabinet) Sim.countersByCabinet = {};
+    if (!Sim.countersByCabinet[key]) {
+      Sim.countersByCabinet[key] = emptyCabinetCounters();
+    } else if (!Sim.countersByCabinet[key].cableByCapacity) {
+      Sim.countersByCabinet[key].cableByCapacity = {};
+    }
+    return Sim.countersByCabinet[key];
+  }
+
+  function mirrorActiveCabinetCountersToSim() {
+    var cabId = getActiveFdtId();
+    if (!cabId) return;
+    var bucket = ensureCabinetCounterBucket(cabId);
+    Sim.counters.handhole = bucket.handhole || 0;
+    Sim.counters.closure = bucket.closure || 0;
+    Sim.counters.fatHandhole = bucket.fatHandhole || 0;
+    Sim.counters.fatSystem = bucket.fatSystem || 0;
+    Sim.counters.pole = bucket.pole || 0;
+    Sim.counters.cableByCapacity = JSON.parse(JSON.stringify(bucket.cableByCapacity || {}));
+  }
+
+  function nodeBelongsToCabinet(node, cabinetId) {
+    if (!cabinetId) return true;
+    if (!node) return false;
+    if (node.type === 'fdt') return String(node.id) === String(cabinetId);
+    if (node.type === 'olt') return false;
+    return String(node.ownerFdtId || '') === String(cabinetId);
+  }
+
+  function resolveCableOwnerFdtId(cable) {
+    if (!cable) return null;
+    if (cable.ownerFdtId && findNode(cable.ownerFdtId)) return String(cable.ownerFdtId);
+    if (cable.mainCableTrail && cable.mainCableTrail.cabinetId) {
+      return String(cable.mainCableTrail.cabinetId);
+    }
+    if (cable.subCableTrail && cable.subCableTrail.closureId) {
+      var clo = findNode(cable.subCableTrail.closureId);
+      if (clo && clo.ownerFdtId) return String(clo.ownerFdtId);
+      var viaClo = findServingFdt(clo);
+      if (viaClo) return String(viaClo.id);
+    }
+    var ends = getCableEndpointNodes(cable.pointSnapNodeIds || []);
+    var fdt = (ends.start && ends.start.type === 'fdt') ? ends.start
+      : (ends.end && ends.end.type === 'fdt') ? ends.end
+      : findServingFdt(ends.start) || findServingFdt(ends.end);
+    return fdt ? String(fdt.id) : getActiveFdtId();
+  }
+
+  function cableBelongsToCabinet(cable, cabinetId) {
+    if (!cabinetId) return true;
+    if (!cable) return false;
+    return String(resolveCableOwnerFdtId(cable) || '') === String(cabinetId);
+  }
+
+  function ensureNodeOwnerFdt(node) {
+    if (!node || node.type === 'fdt' || node.type === 'olt') return null;
+    if (node.ownerFdtId && findNode(node.ownerFdtId)) return String(node.ownerFdtId);
+    var active = getActiveFdtId();
+    if (active) {
+      node.ownerFdtId = active;
+      return active;
+    }
+    var serving = findServingFdt(node);
+    if (serving) {
+      node.ownerFdtId = String(serving.id);
+      return node.ownerFdtId;
+    }
+    return null;
+  }
+
+  function migrateOwnerFdtIdsFromMap() {
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type === 'fdt' || node.type === 'olt') return;
+      if (node.ownerFdtId && findNode(node.ownerFdtId)) return;
+      var serving = findServingFdt(node);
+      if (serving) node.ownerFdtId = String(serving.id);
+      else if (getActiveFdtId()) node.ownerFdtId = getActiveFdtId();
+    });
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      if (!cable) return;
+      if (cable.ownerFdtId && findNode(cable.ownerFdtId)) return;
+      var oid = resolveCableOwnerFdtId(cable);
+      if (oid) cable.ownerFdtId = oid;
+    });
+  }
+
+  function setActiveFdt(fdtNodeOrId, opts) {
+    opts = opts || {};
+    var node = null;
+    if (fdtNodeOrId && typeof fdtNodeOrId === 'object') node = fdtNodeOrId;
+    else if (fdtNodeOrId != null) node = findNode(fdtNodeOrId);
+    if (!node || node.type !== 'fdt') return false;
+    var id = String(node.id);
+    var changed = String(Sim.ui.activeFdtId || '') !== id;
+    Sim.ui.activeFdtId = id;
+    ensureCabinetCounterBucket(id);
+    mirrorActiveCabinetCountersToSim();
+    /* Toolbox cable batches restart / resume for this FDT domain only */
+    syncDefaultCableBatchesToMap();
+    refreshBatchDuplicationHint(getActiveCableKind());
+    updateToolboxAssetCounts();
+    syncActiveFdtChrome();
+    if (changed || opts.force) {
+      if (global.FTTHFiberDesignUI && typeof global.FTTHFiberDesignUI.onActiveFdtChanged === 'function') {
+        global.FTTHFiberDesignUI.onActiveFdtChanged(id, getActiveFdtLabel());
+      }
+      renderUnifiedSidebar();
+    }
+    return true;
+  }
+
+  function ensureActiveFdtFallback() {
+    if (getActiveFdtNode()) return getActiveFdtId();
+    var fdts = (Sim.nodes || []).filter(function (n) { return n && n.type === 'fdt'; });
+    if (!fdts.length) {
+      Sim.ui.activeFdtId = null;
+      syncActiveFdtChrome();
+      return null;
+    }
+    fdts.sort(function (a, b) {
+      return String(a.autoName || a.id).localeCompare(String(b.autoName || b.id), undefined, { numeric: true });
+    });
+    setActiveFdt(fdts[0], { force: true });
+    return getActiveFdtId();
+  }
+
+  function formatActiveFdtBadgeSuffix() {
+    var label = getActiveFdtLabel();
+    return label ? (' · ' + label) : '';
+  }
+
+  function listFdtNodesSorted() {
+    var fdts = (Sim.nodes || []).filter(function (n) { return n && n.type === 'fdt'; });
+    fdts.sort(function (a, b) {
+      return String(a.autoName || a.id).localeCompare(String(b.autoName || b.id), undefined, { numeric: true });
+    });
+    return fdts;
+  }
+
+  function cycleActiveFdt(delta) {
+    var fdts = listFdtNodesSorted();
+    if (!fdts.length) return false;
+    var cur = getActiveFdtId();
+    var idx = 0;
+    var i;
+    for (i = 0; i < fdts.length; i++) {
+      if (String(fdts[i].id) === String(cur)) {
+        idx = i;
+        break;
+      }
+    }
+    var next = fdts[(idx + (delta || 1) + fdts.length * 10) % fdts.length];
+    return setActiveFdt(next, { force: true });
+  }
+
+  function closeFdtHeadMenu(head) {
+    if (!head) {
+      document.querySelectorAll('.toolbox-fdt-head__menu').forEach(function (m) {
+        m.hidden = true;
+        m.classList.remove('is-open');
+      });
+      document.querySelectorAll('.toolbox-fdt-head__badge[aria-expanded="true"]').forEach(function (b) {
+        b.setAttribute('aria-expanded', 'false');
+      });
+      return;
+    }
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (menu) {
+      menu.hidden = true;
+      menu.classList.remove('is-open');
+    }
+    if (badge) badge.setAttribute('aria-expanded', 'false');
+  }
+
+  function openFdtHeadMenu(head) {
+    if (!head) return;
+    closeFdtHeadMenu();
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (!menu) return;
+    menu.hidden = false;
+    menu.classList.add('is-open');
+    if (badge) badge.setAttribute('aria-expanded', 'true');
+  }
+
+  function rebuildFdtHeadMenu(head) {
+    if (!head) return;
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    if (!menu) return;
+    var fdts = listFdtNodesSorted();
+    var activeId = getActiveFdtId();
+    menu.innerHTML = '';
+    if (!fdts.length) {
+      var empty = document.createElement('div');
+      empty.className = 'toolbox-fdt-head__menu-empty';
+      empty.textContent = 'No cabinets placed';
+      menu.appendChild(empty);
+      return;
+    }
+    fdts.forEach(function (fdt) {
+      var opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'toolbox-fdt-head__option';
+      opt.setAttribute('role', 'option');
+      opt.dataset.fdtId = String(fdt.id);
+      var lbl = getFdtCabinetCode(fdt) || fdt.autoName || String(fdt.id);
+      opt.textContent = lbl;
+      opt.title = 'Switch to ' + lbl;
+      if (activeId && String(fdt.id) === String(activeId)) {
+        opt.classList.add('is-active');
+        opt.setAttribute('aria-selected', 'true');
+      } else {
+        opt.setAttribute('aria-selected', 'false');
+      }
+      menu.appendChild(opt);
+    });
+  }
+
+  /** FDT Head switcher — exclusively on the FDT toolbox card (Body tools never show this). */
+  function ensureFdtHeadSwitcher(fdtCard) {
+    if (!fdtCard) return null;
+    fdtCard.classList.add('toolbox-item--fdt-head');
+    var head = fdtCard.querySelector('.toolbox-fdt-head');
+    if (!head) {
+      head = document.createElement('div');
+      head.className = 'toolbox-fdt-head';
+      head.setAttribute('data-fdt-head', '1');
+      head.innerHTML =
+        '<button type="button" class="toolbox-fdt-head__arrow" data-fdt-cycle="-1" aria-label="Previous FDT" title="Previous FDT">&lt;</button>' +
+        '<button type="button" class="toolbox-fdt-head__badge" data-fdt-menu-trigger="1" aria-haspopup="listbox" aria-expanded="false" title="Select active FDT">' +
+          '<span class="toolbox-fdt-head__label">Active FDT —</span>' +
+          '<span class="toolbox-fdt-head__chevron" aria-hidden="true">▾</span>' +
+        '</button>' +
+        '<button type="button" class="toolbox-fdt-head__arrow" data-fdt-cycle="1" aria-label="Next FDT" title="Next FDT">&gt;</button>' +
+        '<div class="toolbox-fdt-head__menu" data-fdt-menu="1" role="listbox" hidden></div>';
+      fdtCard.appendChild(head);
+    }
+    return head;
+  }
+
+  function syncFdtHeadSwitcher() {
+    var box = document.getElementById('toolbox-items');
+    if (!box) return;
+    /* Strip legacy / misplaced badges from Body tools */
+    box.querySelectorAll('.toolbox-active-fdt-status').forEach(function (el) {
+      el.remove();
+    });
+    box.querySelectorAll('.toolbox-fdt-head').forEach(function (head) {
+      var host = head.closest('.toolbox-item[data-type], .toolbox-card[data-type]');
+      if (!host || host.getAttribute('data-type') !== 'fdt') head.remove();
+    });
+
+    var fdtCard = box.querySelector('.toolbox-item[data-type="fdt"], .toolbox-card[data-type="fdt"]');
+    if (!fdtCard) return;
+    var head = ensureFdtHeadSwitcher(fdtCard);
+    if (!head) return;
+
+    var fdts = listFdtNodesSorted();
+    var label = getActiveFdtLabel();
+    var num = getActiveFdtNumber();
+    var statusText = label
+      ? ('Active FDT ' + (num || String(label).replace(/^FDT/i, '')))
+      : (fdts.length ? 'Active FDT —' : 'Active FDT —');
+    var labelEl = head.querySelector('.toolbox-fdt-head__label');
+    if (labelEl) labelEl.textContent = statusText;
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (badge) {
+      badge.title = fdts.length ? ('Select cabinet · ' + statusText) : 'Place an FDT to begin';
+      badge.disabled = !fdts.length;
+    }
+    head.querySelectorAll('.toolbox-fdt-head__arrow').forEach(function (btn) {
+      btn.disabled = fdts.length < 2;
+    });
+    rebuildFdtHeadMenu(head);
+    if (!fdts.length) closeFdtHeadMenu(head);
+  }
+
+  function bindFdtHeadSwitcherEvents() {
+    var box = document.getElementById('toolbox-items');
+    if (!box || box.dataset.fdtHeadBound === '1') return;
+    box.dataset.fdtHeadBound = '1';
+
+    box.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var head = t.closest('[data-fdt-head]');
+      if (!head || !box.contains(head)) return;
+
+      var cycleBtn = t.closest('[data-fdt-cycle]');
+      if (cycleBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        var delta = parseInt(cycleBtn.getAttribute('data-fdt-cycle'), 10) || 1;
+        closeFdtHeadMenu(head);
+        cycleActiveFdt(delta);
+        return;
+      }
+
+      var option = t.closest('.toolbox-fdt-head__option[data-fdt-id]');
+      if (option) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeFdtHeadMenu(head);
+        setActiveFdt(option.getAttribute('data-fdt-id'), { force: true });
+        return;
+      }
+
+      var trigger = t.closest('[data-fdt-menu-trigger]');
+      if (trigger) {
+        e.preventDefault();
+        e.stopPropagation();
+        var menu = head.querySelector('.toolbox-fdt-head__menu');
+        if (menu && !menu.hidden) closeFdtHeadMenu(head);
+        else {
+          rebuildFdtHeadMenu(head);
+          openFdtHeadMenu(head);
+        }
+      }
+    }, true);
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t && t.closest && t.closest('[data-fdt-head]')) return;
+      closeFdtHeadMenu();
+    });
+  }
+
+  function syncActiveFdtChrome() {
+    var label = getActiveFdtLabel();
+
+    var evalHeader = document.querySelector('#evaluation-panel .evaluation-panel__header h2');
+    if (evalHeader) {
+      evalHeader.setAttribute('data-active-fdt', label || '');
+      evalHeader.textContent = label ? ('Evaluation' + formatActiveFdtBadgeSuffix()) : 'Evaluation';
+    }
+    var evalSub = document.querySelector('#evaluation-panel .evaluation-panel__header p');
+    if (evalSub && evalSub.getAttribute('dir') === 'rtl') {
+      evalSub.setAttribute('data-active-fdt', label || '');
+    }
+
+    bindFdtHeadSwitcherEvents();
+    syncFdtHeadSwitcher();
+
+    document.querySelectorAll('.sidebar-section__title[data-ab-base]').forEach(function (titleEl) {
+      var base = titleEl.getAttribute('data-ab-base') || '';
+      var arrow = titleEl.querySelector('.sidebar-section__toggle');
+      var suffix = formatActiveFdtBadgeSuffix();
+      if (arrow) {
+        titleEl.innerHTML = '';
+        titleEl.appendChild(arrow);
+        titleEl.appendChild(document.createTextNode(base + suffix));
+      } else {
+        titleEl.textContent = base + suffix;
+      }
+    });
   }
 
   function parseLabeledNumericId(value, pattern) {
@@ -277,11 +675,13 @@
     return max;
   }
 
-  function collectHandholeNumericIds(excludeNodeId) {
+  function collectHandholeNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'handhole') return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.autoName, /^H(\d+)$/i);
       if (n != null) ids.push(n);
     });
@@ -299,57 +699,67 @@
     return ids;
   }
 
-  function collectFatHandholeNumericIds(excludeNodeId) {
+  function collectFatHandholeNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'fat_handhole') return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.autoName, /^FH(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectFatSystemNumericIds(excludeNodeId) {
+  function collectFatSystemNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'fat_handhole' || !node.fatSystemName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.fatSystemName, /^FAT(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectPoleNumericIds(excludeNodeId) {
+  function collectPoleNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'pole_foundation' || !node.hasPole || !node.poleName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.poleName, /^P(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectClosureNumericIds(excludeNodeId) {
+  function collectClosureNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || !node.closureName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.closureName, /C(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectCableBatchIdsForCapacity(capacity, excludeCableId) {
+  function collectCableBatchIdsForCapacity(capacity, excludeCableId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     var cap = parseInt(capacity, 10);
     if (!cap || cap <= 0) return ids;
     (Sim.fiberCablePaths || []).forEach(function (cable) {
       if (!cable) return;
       if (excludeCableId && cable.id === excludeCableId) return;
+      if (scope && !cableBelongsToCabinet(cable, scope)) return;
       var cableCap = cable.capacity || getCableCapacityForKind(cable.kind);
       if (cableCap !== cap) return;
       var batch = cable.batch;
@@ -361,6 +771,7 @@
     (Sim.connections || []).forEach(function (conn) {
       if (!conn || !conn.name || !conn.capacity) return;
       if (conn.capacity !== cap) return;
+      if (scope && conn.ownerFdtId && String(conn.ownerFdtId) !== String(scope)) return;
       var batch = parseLabeledNumericId(conn.name, new RegExp('^' + cap + 'F(\\d+)$', 'i'));
       if (batch != null) ids.push(batch);
     });
@@ -369,17 +780,20 @@
 
   function syncDefaultCableBatchesToMap() {
     var cfg = ensureCableConfig();
+    var cabId = getActiveFdtId();
     Object.keys(cfg).forEach(function (key) {
       var entry = cfg[key];
       if (!entry) return;
       var cap = entry.capacity || (key === 'lastmile' ? 12 : 72);
-      entry.batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
+      /* Next free batch within the active FDT domain only */
+      entry.batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap, null, cabId));
     });
     if (Sim.penDraft && Sim.penDraft.lineMode === 'cable') {
       var kind = Sim.penDraft.kind || getActiveCableKind();
       if (kind) {
         Sim.penDraft.batch = getCableBatchForKind(kind);
         Sim.penDraft.capacity = getCableCapacityForKind(kind);
+        if (cabId) Sim.penDraft.ownerFdtId = cabId;
       }
     }
     updateFieldStatusCounters();
@@ -397,6 +811,8 @@
       excavationPathId: Sim.excavationPathId,
       fiberCablePathId: Sim.fiberCablePathId,
       counters: JSON.parse(JSON.stringify(Sim.counters)),
+      countersByCabinet: JSON.parse(JSON.stringify(Sim.countersByCabinet || {})),
+      activeFdtId: Sim.ui.activeFdtId || null,
       cableDraftFrom: Sim.cableDraftFrom,
     };
   }
@@ -414,6 +830,9 @@
     Sim.excavationPathId = state.excavationPathId || 0;
     Sim.fiberCablePathId = state.fiberCablePathId || 0;
     Sim.counters = JSON.parse(JSON.stringify(state.counters));
+    Sim.countersByCabinet = JSON.parse(JSON.stringify(state.countersByCabinet || {}));
+    if (!Sim.ui) Sim.ui = {};
+    Sim.ui.activeFdtId = state.activeFdtId || null;
     Sim.cableDraftFrom = state.cableDraftFrom;
     syncNameCountersFromNodes();
     syncDefaultCableBatchesToMap();
@@ -483,65 +902,114 @@
   }
 
   function syncNameCountersFromNodes() {
+    migrateOwnerFdtIdsFromMap();
     resetNameCounters();
-    Sim.counters.handhole = maxNumericId(collectHandholeNumericIds());
     Sim.counters.fdt = maxNumericId(collectFdtNumericIds());
-    Sim.counters.fatHandhole = maxNumericId(collectFatHandholeNumericIds());
-    Sim.counters.fatSystem = maxNumericId(collectFatSystemNumericIds());
-    Sim.counters.pole = maxNumericId(collectPoleNumericIds());
-    Sim.counters.closure = maxNumericId(collectClosureNumericIds());
+
+    var cabinetIds = {};
+    (Sim.nodes || []).forEach(function (node) {
+      if (node && node.type === 'fdt') cabinetIds[String(node.id)] = true;
+      if (node && node.ownerFdtId) cabinetIds[String(node.ownerFdtId)] = true;
+    });
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      var oid = resolveCableOwnerFdtId(cable);
+      if (oid) cabinetIds[oid] = true;
+    });
+
+    Object.keys(cabinetIds).forEach(function (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.handhole = maxNumericId(collectHandholeNumericIds(null, cabId));
+      bucket.fatHandhole = maxNumericId(collectFatHandholeNumericIds(null, cabId));
+      bucket.fatSystem = maxNumericId(collectFatSystemNumericIds(null, cabId));
+      bucket.pole = maxNumericId(collectPoleNumericIds(null, cabId));
+      bucket.closure = maxNumericId(collectClosureNumericIds(null, cabId));
+      bucket.cableByCapacity = {};
+      var cableCapKeys = {};
+      (Sim.fiberCablePaths || []).forEach(function (cable) {
+        if (!cable || !cableBelongsToCabinet(cable, cabId)) return;
+        var cap = cable.capacity || getCableCapacityForKind(cable.kind);
+        if (cap) cableCapKeys[cap] = true;
+      });
+      Object.keys(cableCapKeys).forEach(function (capKey) {
+        var cap = parseInt(capKey, 10);
+        var maxBatch = maxNumericId(collectCableBatchIdsForCapacity(cap, null, cabId));
+        if (maxBatch > 0) bucket.cableByCapacity[cap] = maxBatch;
+      });
+    });
+
     Sim.nodes.forEach(function (node) {
       if (node.type === 'pole_foundation' && node.hasPole && !node.poleName) assignPoleName(node);
     });
-    var cableCapKeys = {};
-    (Sim.fiberCablePaths || []).forEach(function (cable) {
-      if (!cable) return;
-      var cap = cable.capacity || getCableCapacityForKind(cable.kind);
-      if (cap) cableCapKeys[cap] = true;
-    });
-    (Sim.connections || []).forEach(function (conn) {
-      if (conn && conn.capacity) cableCapKeys[conn.capacity] = true;
-    });
-    Object.keys(cableCapKeys).forEach(function (capKey) {
-      var cap = parseInt(capKey, 10);
-      var maxBatch = maxNumericId(collectCableBatchIdsForCapacity(cap));
-      if (maxBatch > 0) Sim.counters.cableByCapacity[cap] = maxBatch;
-    });
+
+    if (!getActiveFdtNode()) ensureActiveFdtFallback();
+    else mirrorActiveCabinetCountersToSim();
   }
 
   function assignCableAsBuiltLabel(meta) {
     var cap = meta.capacity || getCableCapacityForKind(meta.kind) || 12;
+    var cabId = (meta && meta.ownerFdtId) || getActiveFdtId();
     var batch = meta.batch;
     if (batch == null) {
-      batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
+      batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap, null, cabId));
     } else {
       batch = Math.max(1, parseInt(batch, 10) || 1);
     }
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      if (!bucket.cableByCapacity[cap]) bucket.cableByCapacity[cap] = 0;
+      bucket.cableByCapacity[cap] = Math.max(bucket.cableByCapacity[cap], batch);
+    }
     if (!Sim.counters.cableByCapacity[cap]) Sim.counters.cableByCapacity[cap] = 0;
-    Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], batch);
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], batch);
+    }
     return formatCableLabel(cap, batch);
   }
 
   function assignPoleName(node) {
     if (!node || node.type !== 'pole_foundation') return;
-    var poleId = findLowestAvailableNumericId(collectPoleNumericIds(node.id));
+    var cabId = ensureNodeOwnerFdt(node);
+    var poleId = findLowestAvailableNumericId(collectPoleNumericIds(node.id, cabId));
     node.poleName = 'P' + poleId;
-    Sim.counters.pole = Math.max(Sim.counters.pole || 0, poleId);
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.pole = Math.max(bucket.pole || 0, poleId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.pole = Math.max(Sim.counters.pole || 0, poleId);
+    }
   }
 
   function assignAutoName(type, node) {
-    if (type === 'handhole') {
-      var handholeId = findLowestAvailableNumericId(collectHandholeNumericIds(node && node.id));
-      node.autoName = 'H' + handholeId;
-      Sim.counters.handhole = Math.max(Sim.counters.handhole || 0, handholeId);
-    } else if (type === 'fdt') {
+    if (type === 'fdt') {
       var fdtId = findLowestAvailableNumericId(collectFdtNumericIds(node && node.id));
       node.autoName = 'FDT' + fdtId;
       Sim.counters.fdt = Math.max(Sim.counters.fdt || 0, fdtId);
+      ensureCabinetCounterBucket(node.id);
+      /* Active FDT is set after the node is pushed to Sim.nodes (see addNode). */
+      return;
+    }
+    var cabId = ensureNodeOwnerFdt(node);
+    if (type === 'handhole') {
+      var handholeId = findLowestAvailableNumericId(collectHandholeNumericIds(node && node.id, cabId));
+      node.autoName = 'H' + handholeId;
+      if (cabId) {
+        var hb = ensureCabinetCounterBucket(cabId);
+        hb.handhole = Math.max(hb.handhole || 0, handholeId);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.handhole = Math.max(Sim.counters.handhole || 0, handholeId);
+      }
     } else if (type === 'fat_handhole') {
-      var fhId = findLowestAvailableNumericId(collectFatHandholeNumericIds(node && node.id));
+      var fhId = findLowestAvailableNumericId(collectFatHandholeNumericIds(node && node.id, cabId));
       node.autoName = 'FH' + fhId;
-      Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole || 0, fhId);
+      if (cabId) {
+        var fb = ensureCabinetCounterBucket(cabId);
+        fb.fatHandhole = Math.max(fb.fatHandhole || 0, fhId);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole || 0, fhId);
+      }
     }
   }
 
@@ -571,26 +1039,46 @@
    */
   function assignFatSystemName(target) {
     if (!target || target.type !== 'fat_handhole') return;
+    var cabId = ensureNodeOwnerFdt(target);
 
     var inherited = extractHandholeNumericId(target);
     if (inherited != null) {
       target.fatSystemName = 'FAT' + inherited;
-      /* Keep global counter ahead of inherited IDs so later sequential assigns stay unique */
-      Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, inherited);
+      if (cabId) {
+        var bucket = ensureCabinetCounterBucket(cabId);
+        bucket.fatSystem = Math.max(bucket.fatSystem || 0, inherited);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, inherited);
+      }
       return;
     }
 
-    var fatId = findLowestAvailableNumericId(collectFatSystemNumericIds(target && target.id));
+    var fatId = findLowestAvailableNumericId(collectFatSystemNumericIds(target && target.id, cabId));
     target.fatSystemName = 'FAT' + fatId;
-    Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, fatId);
+    if (cabId) {
+      var b2 = ensureCabinetCounterBucket(cabId);
+      b2.fatSystem = Math.max(b2.fatSystem || 0, fatId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, fatId);
+    }
   }
 
   function assignClosureName(target) {
     if (!target || target.type !== 'handhole') return;
-    var closureId = findLowestAvailableNumericId(collectClosureNumericIds(target && target.id));
+    var cabId = ensureNodeOwnerFdt(target);
+    var closureId = findLowestAvailableNumericId(collectClosureNumericIds(target && target.id, cabId));
     target.closureCount = closureId;
-    target.closureName = (target.autoName || 'H1') + 'C' + closureId;
-    Sim.counters.closure = Math.max(Sim.counters.closure || 0, closureId);
+    /* Short C# within each FDT domain (H labels already restart per cabinet). */
+    target.closureName = 'C' + closureId;
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.closure = Math.max(bucket.closure || 0, closureId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.closure = Math.max(Sim.counters.closure || 0, closureId);
+    }
   }
 
   function formatCableLabel(capacity, batch) {
@@ -702,11 +1190,14 @@
     var kindKey = kind ? getCableConfigKey(kind) : kind;
     var capKey = resolveCableCapacityValue(capacity, kindKey);
     if (!kindKey || !(capKey > 0) || batchNumber == null) return false;
+    var cabId = getActiveFdtId();
 
     for (var i = 0; i < Sim.fiberCablePaths.length; i++) {
       var cable = Sim.fiberCablePaths[i];
       if (!cable) continue;
       if (excludeCableId && String(cable.id) === String(excludeCableId)) continue;
+      /* Same batch on another FDT is allowed — domains are independent */
+      if (cabId && !cableBelongsToCabinet(cable, cabId)) continue;
       if (Number(cable.batch) !== Number(batchNumber)) continue;
       if (getCableConfigKey(cable.kind) !== kindKey) continue;
       if (resolveCableCapacityValue(cable, kindKey) !== capKey) continue;
@@ -1376,13 +1867,26 @@
     var cableBatch = meta.batch || getCableBatchForKind(meta.kind) || 1;
     var cableCapacity = meta.capacity || getCableCapacityForKind(meta.kind) || 12;
     setActiveCableKind(meta.kind);
+    var ownerFdtId = meta.ownerFdtId ||
+      (meta.mainCableTrail && meta.mainCableTrail.cabinetId) ||
+      getActiveFdtId() ||
+      null;
+    if (ownerFdtId) setActiveFdt(ownerFdtId);
     var toolboxLabel = meta.cableName || assignCableAsBuiltLabel({
       kind: meta.kind,
       capacity: cableCapacity,
       batch: cableBatch,
+      ownerFdtId: ownerFdtId,
     });
+    if (ownerFdtId) {
+      var cabBucket = ensureCabinetCounterBucket(ownerFdtId);
+      if (!cabBucket.cableByCapacity[cableCapacity]) cabBucket.cableByCapacity[cableCapacity] = 0;
+      cabBucket.cableByCapacity[cableCapacity] =
+        Math.max(cabBucket.cableByCapacity[cableCapacity], cableBatch);
+    }
     if (!Sim.counters.cableByCapacity[cableCapacity]) Sim.counters.cableByCapacity[cableCapacity] = 0;
-    Sim.counters.cableByCapacity[cableCapacity] = Math.max(Sim.counters.cableByCapacity[cableCapacity], cableBatch);
+    Sim.counters.cableByCapacity[cableCapacity] =
+      Math.max(Sim.counters.cableByCapacity[cableCapacity], cableBatch);
     var connectedTo = buildCableConnectedToFromSnapLabels(snapLabels);
 
     Sim.fiberCablePathId++;
@@ -1407,6 +1911,8 @@
       pointSnapNodeIds: pointSnapNodeIds.slice(),
       snapLabels: snapLabels.slice(),
     };
+    if (ownerFdtId) cableRef.ownerFdtId = String(ownerFdtId);
+
     /* Phase 2–3: optional Main/Sub Cable visual sequences — metadata only */
     if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
       cableRef.mainCableTrail = {
@@ -1600,6 +2106,12 @@
     };
     cable.userDrawn = true;
     cable.mergedToTrench = false;
+    var extendOwner = meta.ownerFdtId ||
+      (meta.mainCableTrail && meta.mainCableTrail.cabinetId) ||
+      cable.ownerFdtId ||
+      getActiveFdtId() ||
+      null;
+    if (extendOwner) cable.ownerFdtId = String(extendOwner);
     /* Phase 2–3: merge visual Main/Sub Cable trail metadata when continuing a draw */
     if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
       cable.mainCableTrail = {
@@ -6597,8 +7109,10 @@
     }
     node.labelOffsets = snap.labelOffsets ? JSON.parse(JSON.stringify(snap.labelOffsets)) : {};
     snapNodeToCell(node);
+    if (snap.type !== 'fdt' && snap.type !== 'olt') ensureNodeOwnerFdt(node);
     assignAutoName(snap.type, node);
     Sim.nodes.push(node);
+    if (snap.type === 'fdt') setActiveFdt(node, { force: true });
     renderNode(node);
     selectNode(node.id);
     rememberLastInstalledElement(getNodeAutoLabel(node) || node.autoName || node.type);
@@ -7415,6 +7929,11 @@
       id: pathId,
       segIndex: segIndex,
     };
+    if (pathType === 'fiber' || pathType === 'cable') {
+      var selCable = findPathByRef({ type: 'fiber', id: pathId });
+      var cableOwner = selCable && resolveCableOwnerFdtId(selCable);
+      if (cableOwner) setActiveFdt(cableOwner);
+    }
     Sim.ui.topologyTreeFocus = {
       kind: pathType === 'fiber' ? 'cable' : 'excavation',
       pathType: pathType,
@@ -7655,6 +8174,10 @@
       patchVertexDragVisuals: patchVertexDragVisuals,
       updateStatus: updateStatus,
       setPushHint: setPushHint,
+      setActiveFdt: setActiveFdt,
+      getActiveFdtId: getActiveFdtId,
+      getActiveFdtLabel: getActiveFdtLabel,
+      findServingFdt: findServingFdt,
       syncGisStatusBar: syncGisStatusBar,
       saveState: saveState,
       findPathByRef: findPathByRef,
@@ -8216,6 +8739,8 @@
     global.FTTHToolboxInventory?.bindToolbox?.(box);
     global.FTTHToolboxManager?.onToolboxRendered?.(box);
     updateToolboxAssetCounts();
+    bindFdtHeadSwitcherEvents();
+    syncActiveFdtChrome();
   }
 
   /* ─── Field SVG icons ─── */
@@ -9425,6 +9950,7 @@
       return false;
     }
     target.hasClosure = true;
+    ensureNodeOwnerFdt(target);
     ensureNodeLabelOffsets(target);
     if (target.type === 'handhole') {
       assignClosureName(target);
@@ -9450,6 +9976,7 @@
       return false;
     }
     target.hasFatPole = true;
+    ensureNodeOwnerFdt(target);
     assignFatSystemName(target);
     ensureNodeLabelOffsets(target);
     if (target.labelOffsets.primary) delete target.labelOffsets.primary;
@@ -9558,8 +10085,10 @@
     if (variant) node.variant = variant;
     node.locked = false;
     snapNodeToCell(node);
+    if (type !== 'fdt' && type !== 'olt') ensureNodeOwnerFdt(node);
     assignAutoName(type, node);
     Sim.nodes.push(node);
+    if (type === 'fdt') setActiveFdt(node, { force: true });
     renderNode(node);
     rememberLastInstalledElement(getNodeAutoLabel(node) || node.autoName || type);
     updateMetrics();
@@ -9990,6 +10519,11 @@
     Sim.ui.pathHighlightFromSidebar = !!options.fromSidebar;
     Sim.selectedNodeId = nodeId;
     var node = findNode(nodeId);
+    if (node && node.type === 'fdt') {
+      setActiveFdt(node);
+    } else if (node && node.ownerFdtId) {
+      setActiveFdt(node.ownerFdtId);
+    }
     if (Sim.selectedPath) {
       Sim.selectedPath = null;
       if (Sim.pathEdit) {
@@ -10336,12 +10870,13 @@
     var collapsed = collapsible && !!(Sim.ui.sidebarSectionCollapsed && Sim.ui.sidebarSectionCollapsed[sectionKey]);
     var arrowCls = 'toggle-arrow sidebar-section__toggle' + (collapsed ? ' collapsed' : '');
     var cardsCls = 'sidebar-section__cards' + (collapsed ? ' hidden' : '');
+    var displayTitle = title + (options.skipFdtSuffix ? '' : formatActiveFdtBadgeSuffix());
     var titleInner = collapsible
-      ? '<span class="' + arrowCls + '" data-sidebar-section-toggle="' + escapeSidebarHtml(sectionKey) + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-label="Toggle ' + escapeSidebarHtml(title) + '">▾</span>' +
-        escapeSidebarHtml(title)
-      : escapeSidebarHtml(title);
+      ? '<span class="' + arrowCls + '" data-sidebar-section-toggle="' + escapeSidebarHtml(sectionKey) + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-label="Toggle ' + escapeSidebarHtml(displayTitle) + '">▾</span>' +
+        escapeSidebarHtml(displayTitle)
+      : escapeSidebarHtml(displayTitle);
     return '<section class="sidebar-section' + modCls + '">' +
-      '<h3 class="sidebar-section__title">' + titleInner + '</h3>' +
+      '<h3 class="sidebar-section__title" data-ab-base="' + escapeSidebarHtml(title) + '">' + titleInner + '</h3>' +
       '<ul class="' + cardsCls + '">' + body + '</ul>' +
       '</section>';
   }
@@ -11429,26 +11964,32 @@
 
   function countPlacedAssetByToolId(toolId) {
     var nodes = Sim.nodes || [];
+    var cabId = getActiveFdtId();
+    function inScope(n) {
+      if (!cabId) return true;
+      if (toolId === 'fdt' || toolId === 'olt') return true;
+      return nodeBelongsToCabinet(n, cabId);
+    }
     if (toolId === 'olt') {
       return nodes.filter(function (n) { return n && n.type === 'olt'; }).length;
     }
     if (toolId === 'handhole') {
-      return nodes.filter(function (n) { return n && n.type === 'handhole'; }).length;
+      return nodes.filter(function (n) { return n && n.type === 'handhole' && inScope(n); }).length;
     }
     if (toolId === 'fat_handhole') {
-      return nodes.filter(function (n) { return n && n.type === 'fat_handhole'; }).length;
+      return nodes.filter(function (n) { return n && n.type === 'fat_handhole' && inScope(n); }).length;
     }
     if (toolId === 'fdt') {
       return nodes.filter(function (n) { return n && n.type === 'fdt'; }).length;
     }
     if (toolId === 'closure') {
       return nodes.filter(function (n) {
-        return n && n.hasClosure && (n.type === 'handhole' || n.type === 'fat_handhole');
+        return n && n.hasClosure && (n.type === 'handhole' || n.type === 'fat_handhole') && inScope(n);
       }).length;
     }
     if (toolId === 'fat_pole') {
       return nodes.filter(function (n) {
-        return n && n.type === 'fat_handhole' && n.hasFatPole;
+        return n && n.type === 'fat_handhole' && n.hasFatPole && inScope(n);
       }).length;
     }
     return 0;
@@ -11510,10 +12051,20 @@
     var mc = document.getElementById('metric-components');
     var mconn = document.getElementById('metric-connections');
     var mlength = document.getElementById('metric-length');
-    if (mc) mc.textContent = String(Sim.nodes.length);
+    var cabId = getActiveFdtId();
+    var scopedNodes = (Sim.nodes || []).filter(function (n) {
+      if (!cabId) return true;
+      if (n && n.type === 'fdt') return String(n.id) === String(cabId);
+      if (n && n.type === 'olt') return true;
+      return nodeBelongsToCabinet(n, cabId);
+    });
+    var scopedCables = (Sim.fiberCablePaths || []).filter(function (c) {
+      return !cabId || cableBelongsToCabinet(c, cabId);
+    });
+    if (mc) mc.textContent = String(scopedNodes.length);
     if (mconn) {
-      var pathCount = (Sim.excavationPaths?.length || 0) + (Sim.fiberCablePaths?.length || 0);
-      mconn.textContent = String(Sim.connections.length + pathCount);
+      var pathCount = (Sim.excavationPaths?.length || 0) + scopedCables.length;
+      mconn.textContent = String((Sim.connections.length || 0) + pathCount);
     }
     if (mlength) {
       var cs = Sim.layout?.cellSize || 50;
@@ -11525,6 +12076,7 @@
     Sim.metrics.fdtCount = Sim.nodes.filter(function (n) { return n.type === 'fdt'; }).length;
     updateFieldStatusCounters();
     updateToolboxAssetCounts();
+    syncActiveFdtChrome();
   }
 
   function syncPanelToggleArrows() {
@@ -13596,6 +14148,14 @@
     setPushHint: setPushHint,
     sync: syncGisStatusBar,
     refreshFromContext: refreshPushHintFromContext,
+  };
+
+  global.FTTHActiveFdt = {
+    setActiveFdt: setActiveFdt,
+    getActiveFdtId: getActiveFdtId,
+    getActiveFdtLabel: getActiveFdtLabel,
+    getActiveFdtNumber: getActiveFdtNumber,
+    syncChrome: syncActiveFdtChrome,
   };
 
   var deferBoot = !!document.getElementById('startup-view');

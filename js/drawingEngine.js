@@ -1471,6 +1471,7 @@
       nodeDisplayName(cabinet) ||
       'Cabinet';
     ensureMainCableTrailFromCabinet(cabinet, draft);
+    b()?.setActiveFdt?.(cabinet.id || cabinet);
     var msg = 'Main Cable successfully registered from ' + cabinetName;
 
     S.mainCableStartConfirmUntil = Date.now() + MAIN_CABLE_START_CONFIRM_MS;
@@ -1573,6 +1574,12 @@
     if (!draft || isMainCableTrailActive(draft)) return false;
 
     ensureSubCableTrailFromClosure(closure, draft);
+    if (closure.ownerFdtId) b()?.setActiveFdt?.(closure.ownerFdtId);
+    else if (closure.id) {
+      /* Resolve owning FDT via proximity helper when stamp missing */
+      var serving = b()?.findServingFdt?.(closure);
+      if (serving) b()?.setActiveFdt?.(serving);
+    }
     var label = getClosureCheckpointLabel(closure);
     var msg = 'Sub-Cable successfully registered from ' + label;
 

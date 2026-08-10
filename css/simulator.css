@@ -2929,6 +2929,149 @@ body.simulator-page-active #toolbox {
   position: relative;
 }
 
+/* Legacy badge — never show on Body tools */
+.toolbox-active-fdt-status {
+  display: none !important;
+}
+
+/* FDT Head: Active domain switcher (FDT card only) */
+.toolbox-item--fdt-head {
+  align-items: flex-start;
+}
+
+.toolbox-fdt-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  width: 100%;
+  margin-top: 0.35rem;
+  flex: 1 0 100%;
+}
+
+.toolbox-fdt-head__arrow {
+  flex: 0 0 auto;
+  width: 1.35rem;
+  height: 1.45rem;
+  padding: 0;
+  border-radius: 0.3rem;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(15, 23, 42, 0.65);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toolbox-fdt-head__arrow:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.7);
+}
+
+.toolbox-fdt-head__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbox-fdt-head__badge {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+  padding: 0.18rem 0.4rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: left;
+}
+
+.toolbox-fdt-head__badge:hover:not(:disabled),
+.toolbox-fdt-head__badge[aria-expanded="true"] {
+  background: rgba(245, 158, 11, 0.24);
+  border-color: rgba(251, 191, 36, 0.75);
+}
+
+.toolbox-fdt-head__badge:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.toolbox-fdt-head__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbox-fdt-head__chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+.toolbox-fdt-head__menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 40;
+  max-height: 10rem;
+  overflow: auto;
+  padding: 0.25rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.toolbox-fdt-head__menu[hidden] {
+  display: none !important;
+}
+
+.toolbox-fdt-head__option {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  margin: 0;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toolbox-fdt-head__option:hover {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fde68a;
+}
+
+.toolbox-fdt-head__option.is-active {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fbbf24;
+}
+
+.toolbox-fdt-head__menu-empty {
+  padding: 0.4rem 0.45rem;
+  color: #94a3b8;
+  font-size: 10px;
+  font-style: italic;
+}
+
+#toolbox.collapsed .toolbox-fdt-head {
+  display: none;
+}
+
 .toolbox-asset-count {
   position: static;
   flex-shrink: 0;

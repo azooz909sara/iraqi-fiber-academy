@@ -19,6 +19,22 @@
   var matrixEventsBound = false;
   var activeMatrixTab = 'distribution'; // distribution | ring
   var activeCabinetFilter = 'all';
+
+  function resolveActiveFdtFilterId() {
+    try {
+      if (global.FTTHActiveFdt && typeof global.FTTHActiveFdt.getActiveFdtId === 'function') {
+        return global.FTTHActiveFdt.getActiveFdtId();
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function applyActiveFdtMatrixFilter(fdtId) {
+    if (fdtId) activeCabinetFilter = String(fdtId);
+    if (matrixEl && !matrixEl.classList.contains('hidden')) {
+      refreshMatrix();
+    }
+  }
   var activeClosureFilter = 'all';
   var activeSortMode = 'cindex'; // insertion, chronological, cindex
   var dragState = null;
@@ -758,19 +774,24 @@
     if (activeMatrixTab === 'ring') {
       return mgr && mgr.getRingMatrixRows ? mgr.getRingMatrixRows() : [];
     }
+    /* Strict per-FDT partition: prefer live active FDT over "all" */
+    var liveFdt = resolveActiveFdtFilterId();
+    var cabinetFilter = activeCabinetFilter;
+    if (liveFdt && (cabinetFilter === 'all' || !cabinetFilter)) {
+      cabinetFilter = String(liveFdt);
+      activeCabinetFilter = cabinetFilter;
+    }
     var rows = mgr && mgr.getSpliceMatrixRows
       ? mgr.getSpliceMatrixRows({
-        cabinet: activeCabinetFilter,
+        cabinet: cabinetFilter,
         closure: activeClosureFilter,
       })
       : [];
     rows = sortRowsByMode(rows);
     /*
-     * Full-matrix view: re-number PLC in display order so the sequence stays
-     * continuous across main-cable transitions after UI sort. Filtered views
-     * keep engine-assigned global numbers (do not restart at PLC 01).
+     * Per-cabinet view: renumber PLC in display order within this FDT domain.
      */
-    if (activeCabinetFilter === 'all' && activeClosureFilter === 'all' &&
+    if (cabinetFilter !== 'all' && activeClosureFilter === 'all' &&
         mgr && typeof mgr.applyPlcSplitterMapping === 'function') {
       rows = mgr.applyPlcSplitterMapping(rows);
     }
@@ -1563,7 +1584,12 @@
         mgr.ensureDisplayData();
       }
 
-      activeCabinetFilter = options.cabinetFilter != null ? String(options.cabinetFilter) : 'all';
+      if (options.cabinetFilter != null) {
+        activeCabinetFilter = String(options.cabinetFilter);
+      } else {
+        var liveFdt = resolveActiveFdtFilterId();
+        activeCabinetFilter = liveFdt ? String(liveFdt) : 'all';
+      }
       activeClosureFilter = options.closureFilter != null ? String(options.closureFilter) : 'all';
       
       refreshMatrix();
@@ -1732,6 +1758,9 @@
     clearActiveTab: clearActiveTab,
     sortCablesForTabs: sortCablesForTabs,
     openMatrix: openMatrix,
+    onActiveFdtChanged: function (fdtId) {
+      applyActiveFdtMatrixFilter(fdtId);
+    },
     closeMatrix: closeMatrix,
     refreshMatrix: refreshMatrix,
     exportMatrixPdf: exportMatrixPdf,
