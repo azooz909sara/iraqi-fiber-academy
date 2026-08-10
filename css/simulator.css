@@ -2934,31 +2934,74 @@ body.simulator-page-active #toolbox {
   display: none !important;
 }
 
-/* FDT Head: Active domain switcher (FDT card only) */
-.toolbox-item--fdt-head {
-  align-items: flex-start;
+/* FDT Head card: top row (icon/label/controls) + full-width switcher below */
+.toolbox-item.toolbox-item--fdt-head {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon text controls"
+    "switcher switcher switcher";
+  align-items: center;
+  column-gap: 0.65rem;
+  row-gap: 0.4rem;
+  /* Controls are in-flow on this card — don't reserve absolute eye padding */
+  padding-right: 0.75rem !important;
+  overflow: visible;
+}
+
+.toolbox-item--fdt-head > .toolbox-item__icon {
+  grid-area: icon;
+  align-self: center;
+}
+
+.toolbox-item--fdt-head > .toolbox-item__text {
+  grid-area: text;
+  min-width: 0;
+  max-width: none;
+  align-self: center;
+}
+
+.toolbox-item--fdt-head > .toolbox-item-controls {
+  grid-area: controls;
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  transform: none !important;
+  align-self: center;
+  justify-self: end;
+  z-index: 3;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.toolbox-item--fdt-head > .toolbox-fdt-head {
+  grid-area: switcher;
 }
 
 .toolbox-fdt-head {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  justify-content: stretch;
+  gap: 0.3rem;
   width: 100%;
-  margin-top: 0.35rem;
-  flex: 1 0 100%;
+  min-width: 0;
+  margin: 0;
+  flex: none;
+  box-sizing: border-box;
 }
 
 .toolbox-fdt-head__arrow {
   flex: 0 0 auto;
-  width: 1.35rem;
-  height: 1.45rem;
+  width: 1.4rem;
+  min-width: 1.4rem;
+  height: 1.55rem;
   padding: 0;
   border-radius: 0.3rem;
   border: 1px solid rgba(245, 158, 11, 0.4);
   background: rgba(15, 23, 42, 0.65);
   color: #fbbf24;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
@@ -2976,22 +3019,25 @@ body.simulator-page-active #toolbox {
 
 .toolbox-fdt-head__badge {
   flex: 1 1 auto;
-  min-width: 0;
+  /* Grow between arrows, but never collapse the cabinet label to a letter */
+  min-width: max-content;
   display: inline-flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.25rem;
-  padding: 0.18rem 0.4rem;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.45rem;
   border-radius: 0.35rem;
   border: 1px solid rgba(245, 158, 11, 0.5);
   background: rgba(245, 158, 11, 0.14);
   color: #fbbf24;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
   line-height: 1.2;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
 }
 
 .toolbox-fdt-head__badge:hover:not(:disabled),
@@ -3006,13 +3052,15 @@ body.simulator-page-active #toolbox {
 }
 
 .toolbox-fdt-head__label {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
   white-space: nowrap;
+  min-width: max-content;
 }
 
 .toolbox-fdt-head__chevron {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   font-size: 9px;
   opacity: 0.85;
 }
@@ -3070,6 +3118,24 @@ body.simulator-page-active #toolbox {
 
 #toolbox.collapsed .toolbox-fdt-head {
   display: none;
+}
+
+/* Collapsed icon rail: restore absolute count badge behavior on FDT card */
+#toolbox.collapsed .toolbox-item--fdt-head {
+  display: flex !important;
+  grid-template-columns: none;
+  grid-template-areas: none;
+  padding-right: 0.35rem !important;
+  row-gap: 0;
+}
+
+#toolbox.collapsed .toolbox-item--fdt-head > .toolbox-item-controls {
+  position: absolute !important;
+  inset: 0;
+  right: auto;
+  top: auto;
+  transform: none !important;
+  pointer-events: none;
 }
 
 .toolbox-asset-count {
@@ -5367,6 +5433,43 @@ canvas {
   color: #7dd3fc;
   letter-spacing: 0.01em;
   transition: color 0.2s ease;
+}
+
+.gis-status-bar__active-fdt {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.gis-status-bar__active-fdt[hidden] {
+  display: none !important;
+}
+
+.gis-status-bar__fdt-sep {
+  flex: 0 0 auto;
+  display: inline-block;
+  margin: 0 0.4rem;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+}
+
+.gis-status-bar__fdt-sep[hidden] {
+  display: none !important;
 }
 
 .gis-status-bar__active-path {

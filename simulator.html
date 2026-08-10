@@ -148,6 +148,18 @@
                   justify-content 0.35s ease;
     }
 
+    /* FDT Head: keep quick-switcher label intact when toolbox is narrowed */
+    #toolbox .toolbox-item--fdt-head > .toolbox-item__text.toolbox-collapsible-text {
+      max-width: none;
+      min-width: 0;
+    }
+
+    #toolbox .toolbox-fdt-head__label {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: nowrap;
+    }
+
     .toolbox-item__icon {
       transition: transform 0.25s ease;
     }
@@ -920,6 +932,8 @@
       </div>
       <span class="gis-status-bar__sep gis-status-bar__sep--hint" aria-hidden="true"></span>
       <div class="gis-status-bar__push-hint" id="status-bar-push-hint" title="Status">
+        <span id="status-bar-active-fdt" class="gis-status-bar__active-fdt" hidden aria-hidden="true"></span>
+        <span id="status-bar-fdt-sep" class="gis-status-bar__fdt-sep" hidden aria-hidden="true">|</span>
         <span id="status-bar-active-path" class="gis-status-bar__active-path">Active Path · ...</span>
         <span id="status-bar-dup-badge" class="gis-status-bar__dup-badge" hidden aria-hidden="true"></span>
       </div>

@@ -209,11 +209,24 @@
     return (cables || []).slice();
   }
 
+  function cableInActiveFdtScope(cable) {
+    if (!cable) return false;
+    var cabId = resolveActiveFdtFilterId();
+    if (!cabId) return true;
+    if (cable.cabinet_id != null && String(cable.cabinet_id) !== '' && String(cable.cabinet_id) !== 'all') {
+      return String(cable.cabinet_id) === String(cabId);
+    }
+    if (global.FTTHActiveFdt && typeof global.FTTHActiveFdt.cableBelongsToCabinet === 'function') {
+      return !!global.FTTHActiveFdt.cableBelongsToCabinet(cable.id || cable, cabId);
+    }
+    return true;
+  }
+
   function collectNodeCables(nodeData) {
     if (!nodeData || !nodeData.cables) return [];
     var inbound = Array.isArray(nodeData.cables.inbound) ? nodeData.cables.inbound : [];
     var outbound = Array.isArray(nodeData.cables.outbound) ? nodeData.cables.outbound : [];
-    return inbound.concat(outbound);
+    return inbound.concat(outbound).filter(cableInActiveFdtScope);
   }
 
   function hasFiberDesignContent(nodeData) {
@@ -1760,6 +1773,19 @@
     openMatrix: openMatrix,
     onActiveFdtChanged: function (fdtId) {
       applyActiveFdtMatrixFilter(fdtId);
+      /* Details/Fiber Design tabs must also drop out-of-scope cables immediately */
+      try {
+        var body = document.getElementById('property-panel-body');
+        if (body && typeof refreshPanelContent === 'function') {
+          var nodeId = null;
+          var tab = body.querySelector('[data-fiber-design-tab][data-node-id]');
+          if (tab) nodeId = tab.getAttribute('data-node-id');
+          if (!nodeId && deps && typeof deps.getSelectedNodeId === 'function') {
+            nodeId = deps.getSelectedNodeId();
+          }
+          if (nodeId) refreshPanelContent(body, nodeId);
+        }
+      } catch (err) { /* ignore */ }
     },
     closeMatrix: closeMatrix,
     refreshMatrix: refreshMatrix,
