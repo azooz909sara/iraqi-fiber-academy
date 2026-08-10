@@ -2349,8 +2349,106 @@
   }
 
   /**
+   * Direct Cabinet→Pole (no closure): allocate Main/Expansion rows on the feeder
+   * without Sub-Cable or HH-Closure columns.
+   */
+  function assignFatDirectFromCabinet(cabinetNode, mainMapCable, fatNode, mainPointer, fatDistance) {
+    if (!cabinetNode || !fatNode || !mainMapCable || !isMainCableFromCabinet(mainMapCable)) return;
+
+    var designNode = ensureEngineNode(cabinetNode);
+    if (!designNode) return;
+
+    var mainCable = findOrAddDesignCable(designNode, 'outbound', mainMapCable, 'main');
+    var sharedMainPointer = (mainPointer && typeof mainPointer.nextPair === 'function')
+      ? mainPointer
+      : getOrCreateMainPointer(mainMapCable || mainCable);
+    var feederKey = normalizeMainFeederKey(mainMapCable || mainCable);
+    if (feederKey) mainPointers[feederKey] = sharedMainPointer;
+
+    var mainAsg;
+    try {
+      mainAsg = sharedMainPointer.nextPair();
+    } catch (err) {
+      if (DEBUG) console.warn('[FiberDesignManager] direct assign nextPair failed', err);
+      return;
+    }
+    if (!mainAsg) return;
+
+    var mainTube = ensureTubeOnCable(mainCable, mainAsg.tube_number, mainAsg.tube_color);
+    var fatId = fatIdNumericOnly(getFatLabelForNode(fatNode));
+    var plcPairIndex = Math.floor((mainAsg.global_fiber_index || 0) / FIBERS_PER_FAT);
+    var plcMap = resolvePlcPairMapping(plcPairIndex);
+
+    var specs = [
+      {
+        type: 'Main',
+        mColor: mainAsg.main_fiber_color,
+        mIndex: mainAsg.main_fiber_index,
+        splitterNo: formatPlcSplitterNo(plcMap.plcMain),
+      },
+      {
+        type: 'Expansion',
+        mColor: mainAsg.expansion_fiber_color,
+        mIndex: mainAsg.expansion_fiber_index,
+        splitterNo: formatPlcSplitterNo(plcMap.plcExpansion),
+      },
+    ];
+
+    specs.forEach(function (spec) {
+      var mFiber = mainTube.fibers[spec.mIndex] || findFiberByColor(mainTube, spec.mColor);
+      if (!mFiber) return;
+      if (mFiber.status === 'spliced') return;
+      mFiber.status = 'spliced';
+
+      var row = {
+        node_id: designNode.node_id,
+        closure_id: '',
+        cabinet_id: String(cabinetNode.id),
+        cabinet_label: getCabinetLabel(cabinetNode),
+        m_cable_id: cableDisplayId(mainCable),
+        m_tube_color: mainAsg.tube_color || (mainTube && mainTube.tube_color) || '',
+        m_fiber_color: spec.mColor || '',
+        s_cable_id: '',
+        s_tube_color: '',
+        s_fiber_color: '',
+        fiber_type: spec.type,
+        fat_id: fatId,
+        splice_id: 'direct_' + String(mainCable.id || '') + '_' + fatId + '_' + spec.type,
+        fat_distance: fatDistance || 0,
+        plc_pair_index: plcPairIndex,
+        splitter_fiber_no: spec.splitterNo,
+        pigtails_fiber_color: plcMap.color,
+        path_source: 'interactive_trail_direct',
+        main_path_label: '',
+        sub_path_label: '',
+        design_path: '',
+        closure_order: 0,
+        direct_cabinet_pole: true,
+      };
+
+      if (interactivePathCtx) {
+        row.path_source = interactivePathCtx.source || 'interactive_trail_direct';
+        row.main_path_label = interactivePathCtx.main_path_label || '';
+        row.sub_path_label = '';
+        row.design_path = interactivePathCtx.design_path || row.main_path_label;
+        if (interactivePathCtx.closure_order != null) {
+          row.closure_order = interactivePathCtx.closure_order;
+        }
+      }
+
+      matrixRows.push(row);
+    });
+
+    if (designNode.metadata) {
+      designNode.metadata.is_mock = false;
+      designNode.metadata.source = 'auto_engine';
+    }
+  }
+
+  /**
    * Phase 4: allocate matrix rows from interactive Main/Sub draw trails.
    * Trail sequences are definitive truth — DFS must not re-guess those sub-cables.
+   * Also supports Direct Cabinet→Pole Main trails (no closures, drops on main).
    */
   function applyInteractiveTrailAllocations() {
     interactiveSkipSubCableIds = Object.create(null);
@@ -2388,6 +2486,50 @@
     });
 
     var allocated = 0;
+
+    /* Direct Cabinet→Pole mains: closures empty, drops present */
+    mainPacks.forEach(function (pack) {
+      var trail = pack.trail;
+      var drops = trail.drops || [];
+      if ((trail.closures || []).length || !drops.length) return;
+
+      var mainCable = pack.mapCable;
+      if (!mainCable || !isMainCableFromCabinet(mainCable)) return;
+
+      var cabinetNode = findMapNodeById(trail.cabinetId);
+      if (!cabinetNode || !isCabinetNode(cabinetNode)) return;
+
+      var mainPtr = pack.mainPointer || getOrCreateMainPointer(mainCable);
+      pack.mainPointer = mainPtr;
+      currentCabinetCtx = cabinetNode;
+
+      var mainPathLabel = formatMainCableTrailPath(trail);
+      interactivePathCtx = {
+        source: 'interactive_trail_direct',
+        main_path_label: mainPathLabel,
+        sub_path_label: '',
+        design_path: mainPathLabel,
+        closure_order: 0,
+      };
+
+      var di;
+      for (di = 0; di < drops.length; di++) {
+        var fatNode = findMapNodeById(drops[di].id);
+        if (!fatNode || !isFatOrPoleNode(fatNode)) continue;
+        var before = matrixRows.length;
+        assignFatDirectFromCabinet(
+          cabinetNode,
+          mainCable,
+          fatNode,
+          mainPtr,
+          nodeDistance(cabinetNode, fatNode)
+        );
+        allocated += Math.max(0, matrixRows.length - before);
+      }
+
+      interactiveSkipSubCableIds[String(mainCable.id)] = true;
+      interactivePathCtx = null;
+    });
 
     subPacks.forEach(function (pack) {
       var subCable = findMapCableById(pack.cableId);
@@ -2672,7 +2814,12 @@
           var feederPtr = feederCable ? getOrCreateMainPointer(feederCable) : null;
           usedEdges[ek] = true;
           if (feederCable && (isClosureNode(nextNode) || isFatOrPoleNode(nextNode))) {
-            processClosureDistribution(nextNode, feederCable, feederPtr, nodeId);
+            var feederSkipId = feederCable.id != null ? String(feederCable.id) : '';
+            /* Direct Cabinet→Pole trail already allocated — do not reprocess FAT as a closure */
+            if (!(feederSkipId && interactiveSkipSubCableIds[feederSkipId] &&
+                  isFatOrPoleNode(nextNode))) {
+              processClosureDistribution(nextNode, feederCable, feederPtr, nodeId);
+            }
           }
           visitTowardClosures(nextId, nodeId, {
             mainCable: feederCable,
@@ -3331,6 +3478,14 @@
           };
         })
         : [],
+      drops: Array.isArray(trail.drops)
+        ? trail.drops.map(function (d) {
+          return {
+            id: d && d.id != null ? String(d.id) : '',
+            label: d && d.label != null ? String(d.label) : '',
+          };
+        })
+        : [],
       nodeIds: Array.isArray(trail.nodeIds) ? trail.nodeIds.map(String) : [],
     };
   }
@@ -3345,6 +3500,11 @@
     (trail.closures || []).forEach(function (c) {
       if (c && c.label) parts.push(String(c.label));
     });
+    if (!(trail.closures || []).length) {
+      (trail.drops || []).forEach(function (d) {
+        if (d && d.label) parts.push(String(d.label));
+      });
+    }
     return parts.join(' --> ');
   }
 

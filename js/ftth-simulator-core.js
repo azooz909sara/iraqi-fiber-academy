@@ -834,6 +834,11 @@
     (trail.closures || []).forEach(function (c) {
       if (c && c.label) parts.push(String(c.label));
     });
+    if (!(trail.closures || []).length) {
+      (trail.drops || []).forEach(function (d) {
+        if (d && d.label) parts.push(String(d.label));
+      });
+    }
     return parts.join(' --> ');
   }
 
@@ -1414,6 +1419,11 @@
             return { id: c && c.id, label: c && c.label };
           })
           : [],
+        drops: Array.isArray(meta.mainCableTrail.drops)
+          ? meta.mainCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : [],
         nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
           ? meta.mainCableTrail.nodeIds.slice()
           : [],
@@ -1602,6 +1612,11 @@
             return { id: c && c.id, label: c && c.label };
           })
           : ((cable.mainCableTrail && cable.mainCableTrail.closures) || []).slice(),
+        drops: Array.isArray(meta.mainCableTrail.drops)
+          ? meta.mainCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : ((cable.mainCableTrail && cable.mainCableTrail.drops) || []).slice(),
         nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
           ? meta.mainCableTrail.nodeIds.slice()
           : ((cable.mainCableTrail && cable.mainCableTrail.nodeIds) || []).slice(),

@@ -45,7 +45,7 @@
     { key: 's_tube_color', label: 'S-Cable Tube color', colorCell: true },
     { key: 's_fiber_color', label: 'FAT Cable (Fiber color)', colorCell: true },
     { key: 'fiber_type', label: 'Fiber Type' },
-    { key: 'fat_id', label: 'FAT ID' },
+    { key: 'fat_id', label: 'FAT ID / Pole ID' },
     { key: 'design_path', label: 'Design Path' },
   ];
 
