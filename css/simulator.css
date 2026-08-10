@@ -5190,8 +5190,9 @@ canvas {
 }
 
 .gis-status-bar__push-hint {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: min(72vw, 920px);
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;

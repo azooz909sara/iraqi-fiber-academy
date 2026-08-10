@@ -3337,11 +3337,15 @@
 
   function formatMainCableTrailPath(trail) {
     if (!trail || !trail.cabinetLabel) return '';
-    var parts = [String(trail.cabinetLabel) + ' ' + (trail.cableRoleLabel || 'M-CABLE')];
+    var cableDes = String(trail.cableName || '').trim();
+    var head = cableDes
+      ? (String(trail.cabinetLabel) + ' ' + cableDes + ' M-Cable')
+      : (String(trail.cabinetLabel) + ' M-Cable');
+    var parts = [head];
     (trail.closures || []).forEach(function (c) {
       if (c && c.label) parts.push(String(c.label));
     });
-    return parts.join(' ---> ');
+    return parts.join(' --> ');
   }
 
   function getMainCableVisualSequences() {
@@ -3383,11 +3387,15 @@
 
   function formatSubCableTrailPath(trail) {
     if (!trail || !trail.closureLabel) return '';
-    var parts = [String(trail.closureLabel) + ' ' + (trail.cableRoleLabel || 'S-CABLE')];
+    var cableDes = String(trail.cableName || '').trim();
+    var head = cableDes
+      ? (String(trail.closureLabel) + ' ' + cableDes + ' S-Cable')
+      : (String(trail.closureLabel) + ' S-Cable');
+    var parts = [head];
     (trail.drops || []).forEach(function (d) {
       if (d && d.label) parts.push(String(d.label));
     });
-    return parts.join(' ---> ');
+    return parts.join(' --> ');
   }
 
   function getSubCableVisualSequences() {

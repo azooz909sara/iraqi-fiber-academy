@@ -745,6 +745,7 @@
   function isSubCableDropTargetNode(node) {
     if (!node) return false;
     if (node.type === 'fat_handhole') return true;
+    if (node.type === 'pole') return true;
     if (node.type === 'pole_foundation' && node.hasPole) return true;
     return false;
   }
@@ -755,7 +756,7 @@
       return node.autoName || node.fatSystemName ||
         b()?.getNodeAsBuiltCode?.(node) || 'FH';
     }
-    if (node.type === 'pole_foundation') {
+    if (node.type === 'pole_foundation' || node.type === 'pole') {
       return node.poleName || node.autoName ||
         b()?.getNodeAsBuiltCode?.(node) || 'P';
     }
@@ -852,24 +853,212 @@
     };
   }
 
+  var ACTIVE_PATH_SEP = ' --> ';
+
   function formatMainCableTrailLabel(trail) {
     if (!trail || !trail.cabinetLabel) return '';
-    var role = trail.cableRoleLabel || 'M-CABLE';
-    var parts = [String(trail.cabinetLabel) + ' ' + role];
+    var cableDes = String(trail.cableName || '').trim();
+    var head = cableDes
+      ? (String(trail.cabinetLabel) + ' ' + cableDes + ' M-Cable')
+      : (String(trail.cabinetLabel) + ' M-Cable');
+    var parts = [head];
     (trail.closures || []).forEach(function (c) {
       if (c && c.label) parts.push(String(c.label));
     });
-    return parts.join(' ---> ');
+    return parts.join(ACTIVE_PATH_SEP);
   }
 
+  /**
+   * Sub-Cable Active Path: `C3 12F3 S-Cable --> FH45 --> FH46 --> FH47`
+   */
   function formatSubCableTrailLabel(trail) {
     if (!trail || !trail.closureLabel) return '';
-    var role = trail.cableRoleLabel || 'S-CABLE';
-    var parts = [String(trail.closureLabel) + ' ' + role];
+    var cableDes = String(trail.cableName || '').trim();
+    var head = cableDes
+      ? (String(trail.closureLabel) + ' ' + cableDes + ' S-Cable')
+      : (String(trail.closureLabel) + ' S-Cable');
+    var parts = [head];
     (trail.drops || []).forEach(function (d) {
       if (d && d.label) parts.push(String(d.label));
     });
-    return parts.join(' ---> ');
+    return parts.join(ACTIVE_PATH_SEP);
+  }
+
+  /** Project a map point onto the draft polyline → { d2, along } path distance. */
+  function projectPointOntoDraftPath(px, py, pts) {
+    var best = { d2: Infinity, along: 0 };
+    if (!pts || !pts.length) return best;
+    if (pts.length === 1 && pts[0]) {
+      var sx = px - pts[0][0];
+      var sy = py - pts[0][1];
+      return { d2: sx * sx + sy * sy, along: 0 };
+    }
+    var acc = 0;
+    var i;
+    for (i = 0; i < pts.length - 1; i++) {
+      var a = pts[i];
+      var b = pts[i + 1];
+      if (!a || !b) continue;
+      var dx = b[0] - a[0];
+      var dy = b[1] - a[1];
+      var len2 = dx * dx + dy * dy;
+      var len = Math.sqrt(len2) || 0;
+      var t = len2 < 1e-9 ? 0 : ((px - a[0]) * dx + (py - a[1]) * dy) / len2;
+      if (t < 0) t = 0;
+      if (t > 1) t = 1;
+      var qx = a[0] + t * dx;
+      var qy = a[1] + t * dy;
+      var rx = px - qx;
+      var ry = py - qy;
+      var d2 = rx * rx + ry * ry;
+      if (d2 < best.d2) {
+        best.d2 = d2;
+        best.along = acc + t * len;
+      }
+      acc += len;
+    }
+    return best;
+  }
+
+  /**
+   * Collect every FH/pole along the drawn sub-cable route (snap ids + segment proximity),
+   * ordered by distance along the path — does not truncate the chain.
+   */
+  function collectSubCableDropsAlongDraft(draft) {
+    var trail = draft && draft.subCableTrail;
+    if (!trail || trail.closureId == null) return [];
+    var closureId = String(trail.closureId);
+    var seen = Object.create(null);
+    var ranked = [];
+
+    function consider(node, along) {
+      if (!node || !isSubCableDropTargetNode(node)) return;
+      var id = String(node.id);
+      if (id === closureId || seen[id]) return;
+      seen[id] = true;
+      ranked.push({
+        id: id,
+        label: getSubCableDropLabel(node),
+        along: isFinite(along) ? along : ranked.length,
+      });
+    }
+
+    var pts = draft.points || [];
+    var snapIds = draft.pointSnapNodeIds || [];
+    var labels = draft.snapLabels || [];
+    var i;
+    for (i = 0; i < Math.max(snapIds.length, pts.length); i++) {
+      var alongHint = i;
+      if (pts[i] && i > 0) {
+        var acc = 0;
+        var k;
+        for (k = 0; k < i && k < pts.length - 1; k++) {
+          if (pts[k] && pts[k + 1]) {
+            acc += Math.hypot(pts[k + 1][0] - pts[k][0], pts[k + 1][1] - pts[k][1]);
+          }
+        }
+        alongHint = acc;
+      }
+      if (snapIds[i]) {
+        consider(findSimNodeById(snapIds[i]), alongHint);
+      } else if (labels[i]) {
+        var byLabel = null;
+        if (typeof b()?.resolveNodeBySnapLabel === 'function') {
+          byLabel = b().resolveNodeBySnapLabel(labels[i]);
+        } else if (typeof b()?.findNodeBySnapLabel === 'function') {
+          byLabel = b().findNodeBySnapLabel(labels[i]);
+        }
+        if (byLabel) consider(byLabel, alongHint);
+      }
+    }
+
+    /* Segment proximity: every FH/pole the continuous route passes near */
+    var proxTol = Math.max(1.35, MAX_SNAP_MAP_UNITS);
+    var proxTolSq = proxTol * proxTol;
+    (sim()?.nodes || []).forEach(function (node) {
+      if (!isSubCableDropTargetNode(node) || String(node.id) === closureId) return;
+      if (seen[String(node.id)]) return;
+      var center = getDeviceSnapCenter(node);
+      if (!center) return;
+      var proj = projectPointOntoDraftPath(center.x, center.y, pts);
+      if (proj.d2 <= proxTolSq) consider(node, proj.along);
+    });
+
+    ranked.sort(function (a, b) {
+      if (a.along !== b.along) return a.along - b.along;
+      return String(a.label).localeCompare(String(b.label), undefined, { numeric: true });
+    });
+
+    return ranked.map(function (r) {
+      return { id: r.id, label: r.label };
+    });
+  }
+
+  /**
+   * Rebuild sub-cable drop chain from the full draft route.
+   * Returns { grew, newest } when new poles were captured.
+   */
+  function syncSubCableTrailFromDraft(draft) {
+    if (!draft || !isSubCableTrailActive(draft)) {
+      return { grew: false, newest: null };
+    }
+    var trail = draft.subCableTrail;
+    if (draft.cableName) trail.cableName = draft.cableName;
+    var prevLen = (trail.drops || []).length;
+    var prevTail = prevLen ? String(trail.drops[prevLen - 1].id) : '';
+    var drops = collectSubCableDropsAlongDraft(draft);
+    trail.drops = drops;
+    trail.nodeIds = [String(trail.closureId)].concat(drops.map(function (d) {
+      return String(d.id);
+    }));
+    var S = sim();
+    if (S) S.subCableTrail = trail;
+    var grew = drops.length > prevLen;
+    var newest = null;
+    if (grew && drops.length) {
+      newest = drops[drops.length - 1];
+      /* If multiple new poles appeared at once, flash the latest */
+      if (prevTail && newest && String(newest.id) === prevTail && drops.length > 1) {
+        newest = drops[drops.length - 1];
+      }
+    }
+    return { grew: grew, newest: newest, drops: drops };
+  }
+
+  function flashSubCableDropConfirm(dropEntry, draft) {
+    if (!dropEntry) return;
+    var S = sim();
+    if (!S) return;
+    var node = findSimNodeById(dropEntry.id);
+    var center = node ? getDeviceSnapCenter(node) : null;
+    pinInteractiveConfirmOrigin(node, center
+      ? { x: center.x, y: center.y }
+      : { x: 0, y: 0 });
+    S.subCableDropConfirmUntil = Date.now() + SUB_CABLE_CONFIRM_MS;
+    S.subCableDropConfirmMsg = 'Drop ' + dropEntry.label + ' linked';
+    syncActiveCableTrailStatusHint();
+    b()?.updateStatus?.(
+      'Drop ' + dropEntry.label + ' linked · ' +
+      formatSubCableTrailLabel((draft && draft.subCableTrail) || S.subCableTrail)
+    );
+
+    if (subCableDropConfirmTimer) clearTimeout(subCableDropConfirmTimer);
+    subCableDropConfirmTimer = setTimeout(function () {
+      subCableDropConfirmTimer = null;
+      var live = sim();
+      if (!live) return;
+      if (live.subCableDropConfirmUntil && Date.now() >= live.subCableDropConfirmUntil) {
+        live.subCableDropConfirmUntil = 0;
+        live.subCableDropConfirmMsg = null;
+        if (!live.mainCableStartConfirmUntil && !live.mainCableCheckpointConfirmUntil &&
+            !live.subCableStartConfirmUntil) {
+          live.mainCableConfirmOrigin = null;
+        }
+        syncActiveCableTrailStatusHint();
+      }
+      flushPenCursorVisuals();
+    }, SUB_CABLE_CONFIRM_MS + 40);
+    flushPenCursorVisuals();
   }
 
   function syncActiveCableTrailStatusHint() {
@@ -901,11 +1090,15 @@
     var cabinetLabel = b()?.getNodeAsBuiltCode?.(cabinet) ||
       nodeDisplayName(cabinet) ||
       'Cabinet';
+    var cableName = draft.cableName ||
+      b()?.resolveActiveToolboxCableLabel?.(draft.kind) ||
+      b()?.formatCableLabel?.(draft.capacity, draft.batch || 1) ||
+      '';
     var trail = {
       cabinetId: String(cabinet.id),
       cabinetLabel: cabinetLabel,
       cableRoleLabel: 'M-CABLE',
-      cableName: draft.cableName || '',
+      cableName: cableName,
       closures: [],
       nodeIds: [String(cabinet.id)],
     };
@@ -922,11 +1115,15 @@
   function ensureSubCableTrailFromClosure(closure, draft) {
     if (!closure || !draft) return null;
     var closureLabel = getClosureCheckpointLabel(closure);
+    var cableName = draft.cableName ||
+      b()?.resolveActiveToolboxCableLabel?.(draft.kind) ||
+      b()?.formatCableLabel?.(draft.capacity, draft.batch || 1) ||
+      '';
     var trail = {
       closureId: String(closure.id),
       closureLabel: closureLabel,
       cableRoleLabel: 'S-CABLE',
-      cableName: draft.cableName || '',
+      cableName: cableName,
       drops: [],
       nodeIds: [String(closure.id)],
     };
@@ -1233,56 +1430,34 @@
 
   /**
    * Phase 3: Sub-Cable drop target (FH / pole) linkage — green flash + sequence append.
+   * Full chain is rebuilt from the draft route so intermediate poles are never truncated.
    */
   function signalSubCableDropConfirmed(resolved) {
-    var drop = resolveSubDropFromSnap(resolved);
-    if (!drop) return false;
     var S = sim();
     if (!S) return false;
     var draft = S.penDraft;
     if (!isSubCableTrailActive(draft)) return false;
 
-    var trail = draft.subCableTrail;
-    var dropId = String(drop.id);
-    if (String(trail.closureId) === dropId) return false;
-    if ((trail.nodeIds || []).indexOf(dropId) >= 0) return false;
-    if ((trail.drops || []).some(function (d) { return String(d.id) === dropId; })) {
-      return false;
+    /* Prefer the snapped drop, then rebuild entire route chain from all vertices */
+    var drop = resolveSubDropFromSnap(resolved);
+    if (drop && draft.pointSnapNodeIds && draft.pointSnapNodeIds.length) {
+      var lastIdx = draft.pointSnapNodeIds.length - 1;
+      if (!draft.pointSnapNodeIds[lastIdx]) {
+        draft.pointSnapNodeIds[lastIdx] = drop.id;
+      }
+      if (draft.snapLabels && !draft.snapLabels[lastIdx]) {
+        draft.snapLabels[lastIdx] = getSubCableDropLabel(drop);
+      }
     }
 
-    var label = getSubCableDropLabel(drop);
-    trail.drops.push({ id: dropId, label: label });
-    trail.nodeIds.push(dropId);
-    S.subCableTrail = trail;
-
-    pinInteractiveConfirmOrigin(drop, resolved);
-    S.subCableDropConfirmUntil = Date.now() + SUB_CABLE_CONFIRM_MS;
-    S.subCableDropConfirmMsg = 'Drop ' + label + ' linked';
-
-    var pathMsg = 'Active Path · ' + formatSubCableTrailLabel(trail);
-    S.subCableTrailStatusMsg = pathMsg;
-    b()?.setPushHint?.(pathMsg);
-    b()?.updateStatus?.('Drop ' + label + ' linked · ' + formatSubCableTrailLabel(trail));
-
-    if (subCableDropConfirmTimer) clearTimeout(subCableDropConfirmTimer);
-    subCableDropConfirmTimer = setTimeout(function () {
-      subCableDropConfirmTimer = null;
-      var live = sim();
-      if (!live) return;
-      if (live.subCableDropConfirmUntil && Date.now() >= live.subCableDropConfirmUntil) {
-        live.subCableDropConfirmUntil = 0;
-        live.subCableDropConfirmMsg = null;
-        if (!live.mainCableStartConfirmUntil && !live.mainCableCheckpointConfirmUntil &&
-            !live.subCableStartConfirmUntil) {
-          live.mainCableConfirmOrigin = null;
-        }
-        syncActiveCableTrailStatusHint();
-      }
-      flushPenCursorVisuals();
-    }, SUB_CABLE_CONFIRM_MS + 40);
-
-    flushPenCursorVisuals();
-    return true;
+    var sync = syncSubCableTrailFromDraft(draft);
+    if (sync.grew && sync.newest) {
+      flashSubCableDropConfirm(sync.newest, draft);
+      return true;
+    }
+    /* Even without growth, keep Active Path naming up to date (cable designator, etc.) */
+    syncActiveCableTrailStatusHint();
+    return !!drop;
   }
 
   function pickCableDeviceSnapOnClick(clientX, clientY) {
@@ -2675,11 +2850,20 @@
       if (!mainStartConfirmed && !subStartConfirmed && isMainCableTrailActive(draft)) {
         closureLinked = signalClosureCheckpointConfirmed(resolved);
       }
-      /* Phase 3: Sub-Cable FH/pole drops */
+      /* Phase 3: Sub-Cable FH/pole drops — full chain along draft route */
       var dropLinked = false;
       if (!mainStartConfirmed && !subStartConfirmed && !closureLinked &&
           isSubCableTrailActive(draft)) {
         dropLinked = signalSubCableDropConfirmed(resolved);
+        if (!dropLinked) {
+          var chainSync = syncSubCableTrailFromDraft(draft);
+          if (chainSync.grew && chainSync.newest) {
+            flashSubCableDropConfirm(chainSync.newest, draft);
+            dropLinked = true;
+          } else {
+            syncActiveCableTrailStatusHint();
+          }
+        }
       }
       if (mainStartConfirmed || subStartConfirmed || closureLinked || dropLinked) {
         /* Bottom bar already shows Main/Sub Cable sequence. */
@@ -3156,7 +3340,12 @@
 
         var createdRef = null;
         var wasContinue = !!(draft.continueFromCable && draft.continueFromCable.id);
-        /* Phase 2–3: persist visual Main/Sub Cable sequences (metadata only). */
+        /* Phase 2–3: persist visual Main/Sub Cable sequences (metadata only).
+           Rebuild full FH chain from the complete route before snapshot. */
+        if (isSubCableTrailActive(draft)) {
+          syncSubCableTrailFromDraft(draft);
+          syncActiveCableTrailStatusHint();
+        }
         var mainCableTrailSnapshot = cloneMainCableTrail(draft.mainCableTrail);
         var subCableTrailSnapshot = cloneSubCableTrail(draft.subCableTrail);
         if (wasContinue) {

@@ -797,27 +797,34 @@
         Sim.subCableStartConfirmMsg) {
       return String(Sim.subCableStartConfirmMsg);
     }
-    /* Phase 3: progressive Sub-Cable → FH/pole sequence */
+    /* Phase 3: progressive Sub-Cable → FH/pole sequence
+       Format: C3 12F3 S-Cable --> FH45 --> FH46 --> FH47 */
     var subTrail = (Sim.penDraft && Sim.penDraft.subCableTrail) || Sim.subCableTrail;
     if (subTrail && subTrail.closureLabel) {
       if (Sim.subCableTrailStatusMsg) return String(Sim.subCableTrailStatusMsg);
-      var subRole = subTrail.cableRoleLabel || 'S-CABLE';
-      var subParts = [String(subTrail.closureLabel) + ' ' + subRole];
+      var subCableDes = String(subTrail.cableName || '').trim();
+      var subHead = subCableDes
+        ? (String(subTrail.closureLabel) + ' ' + subCableDes + ' S-Cable')
+        : (String(subTrail.closureLabel) + ' S-Cable');
+      var subParts = [subHead];
       (subTrail.drops || []).forEach(function (d) {
         if (d && d.label) subParts.push(String(d.label));
       });
-      return 'Active Path · ' + subParts.join(' ---> ');
+      return 'Active Path · ' + subParts.join(' --> ');
     }
     /* Phase 2: progressive Main Cable → closure sequence while drawing */
     var trail = (Sim.penDraft && Sim.penDraft.mainCableTrail) || Sim.mainCableTrail;
     if (trail && trail.cabinetLabel) {
       if (Sim.mainCableTrailStatusMsg) return String(Sim.mainCableTrailStatusMsg);
-      var role = trail.cableRoleLabel || 'M-CABLE';
-      var parts = [String(trail.cabinetLabel) + ' ' + role];
+      var mainCableDes = String(trail.cableName || '').trim();
+      var mainHead = mainCableDes
+        ? (String(trail.cabinetLabel) + ' ' + mainCableDes + ' M-Cable')
+        : (String(trail.cabinetLabel) + ' M-Cable');
+      var parts = [mainHead];
       (trail.closures || []).forEach(function (c) {
         if (c && c.label) parts.push(String(c.label));
       });
-      return 'Active Path · ' + parts.join(' ---> ');
+      return 'Active Path · ' + parts.join(' --> ');
     }
     var draft = Sim.penDraft;
     if (draft && draft.points && draft.points.length > 0) {
@@ -11065,9 +11072,13 @@
     var activeEl = document.getElementById('status-bar-active-path');
     if (activeEl) {
       activeEl.textContent = next;
+      activeEl.title = next;
     } else {
       var el = document.getElementById('status-bar-push-hint');
-      if (el && !Sim.ui.batchDuplicationWarning) el.textContent = next;
+      if (el && !Sim.ui.batchDuplicationWarning) {
+        el.textContent = next;
+        el.title = next;
+      }
     }
     /* Keep duplication badge on top when active — Active Path stays stored for restore. */
     if (Sim.ui.batchDuplicationWarning) {
