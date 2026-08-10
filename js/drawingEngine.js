@@ -24,7 +24,7 @@
   var MAIN_CABLE_CONFIRM_RING = '#16a34a';
   var MAIN_CABLE_CLOSURE_HOVER_RING = '#eab308';
   var SUB_CABLE_START_HOVER_RING = '#38bdf8';
-  var SUB_CABLE_DROP_HOVER_RING = '#0284c7';
+  var SUB_CABLE_DROP_HOVER_RING = '#f97316'; /* Orange — FH/pole drop hover */
   var PEN_RUBBER_COLOR = '#f97316';
   var PEN_RUBBER_DASH = '5,5';
   var CUT_PREVIEW_COLOR = '#ef4444';
@@ -3013,7 +3013,7 @@
        * Interactive cues (feedback only):
        * - awaiting start → Cabinet (red) else Closure (sky) for Sub start
        * - Main trail → closure checkpoint (yellow)
-       * - Sub trail → FH/pole drop (deep sky)
+       * - Sub trail → FH/pole drop (orange)
        */
       var cabinetSnap = null;
       var mainClosureSnap = null;

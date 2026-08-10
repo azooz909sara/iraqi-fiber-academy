@@ -5479,31 +5479,10 @@
     box.appendChild(section);
   }
 
+  /** Floating emergency save badge removed — finish via double-click / standard gestures only. */
   function syncCableEmergencySaveButton() {
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!wrap) return;
     var btn = document.getElementById('cable-emergency-save-btn');
-    var show = isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable' &&
-      Sim.penDraft && Sim.penDraft.points && Sim.penDraft.points.length >= 2;
-    if (!show) {
-      if (btn) btn.style.display = 'none';
-      return;
-    }
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'cable-emergency-save-btn';
-      btn.type = 'button';
-      btn.className = 'cable-emergency-save-btn';
-      btn.textContent = 'إنهاء وحفظ الكيبل';
-      btn.setAttribute('aria-label', 'Finish and save cable');
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        global.FTTHDrawingEngine?.finishPenDrawing?.({ trimDblClick: false, emergency: true });
-      });
-      wrap.appendChild(btn);
-    }
-    btn.style.display = '';
+    if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
   }
 
   function isQuickNestToolSelected() {
