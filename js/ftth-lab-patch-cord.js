@@ -151,12 +151,13 @@
     var pos = (typeof x === 'number' && typeof y === 'number')
       ? { x: x, y: y }
       : defaultPos();
+    var span = 120; /* vertical A (top) → B (bottom) */
     var cord = {
       id: 'pc-' + seq,
       ax: pos.x,
       ay: pos.y,
-      bx: pos.x + 120,
-      by: pos.y,
+      bx: pos.x,
+      by: pos.y + span,
       sideA: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
       sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
       route: [],
@@ -167,7 +168,7 @@
     rebuildLayer();
     pushHistory();
     refreshBudget();
-    setStatus('Patch cord placed · drag a free end — gravity Bezier sag · snap into a port to lock');
+    setStatus('Patch cord placed · vertical span · drag a free end to route · snap into a port to lock');
     return cord;
   }
 
@@ -653,8 +654,9 @@
       endLinkSession({ silent: true });
       return false;
     }
-    appendRoutePoint(c, hit.wx, hit.wy);
     attachEnd(c, freeEnd, hit);
+    var seatTip = bootExitStub(c, freeEnd);
+    appendRoutePoint(c, seatTip.x, seatTip.y);
     lockDrawnPath(c);
     flashPort(hit.el);
     endLinkSession({ silent: true });
@@ -785,8 +787,13 @@
 
   var END_W = 14;
   var END_H = 22;
-  var BOOT_CABLE_GAP = 1.5;
-  var CABLE_ATTACH_OFFSET = END_H / 2 + BOOT_CABLE_GAP;
+  /*
+   * Local frame matches CSS: ferrule at top (−Y), ribbed boot at bottom (+Y).
+   * World pos = button center (transform-origin 50% 50%).
+   */
+  var BOOT_EXIT_OFFSET = END_H / 2; /* rear tip of boot flush with button bottom */
+  var BOOT_EXIT_STUB = 10; /* straight run past the tip before any curve */
+  var BODY_CLEAR_PX = END_H / 2 + 3;
   var UNPLUG_PULL_PX = 36;
   var PLUG_SNAP_PX = 22;
   /** Base gravity sag (px); also scaled by end-to-end distance */
@@ -814,25 +821,30 @@
   }
 
   /**
-   * CSS clockwise rotate: boot (local +Y) faces the cable.
-   * α = 90° − atan2(dy, dx)
+   * CSS rotate(θ) is clockwise with y+ down:
+   *   x' =  x cosθ − y sinθ
+   *   y' =  x sinθ + y cosθ
+   * Local +Y = ribbed boot (cable); local −Y = ferrule (port).
+   * α = 90° − atan2(dy, dx) aims the boot toward (dx, dy).
    */
   function endRotationDeg(cx, cy, towardX, towardY) {
     return 90 - Math.atan2(towardY - cy, towardX - cx) * 180 / Math.PI;
   }
 
+  /** Unit vector of local +Y after CSS rotate — rear boot → cable. */
   function bootOutDir(rotDeg) {
     var r = rotDeg * Math.PI / 180;
-    return { x: Math.sin(r), y: Math.cos(r) };
+    return { x: -Math.sin(r), y: Math.cos(r) };
   }
 
+  /** Map connector-local coords onto world using the same matrix as CSS rotate(). */
   function localToWorld(cx, cy, lx, ly, rotDeg) {
     var r = rotDeg * Math.PI / 180;
     var cos = Math.cos(r);
     var sin = Math.sin(r);
     return {
-      x: cx + lx * cos + ly * sin,
-      y: cy - lx * sin + ly * cos,
+      x: cx + lx * cos - ly * sin,
+      y: cy + lx * sin + ly * cos,
     };
   }
 
@@ -850,7 +862,7 @@
     return endRotationDeg(p.x, p.y, o.x, o.y);
   }
 
-  /** Seat on port using locked rotation only — pose stays frozen while the free end moves. */
+  /** Seat on port: ferrule on the port face, boot aimed along the locked axis. */
   function seatEndAtPort(cord, end, portX, portY) {
     var side = cord[endKey(end)];
     var rot = getEndRotation(cord, end);
@@ -859,14 +871,34 @@
       side.attached.lockedRot = rot;
     }
     var t = bootOutDir(rot);
-    setEndWorld(cord, end, portX + t.x * 5, portY + t.y * 5);
+    /* center = port + bootDir * ferruleDepth  ⇒  ferrule (local −Y) lands on port */
+    setEndWorld(cord, end, portX + t.x * BOOT_EXIT_OFFSET, portY + t.y * BOOT_EXIT_OFFSET);
   }
 
-  /** Yellow fiber permanently leaves the rear tip of the ribbed boot. */
+  /**
+   * Exact rear tip of the ribbed boot in world space (CSS-aligned).
+   * Never the ferrule or mid-body — A/B, free or plugged.
+   */
   function bootAnchor(cord, end) {
     var p = getEndWorld(cord, end);
     var rot = getEndRotation(cord, end);
-    return localToWorld(p.x, p.y, 0, CABLE_ATTACH_OFFSET, rot);
+    return localToWorld(p.x, p.y, 0, BOOT_EXIT_OFFSET, rot);
+  }
+
+  /** Short outward stub past the boot tip so the fiber leaves straight before curving. */
+  function bootExitStub(cord, end) {
+    var tip = bootAnchor(cord, end);
+    var t = bootOutDir(getEndRotation(cord, end));
+    return {
+      x: tip.x + t.x * BOOT_EXIT_STUB,
+      y: tip.y + t.y * BOOT_EXIT_STUB,
+    };
+  }
+
+  /** True if a sample sits inside/near a connector body (would pierce housing if used). */
+  function pointInsideConnectorBody(cord, end, x, y) {
+    var c = getEndWorld(cord, end);
+    return dist2(c.x, c.y, x, y) < BODY_CLEAR_PX;
   }
 
   function ensureRoute(cord) {
@@ -924,18 +956,36 @@
   function buildCablePoints(cord) {
     var a = bootAnchor(cord, 'A');
     var b = bootAnchor(cord, 'B');
+    var aStub = bootExitStub(cord, 'A');
+    var bStub = bootExitStub(cord, 'B');
     var route = ensureRoute(cord).slice();
-    if (!route.length) return [a, b];
-    /*
-     * Orient waypoints A → B so dragging either free end yields the same
-     * stable shape (trail may have been recorded toward A or toward B).
-     */
+
+    if (!route.length) return [a, aStub, bStub, b];
+
     if (route.length >= 1) {
       var dFirstA = dist2(route[0].x, route[0].y, a.x, a.y);
       var dLastA = dist2(route[route.length - 1].x, route[route.length - 1].y, a.x, a.y);
       if (dLastA < dFirstA) route.reverse();
     }
-    return [a].concat(route).concat([b]);
+
+    /* Keep only mid-span samples — drop anything inside a connector or on the exit stubs */
+    var cleaned = [];
+    var i;
+    for (i = 0; i < route.length; i++) {
+      var p = route[i];
+      if (pointInsideConnectorBody(cord, 'A', p.x, p.y)) continue;
+      if (pointInsideConnectorBody(cord, 'B', p.x, p.y)) continue;
+      if (dist2(p.x, p.y, a.x, a.y) < 3) continue;
+      if (dist2(p.x, p.y, b.x, b.y) < 3) continue;
+      if (dist2(p.x, p.y, aStub.x, aStub.y) < 2.5) continue;
+      if (dist2(p.x, p.y, bStub.x, bStub.y) < 2.5) continue;
+      if (cleaned.length && dist2(cleaned[cleaned.length - 1].x, cleaned[cleaned.length - 1].y, p.x, p.y) < 2) {
+        continue;
+      }
+      cleaned.push(p);
+    }
+
+    return [a, aStub].concat(cleaned).concat([bStub, b]);
   }
 
   /** Smooth SVG path through recorded waypoints (Catmull-Rom → cubic Bezier). */
@@ -981,24 +1031,39 @@
 
   /**
    * Fallback only for untraced cords (no mouse path yet).
+   * Both ends free → clean chord along boot exit axes (no sideways sag).
+   * One end plugged → light gravity sag toward the free end.
    */
   function gravityBezierPath(cord) {
     var p0 = bootAnchor(cord, 'A');
     var p3 = bootAnchor(cord, 'B');
+    var tA = bootOutDir(getEndRotation(cord, 'A'));
+    var tB = bootOutDir(getEndRotation(cord, 'B'));
     var dx = p3.x - p0.x;
     var dy = p3.y - p0.y;
     var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var bothFree = !cord.sideA.attached && !cord.sideB.attached;
+
+    if (bothFree) {
+      /* Handles follow each boot’s rear-exit vector for a clean vertical stub */
+      var h = Math.min(BOOT_EXIT_STUB + 12, Math.max(BOOT_EXIT_STUB, dist * 0.22));
+      return (
+        'M ' + p0.x + ' ' + p0.y +
+        ' C ' + (p0.x + tA.x * h) + ' ' + (p0.y + tA.y * h) + ', ' +
+        (p3.x + tB.x * h) + ' ' + (p3.y + tB.y * h) + ', ' +
+        p3.x + ' ' + p3.y
+      );
+    }
+
     var gravityOffset = Math.min(
       GRAVITY_SAG_MAX,
       Math.max(GRAVITY_SAG_MIN, GRAVITY_OFFSET * 0.45 + dist * GRAVITY_SAG_RATIO)
     );
-    var tA = bootOutDir(getEndRotation(cord, 'A'));
-    var tB = bootOutDir(getEndRotation(cord, 'B'));
     var handle = Math.min(96, Math.max(28, dist * 0.35));
     var p1x = p0.x + tA.x * handle;
-    var p1y = p0.y + tA.y * handle + gravityOffset;
+    var p1y = p0.y + tA.y * handle + gravityOffset * 0.35;
     var p2x = p3.x + tB.x * handle;
-    var p2y = p3.y + tB.y * handle + gravityOffset;
+    var p2y = p3.y + tB.y * handle + gravityOffset * 0.35;
     return (
       'M ' + p0.x + ' ' + p0.y +
       ' C ' + p1x + ' ' + p1y + ', ' + p2x + ' ' + p2y + ', ' + p3.x + ' ' + p3.y
@@ -1226,7 +1291,9 @@
 
           setEndWorld(c, end, mouse.x, mouse.y);
           if (c[endKey(otherEnd)].attached && !c.pathLocked) {
-            appendRoutePoint(c, mouse.x, mouse.y);
+            /* Record at the free boot tip (not the connector center) to avoid body piercing */
+            var tip = bootExitStub(c, end);
+            appendRoutePoint(c, tip.x, tip.y);
           }
           updateFiberPath(c);
 
@@ -1265,8 +1332,11 @@
               rect.left + rect.width / 2, rect.top + rect.height / 2
             );
             if (dScreen <= PLUG_SNAP_PX * 1.75) {
-              appendRoutePoint(c, hit.wx, hit.wy);
               attachEnd(c, end, hit);
+              if (!c.pathLocked) {
+                var seatTip = bootExitStub(c, end);
+                appendRoutePoint(c, seatTip.x, seatTip.y);
+              }
               pluggedNow = true;
               flashPort(hit.el);
               if (c[endKey(otherEnd)].attached) {
