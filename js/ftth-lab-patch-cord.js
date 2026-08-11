@@ -158,8 +158,8 @@
       ay: pos.y,
       bx: pos.x,
       by: pos.y + span,
-      sideA: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
-      sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
+      sideA: { polish: 'PC', attached: null, mismatch: false, lockedRot: null, liveRot: null },
+      sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null, liveRot: null },
       route: [],
       pathLocked: false,
     };
@@ -232,8 +232,9 @@
     var mismatch = !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
     var otherEnd = oppositeEnd(end);
-    var other = getEndWorld(cord, otherEnd);
-    var lockedRot = endRotationDeg(hit.wx, hit.wy, other.x, other.y);
+    /* Snap to the port's fixed axis — professional straight seat */
+    var lockedRot = portAlignedRotation(hit);
+    side.liveRot = null;
     side.attached = {
       owner: hit.owner,
       polish: portPolishNorm(hit.polish) === 'APC' ? 'APC' : 'UPC',
@@ -265,7 +266,7 @@
     side.attached = null;
     side.mismatch = false;
     side.lockedRot = null;
-    /* Allow redrawing after an unplug */
+    /* Keep last live heading if any; drag will update it */
     cord.pathLocked = false;
   }
 
@@ -333,9 +334,6 @@
       var side = cord[endKey(end)];
       if (!side.attached) return;
       var att = side.attached;
-      if (typeof att.lockedRot === 'number' && typeof side.lockedRot !== 'number') {
-        side.lockedRot = att.lockedRot;
-      }
       var el = null;
       if (att.owner === 'olt') {
         el = document.querySelector(
@@ -347,6 +345,9 @@
           var pt = clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
           att.wx = pt.x;
           att.wy = pt.y;
+          side.lockedRot = portAlignedRotation({ owner: 'olt', el: el, wx: pt.x, wy: pt.y });
+          att.lockedRot = side.lockedRot;
+          side.liveRot = null;
           seatEndAtPort(cord, end, pt.x, pt.y);
         }
         return;
@@ -361,6 +362,9 @@
           var pt2 = clientToWorld(r2.left + r2.width / 2, r2.top + r2.height / 2);
           att.wx = pt2.x;
           att.wy = pt2.y;
+          side.lockedRot = portAlignedRotation({ owner: 'splitter', el: el, wx: pt2.x, wy: pt2.y });
+          att.lockedRot = side.lockedRot;
+          side.liveRot = null;
           seatEndAtPort(cord, end, pt2.x, pt2.y);
         }
       }
@@ -627,8 +631,8 @@
       ay: hit.wy,
       bx: freeX,
       by: freeY,
-      sideA: { polish: polish, attached: null, mismatch: false, lockedRot: null },
-      sideB: { polish: polish, attached: null, mismatch: false, lockedRot: null },
+      sideA: { polish: polish, attached: null, mismatch: false, lockedRot: null, liveRot: null },
+      sideB: { polish: polish, attached: null, mismatch: false, lockedRot: null, liveRot: null },
       route: [],
       pathLocked: false,
     };
@@ -794,6 +798,8 @@
   var BOOT_EXIT_OFFSET = END_H / 2; /* rear tip of boot flush with button bottom */
   var BOOT_EXIT_STUB = 10; /* straight run past the tip before any curve */
   var BODY_CLEAR_PX = END_H / 2 + 3;
+  var HEADING_MIN_PX = 2.5; /* ignore micro jitter when updating live heading */
+  var HEADING_SMOOTH = 0.42; /* blend factor toward new motion heading */
   var UNPLUG_PULL_PX = 36;
   var PLUG_SNAP_PX = 22;
   /** Base gravity sag (px); also scaled by end-to-end distance */
@@ -821,14 +827,17 @@
   }
 
   /**
-   * CSS rotate(θ) is clockwise with y+ down:
-   *   x' =  x cosθ − y sinθ
-   *   y' =  x sinθ + y cosθ
-   * Local +Y = ribbed boot (cable); local −Y = ferrule (port).
-   * α = 90° − atan2(dy, dx) aims the boot toward (dx, dy).
+   * CSS rotate(θ) with y+ down:
+   *   x' = x cosθ − y sinθ
+   *   y' = x sinθ + y cosθ
+   * Local +Y = boot (rear); local −Y = ferrule (nose).
+   * bootOutDir(θ) = (−sin θ, cos θ). Aim that vector at (toward − center):
+   *   θ = atan2(−tx, ty)
    */
   function endRotationDeg(cx, cy, towardX, towardY) {
-    return 90 - Math.atan2(towardY - cy, towardX - cx) * 180 / Math.PI;
+    var tx = towardX - cx;
+    var ty = towardY - cy;
+    return Math.atan2(-tx, ty) * 180 / Math.PI;
   }
 
   /** Unit vector of local +Y after CSS rotate — rear boot → cable. */
@@ -848,6 +857,65 @@
     };
   }
 
+  /** Shortest-path blend between two CSS degrees. */
+  function lerpAngleDeg(from, to, t) {
+    var d = ((to - from + 540) % 360) - 180;
+    return from + d * t;
+  }
+
+  /**
+   * Drag heading: ferrule/nose leads along (dx, dy); boot trails opposite.
+   * Ferrule after rotate = (sin θ, −cos θ) ⇒ θ = atan2(dx, −dy).
+   */
+  function headingRotFromMotion(dx, dy) {
+    return Math.atan2(dx, -dy) * 180 / Math.PI;
+  }
+
+  /**
+   * Straight plug axis for a port: boot faces outward from the equipment
+   * (cardinal), ferrule points into the port.
+   */
+  function portAlignedRotation(hit) {
+    var el = hit && hit.el;
+    var outX = 0;
+    var outY = 1;
+
+    if (el) {
+      var face = el.querySelector('.lab-fx-port__cage') || el.querySelector('i') || el;
+      var rect = face.getBoundingClientRect();
+      var parent = el.closest('[data-spl-node], .lab-fx-card, .lab-fx-chassis-frame, .lab-cas-cassette');
+      var pcx = rect.left + rect.width / 2;
+      var pcy = rect.top + rect.height / 2;
+
+      if (parent) {
+        var pref = parent.getBoundingClientRect();
+        outX = pcx - (pref.left + pref.width / 2);
+        outY = pcy - (pref.top + pref.height / 2);
+      }
+
+      if (Math.abs(outX) < 2 && Math.abs(outY) < 2) {
+        if (hit.owner === 'olt' || (el.classList && el.classList.contains('lab-fx-port'))) {
+          outX = -1;
+          outY = 0;
+        } else {
+          outX = 0;
+          outY = 1;
+        }
+      } else if (Math.abs(outX) >= Math.abs(outY)) {
+        outX = outX >= 0 ? 1 : -1;
+        outY = 0;
+      } else {
+        outX = 0;
+        outY = outY >= 0 ? 1 : -1;
+      }
+    } else if (hit && hit.owner === 'olt') {
+      outX = -1;
+      outY = 0;
+    }
+
+    return endRotationDeg(0, 0, outX, outY);
+  }
+
   function getEndRotation(cord, end) {
     var side = cord[endKey(end)];
     if (side.attached) {
@@ -857,9 +925,24 @@
         return side.lockedRot;
       }
     }
+    /* Live drag heading (nose → motion) drives CSS rotate + bootAnchor */
+    if (typeof side.liveRot === 'number') return side.liveRot;
     var p = getEndWorld(cord, end);
     var o = end === 'A' ? { x: cord.bx, y: cord.by } : { x: cord.ax, y: cord.ay };
     return endRotationDeg(p.x, p.y, o.x, o.y);
+  }
+
+  /** Apply smoothed motion heading while an end is free / being dragged. */
+  function updateLiveHeading(cord, end, dx, dy) {
+    var side = cord[endKey(end)];
+    if (!side || side.attached) return;
+    if (dist2(0, 0, dx, dy) < HEADING_MIN_PX) return;
+    var target = headingRotFromMotion(dx, dy);
+    if (typeof side.liveRot === 'number') {
+      side.liveRot = lerpAngleDeg(side.liveRot, target, HEADING_SMOOTH);
+    } else {
+      side.liveRot = target;
+    }
   }
 
   /** Seat on port: ferrule on the port face, boot aimed along the locked axis. */
@@ -871,13 +954,12 @@
       side.attached.lockedRot = rot;
     }
     var t = bootOutDir(rot);
-    /* center = port + bootDir * ferruleDepth  ⇒  ferrule (local −Y) lands on port */
     setEndWorld(cord, end, portX + t.x * BOOT_EXIT_OFFSET, portY + t.y * BOOT_EXIT_OFFSET);
   }
 
   /**
-   * Exact rear tip of the ribbed boot in world space (CSS-aligned).
-   * Never the ferrule or mid-body — A/B, free or plugged.
+   * Exact rear tip of the ribbed boot in world space (uses current rotation,
+   * including live drag heading).
    */
   function bootAnchor(cord, end) {
     var p = getEndWorld(cord, end);
@@ -1073,9 +1155,11 @@
   function endStyle(cord, end) {
     var p = getEndWorld(cord, end);
     var rot = getEndRotation(cord, end);
+    /* Pivot at connector center — left/top place the box so (END_W/2, END_H/2) = world p */
     return (
       'left:' + Math.round(p.x - END_W / 2) + 'px;' +
       'top:' + Math.round(p.y - END_H / 2) + 'px;' +
+      'transform-origin:50% 50%;' +
       'transform:rotate(' + rot.toFixed(2) + 'deg)'
     );
   }
@@ -1240,6 +1324,8 @@
         var pluggedNow = false;
         var otherEnd = oppositeEnd(end);
         var otherWasLocked = !!c[endKey(otherEnd)].attached;
+        var startWorld = clientToWorld(e.clientX, e.clientY);
+        var lastWorld = { x: startWorld.x, y: startWorld.y };
 
         /*
          * Free end + other plugged → continue / extend manual path on this drag.
@@ -1275,6 +1361,8 @@
             }
             released = true;
             detachEnd(c, end);
+            lastWorld.x = mouse.x;
+            lastWorld.y = mouse.y;
             /* Keep cord.route intact — do not clearDrawnPath on unplug */
             btn.classList.remove('is-attached', 'is-mismatch', 'is-tension');
             btn.classList.add('is-unplugging');
@@ -1287,6 +1375,15 @@
           if (c[endKey(otherEnd)].attached) {
             var oAtt = c[endKey(otherEnd)].attached;
             seatEndAtPort(c, otherEnd, oAtt.wx, oAtt.wy);
+          }
+
+          /* Dynamic heading: nose follows mouse motion; boot trails (feeds bootAnchor) */
+          if (!c[endKey(end)].attached) {
+            updateLiveHeading(c, end, mouse.x - lastWorld.x, mouse.y - lastWorld.y);
+            if (dist2(lastWorld.x, lastWorld.y, mouse.x, mouse.y) >= HEADING_MIN_PX) {
+              lastWorld.x = mouse.x;
+              lastWorld.y = mouse.y;
+            }
           }
 
           setEndWorld(c, end, mouse.x, mouse.y);

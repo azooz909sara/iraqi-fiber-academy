@@ -1746,6 +1746,7 @@ body {
   cursor: grabbing;
   z-index: 8;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+  transition: none;
 }
 
 .lab-pcord__end.is-tension {
@@ -1757,6 +1758,7 @@ body {
 }
 
 .lab-pcord__end.is-just-plugged {
+  transition: transform 0.22s ease-out;
   animation: lab-pcord-plug 0.32s ease-out;
 }
 
