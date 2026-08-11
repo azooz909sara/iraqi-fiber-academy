@@ -1123,6 +1123,9 @@
         chassisX = originX + dx;
         chassisY = originY + dy;
         applyChassisLayout();
+        if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+          FtthLab.notifyLayoutChange();
+        }
       }
 
       function onUp() {
@@ -1132,6 +1135,9 @@
         if (moved) {
           pushHistory();
           setStatus('Chassis moved on grid');
+          if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+            FtthLab.notifyLayoutChange();
+          }
         }
       }
 

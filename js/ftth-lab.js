@@ -185,6 +185,7 @@
     if (target.closest('.lab-fx-port')) return false;
     if (target.closest('.lab-fx-chassis-frame')) return false;
     if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
+    if (target.closest('.lab-pcord')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -513,6 +514,7 @@
             global.FtthLab._patchPending = null;
             setStatus('Patch cancelled');
           }
+          notifyTools('cancelPatch');
           return;
         }
         if (key === 'Delete' || key === 'Backspace') {
@@ -566,6 +568,36 @@
   function setBudget(text) {
     var chip = $('lab-hud-budget');
     if (chip) chip.textContent = text || 'Power budget · —';
+  }
+
+  function refreshPowerBudget() {
+    var loss = 0;
+    var mismatches = 0;
+    Object.keys(state.tools).forEach(function (id) {
+      var tool = state.tools[id];
+      if (tool && typeof tool.getNetworkLossDb === 'function') {
+        try {
+          loss += Number(tool.getNetworkLossDb()) || 0;
+        } catch (err) { /* ignore */ }
+      }
+      if (tool && typeof tool.getMismatchCount === 'function') {
+        try {
+          mismatches += Number(tool.getMismatchCount()) || 0;
+        } catch (err2) { /* ignore */ }
+      }
+    });
+    loss = Math.round(loss * 100) / 100;
+    var text;
+    if (loss <= 0) {
+      text = 'Power budget · no active fiber path';
+    } else if (mismatches > 0) {
+      text = 'Power budget · Total Signal Loss ' + loss.toFixed(2) +
+        ' dB · ' + mismatches + ' polish mismatch warning' + (mismatches > 1 ? 's' : '');
+    } else {
+      text = 'Power budget · Total Signal Loss ' + loss.toFixed(2) + ' dB';
+    }
+    setBudget(text);
+    return loss;
   }
 
   /* ─── Shared HTML5 drag session (toolbox → workspace) ─── */
@@ -658,6 +690,8 @@
     centerWorldInView: centerWorldInView,
     showAlert: showAlert,
     setBudget: setBudget,
+    refreshPowerBudget: refreshPowerBudget,
+    notifyLayoutChange: function () { notifyTools('onLayoutChange'); },
     beginDrag: beginDrag,
     endDrag: endDrag,
     getActiveDrag: getActiveDrag,

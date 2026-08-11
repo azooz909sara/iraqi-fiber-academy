@@ -1517,3 +1517,224 @@ body {
   cursor: pointer;
   line-height: 1;
 }
+
+/* ── Patch Cord — free-floating fiber jumper ── */
+.lab-tool__mark--pcord {
+  width: 1.35rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(202, 138, 4, 0.75);
+  background:
+    linear-gradient(90deg, #2563eb 0 18%, #facc15 18% 82%, #16a34a 82% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.lab-tool--pcord {
+  border-color: rgba(234, 179, 8, 0.35);
+  background: linear-gradient(180deg, rgba(66, 48, 6, 0.55), rgba(15, 23, 42, 0.72));
+}
+
+.lab-tool--pcord.is-selected {
+  border-color: rgba(250, 204, 21, 0.65);
+  background: rgba(161, 98, 7, 0.28);
+}
+
+.lab-tool--pcord .lab-tool__copy strong {
+  color: #fde68a;
+}
+
+.lab-pcord-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lab-pcord-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lab-pcord-fiber-hit {
+  stroke: transparent;
+  stroke-width: 12;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+.lab-pcord-fiber {
+  stroke: #facc15;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  pointer-events: none;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
+}
+
+.lab-pcord-fiber.is-selected {
+  stroke: #fde047;
+  stroke-width: 2.75;
+}
+
+.lab-pcord-fiber.is-mismatch {
+  stroke: #fb923c;
+  stroke-dasharray: 5 3;
+}
+
+.lab-pcord {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Mini SC connector — sized to sit inside splitter / SFP port faces */
+.lab-pcord__end {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  width: 14px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  user-select: none;
+  touch-action: none;
+  transition: transform 0.1s ease, filter 0.1s ease;
+}
+
+.lab-pcord__housing {
+  position: relative;
+  width: 10px;
+  height: 11px;
+  border-radius: 1px;
+  border: 1px solid rgba(15, 23, 42, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 1px;
+}
+
+.lab-pcord__ferrule {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 0.5px;
+  background: #f8fafc;
+  border: 0.5px solid #cbd5e1;
+  box-shadow: 0 0 0 0.5px rgba(15, 23, 42, 0.2);
+}
+
+.lab-pcord__boot {
+  width: 7px;
+  height: 5px;
+  margin-top: -1px;
+  border-radius: 0 0 2px 2px;
+  border: 1px solid rgba(15, 23, 42, 0.35);
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.18) 0 1px,
+      transparent 1px 2px
+    );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+
+.lab-pcord__mark {
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  transform: translateX(-50%);
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+  color: #f8fafc;
+  text-shadow: 0 0 2px #0f172a, 0 1px 1px #0f172a;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.lab-pcord__end.is-attached .lab-pcord__mark {
+  opacity: 0.55;
+}
+
+/* SC/PC — blue */
+.lab-pcord__end.is-pc .lab-pcord__housing,
+.lab-pcord__end.is-upc .lab-pcord__housing {
+  background: linear-gradient(180deg, #3b82f6, #1d4ed8);
+  border-color: #1e3a8a;
+}
+
+.lab-pcord__end.is-pc .lab-pcord__boot,
+.lab-pcord__end.is-upc .lab-pcord__boot {
+  background-color: #2563eb;
+  border-color: #1e40af;
+}
+
+/* SC/APC — green, slight angled cue on housing */
+.lab-pcord__end.is-apc .lab-pcord__housing {
+  background: linear-gradient(180deg, #22c55e, #15803d);
+  border-color: #14532d;
+  clip-path: polygon(0 0, 100% 0, 100% 85%, 88% 100%, 0 100%);
+}
+
+.lab-pcord__end.is-apc .lab-pcord__boot {
+  background-color: #16a34a;
+  border-color: #166534;
+}
+
+.lab-pcord.is-selected .lab-pcord__end:not(.is-attached) {
+  filter: drop-shadow(0 0 2px rgba(250, 204, 21, 0.75));
+}
+
+.lab-pcord__end.is-attached {
+  z-index: 5;
+}
+
+.lab-pcord__end.is-mismatch {
+  filter: drop-shadow(0 0 3px rgba(249, 115, 22, 0.95));
+}
+
+.lab-pcord__end.is-dragging {
+  cursor: grabbing;
+  transform: scale(1.15);
+  z-index: 8;
+}
+
+.lab-pcord-attach {
+  margin: 0.15rem 0 0;
+  font-size: 0.7rem;
+  color: var(--lab-muted);
+}
+
+.lab-pcord-attach.is-warn {
+  color: #fdba74;
+  font-weight: 650;
+}
+
+.is-upc-text { color: #93c5fd; }
+.is-apc-text { color: #86efac; }
+
+.lab-fx-port.is-plug-target .lab-fx-port__cage,
+.lab-cas-port.is-plug-target {
+  outline: 1.5px solid #facc15 !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.55);
+}
+
+body.lab-pcord-plugging {
+  cursor: grabbing !important;
+}

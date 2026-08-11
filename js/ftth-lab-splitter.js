@@ -406,6 +406,13 @@
   function onPatchPort(portDesc) {
     if (!portDesc) return false;
 
+    /* Patch-cord tool owns the session when a cord end is armed */
+    if (global.FtthLab && FtthLab._patchPending && FtthLab._patchPending.fromPatchCord) {
+      if (typeof FtthLab.tryPatchPort === 'function' && FtthLab.tryPatchPort !== onPatchPort) {
+        return FtthLab.tryPatchPort(portDesc);
+      }
+    }
+
     var cablePolish = portDesc.polish === 'APC' ? 'APC' : 'UPC';
 
     if (!global.FtthLab || !FtthLab._patchPending) {
@@ -486,7 +493,15 @@
     return Math.round(sum * 10) / 10;
   }
 
+  function getNetworkLossDb() {
+    return totalNetworkLoss();
+  }
+
   function updateBudgetHud() {
+    if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
+      FtthLab.refreshPowerBudget();
+      return;
+    }
     var chip = document.getElementById('lab-hud-budget');
     var loss = totalNetworkLoss();
     var text = loss > 0
@@ -752,11 +767,19 @@
             node.style.left = Math.round(s.x) + 'px';
             node.style.top = Math.round(s.y) + 'px';
           }
+          if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+            FtthLab.notifyLayoutChange();
+          }
         }
         function onUp() {
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
-          if (moved) pushHistory();
+          if (moved) {
+            pushHistory();
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange();
+            }
+          }
         }
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
@@ -1023,6 +1046,7 @@
     undo: undo,
     redo: redo,
     deleteSelected: deleteSelected,
+    getNetworkLossDb: getNetworkLossDb,
   };
 
   function tryRegister() {

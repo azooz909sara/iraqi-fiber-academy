@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="lab-brand__meta">
           <h1>FTTH Network &amp; Patch Panel Lab</h1>
-          <p>Blank-slate assembly · OLT · Smart Splitters · UPC/APC</p>
+          <p>Blank-slate assembly · OLT · Splitters · Patch Cord</p>
         </div>
       </a>
       <div class="lab-header__actions">
@@ -49,6 +49,10 @@
         <div id="lab-splitter-tree" class="lab-hw-tree" aria-label="Splitter tool">
           <!-- Single Splitter tool · ftth-lab-splitter.js -->
         </div>
+        <p class="lab-rail__label" style="margin-top:1rem">Patch Cords</p>
+        <div id="lab-patchcord-tree" class="lab-hw-tree" aria-label="Patch cord tool">
+          <!-- Patch Cord tool · ftth-lab-patch-cord.js -->
+        </div>
       </aside>
 
       <section class="lab-stage-wrap" aria-label="Lab stage">
@@ -65,8 +69,7 @@
         <div class="lab-stage-hud">
           <span class="lab-hud-chip" id="lab-hud-mode">2D Layout · Empty Workspace</span>
           <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
-          <span class="lab-hud-chip" id="lab-hud-budget">Power budget · no active splitter links</span>
-          <span class="lab-hud-chip">Splitter · configure ratio &amp; polish on place</span>
+          <span class="lab-hud-chip" id="lab-hud-budget">Power budget · no active fiber path</span>
         </div>
       </section>
 
@@ -81,7 +84,7 @@
         <ul class="lab-module-list">
           <li>1 · FX-16 OLT + FGLT-D (active)</li>
           <li>2 · Smart Splitters + UPC/APC (active)</li>
-          <li>3 · Optical jumper wiring</li>
+          <li>3 · Patch Cord drag-plug + mismatch warn (active)</li>
           <li>4 · Patch panel matrix</li>
         </ul>
       </aside>
@@ -97,6 +100,7 @@
   <script src="js/ftth-lab.js"></script>
   <script src="js/ftth-lab-olt-fx16.js"></script>
   <script src="js/ftth-lab-splitter.js"></script>
+  <script src="js/ftth-lab-patch-cord.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>
