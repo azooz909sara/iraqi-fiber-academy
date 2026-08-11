@@ -147,6 +147,10 @@
   }
 
   function updateUndoRedoUi() {
+    if (global.FtthLab && typeof FtthLab.updateHistoryUi === 'function') {
+      FtthLab.updateHistoryUi();
+      return;
+    }
     var undoBtn = document.getElementById('lab-btn-undo');
     var redoBtn = document.getElementById('lab-btn-redo');
     if (undoBtn) undoBtn.disabled = historyIndex <= 0;
@@ -162,28 +166,40 @@
     }
     historyIndex = history.length - 1;
     updateUndoRedoUi();
+    if (historyIndex > 0 && global.FtthLab && typeof FtthLab.recordHistory === 'function') {
+      FtthLab.recordHistory('olt-fx16');
+    }
   }
 
   function undo() {
-    if (historyIndex <= 0) {
-      setStatus('Nothing to undo');
-      return false;
-    }
+    if (historyIndex <= 0) return false;
     historyIndex -= 1;
     applySnapshot(history[historyIndex]);
-    setStatus('Undo');
     return true;
   }
 
   function redo() {
-    if (historyIndex >= history.length - 1) {
-      setStatus('Nothing to redo');
-      return false;
-    }
+    if (historyIndex >= history.length - 1) return false;
     historyIndex += 1;
     applySnapshot(history[historyIndex]);
-    setStatus('Redo');
     return true;
+  }
+
+  function deleteSelected() {
+    if (selection.kind === 'port' && hasSfp(selection.slot, selection.port)) {
+      ejectSfp(selection.slot, selection.port);
+      return true;
+    }
+    if (selection.kind === 'card' ||
+        (selection.kind === 'slot' && selection.slot && installed[selection.slot])) {
+      ejectCard(selection.slot);
+      return true;
+    }
+    if (selection.kind === 'chassis' && chassisPlaced) {
+      removeChassis();
+      return true;
+    }
+    return false;
   }
 
   function clampChassisScale(v) {
@@ -458,8 +474,15 @@
 
   /* ─── Selection ─── */
 
+  function claimSelection() {
+    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
+      FtthLab.setSelectionOwner('olt-fx16');
+    }
+  }
+
   function selectLibraryChassis(opts) {
     opts = opts || {};
+    claimSelection();
     selection = { kind: 'lib-chassis', slot: null, port: null, cardId: null, sfpId: null };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
@@ -471,6 +494,7 @@
       selectLibraryChassis();
       return;
     }
+    claimSelection();
     selection = { kind: 'chassis', slot: null, port: null, cardId: null, sfpId: null };
     updateInspector();
     renderToolbox();
@@ -478,6 +502,7 @@
   }
 
   function selectSlot(slot) {
+    claimSelection();
     selection = { kind: 'slot', slot: slot, port: null, cardId: null, sfpId: null };
     updateInspector();
     renderToolbox();
@@ -491,6 +516,7 @@
       selectSlot(slot);
       return;
     }
+    claimSelection();
     selection = {
       kind: 'card',
       slot: slot,
@@ -505,6 +531,7 @@
 
   function selectPort(slot, port) {
     if (!installed[slot]) return;
+    claimSelection();
 
     /* Smart Splitter patch mode — validate UPC/APC before normal select */
     if (hasSfp(slot, port) && global.FtthLab && typeof FtthLab.tryPatchPort === 'function') {
@@ -549,6 +576,7 @@
 
   function selectLibraryCard(cardId, opts) {
     opts = opts || {};
+    claimSelection();
     selection = { kind: 'lib-card', slot: null, port: null, cardId: cardId, sfpId: null };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
@@ -557,6 +585,7 @@
 
   function selectLibrarySfp(sfpId, opts) {
     opts = opts || {};
+    claimSelection();
     selection = { kind: 'lib-sfp', slot: null, port: null, cardId: null, sfpId: sfpId };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
@@ -1471,6 +1500,7 @@
     onStageClick: onStageClick,
     undo: undo,
     redo: redo,
+    deleteSelected: deleteSelected,
     getPortWiring: getPortWiring,
     getPickables: getPickables,
     installCard: installCard,

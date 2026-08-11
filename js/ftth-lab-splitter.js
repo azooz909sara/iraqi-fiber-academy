@@ -24,9 +24,13 @@
   var connections = [];
   var seq = 0;
   var connSeq = 0;
-  var selection = { kind: 'none', splitterId: null };
+  var selection = { kind: 'none', splitterId: null, linkId: null };
   var dragLib = null;
   var selectedTool = null;
+  var history = [];
+  var historyIndex = -1;
+  var historyLocked = false;
+  var HISTORY_MAX = 60;
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -94,6 +98,123 @@
     return spec ? spec.lossDb : 0;
   }
 
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value == null ? null : value));
+  }
+
+  function captureSnapshot() {
+    return {
+      splitters: cloneJson(splitters),
+      connections: cloneJson(connections),
+      seq: seq,
+      connSeq: connSeq,
+    };
+  }
+
+  function applySnapshot(snap) {
+    if (!snap) return;
+    historyLocked = true;
+    splitters = cloneJson(snap.splitters) || [];
+    connections = cloneJson(snap.connections) || [];
+    seq = snap.seq || 0;
+    connSeq = snap.connSeq || 0;
+    selection = { kind: 'none', splitterId: null, linkId: null };
+    if (global.FtthLab) FtthLab._patchPending = null;
+    rebuildLayer();
+    updateInspector();
+    updateBudgetHud();
+    historyLocked = false;
+  }
+
+  function pushHistory() {
+    if (historyLocked) return;
+    history = history.slice(0, historyIndex + 1);
+    history.push(captureSnapshot());
+    if (history.length > HISTORY_MAX) history.shift();
+    historyIndex = history.length - 1;
+    if (historyIndex > 0 && global.FtthLab && typeof FtthLab.recordHistory === 'function') {
+      FtthLab.recordHistory('smart-splitter');
+    }
+  }
+
+  function undo() {
+    if (historyIndex <= 0) return false;
+    historyIndex -= 1;
+    applySnapshot(history[historyIndex]);
+    setStatus('Undo · splitter');
+    return true;
+  }
+
+  function redo() {
+    if (historyIndex >= history.length - 1) return false;
+    historyIndex += 1;
+    applySnapshot(history[historyIndex]);
+    setStatus('Redo · splitter');
+    return true;
+  }
+
+  function findLinkAt(splitterId, portId) {
+    for (var i = 0; i < connections.length; i++) {
+      var c = connections[i];
+      if ((c.fromId === splitterId && c.fromPort === portId) ||
+          (c.toId === splitterId && c.toPort === portId)) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  function removeLink(linkId) {
+    var before = connections.length;
+    connections = connections.filter(function (c) { return c.id !== linkId; });
+    if (connections.length === before) return false;
+    if (selection.linkId === linkId) {
+      selection = { kind: 'none', splitterId: null, linkId: null };
+    }
+    rebuildLayer();
+    updateInspector();
+    updateBudgetHud();
+    pushHistory();
+    setStatus('Patch link removed');
+    return true;
+  }
+
+  function setBankPolish(id, bank, polish) {
+    var s = findSplitter(id);
+    if (!s) return;
+    polish = polish === 'APC' ? 'APC' : 'UPC';
+    var list = bank === 'out' ? s.outputs : s.inputs;
+    list.forEach(function (p) {
+      p.polish = polish;
+    });
+    /* Drop mismatched links on this bank */
+    var valid = {};
+    list.forEach(function (p) { valid[p.id] = true; });
+    connections = connections.filter(function (c) {
+      var portId = null;
+      if (c.fromId === id && valid[c.fromPort]) portId = c.fromPort;
+      if (c.toId === id && valid[c.toPort]) portId = c.toPort;
+      if (!portId) return true;
+      return c.cablePolish === polish;
+    });
+    rebuildLayer();
+    updateInspector();
+    updateBudgetHud();
+    pushHistory();
+    setStatus((bank === 'out' ? 'OUTPUT' : 'INPUT') + ' · all ' + polish);
+  }
+
+  function deleteSelected() {
+    if (selection.kind === 'link' && selection.linkId) {
+      return removeLink(selection.linkId);
+    }
+    if (selection.kind === 'splitter' && selection.splitterId) {
+      removeSplitter(selection.splitterId);
+      return true;
+    }
+    return false;
+  }
+
   function defaultPos() {
     var w = getWorldSize();
     return {
@@ -133,6 +254,7 @@
     selectSplitter(item.id);
     rebuildLayer();
     updateBudgetHud();
+    pushHistory();
     setStatus(spec.ratio + ' cassette placed · open config panel to customize ports');
     return item;
   }
@@ -142,12 +264,13 @@
       return c.fromId !== id && c.toId !== id;
     });
     splitters = splitters.filter(function (s) { return s.id !== id; });
-    if (selection.splitterId === id) {
-      selection = { kind: 'none', splitterId: null };
+    if (selection.splitterId === id || selection.linkId) {
+      selection = { kind: 'none', splitterId: null, linkId: null };
     }
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
     setStatus('Splitter cassette removed');
   }
 
@@ -162,6 +285,7 @@
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
     setStatus('Cassette ratio → ' + SPLITTER_SPECS[type].ratio);
   }
 
@@ -179,6 +303,7 @@
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
   }
 
   function setOutputCount(id, count) {
@@ -195,6 +320,7 @@
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
   }
 
   function setPortPolish(id, portId, polish) {
@@ -214,6 +340,7 @@
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
     setStatus(portId + ' → ' + polish);
   }
 
@@ -271,6 +398,7 @@
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
+    pushHistory();
     setStatus('Patch OK · ' + cablePolish + ' · loss budget updated');
     return true;
   }
@@ -334,6 +462,7 @@
       rebuildLayer();
       updateInspector();
       updateBudgetHud();
+      pushHistory();
       setStatus('OLT ↔ Splitter patch · ' + cable);
       return true;
     }
@@ -612,8 +741,10 @@
         var sy = e.clientY;
         var ox = s.x;
         var oy = s.y;
+        var moved = false;
 
         function onMove(ev) {
+          moved = true;
           s.x = ox + (ev.clientX - sx) / zoom;
           s.y = oy + (ev.clientY - sy) / zoom;
           var node = host.querySelector('[data-spl-node="' + id + '"]');
@@ -625,6 +756,7 @@
         function onUp() {
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
+          if (moved) pushHistory();
         }
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
@@ -646,6 +778,17 @@
         var portId = btn.getAttribute('data-spl-port');
         var s = findSplitter(id);
         if (!s) return;
+
+        /* Linked port + no pending patch → select link for Delete */
+        var pending = global.FtthLab && FtthLab._patchPending;
+        if (!pending && isPortBusy(id, portId)) {
+          var link = findLinkAt(id, portId);
+          if (link) {
+            selectLink(link);
+            return;
+          }
+        }
+
         selectSplitter(id);
         var polish = getPortPolish(s, portId);
 
@@ -661,9 +804,27 @@
   }
 
   function selectSplitter(id) {
-    selection = { kind: 'splitter', splitterId: id };
+    selection = { kind: 'splitter', splitterId: id, linkId: null };
+    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
+      FtthLab.setSelectionOwner('smart-splitter');
+    }
     updateInspector();
     rebuildLayer();
+  }
+
+  function selectLink(link) {
+    if (!link) return;
+    selection = {
+      kind: 'link',
+      linkId: link.id,
+      splitterId: link.fromId !== 'olt' ? link.fromId : link.toId,
+    };
+    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
+      FtthLab.setSelectionOwner('smart-splitter');
+    }
+    updateInspector();
+    rebuildLayer();
+    setStatus('Link selected · Delete / Backspace to remove');
   }
 
   function portConfigRows(s, list, kind) {
@@ -683,10 +844,55 @@
     }).join('');
   }
 
+  function bankBulkHtml(s, bank) {
+    return (
+      '<div class="lab-cas-bulk" role="group" aria-label="' +
+      (bank === 'out' ? 'Output' : 'Input') + ' bulk polish">' +
+      '<button type="button" class="lab-cas-bulk__btn is-upc" data-cfg-bank="' +
+      s.id + ':' + bank + ':UPC">All UPC</button>' +
+      '<button type="button" class="lab-cas-bulk__btn is-apc" data-cfg-bank="' +
+      s.id + ':' + bank + ':APC">All APC</button>' +
+      '</div>'
+    );
+  }
+
   function updateInspector() {
     var card = document.getElementById('lab-inspector-card');
     var detail = document.getElementById('lab-inspector-detail');
     if (!card) return;
+
+    if (selection.kind === 'link' && selection.linkId) {
+      var link = null;
+      for (var i = 0; i < connections.length; i++) {
+        if (connections[i].id === selection.linkId) { link = connections[i]; break; }
+      }
+      if (!link) {
+        selection = { kind: 'none', splitterId: null, linkId: null };
+        return;
+      }
+      card.innerHTML =
+        '<h2>Patch Link</h2>' +
+        '<p>' + link.fromPort + ' → ' + link.toPort + ' · ' + link.cablePolish +
+        '. Press Delete to remove.</p>';
+      if (detail) {
+        detail.hidden = false;
+        detail.innerHTML =
+          '<div class="lab-spl-sheet">' +
+          '<div><span>Polish</span><strong>' + link.cablePolish + '</strong></div>' +
+          '<div><span>From</span><strong>' + link.fromId + ' / ' + link.fromPort + '</strong></div>' +
+          '<div><span>To</span><strong>' + link.toId + ' / ' + link.toPort + '</strong></div>' +
+          '</div>' +
+          '<button type="button" class="lab-eject-btn" data-remove-link="' + link.id +
+          '">Delete Link</button>';
+        var rmLink = detail.querySelector('[data-remove-link]');
+        if (rmLink) {
+          rmLink.addEventListener('click', function () {
+            removeLink(link.id);
+          });
+        }
+      }
+      return;
+    }
 
     if (selection.kind !== 'splitter' || !selection.splitterId) return;
     var s = findSplitter(selection.splitterId);
@@ -718,7 +924,8 @@
       '" data-cfg-ins="' + s.id + '" />' +
       '</label>' +
       '<div class="lab-cas-cfg-list">' +
-      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">Input polish</p>' +
+      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">INPUT</p>' +
+      bankBulkHtml(s, 'in') +
       portConfigRows(s, s.inputs, 'in') +
       '</div>' +
       '<label class="lab-cas-field">' +
@@ -727,7 +934,8 @@
       '" data-cfg-outs="' + s.id + '" />' +
       '</label>' +
       '<div class="lab-cas-cfg-list">' +
-      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">Output polish</p>' +
+      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">OUTPUT</p>' +
+      bankBulkHtml(s, 'out') +
       portConfigRows(s, s.outputs, 'out') +
       '</div>' +
       '<div class="lab-spl-sheet">' +
@@ -756,6 +964,12 @@
         setOutputCount(s.id, outsEl.value);
       });
     }
+    detail.querySelectorAll('[data-cfg-bank]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-cfg-bank').split(':');
+        setBankPolish(parts[0], parts[1], parts[2]);
+      });
+    });
     detail.querySelectorAll('[data-cfg-polish]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-cfg-polish').split(':');
@@ -780,13 +994,17 @@
     connections = [];
     seq = 0;
     connSeq = 0;
-    selection = { kind: 'none', splitterId: null };
+    history = [];
+    historyIndex = -1;
+    historyLocked = false;
+    selection = { kind: 'none', splitterId: null, linkId: null };
     selectedTool = null;
     renderToolbox();
     bindStageDrop();
     ensureLayer();
     rebuildLayer();
     updateBudgetHud();
+    pushHistory();
 
     if (global.FtthLab) {
       FtthLab.tryPatchPort = onPatchPort;
@@ -802,6 +1020,9 @@
     onViewChange: onViewChange,
     placeSplitter: placeSplitter,
     onPatchPort: onPatchPort,
+    undo: undo,
+    redo: redo,
+    deleteSelected: deleteSelected,
   };
 
   function tryRegister() {

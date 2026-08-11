@@ -244,11 +244,111 @@
   }
 
   function undo() {
-    notifyTools('undo');
+    if (timelineIndex < 0) {
+      setStatus('Nothing to undo');
+      return false;
+    }
+    var toolId = timeline[timelineIndex];
+    var tool = state.tools[toolId];
+    var ok = false;
+    if (tool && typeof tool.undo === 'function') {
+      try { ok = !!tool.undo(); } catch (err) {
+        console.warn('[FtthLab] undo failed:', toolId, err);
+      }
+    }
+    if (ok) {
+      timelineIndex -= 1;
+      updateHistoryUi();
+      setStatus('Undo');
+    } else {
+      setStatus('Nothing to undo');
+    }
+    return ok;
   }
 
   function redo() {
-    notifyTools('redo');
+    if (timelineIndex >= timeline.length - 1) {
+      setStatus('Nothing to redo');
+      return false;
+    }
+    var next = timelineIndex + 1;
+    var toolId = timeline[next];
+    var tool = state.tools[toolId];
+    var ok = false;
+    if (tool && typeof tool.redo === 'function') {
+      try { ok = !!tool.redo(); } catch (err) {
+        console.warn('[FtthLab] redo failed:', toolId, err);
+      }
+    }
+    if (ok) {
+      timelineIndex = next;
+      updateHistoryUi();
+      setStatus('Redo');
+    } else {
+      setStatus('Nothing to redo');
+    }
+    return ok;
+  }
+
+  var timeline = [];
+  var timelineIndex = -1;
+  var selectionOwner = null;
+
+  function recordHistory(toolId) {
+    if (!toolId) return;
+    timeline = timeline.slice(0, timelineIndex + 1);
+    timeline.push(toolId);
+    timelineIndex = timeline.length - 1;
+    updateHistoryUi();
+  }
+
+  function updateHistoryUi() {
+    var undoBtn = $('lab-btn-undo');
+    var redoBtn = $('lab-btn-redo');
+    if (undoBtn) undoBtn.disabled = timelineIndex < 0;
+    if (redoBtn) redoBtn.disabled = timelineIndex < 0 || timelineIndex >= timeline.length - 1;
+  }
+
+  function setSelectionOwner(toolId) {
+    selectionOwner = toolId || null;
+  }
+
+  function deleteSelected() {
+    if (selectionOwner && state.tools[selectionOwner] &&
+        typeof state.tools[selectionOwner].deleteSelected === 'function') {
+      try {
+        if (state.tools[selectionOwner].deleteSelected()) {
+          setStatus('Deleted');
+          return true;
+        }
+      } catch (err) {
+        console.warn('[FtthLab] deleteSelected failed:', selectionOwner, err);
+      }
+    }
+    var ids = Object.keys(state.tools);
+    for (var i = ids.length - 1; i >= 0; i--) {
+      var tool = state.tools[ids[i]];
+      if (tool && typeof tool.deleteSelected === 'function') {
+        try {
+          if (tool.deleteSelected()) {
+            setStatus('Deleted');
+            return true;
+          }
+        } catch (err) {
+          console.warn('[FtthLab] deleteSelected failed:', ids[i], err);
+        }
+      }
+    }
+    setStatus('Nothing selected to delete');
+    return false;
+  }
+
+  function isTypingTarget(el) {
+    if (!el) return false;
+    var tag = (el.tagName || '').toUpperCase();
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+    return false;
   }
 
   /* ─── 3D empty grid stage ─── */
@@ -380,21 +480,51 @@
     if (undoBtn) undoBtn.addEventListener('click', undo);
     if (redoBtn) redoBtn.addEventListener('click', redo);
 
-    document.addEventListener('keydown', function (e) {
-      var tag = (e.target && e.target.tagName) || '';
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
-      var key = (e.key || '').toLowerCase();
-      if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
-        e.preventDefault();
-        undo();
-      } else if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) {
-        e.preventDefault();
-        redo();
-      }
-    });
+    /* Capture-phase on window: works without focusing a field; blocks browser Undo/Redo */
+    if (!bindUi._keysBound) {
+      bindUi._keysBound = true;
+      window.addEventListener('keydown', function (e) {
+        var ctrl = e.ctrlKey || e.metaKey;
+        var code = e.code || '';
+        var key = e.key || '';
+        var keyLower = key.toLowerCase();
+        var isZ = code === 'KeyZ' || keyLower === 'z';
+        var isY = code === 'KeyY' || keyLower === 'y';
+
+        if (ctrl && isZ && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          undo();
+          return;
+        }
+        if (ctrl && !e.altKey && (isY || (isZ && e.shiftKey))) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          redo();
+          return;
+        }
+
+        if (isTypingTarget(e.target)) return;
+
+        if (key === 'Escape') {
+          if (global.FtthLab && global.FtthLab._patchPending) {
+            global.FtthLab._patchPending = null;
+            setStatus('Patch cancelled');
+          }
+          return;
+        }
+        if (key === 'Delete' || key === 'Backspace') {
+          e.preventDefault();
+          deleteSelected();
+        }
+      }, true);
+    }
 
     bindZoom2d();
     bindWorkspaceDnD();
+    updateHistoryUi();
   }
 
   function boot() {
@@ -403,7 +533,7 @@
     state.booted = true;
     flushPendingTools();
     setViewMode('2d');
-    setStatus('FTTH Lab ready · blank workspace · scroll to zoom · Undo / Redo available');
+    setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Delete selected · scroll to zoom');
   }
 
   function showAlert(msg, kind) {
@@ -533,6 +663,10 @@
     getActiveDrag: getActiveDrag,
     clientToWorld2d: clientToWorld2d,
     clearStageDropHighlight: clearStageDropHighlight,
+    recordHistory: recordHistory,
+    updateHistoryUi: updateHistoryUi,
+    deleteSelected: deleteSelected,
+    setSelectionOwner: setSelectionOwner,
     tryPatchPort: null,
     _patchPending: null,
   };
