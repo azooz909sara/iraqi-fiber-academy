@@ -1177,13 +1177,14 @@
         var otherWasLocked = !!c[endKey(otherEnd)].attached;
 
         /*
-         * Free end + other plugged → record manual path on this explicit drag only.
-         * Same rules whether the free end is A or B.
+         * Free end + other plugged → continue / extend manual path on this drag.
+         * Never wipe cord.route — preserve existing waypoints across re-grabs.
          */
         if (!wasAttached && otherWasLocked && !c.pathLocked) {
-          clearDrawnPath(c);
-          var seedBoot = bootAnchor(c, otherEnd);
-          appendRoutePoint(c, seedBoot.x, seedBoot.y);
+          if (!ensureRoute(c).length) {
+            var seedBoot = bootAnchor(c, otherEnd);
+            appendRoutePoint(c, seedBoot.x, seedBoot.y);
+          }
         }
 
         btn.classList.add('is-dragging');
@@ -1209,7 +1210,7 @@
             }
             released = true;
             detachEnd(c, end);
-            clearDrawnPath(c);
+            /* Keep cord.route intact — do not clearDrawnPath on unplug */
             btn.classList.remove('is-attached', 'is-mismatch', 'is-tension');
             btn.classList.add('is-unplugging');
             setStatus('Side ' + end + ' unplugged from ' + (portHome.label || 'port'));
