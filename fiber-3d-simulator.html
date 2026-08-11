@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="f3d-brand__meta">
           <h1>Fiber Optics 3D / 2D Interactive Anatomy</h1>
-          <p>3D cross-section · Jacket → Tubes → 6 Strands</p>
+          <p>Backbone 48–288F · Jacket → Tubes → 12 Strands</p>
         </div>
       </a>
       <div class="f3d-header__actions">
@@ -37,10 +37,10 @@
 
     <main class="f3d-main">
       <aside class="f3d-rail" aria-label="Cable capacity and components">
-        <p class="f3d-rail__label">Cable Capacity</p>
+        <p class="f3d-rail__label">Access Cable</p>
         <ul class="f3d-component-list">
           <li>
-            <button type="button" class="f3d-component-btn is-active" data-f3d-capacity="12">
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="12">
               <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
               <span class="f3d-component-btn__text">
                 <strong>12F Cable</strong>
@@ -66,12 +66,43 @@
               </span>
             </button>
           </li>
+        </ul>
+
+        <p class="f3d-rail__label" style="margin-top:1rem">Backbone Cable</p>
+        <ul class="f3d-component-list">
           <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="48">
+            <button type="button" class="f3d-component-btn is-active" data-f3d-capacity="48">
               <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
               <span class="f3d-component-btn__text">
                 <strong>48F Cable</strong>
-                <span>8 tubes × 6 strands</span>
+                <span>4 tubes × 12 strands</span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="72">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>72F Cable</strong>
+                <span>6 tubes × 12 strands</span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="144">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>144F Cable</strong>
+                <span>12 tubes × 12 strands</span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="288">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>288F Backbone</strong>
+                <span>24 tubes × 12 · T13–T24 mid-stripe</span>
               </span>
             </button>
           </li>
@@ -114,7 +145,7 @@
         <div id="f3d-2d-host" class="f3d-2d-host" hidden></div>
         <div class="f3d-stage-hud">
           <button type="button" class="f3d-layer-btn" id="f3d-reset-peel">Reset Jacket</button>
-          <span class="f3d-hint">2D/3D: jacket → tubes → click tube for 6 strands</span>
+          <span class="f3d-hint">2D/3D: jacket → tubes → strands (6F / 12F)</span>
         </div>
       </section>
 

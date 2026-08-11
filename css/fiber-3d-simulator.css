@@ -437,15 +437,38 @@ html, body {
   color: inherit;
 }
 
-/* Explicit equal share: 12F (2) … 48F (8) each fill 1/N of the block */
+/* Explicit equal share across tube counts */
 .f3d-schematic[style*="--tube-count:2"] .f3d-tube-bar { flex: 1 1 50%; }
 .f3d-schematic[style*="--tube-count:4"] .f3d-tube-bar { flex: 1 1 25%; }
 .f3d-schematic[style*="--tube-count:6"] .f3d-tube-bar { flex: 1 1 16.666%; }
 .f3d-schematic[style*="--tube-count:8"] .f3d-tube-bar { flex: 1 1 12.5%; }
+.f3d-schematic[style*="--tube-count:12"] .f3d-tube-bar { flex: 1 1 8.333%; }
+.f3d-schematic[style*="--tube-count:24"] .f3d-tube-bar { flex: 1 1 4.166%; }
 
 .f3d-tube-bar__fill {
   position: absolute;
   inset: 0;
+  background: var(--tube-color);
+}
+
+.f3d-tube-bar__stripe {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #0a0a0a;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.f3d-tube-bar.is-striped .f3d-tube-bar__stripe {
+  display: block;
+}
+
+.f3d-tube-bar.is-striped .f3d-tube-bar__fill {
   background: var(--tube-color);
 }
 
@@ -454,13 +477,18 @@ html, body {
   left: 0.55rem;
   top: 50%;
   transform: translateY(-50%);
-  z-index: 1;
+  z-index: 2;
   font-size: 0.62rem;
   font-weight: 700;
   color: #0f172a;
   text-shadow: 0 0 2px rgba(255, 255, 255, 0.55);
   pointer-events: none;
   white-space: nowrap;
+}
+
+.f3d-schematic--dense .f3d-tube-bar__name {
+  font-size: 0.5rem;
+  left: 0.3rem;
 }
 
 .f3d-tube-bar[style*="--tube-color:#1e293b"] .f3d-tube-bar__name,
@@ -483,17 +511,38 @@ html, body {
 
 /* Layer 3 — selected tube + thin parallel strand lines */
 .f3d-layer-tube {
+  position: relative;
   flex: 0 0 100px;
   width: 100px;
-  height: 56px;
+  height: 72px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: var(--tube-color);
   border: 1px solid rgba(15, 23, 42, 0.35);
+  overflow: hidden;
+}
+
+.f3d-layer-tube__stripe {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #0a0a0a;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.f3d-layer-tube.is-striped .f3d-layer-tube__stripe {
+  display: block;
 }
 
 .f3d-layer-tube__label {
+  position: relative;
+  z-index: 2;
   font-size: 0.85rem;
   font-weight: 800;
   color: #0f172a;
@@ -507,11 +556,27 @@ html, body {
   justify-content: center;
   gap: 0;
   width: 200px;
-  height: 56px;
+  height: 72px;
   border: 1px solid rgba(15, 23, 42, 0.35);
   border-left: none;
   background: #f1f5f9;
   overflow: hidden;
+}
+
+.f3d-strand-ribbon--12 {
+  height: 96px;
+}
+
+.f3d-strand-ribbon--6 {
+  height: 56px;
+}
+
+.f3d-layer-tube:has(+ .f3d-strand-ribbon--6) {
+  height: 56px;
+}
+
+.f3d-layer-tube:has(+ .f3d-strand-ribbon--12) {
+  height: 96px;
 }
 
 .f3d-strand-line {
@@ -529,12 +594,36 @@ html, body {
 }
 
 .f3d-strand-legend {
-  flex: 1 1 160px;
+  flex: 1 1 180px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.2rem 0.65rem;
   padding-left: 0.75rem;
   min-width: 0;
+}
+
+.f3d-strand-legend--12 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.f3d-swatch--striped {
+  position: relative;
+  overflow: hidden;
+}
+
+.f3d-swatch--striped::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  transform: translateY(-50%);
+  background: #0a0a0a;
+}
+
+.f3d-fiber-grid--12 {
+  grid-template-columns: repeat(3, 1fr);
 }
 
 .f3d-strand-legend__item {
