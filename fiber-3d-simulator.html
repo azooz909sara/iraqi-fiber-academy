@@ -12,16 +12,21 @@
 <body class="f3d-page">
 
   <!-- Open access: no subscriber gate — workspace loads for all visitors -->
-  <div class="f3d-app" id="f3d-app">
+  <div class="f3d-app f3d-app--3d" id="f3d-app">
     <header class="f3d-header">
       <a class="f3d-brand" href="index.html" title="Iraqi Fiber Academy">
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="f3d-brand__meta">
-          <h1>Fiber Optics 3D Interactive Anatomy</h1>
-          <p>Dissection Simulator · Jacket → Tubes → 12F Strands</p>
+          <h1>Fiber Optics 3D / 2D Interactive Anatomy</h1>
+          <p>3D cross-section · Jacket → Tubes → 6 Strands</p>
         </div>
       </a>
       <div class="f3d-header__actions">
+        <div class="f3d-toggle-group" role="group" aria-label="View mode">
+          <button type="button" class="f3d-toggle-btn is-active" data-f3d-view="3d">3D View</button>
+          <button type="button" class="f3d-toggle-btn" data-f3d-view="2d">2D Layout</button>
+        </div>
+        <button type="button" class="f3d-toggle-btn is-active" id="f3d-auto-rotate" aria-pressed="true">Auto-Rotate: On</button>
         <a class="f3d-home-link" href="index.html">← Back to Home</a>
         <a class="f3d-home-link" href="simulator.html">FTTH Map Sim</a>
         <div class="auth-slot auth-slot--sim shrink-0" data-auth-slot data-auth-variant="simulator">
@@ -31,24 +36,55 @@
     </header>
 
     <main class="f3d-main">
-      <aside class="f3d-rail" aria-label="Anatomy components">
-        <p class="f3d-rail__label">Components</p>
+      <aside class="f3d-rail" aria-label="Cable capacity and components">
+        <p class="f3d-rail__label">Cable Capacity</p>
         <ul class="f3d-component-list">
           <li>
-            <button type="button" class="f3d-component-btn is-active" data-f3d-component="cable">
+            <button type="button" class="f3d-component-btn is-active" data-f3d-capacity="12">
               <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
               <span class="f3d-component-btn__text">
-                <strong>Fiber Cable</strong>
-                <span>Outer jacket, loose tubes, 12-color strands</span>
+                <strong>12F Cable</strong>
+                <span>2 tubes × 6 strands</span>
               </span>
             </button>
           </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="24">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>24F Cable</strong>
+                <span>4 tubes × 6 strands</span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="36">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>36F Cable</strong>
+                <span>6 tubes × 6 strands</span>
+              </span>
+            </button>
+          </li>
+          <li>
+            <button type="button" class="f3d-component-btn" data-f3d-capacity="48">
+              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
+              <span class="f3d-component-btn__text">
+                <strong>48F Cable</strong>
+                <span>8 tubes × 6 strands</span>
+              </span>
+            </button>
+          </li>
+        </ul>
+
+        <p class="f3d-rail__label" style="margin-top:1rem">Other Components</p>
+        <ul class="f3d-component-list">
           <li>
             <button type="button" class="f3d-component-btn" data-f3d-component="fdt">
               <span class="f3d-component-btn__icon" aria-hidden="true">📦</span>
               <span class="f3d-component-btn__text">
                 <strong>FDT Cabinet</strong>
-                <span>Distribution trays, ports, splitter bays</span>
+                <span>Distribution trays &amp; ports</span>
               </span>
             </button>
           </li>
@@ -57,7 +93,7 @@
               <span class="f3d-component-btn__icon" aria-hidden="true">🔀</span>
               <span class="f3d-component-btn__text">
                 <strong>Optical Splitter</strong>
-                <span>Input fiber and fan-out outputs</span>
+                <span>Input &amp; fan-out</span>
               </span>
             </button>
           </li>
@@ -66,21 +102,19 @@
               <span class="f3d-component-btn__icon" aria-hidden="true">🖥️</span>
               <span class="f3d-component-btn__text">
                 <strong>OLT</strong>
-                <span>PON ports and line-card indicators</span>
+                <span>PON line card</span>
               </span>
             </button>
           </li>
         </ul>
       </aside>
 
-      <section class="f3d-stage-wrap" aria-label="3D dissection stage">
+      <section class="f3d-stage-wrap" aria-label="Dissection stage">
         <div id="f3d-canvas-host"></div>
+        <div id="f3d-2d-host" class="f3d-2d-host" hidden></div>
         <div class="f3d-stage-hud">
-          <button type="button" class="f3d-layer-btn is-active" data-f3d-layer="0">Outer Jacket</button>
-          <button type="button" class="f3d-layer-btn" data-f3d-layer="1">Loose Tubes</button>
-          <button type="button" class="f3d-layer-btn" data-f3d-layer="2">12-Color Strands</button>
-          <button type="button" class="f3d-layer-btn" id="f3d-peel-next">Peel Next Layer ▸</button>
-          <span class="f3d-hint">Drag to orbit · Scroll to zoom</span>
+          <button type="button" class="f3d-layer-btn" id="f3d-reset-peel">Reset Jacket</button>
+          <span class="f3d-hint">2D/3D: jacket → tubes → click tube for 6 strands</span>
         </div>
       </section>
 
@@ -88,18 +122,18 @@
         <p class="f3d-inspector__label">Anatomy Guide</p>
         <div class="f3d-inspector__card" id="f3d-inspector-card">
           <h2>Fiber Cable Anatomy</h2>
-          <p>Peel layers to reveal construction details used in FTTH field work.</p>
+          <p>Select a capacity, then click to peel layers hierarchically.</p>
         </div>
-        <p class="f3d-inspector__label">Dissection Stack</p>
+        <p class="f3d-inspector__label">Loose Tubes</p>
         <div class="f3d-layer-stack" id="f3d-layer-stack"></div>
-        <p class="f3d-inspector__label" style="margin-top:0.9rem">TIA Fiber Colors</p>
-        <div class="f3d-fiber-grid" id="f3d-fiber-grid"></div>
+        <p class="f3d-inspector__label" id="f3d-fiber-caption" style="margin-top:0.9rem" hidden>Strands</p>
+        <div class="f3d-fiber-grid" id="f3d-fiber-grid" hidden></div>
       </aside>
     </main>
 
     <footer class="f3d-footer">
-      <span id="f3d-status">Loading 3D anatomy…</span>
-      <span>Iraqi Fiber Academy · 3D Interactive Simulator</span>
+      <span id="f3d-status">Loading anatomy…</span>
+      <span>Iraqi Fiber Academy · 3D / 2D Interactive Simulator</span>
     </footer>
   </div>
 
