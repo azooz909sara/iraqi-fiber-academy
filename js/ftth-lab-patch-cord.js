@@ -232,8 +232,9 @@
     var mismatch = !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
     var otherEnd = oppositeEnd(end);
-    /* Snap to the port's fixed axis — professional straight seat */
-    var lockedRot = portAlignedRotation(hit);
+    /* Zero drag rotation, then lock to strict vertical socket pose (0° or 180°) */
+    var lockedRot = resolveUprightPlugRotation(hit, cord, end);
+    lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
     side.liveRot = null;
     side.attached = {
       owner: hit.owner,
@@ -249,6 +250,7 @@
       lockedRot: lockedRot,
     };
     side.lockedRot = lockedRot;
+    side.liveRot = null;
     side.mismatch = mismatch;
     /* Seat only this end — never move or shrink the free end */
     var freePos = getEndWorld(cord, otherEnd);
@@ -345,8 +347,11 @@
           var pt = clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
           att.wx = pt.x;
           att.wy = pt.y;
-          side.lockedRot = portAlignedRotation({ owner: 'olt', el: el, wx: pt.x, wy: pt.y });
-          att.lockedRot = side.lockedRot;
+          /* Keep plug-time upright lock — do not re-derive sideways axes on sync */
+          if (typeof side.lockedRot !== 'number') {
+            side.lockedRot = portAlignedRotation({ owner: 'olt', el: el, wx: pt.x, wy: pt.y });
+            att.lockedRot = side.lockedRot;
+          }
           side.liveRot = null;
           seatEndAtPort(cord, end, pt.x, pt.y);
         }
@@ -362,8 +367,10 @@
           var pt2 = clientToWorld(r2.left + r2.width / 2, r2.top + r2.height / 2);
           att.wx = pt2.x;
           att.wy = pt2.y;
-          side.lockedRot = portAlignedRotation({ owner: 'splitter', el: el, wx: pt2.x, wy: pt2.y });
-          att.lockedRot = side.lockedRot;
+          if (typeof side.lockedRot !== 'number') {
+            side.lockedRot = portAlignedRotation({ owner: 'splitter', el: el, wx: pt2.x, wy: pt2.y });
+            att.lockedRot = side.lockedRot;
+          }
           side.liveRot = null;
           seatEndAtPort(cord, end, pt2.x, pt2.y);
         }
@@ -872,48 +879,30 @@
   }
 
   /**
-   * Straight plug axis for a port: boot faces outward from the equipment
-   * (cardinal), ferrule points into the port.
+   * Strict vertical socket axis only (never sideways).
+   * 0°  = boot down / ferrule up
+   * 180° = boot up / ferrule down (typical faceplate insert from above)
    */
   function portAlignedRotation(hit) {
-    var el = hit && hit.el;
-    var outX = 0;
-    var outY = 1;
-
-    if (el) {
-      var face = el.querySelector('.lab-fx-port__cage') || el.querySelector('i') || el;
-      var rect = face.getBoundingClientRect();
-      var parent = el.closest('[data-spl-node], .lab-fx-card, .lab-fx-chassis-frame, .lab-cas-cassette');
-      var pcx = rect.left + rect.width / 2;
-      var pcy = rect.top + rect.height / 2;
-
-      if (parent) {
-        var pref = parent.getBoundingClientRect();
-        outX = pcx - (pref.left + pref.width / 2);
-        outY = pcy - (pref.top + pref.height / 2);
-      }
-
-      if (Math.abs(outX) < 2 && Math.abs(outY) < 2) {
-        if (hit.owner === 'olt' || (el.classList && el.classList.contains('lab-fx-port'))) {
-          outX = -1;
-          outY = 0;
-        } else {
-          outX = 0;
-          outY = 1;
-        }
-      } else if (Math.abs(outX) >= Math.abs(outY)) {
-        outX = outX >= 0 ? 1 : -1;
-        outY = 0;
-      } else {
-        outX = 0;
-        outY = outY >= 0 ? 1 : -1;
-      }
-    } else if (hit && hit.owner === 'olt') {
-      outX = -1;
-      outY = 0;
+    if (hit && (hit.owner === 'splitter' ||
+        (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
+      return 180;
     }
+    /* OLT / default: upright ferrule-up seat */
+    return 0;
+  }
 
-    return endRotationDeg(0, 0, outX, outY);
+  /** Pick exact 0° or 180° from vertical approach; ignores horizontal drag heading. */
+  function resolveUprightPlugRotation(hit, cord, end) {
+    var base = portAlignedRotation(hit);
+    var alt = base === 0 ? 180 : 0;
+    var p = getEndWorld(cord, end);
+    var dY = (hit && typeof hit.wy === 'number') ? (hit.wy - p.y) : 0;
+    if (Math.abs(dY) < 1) return base;
+    var preferred = headingRotFromMotion(0, dY);
+    var dBase = Math.abs(((preferred - base + 540) % 360) - 180);
+    var dAlt = Math.abs(((preferred - alt + 540) % 360) - 180);
+    return dAlt < dBase ? alt : base;
   }
 
   function getEndRotation(cord, end) {
