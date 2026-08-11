@@ -1572,6 +1572,7 @@ body {
   stroke: #facc15;
   stroke-width: 2.25;
   stroke-linecap: round;
+  stroke-linejoin: round;
   pointer-events: none;
   filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
 }
@@ -1592,13 +1593,13 @@ body {
   pointer-events: none;
 }
 
-/* Mini SC connector — sized to sit inside splitter / SFP port faces */
+/* Mini SC connector — housing + ribbed strain-relief boot */
 .lab-pcord__end {
   position: absolute;
   z-index: 3;
   box-sizing: border-box;
   width: 14px;
-  height: 18px;
+  height: 22px;
   padding: 0;
   margin: 0;
   border: none;
@@ -1612,13 +1613,14 @@ body {
   gap: 0;
   user-select: none;
   touch-action: none;
-  transition: transform 0.1s ease, filter 0.1s ease;
+  transform-origin: 50% 50%;
+  will-change: transform, left, top;
 }
 
 .lab-pcord__housing {
   position: relative;
   width: 10px;
-  height: 11px;
+  height: 10px;
   border-radius: 1px;
   border: 1px solid rgba(15, 23, 42, 0.45);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
@@ -1626,6 +1628,7 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding-top: 1px;
+  flex-shrink: 0;
 }
 
 .lab-pcord__ferrule {
@@ -1639,24 +1642,46 @@ body {
 }
 
 .lab-pcord__boot {
-  width: 7px;
-  height: 5px;
-  margin-top: -1px;
-  border-radius: 0 0 2px 2px;
-  border: 1px solid rgba(15, 23, 42, 0.35);
-  background:
-    repeating-linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.18) 0 1px,
-      transparent 1px 2px
-    );
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 8px;
+  height: 11px;
+  margin-top: 0;
+  padding: 1px 0 0;
+  border-radius: 0 0 3px 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
+
+.lab-pcord__boot i {
+  display: block;
+  width: 100%;
+  height: 2px;
+  margin: 0;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.35) 0%,
+    rgba(0, 0, 0, 0.12) 55%,
+    rgba(0, 0, 0, 0.22) 100%
+  );
+  box-shadow: 0 0.5px 0 rgba(0, 0, 0, 0.25);
+}
+
+.lab-pcord__boot i:nth-child(1) { width: 100%; opacity: 1; }
+.lab-pcord__boot i:nth-child(2) { width: 92%; opacity: 0.95; }
+.lab-pcord__boot i:nth-child(3) { width: 82%; opacity: 0.9; }
+.lab-pcord__boot i:nth-child(4) { width: 70%; opacity: 0.85; }
+.lab-pcord__boot i:nth-child(5) { width: 56%; opacity: 0.8; border-radius: 0 0 2px 2px; }
 
 .lab-pcord__mark {
   position: absolute;
   left: 50%;
-  bottom: -8px;
+  bottom: -9px;
   transform: translateX(-50%);
   font-size: 7px;
   font-weight: 800;
@@ -1668,7 +1693,7 @@ body {
 }
 
 .lab-pcord__end.is-attached .lab-pcord__mark {
-  opacity: 0.55;
+  opacity: 0.45;
 }
 
 /* SC/PC — blue */
@@ -1680,11 +1705,12 @@ body {
 
 .lab-pcord__end.is-pc .lab-pcord__boot,
 .lab-pcord__end.is-upc .lab-pcord__boot {
-  background-color: #2563eb;
-  border-color: #1e40af;
+  background: linear-gradient(180deg, #2563eb, #1d4ed8 70%, #1e40af);
+  border: 1px solid #1e3a8a;
+  border-top: none;
 }
 
-/* SC/APC — green, slight angled cue on housing */
+/* SC/APC — green */
 .lab-pcord__end.is-apc .lab-pcord__housing {
   background: linear-gradient(180deg, #22c55e, #15803d);
   border-color: #14532d;
@@ -1692,8 +1718,9 @@ body {
 }
 
 .lab-pcord__end.is-apc .lab-pcord__boot {
-  background-color: #16a34a;
-  border-color: #166534;
+  background: linear-gradient(180deg, #16a34a, #15803d 70%, #166534);
+  border: 1px solid #14532d;
+  border-top: none;
 }
 
 .lab-pcord.is-selected .lab-pcord__end:not(.is-attached) {
@@ -1702,6 +1729,13 @@ body {
 
 .lab-pcord__end.is-attached {
   z-index: 5;
+  cursor: grab;
+}
+
+.lab-pcord__end.is-attached .lab-pcord__boot {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 2px 0 rgba(250, 204, 21, 0.35);
 }
 
 .lab-pcord__end.is-mismatch {
@@ -1710,8 +1744,31 @@ body {
 
 .lab-pcord__end.is-dragging {
   cursor: grabbing;
-  transform: scale(1.15);
   z-index: 8;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.45));
+}
+
+.lab-pcord__end.is-tension {
+  filter: drop-shadow(0 0 4px rgba(250, 204, 21, 0.9));
+}
+
+.lab-pcord__end.is-unplugging {
+  animation: lab-pcord-unplug 0.22s ease-out;
+}
+
+.lab-pcord__end.is-just-plugged {
+  animation: lab-pcord-plug 0.32s ease-out;
+}
+
+@keyframes lab-pcord-plug {
+  0% { filter: drop-shadow(0 0 0 rgba(250, 204, 21, 0)); }
+  35% { filter: drop-shadow(0 0 6px rgba(250, 204, 21, 1)); }
+  100% { filter: drop-shadow(0 0 0 rgba(250, 204, 21, 0)); }
+}
+
+@keyframes lab-pcord-unplug {
+  0% { filter: drop-shadow(0 0 5px rgba(148, 163, 184, 0.9)); }
+  100% { filter: none; }
 }
 
 .lab-pcord-attach {
@@ -1735,6 +1792,21 @@ body {
   box-shadow: 0 0 8px rgba(250, 204, 21, 0.55);
 }
 
+.lab-fx-port.is-plug-click .lab-fx-port__cage,
+.lab-cas-port.is-plug-click {
+  outline: 2px solid #fde047 !important;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.85);
+}
+
 body.lab-pcord-plugging {
   cursor: grabbing !important;
+}
+
+body.lab-pcord-linking {
+  cursor: crosshair !important;
+}
+
+body.lab-pcord-linking .lab-pcord-fiber {
+  stroke: #fde047;
+  stroke-width: 2.75;
 }

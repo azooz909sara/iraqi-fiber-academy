@@ -1,7 +1,7 @@
 /**
- * Patch Cord — free-floating yellow jumper
- * Drag ends into equipment ports. SC/APC (green) / SC/PC (blue).
- * Mismatches warn only and add insertion-loss penalty (not blocked).
+ * Patch Cord — symmetrical click-and-drag for End A and End B
+ * Plugged end stays locked; free end moves only on mouse-down+hold.
+ * Manual mouse path is recorded and frozen when the free end snaps.
  */
 (function (global) {
   'use strict';
@@ -25,6 +25,9 @@
   var historyLocked = false;
   var HISTORY_MAX = 60;
   var endDragState = null;
+  /** Dual-state link: A locked in port, B follows mouse until snap */
+  var linkSession = null; /* { cordId, freeEnd } */
+  var suppressPortClickUntil = 0;
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -98,6 +101,7 @@
   function applySnapshot(snap) {
     if (!snap) return;
     historyLocked = true;
+    endLinkSession({ silent: true });
     cords = cloneJson(snap.cords) || [];
     seq = snap.seq || 0;
     selection = { kind: 'none', cordId: null };
@@ -153,19 +157,22 @@
       ay: pos.y,
       bx: pos.x + 120,
       by: pos.y,
-      sideA: { polish: 'PC', attached: null, mismatch: false },
-      sideB: { polish: 'PC', attached: null, mismatch: false },
+      sideA: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
+      sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null },
+      route: [],
+      pathLocked: false,
     };
     cords.push(cord);
     selectCord(cord.id);
     rebuildLayer();
     pushHistory();
     refreshBudget();
-    setStatus('Patch cord placed · drag ends into ports · set SC/APC or SC/PC in properties');
+    setStatus('Patch cord placed · drag a free end — gravity Bezier sag · snap into a port to lock');
     return cord;
   }
 
   function removeCord(id) {
+    if (linkSession && linkSession.cordId === id) endLinkSession({ silent: true });
     cords = cords.filter(function (c) { return c.id !== id; });
     if (selection.cordId === id) selection = { kind: 'none', cordId: null };
     rebuildLayer();
@@ -213,6 +220,7 @@
         if (side.attached && samePort(side.attached, hit)) {
           side.attached = null;
           side.mismatch = false;
+          side.lockedRot = null;
         }
       });
     });
@@ -222,6 +230,9 @@
     var side = cord[endKey(end)];
     var mismatch = !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
+    var otherEnd = oppositeEnd(end);
+    var other = getEndWorld(cord, otherEnd);
+    var lockedRot = endRotationDeg(hit.wx, hit.wy, other.x, other.y);
     side.attached = {
       owner: hit.owner,
       polish: portPolishNorm(hit.polish) === 'APC' ? 'APC' : 'UPC',
@@ -233,18 +244,17 @@
       wx: hit.wx,
       wy: hit.wy,
       mismatch: mismatch,
+      lockedRot: lockedRot,
     };
+    side.lockedRot = lockedRot;
     side.mismatch = mismatch;
-    if (end === 'A') {
-      cord.ax = hit.wx;
-      cord.ay = hit.wy;
-    } else {
-      cord.bx = hit.wx;
-      cord.by = hit.wy;
-    }
+    /* Seat only this end — never move or shrink the free end */
+    var freePos = getEndWorld(cord, otherEnd);
+    seatEndAtPort(cord, end, hit.wx, hit.wy);
+    setEndWorld(cord, otherEnd, freePos.x, freePos.y);
     if (mismatch) showWarning(MISMATCH_MSG);
     setStatus(
-      'Side ' + end + ' · ' + displayPolish(side.polish) + ' → ' + hit.label +
+      'Side ' + end + ' locked · ' + displayPolish(side.polish) + ' → ' + hit.label +
       (mismatch ? ' · mismatch warning · +' + MISMATCH_PENALTY_DB + ' dB' : '')
     );
   }
@@ -253,6 +263,9 @@
     var side = cord[endKey(end)];
     side.attached = null;
     side.mismatch = false;
+    side.lockedRot = null;
+    /* Allow redrawing after an unplug */
+    cord.pathLocked = false;
   }
 
   /* ─── Hit-test equipment ports ─── */
@@ -319,6 +332,9 @@
       var side = cord[endKey(end)];
       if (!side.attached) return;
       var att = side.attached;
+      if (typeof att.lockedRot === 'number' && typeof side.lockedRot !== 'number') {
+        side.lockedRot = att.lockedRot;
+      }
       var el = null;
       if (att.owner === 'olt') {
         el = document.querySelector(
@@ -330,11 +346,11 @@
           var pt = clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
           att.wx = pt.x;
           att.wy = pt.y;
-          if (end === 'A') { cord.ax = pt.x; cord.ay = pt.y; }
-          else { cord.bx = pt.x; cord.by = pt.y; }
+          seatEndAtPort(cord, end, pt.x, pt.y);
         }
         return;
-      } else if (att.owner === 'splitter') {
+      }
+      if (att.owner === 'splitter') {
         el = document.querySelector(
           '.lab-cas-port[data-spl-id="' + att.splitterId + '"][data-spl-port="' + att.port + '"]'
         );
@@ -344,8 +360,7 @@
           var pt2 = clientToWorld(r2.left + r2.width / 2, r2.top + r2.height / 2);
           att.wx = pt2.x;
           att.wy = pt2.y;
-          if (end === 'A') { cord.ax = pt2.x; cord.ay = pt2.y; }
-          else { cord.bx = pt2.x; cord.by = pt2.y; }
+          seatEndAtPort(cord, end, pt2.x, pt2.y);
         }
       }
     });
@@ -425,7 +440,7 @@
       '<span class="lab-tool__mark lab-tool__mark--pcord" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
       '<strong>Patch Cord</strong>' +
-      '<span>Drag ends into ports</span>' +
+      '<span>A ↔ B same click-drag rules</span>' +
       '</span>' +
       '</button>' +
       '</div>';
@@ -438,7 +453,7 @@
     btn.addEventListener('click', function () {
       selectedTool = 'patchcord';
       renderToolbox();
-      setStatus('Patch Cord · drag onto workspace, then drag A/B ends into ports');
+      setStatus('Patch Cord · click-and-hold End A or End B to drag — no auto-follow');
     });
     btn.addEventListener('dragstart', function (e) {
       selectedTool = 'patchcord';
@@ -482,12 +497,272 @@
         if (kind !== 'patchcord') return;
         e.preventDefault();
         e.stopPropagation();
-        var pt = clientToWorld(e.clientX, e.clientY);
-        placeCord(Math.round(pt.x - 20), Math.round(pt.y - 10));
         dragLib = null;
         if (global.FtthLab && FtthLab.endDrag) FtthLab.endDrag();
+        selectedTool = 'patchcord';
+        var hit = hitTestPort(e.clientX, e.clientY);
+        if (hit) {
+          startLinkFromPort(hit);
+          return;
+        }
+        var pt = clientToWorld(e.clientX, e.clientY);
+        placeCord(Math.round(pt.x - 20), Math.round(pt.y - 10));
       });
     });
+  }
+
+  /* ─── Dual-state link lifecycle (A locked → B follows → B snap) ─── */
+
+  function clearPortHighlights() {
+    document.querySelectorAll('.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target')
+      .forEach(function (n) { n.classList.remove('is-plug-target'); });
+  }
+
+  function unbindLinkFollow() {
+    if (!linkSession) return;
+    if (linkSession._onMove) {
+      window.removeEventListener('pointermove', linkSession._onMove);
+    }
+    if (linkSession._onDown) {
+      window.removeEventListener('pointerdown', linkSession._onDown, true);
+    }
+    linkSession._onMove = null;
+    linkSession._onDown = null;
+  }
+
+  function endLinkSession(opts) {
+    opts = opts || {};
+    unbindLinkFollow();
+    linkSession = null;
+    document.body.classList.remove('lab-pcord-linking');
+    clearPortHighlights();
+    if (global.FtthLab) FtthLab._patchPending = null;
+  }
+
+  function cancelLinkSession() {
+    if (!linkSession) {
+      if (global.FtthLab) FtthLab._patchPending = null;
+      return;
+    }
+    var id = linkSession.cordId;
+    var c = findCord(id);
+    endLinkSession({ silent: true });
+    if (!c) {
+      setStatus('Patch link cancelled');
+      return;
+    }
+    var free = getFreeEnd(c);
+    if (free) {
+      rebuildLayer();
+      updateInspector();
+      setStatus(
+        'End ' + oppositeEnd(free) + ' locked · click-and-hold End ' + free + ' to drag'
+      );
+      return;
+    }
+    if (!c.sideA.attached && !c.sideB.attached) {
+      removeCord(id);
+    }
+    setStatus('Patch link cancelled');
+  }
+
+  function oppositeEnd(end) {
+    return end === 'A' ? 'B' : 'A';
+  }
+
+  /** Which connector is free (unplugged), or null if none/both. */
+  function getFreeEnd(cord) {
+    if (!cord) return null;
+    var aOn = !!cord.sideA.attached;
+    var bOn = !!cord.sideB.attached;
+    if (aOn && !bOn) return 'B';
+    if (bOn && !aOn) return 'A';
+    return null;
+  }
+
+  /**
+   * Mark a half-connected cord. The plugged end stays locked; the free end
+   * keeps its current workspace position (no auto-shrink / snap-back) until
+   * an explicit click-and-hold drag.
+   */
+  function armHalfConnected(cord, freeEnd) {
+    if (!cord) return;
+    freeEnd = freeEnd || getFreeEnd(cord);
+    if (!freeEnd) return;
+    freeEnd = freeEnd === 'A' ? 'A' : 'B';
+    var lockedEnd = oppositeEnd(freeEnd);
+    if (!cord[endKey(lockedEnd)].attached) return;
+
+    linkSession = { cordId: cord.id, freeEnd: freeEnd };
+    if (global.FtthLab) {
+      FtthLab._patchPending = {
+        fromPatchCord: true,
+        cordId: cord.id,
+        freeEnd: freeEnd,
+      };
+    }
+    selectCord(cord.id);
+    setStatus(
+      'End ' + lockedEnd + ' locked · End ' + freeEnd +
+      ' stays put — click-and-hold it to drag'
+    );
+  }
+
+  /**
+   * First port click locks End A. End B is created at a fixed offset once,
+   * then left alone — never auto-collapsed when A seats.
+   */
+  function startLinkFromPort(hit) {
+    if (!hit || typeof hit.wx !== 'number') return false;
+    if (linkSession) cancelLinkSession();
+
+    seq += 1;
+    var polish = hit.polish === 'APC' || String(hit.polish).toUpperCase() === 'APC' ? 'APC' : 'PC';
+    var freeX = hit.wx + 140;
+    var freeY = hit.wy + 70;
+    var cord = {
+      id: 'pc-' + seq,
+      ax: hit.wx,
+      ay: hit.wy,
+      bx: freeX,
+      by: freeY,
+      sideA: { polish: polish, attached: null, mismatch: false, lockedRot: null },
+      sideB: { polish: polish, attached: null, mismatch: false, lockedRot: null },
+      route: [],
+      pathLocked: false,
+    };
+    cords.push(cord);
+    attachEnd(cord, 'A', hit);
+    /* Preserve free-end spawn position — do not re-snap B toward A after seat */
+    cord.bx = freeX;
+    cord.by = freeY;
+    clearDrawnPath(cord);
+    selectCord(cord.id);
+    rebuildLayer();
+    flashPort(hit.el);
+    armHalfConnected(cord, 'B');
+    return true;
+  }
+
+  /** Used only if a pending half-link is completed via API — prefer drag-release. */
+  function completeLinkToPort(hit) {
+    if (!linkSession || !hit) return false;
+    var c = findCord(linkSession.cordId);
+    var freeEnd = linkSession.freeEnd || 'B';
+    if (!c) {
+      endLinkSession({ silent: true });
+      return false;
+    }
+    appendRoutePoint(c, hit.wx, hit.wy);
+    attachEnd(c, freeEnd, hit);
+    lockDrawnPath(c);
+    flashPort(hit.el);
+    endLinkSession({ silent: true });
+    suppressPortClickUntil = Date.now() + 450;
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    refreshBudget();
+    setStatus(
+      'Patch connected · drawn path locked · ' +
+      (c.sideA.attached && c.sideA.attached.label) + ' ↔ ' +
+      (c.sideB.attached && c.sideB.attached.label)
+    );
+    return true;
+  }
+
+  /** Enrich a port descriptor from splitter/OLT into a full hit with world coords. */
+  function resolvePortDesc(portDesc) {
+    if (!portDesc) return null;
+    if (typeof portDesc.wx === 'number' && typeof portDesc.wy === 'number' && portDesc.el) {
+      return portDesc;
+    }
+    var el = null;
+    if (portDesc.owner === 'olt') {
+      el = document.querySelector(
+        '.lab-fx-port.is-active[data-lab-slot="' + portDesc.slot +
+        '"][data-lab-sfp="' + portDesc.oltPort + '"]'
+      );
+    } else if (portDesc.owner === 'splitter') {
+      el = document.querySelector(
+        '.lab-cas-port[data-spl-id="' + portDesc.splitterId +
+        '"][data-spl-port="' + portDesc.port + '"]'
+      );
+    }
+    if (!el) return null;
+    var face = el.querySelector('.lab-fx-port__cage, i') || el;
+    var rect = face.getBoundingClientRect();
+    var center = clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return {
+      owner: portDesc.owner,
+      polish: portDesc.polish,
+      label: portDesc.label,
+      splitterId: portDesc.splitterId || null,
+      port: portDesc.port || null,
+      slot: portDesc.slot != null ? portDesc.slot : null,
+      oltPort: portDesc.oltPort != null ? portDesc.oltPort : null,
+      wx: center.x,
+      wy: center.y,
+      el: el,
+    };
+  }
+
+  /**
+   * Entry from splitter/OLT port clicks (and FtthLab.tryPatchPort).
+   * Starts or completes the dual-state yellow patch-cord link.
+   */
+  function tryPatchPort(portDesc) {
+    var hit = resolvePortDesc(portDesc);
+    if (!hit) return false;
+
+    if (linkSession) {
+      /* No auto-complete on port click — user must click-drag the free end */
+      setStatus('Click-and-drag the free connector end onto the target port');
+      return true;
+    }
+
+    if (selectedTool === 'patchcord' || (portDesc && portDesc.forcePatchCord)) {
+      return startLinkFromPort(hit);
+    }
+    return false;
+  }
+
+  function bindPortLifecycle() {
+    if (typeof document === 'undefined') return;
+    if (document.documentElement.dataset.pcordLifecycle === '1') return;
+    document.documentElement.dataset.pcordLifecycle = '1';
+
+    document.addEventListener('click', function (e) {
+      var el = e.target.closest && e.target.closest(
+        '.lab-fx-port.is-active, .lab-cas-port'
+      );
+      if (!el) return;
+
+      if (Date.now() < suppressPortClickUntil) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        return;
+      }
+
+      /* Half-connected: ignore port clicks — only click-drag free end completes the link */
+      if (linkSession) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        setStatus('Click-and-hold the free End and drag it onto the target port');
+        return;
+      }
+
+      if (selectedTool !== 'patchcord') return;
+
+      var hit = hitTestPort(e.clientX, e.clientY);
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      startLinkFromPort(hit);
+    }, true);
   }
 
   /* ─── Render ─── */
@@ -508,25 +783,236 @@
     return normalizePolish(side.polish) === 'APC' ? 'is-apc' : 'is-pc';
   }
 
-  function bezierPath(x1, y1, x2, y2) {
-    var dx = x2 - x1;
-    var mid = x1 + dx / 2;
-    var c1y = y1;
-    var c2y = y2;
-    if (Math.abs(dx) < 40) {
-      c1y = y1 + (y2 - y1) * 0.25;
-      c2y = y1 + (y2 - y1) * 0.75;
-      mid = x1 + (dx >= 0 ? 40 : -40);
-    }
-    return 'M ' + x1 + ' ' + y1 +
-      ' C ' + mid + ' ' + c1y + ', ' + mid + ' ' + c2y + ', ' + x2 + ' ' + y2;
+  var END_W = 14;
+  var END_H = 22;
+  var BOOT_CABLE_GAP = 1.5;
+  var CABLE_ATTACH_OFFSET = END_H / 2 + BOOT_CABLE_GAP;
+  var UNPLUG_PULL_PX = 36;
+  var PLUG_SNAP_PX = 22;
+  /** Base gravity sag (px); also scaled by end-to-end distance */
+  var GRAVITY_OFFSET = 100;
+  var GRAVITY_SAG_RATIO = 0.28;
+  var GRAVITY_SAG_MIN = 24;
+  var GRAVITY_SAG_MAX = 160;
+  /** Min world distance between recorded mouse-path samples */
+  var TRACE_SAMPLE_PX = 10;
+  var TRACE_MAX_POINTS = 180;
+
+  function dist2(ax, ay, bx, by) {
+    var dx = ax - bx;
+    var dy = ay - by;
+    return Math.sqrt(dx * dx + dy * dy);
   }
 
-  var END_W = 14;
-  var END_H = 18;
+  function setEndWorld(cord, end, x, y) {
+    if (end === 'A') { cord.ax = x; cord.ay = y; }
+    else { cord.bx = x; cord.by = y; }
+  }
 
-  function endStyle(x, y) {
-    return 'left:' + Math.round(x - END_W / 2) + 'px;top:' + Math.round(y - END_H / 2) + 'px';
+  function getEndWorld(cord, end) {
+    return end === 'A' ? { x: cord.ax, y: cord.ay } : { x: cord.bx, y: cord.by };
+  }
+
+  /**
+   * CSS clockwise rotate: boot (local +Y) faces the cable.
+   * α = 90° − atan2(dy, dx)
+   */
+  function endRotationDeg(cx, cy, towardX, towardY) {
+    return 90 - Math.atan2(towardY - cy, towardX - cx) * 180 / Math.PI;
+  }
+
+  function bootOutDir(rotDeg) {
+    var r = rotDeg * Math.PI / 180;
+    return { x: Math.sin(r), y: Math.cos(r) };
+  }
+
+  function localToWorld(cx, cy, lx, ly, rotDeg) {
+    var r = rotDeg * Math.PI / 180;
+    var cos = Math.cos(r);
+    var sin = Math.sin(r);
+    return {
+      x: cx + lx * cos + ly * sin,
+      y: cy - lx * sin + ly * cos,
+    };
+  }
+
+  function getEndRotation(cord, end) {
+    var side = cord[endKey(end)];
+    if (side.attached) {
+      if (typeof side.lockedRot === 'number') return side.lockedRot;
+      if (side.attached && typeof side.attached.lockedRot === 'number') {
+        side.lockedRot = side.attached.lockedRot;
+        return side.lockedRot;
+      }
+    }
+    var p = getEndWorld(cord, end);
+    var o = end === 'A' ? { x: cord.bx, y: cord.by } : { x: cord.ax, y: cord.ay };
+    return endRotationDeg(p.x, p.y, o.x, o.y);
+  }
+
+  /** Seat on port using locked rotation only — pose stays frozen while the free end moves. */
+  function seatEndAtPort(cord, end, portX, portY) {
+    var side = cord[endKey(end)];
+    var rot = getEndRotation(cord, end);
+    if (side.attached && typeof side.lockedRot !== 'number') {
+      side.lockedRot = rot;
+      side.attached.lockedRot = rot;
+    }
+    var t = bootOutDir(rot);
+    setEndWorld(cord, end, portX + t.x * 5, portY + t.y * 5);
+  }
+
+  /** Yellow fiber permanently leaves the rear tip of the ribbed boot. */
+  function bootAnchor(cord, end) {
+    var p = getEndWorld(cord, end);
+    var rot = getEndRotation(cord, end);
+    return localToWorld(p.x, p.y, 0, CABLE_ATTACH_OFFSET, rot);
+  }
+
+  function ensureRoute(cord) {
+    if (!cord.route) cord.route = [];
+    return cord.route;
+  }
+
+  function clearDrawnPath(cord) {
+    if (!cord) return;
+    cord.route = [];
+    cord.pathLocked = false;
+  }
+
+  /**
+   * Record the mouse trail while the free end is dragged.
+   * Once pathLocked, samples are never modified.
+   */
+  function appendRoutePoint(cord, x, y) {
+    if (!cord || cord.pathLocked) return;
+    var route = ensureRoute(cord);
+    var last = route[route.length - 1];
+    if (!last) {
+      route.push({ x: x, y: y });
+      return;
+    }
+    if (dist2(last.x, last.y, x, y) < TRACE_SAMPLE_PX) return;
+    route.push({ x: x, y: y });
+    if (route.length > TRACE_MAX_POINTS * 2) {
+      cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
+    }
+  }
+
+  function downsampleRoute(pts, maxN) {
+    if (!pts || pts.length <= maxN) return pts || [];
+    var out = [];
+    var step = (pts.length - 1) / (maxN - 1);
+    var i;
+    for (i = 0; i < maxN; i++) {
+      var idx = Math.round(i * step);
+      out.push({ x: pts[idx].x, y: pts[idx].y });
+    }
+    return out;
+  }
+
+  /** Freeze the traced path so it never auto-recalculates after both ends are plugged. */
+  function lockDrawnPath(cord) {
+    if (!cord) return;
+    var route = ensureRoute(cord);
+    if (route.length > TRACE_MAX_POINTS) {
+      cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
+    }
+    cord.pathLocked = true;
+  }
+
+  function buildCablePoints(cord) {
+    var a = bootAnchor(cord, 'A');
+    var b = bootAnchor(cord, 'B');
+    var route = ensureRoute(cord).slice();
+    if (!route.length) return [a, b];
+    /*
+     * Orient waypoints A → B so dragging either free end yields the same
+     * stable shape (trail may have been recorded toward A or toward B).
+     */
+    if (route.length >= 1) {
+      var dFirstA = dist2(route[0].x, route[0].y, a.x, a.y);
+      var dLastA = dist2(route[route.length - 1].x, route[route.length - 1].y, a.x, a.y);
+      if (dLastA < dFirstA) route.reverse();
+    }
+    return [a].concat(route).concat([b]);
+  }
+
+  /** Smooth SVG path through recorded waypoints (Catmull-Rom → cubic Bezier). */
+  function smoothPathThrough(pts) {
+    if (!pts || pts.length < 2) return '';
+    if (pts.length === 2) {
+      return 'M ' + pts[0].x + ' ' + pts[0].y + ' L ' + pts[1].x + ' ' + pts[1].y;
+    }
+    if (pts.length === 3) {
+      return (
+        'M ' + pts[0].x + ' ' + pts[0].y +
+        ' Q ' + pts[1].x + ' ' + pts[1].y + ', ' + pts[2].x + ' ' + pts[2].y
+      );
+    }
+    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var i;
+    var k = 4.5;
+    for (i = 0; i < pts.length - 1; i++) {
+      var p0 = pts[i - 1] || pts[i];
+      var p1 = pts[i];
+      var p2 = pts[i + 1];
+      var p3 = pts[i + 2] || p2;
+      var c1x = p1.x + (p2.x - p0.x) / k;
+      var c1y = p1.y + (p2.y - p0.y) / k;
+      var c2x = p2.x - (p3.x - p1.x) / k;
+      var c2y = p2.y - (p3.y - p1.y) / k;
+      d += ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + p2.x + ' ' + p2.y;
+    }
+    return d;
+  }
+
+  /**
+   * Prefer the user-traced route. Fall back to a light gravity sag only when
+   * no path has been drawn yet (idle / untraced span).
+   */
+  function cordCablePath(cord) {
+    var route = ensureRoute(cord);
+    if (route.length || cord.pathLocked) {
+      return smoothPathThrough(buildCablePoints(cord));
+    }
+    return gravityBezierPath(cord);
+  }
+
+  /**
+   * Fallback only for untraced cords (no mouse path yet).
+   */
+  function gravityBezierPath(cord) {
+    var p0 = bootAnchor(cord, 'A');
+    var p3 = bootAnchor(cord, 'B');
+    var dx = p3.x - p0.x;
+    var dy = p3.y - p0.y;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var gravityOffset = Math.min(
+      GRAVITY_SAG_MAX,
+      Math.max(GRAVITY_SAG_MIN, GRAVITY_OFFSET * 0.45 + dist * GRAVITY_SAG_RATIO)
+    );
+    var tA = bootOutDir(getEndRotation(cord, 'A'));
+    var tB = bootOutDir(getEndRotation(cord, 'B'));
+    var handle = Math.min(96, Math.max(28, dist * 0.35));
+    var p1x = p0.x + tA.x * handle;
+    var p1y = p0.y + tA.y * handle + gravityOffset;
+    var p2x = p3.x + tB.x * handle;
+    var p2y = p3.y + tB.y * handle + gravityOffset;
+    return (
+      'M ' + p0.x + ' ' + p0.y +
+      ' C ' + p1x + ' ' + p1y + ', ' + p2x + ' ' + p2y + ', ' + p3.x + ' ' + p3.y
+    );
+  }
+
+  function endStyle(cord, end) {
+    var p = getEndWorld(cord, end);
+    var rot = getEndRotation(cord, end);
+    return (
+      'left:' + Math.round(p.x - END_W / 2) + 'px;' +
+      'top:' + Math.round(p.y - END_H / 2) + 'px;' +
+      'transform:rotate(' + rot.toFixed(2) + 'deg)'
+    );
   }
 
   function endMarkup(cord, end, side) {
@@ -537,16 +1023,28 @@
       (side.attached ? ' is-attached' : '') +
       (side.mismatch ? ' is-mismatch' : '') +
       '" data-pcord-id="' + cord.id + '" data-pcord-end="' + end + '" ' +
-      'style="' + endStyle(end === 'A' ? cord.ax : cord.bx, end === 'A' ? cord.ay : cord.by) + '" ' +
-      'title="Side ' + label + ' · ' + displayPolish(side.polish) + ' · drag to port" ' +
+      'style="' + endStyle(cord, end) + '" ' +
+      'title="Side ' + label + ' · ' + displayPolish(side.polish) +
+      (side.attached
+        ? ' · locked in port · pull to unplug'
+        : ' · drag to follow mouse · release on port to snap') +
+      '" ' +
       'aria-label="Side ' + label + ' ' + displayPolish(side.polish) + '">' +
       '<span class="lab-pcord__housing" aria-hidden="true">' +
       '<i class="lab-pcord__ferrule"></i>' +
       '</span>' +
-      '<span class="lab-pcord__boot" aria-hidden="true"></span>' +
+      '<span class="lab-pcord__boot" aria-hidden="true">' +
+      '<i></i><i></i><i></i><i></i><i></i>' +
+      '</span>' +
       '<b class="lab-pcord__mark">' + label + '</b>' +
       '</button>'
     );
+  }
+
+  function flashPort(el) {
+    if (!el) return;
+    el.classList.add('is-plug-click');
+    setTimeout(function () { el.classList.remove('is-plug-click'); }, 280);
   }
 
   function rebuildLayer() {
@@ -557,10 +1055,9 @@
 
     var html = '<svg class="lab-pcord-svg" aria-hidden="true">';
     cords.forEach(function (c) {
-      var path = bezierPath(c.ax, c.ay, c.bx, c.by);
+      var path = cordCablePath(c);
       var bad = c.sideA.mismatch || c.sideB.mismatch;
       var sel = selection.cordId === c.id ? ' is-selected' : '';
-      /* Wide invisible hit stroke so the clean yellow cable can be dragged */
       html +=
         '<path class="lab-pcord-fiber-hit" data-pcord-drag="' + c.id + '" d="' + path +
         '" fill="none" />' +
@@ -583,27 +1080,22 @@
     bindLayerEvents(host);
   }
 
+  /** Real-time path + free-end pose; plugged ends keep locked style. */
   function updateFiberPath(cord) {
     if (!layer) return;
-    var d = bezierPath(cord.ax, cord.ay, cord.bx, cord.by);
+    var d = cordCablePath(cord);
     var path = layer.querySelector('[data-pcord-fiber="' + cord.id + '"]');
     var hit = layer.querySelector('.lab-pcord-fiber-hit[data-pcord-drag="' + cord.id + '"]');
     if (path) path.setAttribute('d', d);
     if (hit) hit.setAttribute('d', d);
     var aBtn = layer.querySelector('[data-pcord-id="' + cord.id + '"][data-pcord-end="A"]');
     var bBtn = layer.querySelector('[data-pcord-id="' + cord.id + '"][data-pcord-end="B"]');
-    if (aBtn) {
-      aBtn.style.left = Math.round(cord.ax - END_W / 2) + 'px';
-      aBtn.style.top = Math.round(cord.ay - END_H / 2) + 'px';
-    }
-    if (bBtn) {
-      bBtn.style.left = Math.round(cord.bx - END_W / 2) + 'px';
-      bBtn.style.top = Math.round(cord.by - END_H / 2) + 'px';
-    }
+    if (aBtn) aBtn.setAttribute('style', endStyle(cord, 'A'));
+    if (bBtn) bBtn.setAttribute('style', endStyle(cord, 'B'));
   }
 
   function bindLayerEvents(host) {
-    /* Drag whole free cord via the yellow fiber hit-path */
+    /* Whole free cord move via fiber (plugged ends stay locked) */
     host.querySelectorAll('[data-pcord-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -622,6 +1114,11 @@
         var oby = c.by;
         var aLocked = !!c.sideA.attached;
         var bLocked = !!c.sideB.attached;
+        /* Path routing is only via click-drag on a connector end — never auto / fiber-glue */
+        if (aLocked || bLocked) {
+          setStatus('Click-and-hold a free connector end to drag and draw the path');
+          return;
+        }
         var moved = false;
 
         function onMove(ev) {
@@ -648,68 +1145,165 @@
       });
     });
 
-    /* Drag individual ends to plug into ports */
+    /* Identical click-and-hold drag for End A and End B — no auto cursor glue */
     host.querySelectorAll('[data-pcord-end]').forEach(function (btn) {
       btn.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
+        try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
         var id = btn.getAttribute('data-pcord-id');
         var end = btn.getAttribute('data-pcord-end');
         var c = findCord(id);
         if (!c) return;
         selectCord(id);
-        detachEnd(c, end);
-        btn.classList.remove('is-attached', 'is-mismatch');
+
+        var side = c[endKey(end)];
+        var wasAttached = !!side.attached;
+        var portHome = wasAttached
+          ? {
+              x: side.attached.wx,
+              y: side.attached.wy,
+              label: side.attached.label,
+              lockedRot: side.lockedRot,
+            }
+          : null;
+        var startClientX = e.clientX;
+        var startClientY = e.clientY;
+        var released = false;
+        var pluggedNow = false;
+        var otherEnd = oppositeEnd(end);
+        var otherWasLocked = !!c[endKey(otherEnd)].attached;
+
+        /*
+         * Free end + other plugged → record manual path on this explicit drag only.
+         * Same rules whether the free end is A or B.
+         */
+        if (!wasAttached && otherWasLocked && !c.pathLocked) {
+          clearDrawnPath(c);
+          var seedBoot = bootAnchor(c, otherEnd);
+          appendRoutePoint(c, seedBoot.x, seedBoot.y);
+        }
+
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pcord-plugging');
-
         endDragState = { cordId: id, end: end };
 
+        function clearHighlights() {
+          document.querySelectorAll('.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target')
+            .forEach(function (n) { n.classList.remove('is-plug-target'); });
+        }
+
         function onMove(ev) {
-          var pt = clientToWorld(ev.clientX, ev.clientY);
-          if (end === 'A') {
-            c.ax = pt.x;
-            c.ay = pt.y;
-          } else {
-            c.bx = pt.x;
-            c.by = pt.y;
+          var mouse = clientToWorld(ev.clientX, ev.clientY);
+          var pullPx = dist2(ev.clientX, ev.clientY, startClientX, startClientY);
+
+          if (wasAttached && !released) {
+            /* Plugged A or B: stay locked until pull clears unplug threshold */
+            if (pullPx < UNPLUG_PULL_PX) {
+              if (portHome) seatEndAtPort(c, end, portHome.x, portHome.y);
+              btn.classList.add('is-tension');
+              updateFiberPath(c);
+              return;
+            }
+            released = true;
+            detachEnd(c, end);
+            clearDrawnPath(c);
+            btn.classList.remove('is-attached', 'is-mismatch', 'is-tension');
+            btn.classList.add('is-unplugging');
+            setStatus('Side ' + end + ' unplugged from ' + (portHome.label || 'port'));
+            refreshBudget();
+            updateInspector();
+          }
+
+          /* Opposite plugged end stays seated (symmetrical for A↔B) */
+          if (c[endKey(otherEnd)].attached) {
+            var oAtt = c[endKey(otherEnd)].attached;
+            seatEndAtPort(c, otherEnd, oAtt.wx, oAtt.wy);
+          }
+
+          setEndWorld(c, end, mouse.x, mouse.y);
+          if (c[endKey(otherEnd)].attached && !c.pathLocked) {
+            appendRoutePoint(c, mouse.x, mouse.y);
           }
           updateFiberPath(c);
 
-          document.querySelectorAll('.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target')
-            .forEach(function (n) { n.classList.remove('is-plug-target'); });
+          clearHighlights();
           var hit = hitTestPort(ev.clientX, ev.clientY);
-          if (hit && hit.el) hit.el.classList.add('is-plug-target');
+          if (hit && hit.el) {
+            var br = hit.el.getBoundingClientRect();
+            var dScreen = dist2(
+              ev.clientX, ev.clientY,
+              br.left + br.width / 2, br.top + br.height / 2
+            );
+            if (dScreen <= PLUG_SNAP_PX * 1.6) hit.el.classList.add('is-plug-target');
+          }
         }
 
         function onUp(ev) {
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
-          btn.classList.remove('is-dragging');
+          try { btn.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
+          btn.classList.remove('is-dragging', 'is-tension', 'is-unplugging');
           document.body.classList.remove('lab-pcord-plugging');
-          document.querySelectorAll('.is-plug-target')
-            .forEach(function (n) { n.classList.remove('is-plug-target'); });
+          clearHighlights();
 
           var hit = hitTestPort(ev.clientX, ev.clientY);
-          if (hit) {
-            attachEnd(c, end, hit);
-          } else {
-            var pt = clientToWorld(ev.clientX, ev.clientY);
-            if (end === 'A') {
-              c.ax = pt.x;
-              c.ay = pt.y;
+          var mouse = clientToWorld(ev.clientX, ev.clientY);
+
+          if (wasAttached && !released) {
+            syncAttachedPositions(c);
+            setStatus('Side ' + end + ' still locked · pull farther to unplug');
+          } else if (hit) {
+            var snapEl = hit.el.querySelector('.lab-fx-port__cage') ||
+              hit.el.querySelector('i') || hit.el;
+            var rect = snapEl.getBoundingClientRect();
+            var dScreen = dist2(
+              ev.clientX, ev.clientY,
+              rect.left + rect.width / 2, rect.top + rect.height / 2
+            );
+            if (dScreen <= PLUG_SNAP_PX * 1.75) {
+              appendRoutePoint(c, hit.wx, hit.wy);
+              attachEnd(c, end, hit);
+              pluggedNow = true;
+              flashPort(hit.el);
+              if (c[endKey(otherEnd)].attached) {
+                lockDrawnPath(c);
+                endLinkSession({ silent: true });
+                setStatus('Patch connected · drawn path locked (End ' + end + ' snapped)');
+              }
             } else {
-              c.bx = pt.x;
-              c.by = pt.y;
+              setEndWorld(c, end, mouse.x, mouse.y);
+              setStatus('Side ' + end + ' free · release over a port to snap-lock');
             }
-            setStatus('Side ' + end + ' free · drag onto an equipment port to plug');
+          } else {
+            setEndWorld(c, end, mouse.x, mouse.y);
+            setStatus('Side ' + end + ' free · click-and-drag to draw, release on a port');
           }
+
           endDragState = null;
           rebuildLayer();
           updateInspector();
           pushHistory();
           refreshBudget();
+          if (pluggedNow && layer) {
+            var live = layer.querySelector(
+              '[data-pcord-id="' + id + '"][data-pcord-end="' + end + '"]'
+            );
+            if (live) {
+              live.classList.add('is-just-plugged');
+              setTimeout(function () { live.classList.remove('is-just-plugged'); }, 320);
+            }
+          }
+
+          /* First end plugged — free end keeps its current position (no shrink/snap-back) */
+          if (pluggedNow) {
+            var other = oppositeEnd(end);
+            if (c[endKey(end)].attached && !c[endKey(other)].attached) {
+              armHalfConnected(c, other);
+            }
+          }
         }
 
         window.addEventListener('pointermove', onMove);
@@ -749,7 +1343,7 @@
     var pathLoss = cordLossDb(c);
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>Drag Side A / Side B into OLT, splitter, or SFP ports. Mismatched polish warns and adds loss — it does not block.</p>';
+      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap and lock the drawn path.</p>';
 
     if (!detail) return;
     detail.hidden = false;
@@ -808,6 +1402,7 @@
 
   function cancelPatch() {
     endDragState = null;
+    cancelLinkSession();
   }
 
   function mount(api) {
@@ -821,12 +1416,25 @@
     selectedTool = null;
     dragLib = null;
     endDragState = null;
+    endLinkSession({ silent: true });
     renderToolbox();
     bindStageDrop();
+    bindPortLifecycle();
     ensureLayer();
     rebuildLayer();
     pushHistory();
     refreshBudget();
+
+    if (global.FtthLab) {
+      var prevTry = FtthLab.tryPatchPort;
+      FtthLab.tryPatchPort = function (portDesc) {
+        if (tryPatchPort(portDesc)) return true;
+        if (typeof prevTry === 'function' && prevTry !== tryPatchPort) {
+          return prevTry(portDesc);
+        }
+        return false;
+      };
+    }
   }
 
   var tool = {
@@ -839,6 +1447,8 @@
     redo: redo,
     deleteSelected: deleteSelected,
     placeCord: placeCord,
+    startLinkFromPort: startLinkFromPort,
+    tryPatchPort: tryPatchPort,
     getNetworkLossDb: getNetworkLossDb,
     getMismatchCount: getMismatchCount,
     rebuildLayer: rebuildLayer,
