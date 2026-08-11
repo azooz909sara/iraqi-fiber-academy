@@ -18,6 +18,26 @@
   /* Blank slate — nothing on canvas until user places hardware */
   var chassisPlaced = false;
   var chassisInLibrary = true;
+  var chassisScale = 1;
+  var chassisX = 0;
+  var chassisY = 0;
+  var WORLD_SIZE = 20000;
+  var CHASSIS_BASE_W = 1100;
+  var CHASSIS_SCALE_MIN = 0.45;
+  var CHASSIS_SCALE_MAX = 1.7;
+
+  function getWorldSize() {
+    return (global.FtthLab && FtthLab.getWorldSize) ? FtthLab.getWorldSize() : WORLD_SIZE;
+  }
+
+  function defaultChassisPos() {
+    var world = getWorldSize();
+    var w = Math.round(CHASSIS_BASE_W * chassisScale);
+    return {
+      x: Math.round(world / 2 - w / 2),
+      y: Math.round(world / 2 - 180),
+    };
+  }
 
   /* installed[slot] = { id, model } — stock minted from toolbox on demand */
   var installed = {};
@@ -38,9 +58,19 @@
   var cardSeq = 0;
   var sfpSeq = 0;
 
+  /* Undo / Redo history of hardware placement */
+  var history = [];
+  var historyIndex = -1;
+  var historyLocked = false;
+  var HISTORY_MAX = 80;
+
   function resetAssembly() {
     chassisPlaced = false;
     chassisInLibrary = true;
+    chassisScale = 1;
+    var pos = defaultChassisPos();
+    chassisX = pos.x;
+    chassisY = pos.y;
     installed = {};
     sfpMap = {};
     portWiring = {};
@@ -49,6 +79,145 @@
     cardSeq = 0;
     sfpSeq = 0;
     selection = { kind: 'none', slot: null, port: null, cardId: null, sfpId: null };
+    history = [];
+    historyIndex = -1;
+  }
+
+  function cloneJson(value) {
+    return JSON.parse(JSON.stringify(value == null ? null : value));
+  }
+
+  function captureSnapshot() {
+    return {
+      chassisPlaced: chassisPlaced,
+      chassisInLibrary: chassisInLibrary,
+      chassisScale: chassisScale,
+      chassisX: chassisX,
+      chassisY: chassisY,
+      installed: cloneJson(installed),
+      sfpMap: cloneJson(sfpMap),
+      cardSeq: cardSeq,
+      sfpSeq: sfpSeq,
+    };
+  }
+
+  function rebuildWiringFromMaps() {
+    portWiring = {};
+    for (var s = 1; s <= SLOT_COUNT; s++) {
+      if (!installed[s]) continue;
+      ensureSlotWiring(s);
+      if (!sfpMap[s]) continue;
+      Object.keys(sfpMap[s]).forEach(function (pk) {
+        var id = portId(s, parseInt(pk, 10));
+        if (portWiring[id]) portWiring[id].hasSfp = true;
+      });
+    }
+  }
+
+  function applySnapshot(snap) {
+    if (!snap) return;
+    historyLocked = true;
+    chassisPlaced = !!snap.chassisPlaced;
+    chassisInLibrary = !!snap.chassisInLibrary;
+    chassisScale = typeof snap.chassisScale === 'number' ? snap.chassisScale : 1;
+    chassisX = typeof snap.chassisX === 'number' ? snap.chassisX : defaultChassisPos().x;
+    chassisY = typeof snap.chassisY === 'number' ? snap.chassisY : defaultChassisPos().y;
+    installed = cloneJson(snap.installed) || {};
+    sfpMap = cloneJson(snap.sfpMap) || {};
+    cardSeq = snap.cardSeq || 0;
+    sfpSeq = snap.sfpSeq || 0;
+    cardInventory = [];
+    sfpInventory = [];
+    rebuildWiringFromMaps();
+    selection = { kind: 'none', slot: null, port: null, cardId: null, sfpId: null };
+    rebuildViews();
+    var hud = document.getElementById('lab-hud-mode');
+    if (hud) {
+      hud.textContent = chassisPlaced
+        ? '2D Layout · FX-16 Chassis'
+        : '2D Layout · Empty Workspace';
+    }
+    if (chassisPlaced) selectChassis();
+    else {
+      updateInspector();
+      renderToolbox();
+    }
+    historyLocked = false;
+    updateUndoRedoUi();
+  }
+
+  function updateUndoRedoUi() {
+    var undoBtn = document.getElementById('lab-btn-undo');
+    var redoBtn = document.getElementById('lab-btn-redo');
+    if (undoBtn) undoBtn.disabled = historyIndex <= 0;
+    if (redoBtn) redoBtn.disabled = historyIndex < 0 || historyIndex >= history.length - 1;
+  }
+
+  function pushHistory() {
+    if (historyLocked) return;
+    history = history.slice(0, historyIndex + 1);
+    history.push(captureSnapshot());
+    if (history.length > HISTORY_MAX) {
+      history.shift();
+    }
+    historyIndex = history.length - 1;
+    updateUndoRedoUi();
+  }
+
+  function undo() {
+    if (historyIndex <= 0) {
+      setStatus('Nothing to undo');
+      return false;
+    }
+    historyIndex -= 1;
+    applySnapshot(history[historyIndex]);
+    setStatus('Undo');
+    return true;
+  }
+
+  function redo() {
+    if (historyIndex >= history.length - 1) {
+      setStatus('Nothing to redo');
+      return false;
+    }
+    historyIndex += 1;
+    applySnapshot(history[historyIndex]);
+    setStatus('Redo');
+    return true;
+  }
+
+  function clampChassisScale(v) {
+    return Math.max(CHASSIS_SCALE_MIN, Math.min(CHASSIS_SCALE_MAX, v));
+  }
+
+  function applyChassisLayout() {
+    if (!el2d) return;
+    var world = getWorldSize();
+    if (!chassisPlaced) {
+      el2d.classList.add('lab-olt-2d--empty');
+      el2d.style.left = Math.round(world / 2 - 360) + 'px';
+      el2d.style.top = Math.round(world / 2 - 160) + 'px';
+      el2d.style.width = '720px';
+      el2d.style.maxWidth = 'none';
+      el2d.style.maxHeight = 'none';
+      el2d.style.transform = 'none';
+      el2d.style.overflow = 'visible';
+      return;
+    }
+    el2d.classList.remove('lab-olt-2d--empty');
+    var frame = el2d.querySelector('.lab-fx-chassis-frame');
+    var w = Math.round(CHASSIS_BASE_W * chassisScale);
+    if (frame) {
+      frame.style.width = w + 'px';
+      frame.style.setProperty('--fx-scale', String(chassisScale));
+    }
+    el2d.style.left = Math.round(chassisX) + 'px';
+    el2d.style.top = Math.round(chassisY) + 'px';
+    el2d.style.width = w + 'px';
+    el2d.style.maxWidth = 'none';
+    el2d.style.maxHeight = 'none';
+    el2d.style.transform = 'none';
+    el2d.style.overflow = 'visible';
   }
 
   /** Toolbox tools are always available — mint stock on demand */
@@ -138,11 +307,16 @@
     }
     chassisPlaced = true;
     chassisInLibrary = false;
+    var pos = defaultChassisPos();
+    chassisX = pos.x;
+    chassisY = pos.y;
+    chassisScale = 1;
     rebuildViews();
     selectChassis();
     var hud = document.getElementById('lab-hud-mode');
     if (hud) hud.textContent = '2D Layout · FX-16 Chassis';
-    setStatus('FX-16 chassis placed · drag FGLT-D into empty LT slots 01–16');
+    pushHistory();
+    setStatus('FX-16 placed · drag chassis to move · corner handles to resize');
     return true;
   }
 
@@ -159,10 +333,15 @@
     sfpInventory = [];
     chassisPlaced = false;
     chassisInLibrary = true;
+    chassisScale = 1;
+    var pos = defaultChassisPos();
+    chassisX = pos.x;
+    chassisY = pos.y;
     rebuildViews();
     selectLibraryChassis();
     var hud = document.getElementById('lab-hud-mode');
     if (hud) hud.textContent = '2D Layout · Empty Workspace';
+    pushHistory();
     setStatus('Chassis removed · workspace empty · drag FX-16 from the toolbox to restart');
     return true;
   }
@@ -207,6 +386,7 @@
       });
       rebuildViews();
       selectCard(slot);
+      pushHistory();
       setStatus('FGLT-D moved to LT' + pad2(slot));
       return true;
     } else {
@@ -218,6 +398,7 @@
     if (!sfpMap[slot]) sfpMap[slot] = {};
     rebuildViews();
     selectCard(slot);
+    pushHistory();
     setStatus('FGLT-D seated in LT' + pad2(slot) + ' · drag SFP modules into square ports');
     return true;
   }
@@ -229,6 +410,7 @@
     clearSlotWiring(slot);
     rebuildViews();
     selectSlot(slot);
+    pushHistory();
     setStatus('FGLT-D ejected from LT' + pad2(slot));
     return true;
   }
@@ -263,6 +445,7 @@
     if (portWiring[portId(slot, port)]) portWiring[portId(slot, port)].hasSfp = true;
     rebuildViews();
     selectPort(slot, port);
+    pushHistory();
     setStatus('SFP seated in LT' + pad2(slot) + ' · Port ' + port + ' · jumper-ready');
     return true;
   }
@@ -275,6 +458,7 @@
     if (portWiring[portId(slot, port)]) portWiring[portId(slot, port)].hasSfp = false;
     rebuildViews();
     selectPort(slot, port);
+    pushHistory();
     setStatus('SFP removed from Port ' + port);
     return true;
   }
@@ -729,6 +913,7 @@
 
     /* Blank slate — no chassis until user places it */
     if (!chassisPlaced) {
+      el2d.classList.add('lab-olt-2d--empty');
       el2d.innerHTML =
         '<div class="lab-stage-dropzone" data-lab-drop="chassis" role="region" ' +
         'aria-label="Empty workspace drop zone">' +
@@ -742,6 +927,7 @@
         '</ol>' +
         '</div></div>';
       host.appendChild(el2d);
+      applyChassisLayout();
       bindEmptyDropzoneEvents();
       syncSelectionUi();
       return;
@@ -764,22 +950,160 @@
 
     el2d.innerHTML =
       '<div class="lab-fx-workspace lab-fx-workspace--solo">' +
+      '<div class="lab-fx-chassis-frame" data-lab-chassis-frame="1">' +
       '<div class="lab-fx-chassis" data-lab-olt="chassis">' +
-      '<div class="lab-fx-comb" aria-hidden="true"></div>' +
+      '<div class="lab-fx-comb" data-lab-chassis-drag="1" aria-hidden="true"></div>' +
       '<div class="lab-fx-bay">' + slotsHtml + '</div>' +
       '<div class="lab-fx-numbers">' + nums + '</div>' +
-      '<div class="lab-fx-power">' +
+      '<div class="lab-fx-power" data-lab-chassis-drag="1">' +
       '<span class="lab-fx-power__model">7360 ISAM FX-16</span>' +
       '<span class="lab-fx-power__spec">40.5V–72V · 70A</span>' +
       '<span class="lab-fx-power__brand">NOKIA</span>' +
       '</div>' +
-      '<div class="lab-fx-fan"><span>FAN TRAY</span>' +
+      '<div class="lab-fx-fan" data-lab-chassis-drag="1"><span>FAN TRAY</span>' +
       '<span class="lab-fx-fan__leds"><i></i><i class="is-on"></i></span></div>' +
+      '</div>' +
+      /* Invisible edge/corner hit zones — no visual chrome */
+      '<span class="lab-fx-edge lab-fx-edge--n" data-lab-resize="n" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--s" data-lab-resize="s" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--e" data-lab-resize="e" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--w" data-lab-resize="w" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--nw" data-lab-resize="nw" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--ne" data-lab-resize="ne" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--sw" data-lab-resize="sw" aria-hidden="true"></span>' +
+      '<span class="lab-fx-edge lab-fx-edge--se" data-lab-resize="se" aria-hidden="true"></span>' +
       '</div></div>';
 
     host.appendChild(el2d);
+    applyChassisLayout();
     bind2dEvents();
+    bindChassisMove();
+    bindResizeHandles();
     syncSelectionUi();
+  }
+
+  function bindChassisMove() {
+    if (!el2d || !chassisPlaced) return;
+    var frame = el2d.querySelector('.lab-fx-chassis-frame');
+    if (!frame) return;
+
+    function startMove(e) {
+      if (e.button !== 0) return;
+      if (e.target.closest('[data-lab-resize]')) return;
+      if (e.target.closest('.lab-fx-slot')) return;
+      if (e.target.closest('.lab-fx-port')) return;
+      if (!e.target.closest('[data-lab-chassis-drag]')) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      selectChassis();
+
+      var zoom = (global.FtthLab && FtthLab.getZoom2d) ? FtthLab.getZoom2d() : 1;
+      var startX = e.clientX;
+      var startY = e.clientY;
+      var originX = chassisX;
+      var originY = chassisY;
+      var moved = false;
+      frame.classList.add('is-dragging');
+
+      function onMove(ev) {
+        var dx = (ev.clientX - startX) / zoom;
+        var dy = (ev.clientY - startY) / zoom;
+        if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+        chassisX = originX + dx;
+        chassisY = originY + dy;
+        applyChassisLayout();
+      }
+
+      function onUp() {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        frame.classList.remove('is-dragging');
+        if (moved) {
+          pushHistory();
+          setStatus('Chassis moved on grid');
+        }
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+
+    frame.querySelectorAll('[data-lab-chassis-drag]').forEach(function (el) {
+      el.addEventListener('pointerdown', startMove);
+    });
+  }
+
+  function bindResizeHandles() {
+    if (!el2d) return;
+    var frame = el2d.querySelector('.lab-fx-chassis-frame');
+    if (!frame) return;
+
+    frame.querySelectorAll('[data-lab-resize]').forEach(function (handle) {
+      handle.addEventListener('pointerdown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var mode = handle.getAttribute('data-lab-resize');
+        var startX = e.clientX;
+        var startY = e.clientY;
+        var startScale = chassisScale;
+        var startLeft = chassisX;
+        var startTop = chassisY;
+        var startW = CHASSIS_BASE_W * startScale;
+        var zoom = (global.FtthLab && FtthLab.getZoom2d) ? FtthLab.getZoom2d() : 1;
+        var startH = frame.getBoundingClientRect().height / zoom;
+        var moved = false;
+
+        function onMove(ev) {
+          var dx = (ev.clientX - startX) / zoom;
+          var dy = (ev.clientY - startY) / zoom;
+          var delta = 0;
+          if (mode === 'e') delta = dx;
+          else if (mode === 'w') delta = -dx;
+          else if (mode === 's') delta = dy;
+          else if (mode === 'n') delta = -dy;
+          else if (mode === 'se') delta = Math.max(dx, dy);
+          else if (mode === 'ne') delta = Math.max(dx, -dy);
+          else if (mode === 'sw') delta = Math.max(-dx, dy);
+          else delta = Math.max(-dx, -dy); /* nw */
+
+          var next = clampChassisScale(startScale + delta / CHASSIS_BASE_W);
+          if (Math.abs(next - chassisScale) < 0.001) return;
+          moved = true;
+          var nextW = CHASSIS_BASE_W * next;
+          var nextH = startH * (next / startScale);
+          chassisScale = next;
+
+          /* Anchor opposite edge/corner */
+          if (mode === 'e' || mode === 's' || mode === 'se') {
+            /* top-left fixed */
+          } else if (mode === 'w' || mode === 'sw') {
+            chassisX = startLeft + (startW - nextW);
+          } else if (mode === 'n' || mode === 'ne') {
+            chassisY = startTop + (startH - nextH);
+          } else {
+            chassisX = startLeft + (startW - nextW);
+            chassisY = startTop + (startH - nextH);
+          }
+
+          applyChassisLayout();
+          if (group3d) group3d.scale.setScalar(chassisScale);
+        }
+
+        function onUp() {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          if (moved) {
+            pushHistory();
+            setStatus('Chassis size · ' + Math.round(chassisScale * 100) + '%');
+          }
+        }
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+      });
+    });
   }
 
   function bindEmptyDropzoneEvents() {
@@ -908,6 +1232,7 @@
     group3d = new THREE.Group();
     group3d.name = 'nokia-fx16';
     group3d.position.set(0, 1.15, 0);
+    group3d.scale.setScalar(chassisScale);
 
     var silver = new THREE.MeshStandardMaterial({
       color: 0xc0c6ce, roughness: 0.45, metalness: 0.55,
@@ -1050,8 +1375,10 @@
     resetAssembly();
     bindStageDrop();
     rebuildViews();
+    pushHistory();
+    updateUndoRedoUi();
     updateInspector();
-    setStatus('Blank workspace · drag Nokia 7360 FX-16 from the toolbox to begin');
+    setStatus('Blank workspace · scroll to zoom · تراجع / تقدم خطوة · drag FX-16 to begin');
   }
 
   function getPortWiring(portOrId) {
@@ -1072,6 +1399,8 @@
     mount: mount,
     onViewChange: onViewChange,
     onStageClick: onStageClick,
+    undo: undo,
+    redo: redo,
     getPortWiring: getPortWiring,
     getPickables: getPickables,
     installCard: installCard,

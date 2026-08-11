@@ -22,6 +22,10 @@
         </div>
       </a>
       <div class="lab-header__actions">
+        <div class="lab-toggle-group lab-history-group" role="group" aria-label="History">
+          <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-undo" data-lab-undo title="Undo · Ctrl+Z" aria-label="Undo" disabled>↩️</button>
+          <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-redo" data-lab-redo title="Redo · Ctrl+Y" aria-label="Redo" disabled>↪️</button>
+        </div>
         <div class="lab-toggle-group" role="group" aria-label="Workspace view">
           <button type="button" class="lab-toggle-btn is-active" data-lab-view="2d">2D Layout</button>
           <button type="button" class="lab-toggle-btn" data-lab-view="3d">3D Workspace</button>
@@ -45,16 +49,19 @@
 
       <section class="lab-stage-wrap" aria-label="Lab stage">
         <div id="lab-canvas-2d" class="lab-2d-stage">
-          <div class="lab-2d-grid" aria-hidden="true"></div>
-          <div class="lab-2d-origin" title="Layout origin" aria-hidden="true"></div>
-          <div id="lab-2d-mount" class="lab-2d-mount" data-lab-mount="2d"></div>
+          <div class="lab-2d-world" id="lab-2d-world">
+            <div class="lab-2d-grid" aria-hidden="true"></div>
+            <div class="lab-2d-origin" title="Layout origin" aria-hidden="true"></div>
+            <div id="lab-2d-mount" class="lab-2d-mount" data-lab-mount="2d"></div>
+          </div>
         </div>
 
         <div id="lab-canvas-3d" hidden data-lab-mount="3d"></div>
 
         <div class="lab-stage-hud">
           <span class="lab-hud-chip" id="lab-hud-mode">2D Layout · Empty Workspace</span>
-          <span class="lab-hud-chip">Drag: OLT → FGLT-D → SFP</span>
+          <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
+          <span class="lab-hud-chip">Scroll zoom · Drag grid to pan · Drag OLT to move</span>
         </div>
       </section>
 

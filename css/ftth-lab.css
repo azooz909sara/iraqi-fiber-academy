@@ -110,6 +110,20 @@ body {
   color: var(--lab-cyan);
 }
 
+.lab-toggle-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  color: var(--lab-muted);
+}
+
+.lab-icon-btn {
+  min-width: 2.35rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .lab-home-link {
   display: inline-flex;
   align-items: center;
@@ -281,19 +295,36 @@ body {
   width: 100%;
   height: 100%;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
+  touch-action: none;
+  cursor: grab;
+}
+
+.lab-2d-stage.is-panning {
+  cursor: grabbing;
+}
+
+.lab-2d-world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 20000px;
+  height: 20000px;
+  transform-origin: 0 0;
+  will-change: transform;
 }
 
 .lab-2d-grid {
   position: absolute;
   inset: 0;
-  min-width: 100%;
-  min-height: 100%;
+  width: 100%;
+  height: 100%;
   background-color: #0a101c;
   background-image:
     linear-gradient(var(--lab-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--lab-grid) 1px, transparent 1px);
   background-size: 24px 24px;
+  pointer-events: auto;
 }
 
 .lab-2d-origin {
@@ -312,16 +343,18 @@ body {
 .lab-2d-mount {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   /* Tools mount DOM / SVG layers here */
 }
 
 /* Blank-slate empty workspace drop target */
 .lab-stage-dropzone {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: min(720px, calc(100% - 2rem));
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+  width: 100%;
   min-height: 280px;
   display: flex;
   align-items: center;
@@ -415,12 +448,6 @@ body {
 }
 
 .lab-olt-2d:has(.lab-stage-dropzone) {
-  inset: 0;
-  width: 100%;
-  max-height: none;
-  transform: none;
-  left: 0;
-  top: 0;
   overflow: visible;
 }
 
@@ -492,12 +519,22 @@ body {
 /* ── Nokia FX-16 OLT · reference front elevation + inventory ── */
 .lab-olt-2d {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: min(1100px, calc(100% - 1.5rem));
-  max-height: calc(100% - 1.5rem);
-  overflow: auto;
+  left: 0;
+  top: 0;
+  width: auto;
+  max-height: none;
+  overflow: visible;
+  z-index: 2;
+  scrollbar-width: none;
+}
+
+.lab-olt-2d::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.lab-olt-2d--empty {
   z-index: 2;
 }
 
@@ -512,6 +549,21 @@ body {
   grid-template-columns: 1fr;
 }
 
+.lab-fx-chassis-frame {
+  position: relative;
+  width: 100%;
+  --fx-scale: 1;
+  padding: 0;
+  outline: none;
+  box-shadow: none;
+  border: none;
+  background: transparent;
+}
+
+.lab-fx-chassis-frame.is-dragging {
+  opacity: 0.96;
+}
+
 .lab-fx-chassis {
   background: linear-gradient(180deg, #d7dce6 0%, #b8c0ca 45%, #9aa3ae 100%);
   border: 1px solid #7b8490;
@@ -519,10 +571,104 @@ body {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
   padding: 0.45rem 0.55rem 0.55rem;
   color: #0f172a;
+  outline: none;
+}
+
+.lab-fx-chassis-frame:focus,
+.lab-fx-chassis-frame:focus-visible,
+.lab-fx-chassis:focus,
+.lab-fx-edge:focus,
+.lab-fx-edge:focus-visible {
+  outline: none;
+}
+
+.lab-fx-comb,
+.lab-fx-power,
+.lab-fx-fan {
+  cursor: grab;
+}
+
+/* Invisible natural-edge resize hit zones (no chrome, labels, or blue boxes) */
+.lab-fx-edge {
+  position: absolute;
+  z-index: 6;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  opacity: 0;
+}
+
+.lab-fx-edge--n {
+  left: 12px;
+  right: 12px;
+  top: -5px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.lab-fx-edge--s {
+  left: 12px;
+  right: 12px;
+  bottom: -5px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.lab-fx-edge--e {
+  top: 12px;
+  bottom: 12px;
+  right: -5px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.lab-fx-edge--w {
+  top: 12px;
+  bottom: 12px;
+  left: -5px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.lab-fx-edge--nw {
+  left: -6px;
+  top: -6px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.lab-fx-edge--ne {
+  right: -6px;
+  top: -6px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+
+.lab-fx-edge--sw {
+  left: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  cursor: nesw-resize;
+}
+
+.lab-fx-edge--se {
+  right: -6px;
+  bottom: -6px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
 }
 
 .lab-fx-comb {
-  height: 22px;
+  height: calc(22px * var(--fx-scale, 1));
   margin-bottom: 0.35rem;
   border-radius: 0.2rem;
   background:
@@ -541,7 +687,7 @@ body {
   display: grid;
   grid-template-columns: repeat(16, minmax(0, 1fr));
   gap: 2px;
-  min-height: 260px;
+  min-height: calc(260px * var(--fx-scale, 1));
   padding: 0.25rem;
   background: #6b7280;
   border: 1px solid #4b5563;
@@ -549,7 +695,7 @@ body {
 
 .lab-fx-slot {
   position: relative;
-  min-height: 250px;
+  min-height: calc(250px * var(--fx-scale, 1));
   background: #9ca3af;
   border: 1px solid #6b7280;
   cursor: pointer;
@@ -666,8 +812,8 @@ body {
 .lab-fx-port__cage {
   grid-column: 1;
   grid-row: 1 / span 2;
-  width: 11px;
-  height: 11px;
+  width: calc(11px * var(--fx-scale, 1));
+  height: calc(11px * var(--fx-scale, 1));
   border-radius: 1px;
   background: #0f172a;
   border: 1px solid #475569;
@@ -677,7 +823,7 @@ body {
 .lab-fx-port__num {
   grid-column: 2;
   grid-row: 1;
-  font-size: 0.4rem;
+  font-size: calc(0.4rem * var(--fx-scale, 1));
   font-weight: 800;
   color: #334155;
   line-height: 1;

@@ -19,7 +19,16 @@
     tools: {},
     booted: false,
     pendingTools: [],
+    /* 2D canvas zoom (mouse wheel) */
+    zoom2d: 1,
+    pan2dX: 0,
+    pan2dY: 0,
   };
+
+  var ZOOM_MIN = 0.2;
+  var ZOOM_MAX = 2.75;
+  var ZOOM_STEP = 0.08;
+  var WORLD_SIZE = 20000; /* virtually infinite workspace */
 
   function $(id) {
     return document.getElementById(id);
@@ -109,15 +118,137 @@
     if (host2d) host2d.hidden = state.viewMode !== '2d';
     if (host3d) host3d.hidden = state.viewMode !== '3d';
 
-    var modeChip = $('lab-hud-mode');
-    if (modeChip) {
-      modeChip.textContent = state.viewMode === '2d'
-        ? '2D Layout · FX-16 OLT'
-        : '3D Workspace · FX-16 OLT';
-    }
-
     notifyTools('onViewChange', { viewMode: state.viewMode });
     onResize();
+    applyZoom2d();
+  }
+
+  /* ─── 2D mouse-wheel zoom ─── */
+
+  function clampZoom(z) {
+    return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  }
+
+  function applyZoom2d() {
+    var world = $('lab-2d-world');
+    if (world) {
+      world.style.width = WORLD_SIZE + 'px';
+      world.style.height = WORLD_SIZE + 'px';
+      world.style.transform =
+        'translate(' + state.pan2dX + 'px, ' + state.pan2dY + 'px) scale(' + state.zoom2d + ')';
+    }
+    var chip = $('lab-hud-zoom');
+    if (chip) chip.textContent = 'Zoom ' + Math.round(state.zoom2d * 100) + '%';
+  }
+
+  function zoom2dAt(clientX, clientY, nextZoom) {
+    var stage = $('lab-canvas-2d');
+    if (!stage) {
+      state.zoom2d = clampZoom(nextZoom);
+      applyZoom2d();
+      return;
+    }
+    var rect = stage.getBoundingClientRect();
+    var mx = clientX - rect.left;
+    var my = clientY - rect.top;
+    var prev = state.zoom2d;
+    var next = clampZoom(nextZoom);
+    if (next === prev) return;
+    /* Keep point under cursor stable while scaling */
+    state.pan2dX = mx - ((mx - state.pan2dX) * (next / prev));
+    state.pan2dY = my - ((my - state.pan2dY) * (next / prev));
+    state.zoom2d = next;
+    applyZoom2d();
+  }
+
+  function onStageWheel(e) {
+    if (state.viewMode !== '2d') return;
+    e.preventDefault();
+    var dir = e.deltaY > 0 ? -1 : 1;
+    zoom2dAt(e.clientX, e.clientY, state.zoom2d + dir * ZOOM_STEP);
+  }
+
+  function centerWorldInView() {
+    var stage = $('lab-canvas-2d');
+    if (!stage) return;
+    var z = state.zoom2d || 1;
+    state.pan2dX = (stage.clientWidth / 2) - (WORLD_SIZE / 2) * z;
+    state.pan2dY = (stage.clientHeight / 2) - (WORLD_SIZE / 2) * z;
+    applyZoom2d();
+  }
+
+  function isCanvasPanTarget(target) {
+    if (!target || !target.closest) return true;
+    if (target.closest('[data-lab-resize]')) return false;
+    if (target.closest('[data-lab-chassis-drag]')) return false;
+    if (target.closest('.lab-fx-slot')) return false;
+    if (target.closest('.lab-fx-port')) return false;
+    if (target.closest('.lab-fx-chassis-frame')) return false;
+    if (target.closest('.lab-stage-dropzone')) return false;
+    if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
+    return true;
+  }
+
+  function bindPan2d(stage) {
+    if (!stage || stage.dataset.panBound === '1') return;
+    stage.dataset.panBound = '1';
+    var pan = null;
+
+    stage.addEventListener('pointerdown', function (e) {
+      if (state.viewMode !== '2d') return;
+      var middle = e.button === 1;
+      var leftEmpty = e.button === 0 && isCanvasPanTarget(e.target);
+      if (!middle && !leftEmpty) return;
+      if (middle) e.preventDefault();
+      pan = {
+        x: e.clientX,
+        y: e.clientY,
+        panX: state.pan2dX,
+        panY: state.pan2dY,
+        pointerId: e.pointerId,
+      };
+      stage.classList.add('is-panning');
+      try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
+
+    stage.addEventListener('pointermove', function (e) {
+      if (!pan) return;
+      state.pan2dX = pan.panX + (e.clientX - pan.x);
+      state.pan2dY = pan.panY + (e.clientY - pan.y);
+      applyZoom2d();
+    });
+
+    function endPan() {
+      if (!pan) return;
+      pan = null;
+      stage.classList.remove('is-panning');
+    }
+
+    stage.addEventListener('pointerup', endPan);
+    stage.addEventListener('pointercancel', endPan);
+    stage.addEventListener('lostpointercapture', endPan);
+
+    /* Prevent middle-click autoscroll */
+    stage.addEventListener('auxclick', function (e) {
+      if (e.button === 1) e.preventDefault();
+    });
+  }
+
+  function bindZoom2d() {
+    var stage = $('lab-canvas-2d');
+    if (!stage || stage.dataset.zoomBound === '1') return;
+    stage.dataset.zoomBound = '1';
+    stage.addEventListener('wheel', onStageWheel, { passive: false });
+    bindPan2d(stage);
+    centerWorldInView();
+  }
+
+  function undo() {
+    notifyTools('undo');
+  }
+
+  function redo() {
+    notifyTools('redo');
   }
 
   /* ─── 3D empty grid stage ─── */
@@ -243,6 +374,26 @@
         setViewMode(btn.getAttribute('data-lab-view'));
       });
     });
+
+    var undoBtn = $('lab-btn-undo');
+    var redoBtn = $('lab-btn-redo');
+    if (undoBtn) undoBtn.addEventListener('click', undo);
+    if (redoBtn) redoBtn.addEventListener('click', redo);
+
+    document.addEventListener('keydown', function (e) {
+      var tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+      var key = (e.key || '').toLowerCase();
+      if ((e.ctrlKey || e.metaKey) && key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((e.ctrlKey || e.metaKey) && (key === 'y' || (key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
+      }
+    });
+
+    bindZoom2d();
   }
 
   function boot() {
@@ -251,7 +402,7 @@
     state.booted = true;
     flushPendingTools();
     setViewMode('2d');
-    setStatus('FTTH Lab ready · blank workspace · assemble from library');
+    setStatus('FTTH Lab ready · blank workspace · scroll to zoom · Undo / Redo available');
   }
 
   var api = {
@@ -263,6 +414,11 @@
     getCamera: function () { return state.camera; },
     getRenderer: function () { return state.renderer; },
     setStatus: setStatus,
+    undo: undo,
+    redo: redo,
+    getZoom2d: function () { return state.zoom2d; },
+    getWorldSize: function () { return WORLD_SIZE; },
+    centerWorldInView: centerWorldInView,
   };
 
   global.FtthLab = api;
