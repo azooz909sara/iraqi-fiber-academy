@@ -1,8 +1,8 @@
 /**
  * Fiber Optics 3D/2D Interactive Anatomy
  * Hierarchical click-to-peel: Jacket → Loose Tubes → Strands
- * Backbone: 48F / 72F / 144F / 288F (12 strands / tube)
- * Access: 12F / 24F / 36F (6 strands / tube)
+ * Last Mile: 12F / 24F / 36F / 48F (6 strands / tube)
+ * FTTH Cable: 48F Feeder / 72F / 144F / 288F (12 strands / tube)
  */
 (function () {
   'use strict';
@@ -43,42 +43,64 @@
     12: {
       capacity: 12,
       label: '12F',
+      badge: '12F',
+      category: 'lastmile',
       strandsPerTube: 6,
       tubes: tubesFromCount(2),
     },
     24: {
       capacity: 24,
       label: '24F',
+      badge: '24F',
+      category: 'lastmile',
       strandsPerTube: 6,
       tubes: tubesFromCount(4),
     },
     36: {
       capacity: 36,
       label: '36F',
+      badge: '36F',
+      category: 'lastmile',
       strandsPerTube: 6,
       tubes: tubesFromCount(6),
     },
-    48: {
+    '48lm': {
       capacity: 48,
-      label: '48F',
+      label: '48F [Last Mile]',
+      badge: '48F',
+      category: 'lastmile',
+      strandsPerTube: 6,
+      tubes: tubesFromCount(8),
+    },
+    '48f': {
+      capacity: 48,
+      label: '48F [Feeder]',
+      badge: '48F',
+      category: 'ftth',
       strandsPerTube: 12,
       tubes: tubesFromCount(4),
     },
     72: {
       capacity: 72,
       label: '72F',
+      badge: '72F',
+      category: 'ftth',
       strandsPerTube: 12,
       tubes: tubesFromCount(6),
     },
     144: {
       capacity: 144,
       label: '144F',
+      badge: '144F',
+      category: 'ftth',
       strandsPerTube: 12,
       tubes: tubesFromCount(12),
     },
     288: {
       capacity: 288,
       label: '288F',
+      badge: '288F',
+      category: 'ftth',
       strandsPerTube: 12,
       dualGroup: true,
       tubes: tubes288DualGroup(),
@@ -110,7 +132,7 @@
 
   var state = {
     component: 'cable',
-    capacity: 48,
+    capacity: 12,
     peelState: 0, /* 0 jacket, 1 tubes, 2 strands */
     selectedTube: null,
     viewMode: '3d', /* 3d | 2d */
@@ -144,7 +166,21 @@
   function $(id) { return document.getElementById(id); }
 
   function getSpec() {
-    return CABLE_SPECS[state.capacity] || CABLE_SPECS[48];
+    return CABLE_SPECS[state.capacity] || CABLE_SPECS[12];
+  }
+
+  function resolveCapacityKey(cap) {
+    if (cap == null) return null;
+    if (Object.prototype.hasOwnProperty.call(CABLE_SPECS, cap)) return cap;
+    var asStr = String(cap);
+    if (Object.prototype.hasOwnProperty.call(CABLE_SPECS, asStr)) return asStr;
+    var n = parseInt(asStr, 10);
+    if (!isNaN(n) && Object.prototype.hasOwnProperty.call(CABLE_SPECS, n)) return n;
+    return null;
+  }
+
+  function jacketBadge(spec) {
+    return (spec && (spec.badge || spec.label)) || '';
   }
 
   function colorOf(key) {
@@ -372,14 +408,14 @@
         'data-f3d-2d-peel="jacket" title="Click jacket to expose loose tubes" ' +
         'aria-label="' + spec.label + ' outer jacket — click to peel">' +
         '<span class="f3d-layer-jacket">' +
-        '<span class="f3d-layer-jacket__label">' + spec.label + '</span>' +
+        '<span class="f3d-layer-jacket__label">' + jacketBadge(spec) + '</span>' +
         '</span>' +
         '<span class="f3d-schematic__hint">Click jacket → expose tubes</span>' +
         '</button>';
     } else {
       html += '<div class="f3d-schematic__row f3d-schematic__row--tubes" aria-label="Jacket and loose tubes">';
       html += '<div class="f3d-layer-jacket f3d-layer-jacket--open" title="Outer jacket">' +
-        '<span class="f3d-layer-jacket__label">' + spec.label + '</span>' +
+        '<span class="f3d-layer-jacket__label">' + jacketBadge(spec) + '</span>' +
         '</div>';
       html += '<div class="f3d-tube-ribbon" role="list">';
       spec.tubes.forEach(function (tubeKey, ti) {
@@ -762,9 +798,9 @@
   }
 
   function setCapacity(cap) {
-    var n = parseInt(cap, 10);
-    if (!CABLE_SPECS[n]) return;
-    state.capacity = n;
+    var key = resolveCapacityKey(cap);
+    if (key == null) return;
+    state.capacity = key;
     state.component = 'cable';
     state.peelState = 0;
     state.selectedTube = null;
@@ -790,8 +826,8 @@
       btn.classList.toggle('is-active', btn.getAttribute('data-f3d-component') === state.component);
     });
     document.querySelectorAll('[data-f3d-capacity]').forEach(function (btn) {
-      var cap = parseInt(btn.getAttribute('data-f3d-capacity'), 10);
-      btn.classList.toggle('is-active', state.component === 'cable' && cap === state.capacity);
+      var key = resolveCapacityKey(btn.getAttribute('data-f3d-capacity'));
+      btn.classList.toggle('is-active', state.component === 'cable' && key === state.capacity);
     });
   }
 
@@ -965,9 +1001,9 @@
     syncComponentButtons();
     setAutoRotate(true);
     setViewMode('3d');
-    setCapacity(48);
+    setCapacity(12);
     initThree();
-    setStatus('48F ready · click jacket to peel tubes');
+    setStatus('12F ready · click jacket to peel tubes');
   }
 
   if (document.readyState === 'loading') {
