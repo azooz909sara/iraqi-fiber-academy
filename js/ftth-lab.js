@@ -184,7 +184,7 @@
     if (target.closest('.lab-fx-slot')) return false;
     if (target.closest('.lab-fx-port')) return false;
     if (target.closest('.lab-fx-chassis-frame')) return false;
-    if (target.closest('.lab-stage-dropzone')) return false;
+    if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -394,6 +394,7 @@
     });
 
     bindZoom2d();
+    bindWorkspaceDnD();
   }
 
   function boot() {
@@ -403,6 +404,111 @@
     flushPendingTools();
     setViewMode('2d');
     setStatus('FTTH Lab ready · blank workspace · scroll to zoom · Undo / Redo available');
+  }
+
+  function showAlert(msg, kind) {
+    var host = $('lab-alert');
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'lab-alert';
+      host.className = 'lab-alert';
+      host.setAttribute('role', 'alert');
+      var stage = document.querySelector('.lab-stage-wrap') || document.body;
+      stage.appendChild(host);
+    }
+    host.className = 'lab-alert' + (kind === 'warn' ? ' lab-alert--warn' : '');
+    host.innerHTML =
+      '<strong>Physical incompatibility</strong>' +
+      '<p>' + (msg || '') + '</p>' +
+      '<button type="button" class="lab-alert__close" aria-label="Dismiss">×</button>';
+    host.hidden = false;
+    var close = host.querySelector('.lab-alert__close');
+    if (close) {
+      close.onclick = function () { host.hidden = true; };
+    }
+    clearTimeout(showAlert._t);
+    showAlert._t = setTimeout(function () {
+      if (host) host.hidden = true;
+    }, 7000);
+    setStatus(msg);
+  }
+
+  function setBudget(text) {
+    var chip = $('lab-hud-budget');
+    if (chip) chip.textContent = text || 'Power budget · —';
+  }
+
+  /* ─── Shared HTML5 drag session (toolbox → workspace) ─── */
+
+  var activeDrag = null;
+
+  function beginDrag(payload) {
+    activeDrag = payload && typeof payload === 'object' ? payload : null;
+  }
+
+  function endDrag() {
+    activeDrag = null;
+  }
+
+  function getActiveDrag() {
+    return activeDrag;
+  }
+
+  function clientToWorld2d(clientX, clientY) {
+    var stage = $('lab-canvas-2d');
+    if (!stage) return { x: 0, y: 0 };
+    var rect = stage.getBoundingClientRect();
+    var z = state.zoom2d || 1;
+    return {
+      x: (clientX - rect.left - state.pan2dX) / z,
+      y: (clientY - rect.top - state.pan2dY) / z,
+    };
+  }
+
+  function clearStageDropHighlight() {
+    ['lab-canvas-2d', 'lab-2d-mount', 'lab-canvas-3d'].forEach(function (id) {
+      var el = $(id);
+      if (el) el.classList.remove('is-drop-target');
+    });
+  }
+
+  /** Allow drops anywhere on the 2D stage while a toolbox drag is active */
+  function bindWorkspaceDnD() {
+    var stage = $('lab-canvas-2d');
+    var world = $('lab-2d-world');
+    var mount = $('lab-2d-mount');
+    var canvas3d = $('lab-canvas-3d');
+
+    function onDragOver(e) {
+      if (!activeDrag) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+      if (stage && state.viewMode === '2d') stage.classList.add('is-drop-target');
+      if (canvas3d && state.viewMode === '3d') canvas3d.classList.add('is-drop-target');
+    }
+
+    function onDragLeave(e) {
+      var zone = e.currentTarget;
+      if (!zone) return;
+      var related = e.relatedTarget;
+      if (related && zone.contains(related)) return;
+      zone.classList.remove('is-drop-target');
+    }
+
+    function onDrop(e) {
+      if (!activeDrag) return;
+      e.preventDefault();
+      clearStageDropHighlight();
+      /* Tools handle placement via their own drop listeners + getActiveDrag() */
+    }
+
+    [stage, world, mount, canvas3d].forEach(function (el) {
+      if (!el || el.dataset.labWorkspaceDnd === '1') return;
+      el.dataset.labWorkspaceDnd = '1';
+      el.addEventListener('dragover', onDragOver);
+      el.addEventListener('dragleave', onDragLeave);
+      el.addEventListener('drop', onDrop);
+    });
   }
 
   var api = {
@@ -417,8 +523,18 @@
     undo: undo,
     redo: redo,
     getZoom2d: function () { return state.zoom2d; },
+    getPan2d: function () { return { x: state.pan2dX, y: state.pan2dY }; },
     getWorldSize: function () { return WORLD_SIZE; },
     centerWorldInView: centerWorldInView,
+    showAlert: showAlert,
+    setBudget: setBudget,
+    beginDrag: beginDrag,
+    endDrag: endDrag,
+    getActiveDrag: getActiveDrag,
+    clientToWorld2d: clientToWorld2d,
+    clearStageDropHighlight: clearStageDropHighlight,
+    tryPatchPort: null,
+    _patchPending: null,
   };
 
   global.FtthLab = api;

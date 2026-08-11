@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="lab-brand__meta">
           <h1>FTTH Network &amp; Patch Panel Lab</h1>
-          <p>Blank-slate assembly · Chassis → FGLT-D → SFP</p>
+          <p>Blank-slate assembly · OLT · Smart Splitters · UPC/APC</p>
         </div>
       </a>
       <div class="lab-header__actions">
@@ -42,8 +42,12 @@
     <main class="lab-main">
       <aside class="lab-rail" aria-label="Tool drawer">
         <p class="lab-rail__label">Toolbox</p>
-        <div id="lab-hw-tree" class="lab-hw-tree" aria-label="Drag-and-drop tools">
-          <!-- Filled by ftth-lab-olt-fx16.js: FX-16 · FGLT-D · SFP -->
+        <div id="lab-hw-tree" class="lab-hw-tree" aria-label="OLT tools">
+          <!-- Filled by ftth-lab-olt-fx16.js -->
+        </div>
+        <p class="lab-rail__label" style="margin-top:1rem">Smart Splitters</p>
+        <div id="lab-splitter-tree" class="lab-hw-tree" aria-label="Splitter tool">
+          <!-- Single Splitter tool · ftth-lab-splitter.js -->
         </div>
       </aside>
 
@@ -61,7 +65,8 @@
         <div class="lab-stage-hud">
           <span class="lab-hud-chip" id="lab-hud-mode">2D Layout · Empty Workspace</span>
           <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
-          <span class="lab-hud-chip">Scroll zoom · Drag grid to pan · Drag OLT to move</span>
+          <span class="lab-hud-chip" id="lab-hud-budget">Power budget · no active splitter links</span>
+          <span class="lab-hud-chip">Splitter · configure ratio &amp; polish on place</span>
         </div>
       </section>
 
@@ -75,9 +80,9 @@
         <p class="lab-inspector__label" style="margin-top:0.9rem">Integration Roadmap</p>
         <ul class="lab-module-list">
           <li>1 · FX-16 OLT + FGLT-D (active)</li>
-          <li>2 · Optical jumper wiring</li>
-          <li>3 · Patch panel matrix</li>
-          <li>4 · ODF / splitter bay</li>
+          <li>2 · Smart Splitters + UPC/APC (active)</li>
+          <li>3 · Optical jumper wiring</li>
+          <li>4 · Patch panel matrix</li>
         </ul>
       </aside>
     </main>
@@ -91,6 +96,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="js/ftth-lab.js"></script>
   <script src="js/ftth-lab-olt-fx16.js"></script>
+  <script src="js/ftth-lab-splitter.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>

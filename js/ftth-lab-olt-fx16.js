@@ -191,20 +191,7 @@
   }
 
   function applyChassisLayout() {
-    if (!el2d) return;
-    var world = getWorldSize();
-    if (!chassisPlaced) {
-      el2d.classList.add('lab-olt-2d--empty');
-      el2d.style.left = Math.round(world / 2 - 360) + 'px';
-      el2d.style.top = Math.round(world / 2 - 160) + 'px';
-      el2d.style.width = '720px';
-      el2d.style.maxWidth = 'none';
-      el2d.style.maxHeight = 'none';
-      el2d.style.transform = 'none';
-      el2d.style.overflow = 'visible';
-      return;
-    }
-    el2d.classList.remove('lab-olt-2d--empty');
+    if (!el2d || !chassisPlaced) return;
     var frame = el2d.querySelector('.lab-fx-chassis-frame');
     var w = Math.round(CHASSIS_BASE_W * chassisScale);
     if (frame) {
@@ -261,6 +248,7 @@
           peer: null,
           readyForJumper: true,
           hasSfp: false,
+          polish: 'UPC',
         };
       }
     }
@@ -442,7 +430,12 @@
     if (!mod) return false;
     sfpInventory = sfpInventory.filter(function (m) { return m.id !== sfpId; });
     sfpMap[slot][port] = mod;
-    if (portWiring[portId(slot, port)]) portWiring[portId(slot, port)].hasSfp = true;
+    if (portWiring[portId(slot, port)]) {
+      portWiring[portId(slot, port)].hasSfp = true;
+      if (!portWiring[portId(slot, port)].polish) {
+        portWiring[portId(slot, port)].polish = 'UPC';
+      }
+    }
     rebuildViews();
     selectPort(slot, port);
     pushHistory();
@@ -465,10 +458,11 @@
 
   /* ─── Selection ─── */
 
-  function selectLibraryChassis() {
+  function selectLibraryChassis(opts) {
+    opts = opts || {};
     selection = { kind: 'lib-chassis', slot: null, port: null, cardId: null, sfpId: null };
     updateInspector();
-    renderToolbox();
+    if (!opts.keepToolbox) renderToolbox();
     setStatus('FX-16 selected · drag onto the empty workspace grid to place');
   }
 
@@ -511,6 +505,31 @@
 
   function selectPort(slot, port) {
     if (!installed[slot]) return;
+
+    /* Smart Splitter patch mode — validate UPC/APC before normal select */
+    if (hasSfp(slot, port) && global.FtthLab && typeof FtthLab.tryPatchPort === 'function') {
+      var wiring = portWiring[portId(slot, port)] || {};
+      var handled = FtthLab.tryPatchPort({
+        owner: 'olt',
+        polish: wiring.polish || 'UPC',
+        label: 'LT' + pad2(slot) + '/P' + port,
+        slot: slot,
+        oltPort: port,
+      });
+      if (handled) {
+        selection = {
+          kind: 'port',
+          slot: slot,
+          port: port,
+          cardId: installed[slot].id,
+          sfpId: sfpMap[slot][port].id,
+        };
+        updateInspector();
+        renderToolbox();
+        return;
+      }
+    }
+
     selection = {
       kind: 'port',
       slot: slot,
@@ -522,22 +541,25 @@
     renderToolbox();
     setStatus(
       hasSfp(slot, port)
-        ? 'Port ' + port + ' · SFP active · ' + portId(slot, port)
+        ? 'Port ' + port + ' · SFP active · ' + portId(slot, port) +
+          ' · ' + ((portWiring[portId(slot, port)] && portWiring[portId(slot, port)].polish) || 'UPC')
         : 'Port ' + port + ' · empty square cage · drop SFP module'
     );
   }
 
-  function selectLibraryCard(cardId) {
+  function selectLibraryCard(cardId, opts) {
+    opts = opts || {};
     selection = { kind: 'lib-card', slot: null, port: null, cardId: cardId, sfpId: null };
     updateInspector();
-    renderToolbox();
+    if (!opts.keepToolbox) renderToolbox();
     setStatus('FGLT-D selected · drop onto empty LT slot 01–16');
   }
 
-  function selectLibrarySfp(sfpId) {
+  function selectLibrarySfp(sfpId, opts) {
+    opts = opts || {};
     selection = { kind: 'lib-sfp', slot: null, port: null, cardId: null, sfpId: sfpId };
     updateInspector();
-    renderToolbox();
+    if (!opts.keepToolbox) renderToolbox();
     setStatus('SFP selected · drop onto an empty square port on an installed FGLT-D');
   }
 
@@ -583,6 +605,28 @@
     return list;
   }
 
+  function beginLabDrag(payload) {
+    if (global.FtthLab && typeof FtthLab.beginDrag === 'function') {
+      FtthLab.beginDrag(payload);
+    }
+  }
+
+  function endLabDrag() {
+    if (global.FtthLab && typeof FtthLab.endDrag === 'function') {
+      FtthLab.endDrag();
+    }
+    if (global.FtthLab && typeof FtthLab.clearStageDropHighlight === 'function') {
+      FtthLab.clearStageDropHighlight();
+    }
+  }
+
+  function getLabDrag() {
+    if (global.FtthLab && typeof FtthLab.getActiveDrag === 'function') {
+      return FtthLab.getActiveDrag();
+    }
+    return null;
+  }
+
   function bindToolboxEvents(host) {
     var chassisBtn = host.querySelector('[data-lab-tool="chassis"]');
     var cardBtn = host.querySelector('[data-lab-tool="card"]');
@@ -600,15 +644,22 @@
           return;
         }
         dragState = { type: 'chassis' };
-        e.dataTransfer.setData('text/lab-drag', 'chassis');
-        e.dataTransfer.effectAllowed = 'copy';
-        chassisBtn.classList.add('is-dragging');
-        selectLibraryChassis();
+        beginLabDrag({ kind: 'chassis' });
+        try {
+          e.dataTransfer.setData('text/plain', 'lab:chassis');
+          e.dataTransfer.setData('text/lab-drag', 'chassis');
+          e.dataTransfer.effectAllowed = 'copy';
+        } catch (err) { /* ignore */ }
+        chassisBtn.classList.add('is-dragging', 'is-selected');
+        /* keepToolbox: rebuilding HTML mid-drag cancels HTML5 DnD */
+        selectLibraryChassis({ keepToolbox: true });
       });
       chassisBtn.addEventListener('dragend', function () {
         dragState = null;
+        endLabDrag();
         chassisBtn.classList.remove('is-dragging');
         clearDropHighlights();
+        renderToolbox();
       });
     }
 
@@ -624,16 +675,22 @@
         }
         var cardId = takeNextCard();
         dragState = { type: 'card', cardId: cardId };
-        e.dataTransfer.setData('text/lab-drag', 'card');
-        e.dataTransfer.setData('text/lab-card-id', cardId);
-        e.dataTransfer.effectAllowed = 'copy';
-        cardBtn.classList.add('is-dragging');
-        selectLibraryCard(cardId);
+        beginLabDrag({ kind: 'card', cardId: cardId });
+        try {
+          e.dataTransfer.setData('text/plain', 'lab:card:' + cardId);
+          e.dataTransfer.setData('text/lab-drag', 'card');
+          e.dataTransfer.setData('text/lab-card-id', cardId);
+          e.dataTransfer.effectAllowed = 'copy';
+        } catch (err) { /* ignore */ }
+        cardBtn.classList.add('is-dragging', 'is-selected');
+        selectLibraryCard(cardId, { keepToolbox: true });
       });
       cardBtn.addEventListener('dragend', function () {
         dragState = null;
+        endLabDrag();
         cardBtn.classList.remove('is-dragging');
         clearDropHighlights();
+        renderToolbox();
       });
     }
 
@@ -649,16 +706,22 @@
         }
         var sfpId = takeNextSfp();
         dragState = { type: 'sfp', sfpId: sfpId };
-        e.dataTransfer.setData('text/lab-drag', 'sfp');
-        e.dataTransfer.setData('text/lab-sfp-id', sfpId);
-        e.dataTransfer.effectAllowed = 'copy';
-        sfpBtn.classList.add('is-dragging');
-        selectLibrarySfp(sfpId);
+        beginLabDrag({ kind: 'sfp', sfpId: sfpId });
+        try {
+          e.dataTransfer.setData('text/plain', 'lab:sfp:' + sfpId);
+          e.dataTransfer.setData('text/lab-drag', 'sfp');
+          e.dataTransfer.setData('text/lab-sfp-id', sfpId);
+          e.dataTransfer.effectAllowed = 'copy';
+        } catch (err) { /* ignore */ }
+        sfpBtn.classList.add('is-dragging', 'is-selected');
+        selectLibrarySfp(sfpId, { keepToolbox: true });
       });
       sfpBtn.addEventListener('dragend', function () {
         dragState = null;
+        endLabDrag();
         sfpBtn.classList.remove('is-dragging');
         clearDropHighlights();
+        renderToolbox();
       });
     }
   }
@@ -669,36 +732,49 @@
     });
   }
 
+  function isChassisDragPayload() {
+    var active = getLabDrag();
+    if (active && active.kind === 'chassis') return true;
+    return !!(dragState && dragState.type === 'chassis');
+  }
+
   function bindStageDrop() {
     if (stageDropBound) return;
     stageDropBound = true;
 
     function onDragOver(e) {
-      if (!chassisInLibrary) return;
-      if (!(dragState && dragState.type === 'chassis')) return;
+      if (chassisPlaced) return;
+      if (!isChassisDragPayload()) return;
       e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       var zone = e.currentTarget;
       if (zone) zone.classList.add('is-drop-target');
     }
 
     function onDragLeave(e) {
       var zone = e.currentTarget;
-      if (zone) zone.classList.remove('is-drop-target');
+      if (!zone) return;
+      var related = e.relatedTarget;
+      if (related && zone.contains(related)) return;
+      zone.classList.remove('is-drop-target');
     }
 
     function onDrop(e) {
+      var active = getLabDrag();
+      var kind = (e.dataTransfer && e.dataTransfer.getData('text/lab-drag')) ||
+        (active && active.kind) ||
+        (dragState && dragState.type);
+      if (kind !== 'chassis') return;
       e.preventDefault();
+      e.stopPropagation();
       var zone = e.currentTarget;
       if (zone) zone.classList.remove('is-drop-target');
-      var kind = e.dataTransfer.getData('text/lab-drag') || (dragState && dragState.type);
-      if (kind === 'chassis' || (dragState && dragState.type === 'chassis')) {
-        placeChassis();
-      }
+      placeChassis();
       dragState = null;
+      endLabDrag();
     }
 
-    ['lab-2d-mount', 'lab-canvas-2d', 'lab-canvas-3d'].forEach(function (id) {
+    ['lab-2d-mount', 'lab-canvas-2d', 'lab-2d-world', 'lab-canvas-3d'].forEach(function (id) {
       var el = document.getElementById(id);
       if (!el) return;
       el.addEventListener('dragover', onDragOver);
@@ -754,16 +830,40 @@
 
     if (selection.kind === 'port') {
       var activePort = hasSfp(selection.slot, selection.port);
+      var w = portWiring[portId(selection.slot, selection.port)] || {};
+      var polish = w.polish || 'UPC';
       detail.innerHTML =
         '<div class="lab-port-sheet">' +
         '<div><span>Status</span><strong>' + (activePort ? 'Active (SFP in)' : 'Empty') + '</strong></div>' +
         '<div><span>Port</span><strong>' + selection.port + ' / 16</strong></div>' +
         '<div><span>Port ID</span><strong>' + portId(selection.slot, selection.port) + '</strong></div>' +
+        (activePort
+          ? '<div><span>Polish</span><strong>' + polish + '</strong></div>'
+          : '') +
         '</div>' +
         (activePort
-          ? '<button type="button" class="lab-eject-btn" data-lab-eject-sfp="1">Remove SFP</button>'
+          ? '<p class="lab-inspector__label" style="margin:0.55rem 0 0.4rem">SFP connector polish</p>' +
+            '<div class="lab-polish-toggle" role="group">' +
+            '<button type="button" class="lab-polish-btn is-upc' +
+            (polish === 'UPC' ? ' is-active' : '') +
+            '" data-set-olt-polish="UPC">UPC · Blue</button>' +
+            '<button type="button" class="lab-polish-btn is-apc' +
+            (polish === 'APC' ? ' is-active' : '') +
+            '" data-set-olt-polish="APC">APC · Green</button>' +
+            '</div>' +
+            '<button type="button" class="lab-eject-btn" data-lab-eject-sfp="1">Remove SFP</button>'
           : '<button type="button" class="lab-install-btn" data-lab-install-sfp="1">Insert SFP into Port ' + selection.port + '</button>');
       detail.hidden = false;
+      detail.querySelectorAll('[data-set-olt-polish]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var pid = portId(selection.slot, selection.port);
+          if (!portWiring[pid]) return;
+          portWiring[pid].polish = btn.getAttribute('data-set-olt-polish');
+          rebuildViews();
+          selectPort(selection.slot, selection.port);
+          setStatus('OLT port polish → ' + portWiring[pid].polish);
+        });
+      });
       var ej = detail.querySelector('[data-lab-eject-sfp]');
       if (ej) ej.addEventListener('click', function () {
         ejectSfp(selection.slot, selection.port);
@@ -824,13 +924,6 @@
 
   function syncSelectionUi() {
     if (!el2d) return;
-    var dropzone = el2d.querySelector('[data-lab-drop="chassis"]');
-    if (dropzone) {
-      dropzone.classList.toggle(
-        'is-drop-target',
-        !!(dragState && dragState.type === 'chassis' && chassisInLibrary)
-      );
-    }
     el2d.querySelectorAll('.lab-fx-slot').forEach(function (node) {
       var s = parseInt(node.getAttribute('data-lab-slot'), 10);
       node.classList.toggle('is-selected', selection.slot === s);
@@ -876,10 +969,13 @@
     for (var p = 1; p <= PORT_COUNT; p++) {
       var filled = hasSfp(slot, p);
       var id = portId(slot, p);
+      var polish = (portWiring[id] && portWiring[id].polish) || 'UPC';
+      var polishClass = filled ? (polish === 'APC' ? ' is-apc' : ' is-upc') : '';
       ports +=
-        '<button type="button" class="lab-fx-port' + (filled ? ' is-active' : ' is-empty') + '" ' +
+        '<button type="button" class="lab-fx-port' + (filled ? ' is-active' : ' is-empty') +
+        polishClass + '" ' +
         'data-lab-sfp="' + p + '" data-lab-slot="' + slot + '" data-lab-port-id="' + id + '" ' +
-        'data-lab-drop="sfp" title="Port ' + p + (filled ? ' · SFP active' : ' · empty') + '">' +
+        'data-lab-drop="sfp" title="Port ' + p + (filled ? ' · SFP · ' + polish : ' · empty') + '">' +
         '<span class="lab-fx-port__cage"></span>' +
         '<span class="lab-fx-port__num">' + p + '</span>' +
         '<span class="lab-fx-port__led' + (filled ? ' is-on' : '') + '"></span>' +
@@ -907,31 +1003,16 @@
   function build2d(host) {
     if (!host) return;
     if (el2d && el2d.parentNode) el2d.parentNode.removeChild(el2d);
+    el2d = null;
 
-    el2d = document.createElement('div');
-    el2d.className = 'lab-olt-2d';
-
-    /* Blank slate — no chassis until user places it */
+    /* Blank slate — clean grid, no instructional overlay */
     if (!chassisPlaced) {
-      el2d.classList.add('lab-olt-2d--empty');
-      el2d.innerHTML =
-        '<div class="lab-stage-dropzone" data-lab-drop="chassis" role="region" ' +
-        'aria-label="Empty workspace drop zone">' +
-        '<div class="lab-stage-dropzone__inner">' +
-        '<p class="lab-stage-dropzone__title">Empty Workspace</p>' +
-        '<p class="lab-stage-dropzone__hint">Drag <strong>Nokia 7360 FX-16</strong> from the toolbox onto this grid</p>' +
-        '<ol class="lab-stage-dropzone__steps">' +
-        '<li>Drop FX-16 chassis</li>' +
-        '<li>Drop FGLT-D into LT slots 01–16</li>' +
-        '<li>Drop SFP modules into square ports</li>' +
-        '</ol>' +
-        '</div></div>';
-      host.appendChild(el2d);
-      applyChassisLayout();
-      bindEmptyDropzoneEvents();
       syncSelectionUi();
       return;
     }
+
+    el2d = document.createElement('div');
+    el2d.className = 'lab-olt-2d';
 
     var slotsHtml = '';
     for (var s = 1; s <= SLOT_COUNT; s++) {
@@ -1106,35 +1187,6 @@
     });
   }
 
-  function bindEmptyDropzoneEvents() {
-    if (!el2d) return;
-    var zone = el2d.querySelector('[data-lab-drop="chassis"]');
-    if (!zone) return;
-
-    zone.addEventListener('click', function () {
-      if (selection.kind === 'lib-chassis' && chassisInLibrary) placeChassis();
-      else selectLibraryChassis();
-    });
-
-    zone.addEventListener('dragover', function (e) {
-      if (dragState && dragState.type === 'chassis') {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        zone.classList.add('is-drop-target');
-      }
-    });
-    zone.addEventListener('dragleave', function () {
-      zone.classList.remove('is-drop-target');
-    });
-    zone.addEventListener('drop', function (e) {
-      e.preventDefault();
-      zone.classList.remove('is-drop-target');
-      var kind = e.dataTransfer.getData('text/lab-drag') || (dragState && dragState.type);
-      if (kind === 'chassis') placeChassis();
-      dragState = null;
-    });
-  }
-
   function bind2dEvents() {
     if (!el2d) return;
 
@@ -1155,9 +1207,11 @@
       });
 
       slotEl.addEventListener('dragover', function (e) {
-        var type = (dragState && dragState.type) || e.dataTransfer.types;
-        if (dragState && dragState.type === 'card' && !installed[slot]) {
+        var active = getLabDrag();
+        var isCard = (dragState && dragState.type === 'card') || (active && active.kind === 'card');
+        if (isCard && !installed[slot]) {
           e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
           slotEl.classList.add('is-drop-target');
         }
       });
@@ -1166,13 +1220,20 @@
       });
       slotEl.addEventListener('drop', function (e) {
         e.preventDefault();
+        e.stopPropagation();
         slotEl.classList.remove('is-drop-target');
-        var kind = e.dataTransfer.getData('text/lab-drag') || (dragState && dragState.type);
+        var active = getLabDrag();
+        var kind = (e.dataTransfer && e.dataTransfer.getData('text/lab-drag')) ||
+          (active && active.kind) ||
+          (dragState && dragState.type);
         if (kind === 'card') {
-          var cardId = e.dataTransfer.getData('text/lab-card-id') || (dragState && dragState.cardId);
+          var cardId = (e.dataTransfer && e.dataTransfer.getData('text/lab-card-id')) ||
+            (active && active.cardId) ||
+            (dragState && dragState.cardId);
           if (cardId) installCard(cardId, slot);
         }
         dragState = null;
+        endLabDrag();
       });
     });
 
@@ -1190,9 +1251,12 @@
       });
 
       btn.addEventListener('dragover', function (e) {
-        if (dragState && dragState.type === 'sfp' && !hasSfp(slot, port)) {
+        var active = getLabDrag();
+        var isSfp = (dragState && dragState.type === 'sfp') || (active && active.kind === 'sfp');
+        if (isSfp && !hasSfp(slot, port)) {
           e.preventDefault();
           e.stopPropagation();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
           btn.classList.add('is-drop-target');
         }
       });
@@ -1203,12 +1267,18 @@
         e.preventDefault();
         e.stopPropagation();
         btn.classList.remove('is-drop-target');
-        var kind = e.dataTransfer.getData('text/lab-drag') || (dragState && dragState.type);
+        var active = getLabDrag();
+        var kind = (e.dataTransfer && e.dataTransfer.getData('text/lab-drag')) ||
+          (active && active.kind) ||
+          (dragState && dragState.type);
         if (kind === 'sfp') {
-          var sfpId = e.dataTransfer.getData('text/lab-sfp-id') || (dragState && dragState.sfpId);
+          var sfpId = (e.dataTransfer && e.dataTransfer.getData('text/lab-sfp-id')) ||
+            (active && active.sfpId) ||
+            (dragState && dragState.sfpId);
           if (sfpId) installSfp(sfpId, slot, port);
         }
         dragState = null;
+        endLabDrag();
       });
     });
   }
