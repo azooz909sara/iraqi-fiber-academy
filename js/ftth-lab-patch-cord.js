@@ -1,9 +1,10 @@
 /**
  * Patch Cord — symmetrical click-and-drag for End A and End B
  * Plugged end stays locked; free end moves only on mouse-down+hold.
- * Manual mouse path is recorded and frozen when the free end snaps.
- * Fully linked cords: drag the fiber body for elastic stretch; release
- * runs a Verlet spring-damper settle into natural gravity sag.
+ * On full connect, mid-span is a true catenary y = c + a·cosh(x/a) fitted to
+ * the user's drawn length/sag, with straight axial strain-relief port exits.
+ * Fully linked cords: drag the fiber body for elastic stretch; release settles
+ * back toward the fitted catenary rest shape.
  */
 (function (global) {
   'use strict';
@@ -824,15 +825,17 @@
   var GRAVITY_SAG_RATIO = 0.28;
   var GRAVITY_SAG_MIN = 24;
   var GRAVITY_SAG_MAX = 160;
-  /** How strongly locked routes blend toward a hanging catenary (0–1) */
-  var GRAVITY_BLEND = 0.4; /* unused on custom ink — keep for empty-span fallback */
+  /** Slack factor when no user length is available (true catenary) */
+  var CATENARY_DEFAULT_SLACK = 1.12;
+  /** Dense samples for mathematically accurate mid-span */
+  var CATENARY_SAMPLES = 48;
   /** Min world distance between recorded mouse-path samples (anti-jitter) */
   var TRACE_SAMPLE_PX = 14;
   var TRACE_MAX_POINTS = 180;
   var CHAIKIN_ITERATIONS = 2;
-  /** Catmull-Rom densify: samples per segment when locking / polishing ink */
+  /** Catmull-Rom densify: samples per segment when polishing free-hand ink */
   var SPLINE_SAMPLES_PER_SEG = 5;
-  /** SVG Catmull handle divisor — lower = silkier mid-span (still through waypoints) */
+  /** SVG Catmull handle divisor for non-catenary mid-spans */
   var CATMULL_HANDLE_K = 5.0;
   /* ─── Mid-span rope / spring-damper (fully linked cords) ─── */
   var PHYS_SEGMENTS = 20;
@@ -1017,7 +1020,7 @@
     return dist2(c.x, c.y, x, y) < BODY_CLEAR_PX;
   }
 
-  /** Sag depth grows with span (short = shallow, long = deep drape). */
+  /** Default sag depth guess from span (used only to pick slack when no user ink). */
   function catenarySagDepth(dist) {
     return Math.min(
       GRAVITY_SAG_MAX,
@@ -1026,36 +1029,170 @@
   }
 
   /**
-   * Blend midpoints toward a hanging catenary (empty-span fallback only).
-   * Custom user ink must not call this with a high weight — it flattens depth.
+   * Solve catenary scale a from:
+   *   2 a sinh(h / (2 a)) = v
+   * where h = horizontal span, v = sqrt(L² − Δy²) (physics / y-up frame).
    */
-  function drapeRouteTowardCatenary(route, p0, p3, weight) {
-    if (!route || !route.length) return [];
-    weight = weight == null ? GRAVITY_BLEND : weight;
-    var dx = p3.x - p0.x;
-    var dy = p3.y - p0.y;
-    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    var sag = catenarySagDepth(dist);
-
-    var pts = [{ x: p0.x, y: p0.y }].concat(route).concat([{ x: p3.x, y: p3.y }]);
-    var cum = [0];
+  function solveCatenaryA(h, v) {
+    h = Math.abs(h);
+    if (h < 1e-8 || v < h * 1.0000001) {
+      /* Nearly taut — a → ∞; return large a for a near-straight span */
+      return Math.max(h * 50, 1e6);
+    }
+    /* Initial guess from series: sinh(z)≈z+z³/6 ⇒ a ≈ h / sqrt(24*(v/h - 1)) */
+    var r = v / h;
+    var a = r > 1.0001
+      ? h / Math.sqrt(Math.max(1e-8, 24 * (r - 1)))
+      : h * 10;
+    if (!isFinite(a) || a <= 0) a = h;
     var i;
-    for (i = 1; i < pts.length; i++) {
-      cum[i] = cum[i - 1] + dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    for (i = 0; i < 28; i++) {
+      var half = h / (2 * a);
+      if (half > 50) {
+        a *= 2;
+        continue;
+      }
+      var sh = Math.sinh(half);
+      var ch = Math.cosh(half);
+      var f = 2 * a * sh - v;
+      var df = 2 * sh - (h / a) * ch;
+      if (Math.abs(df) < 1e-14) break;
+      var next = a - f / df;
+      if (next <= 0 || !isFinite(next)) next = a * 0.5;
+      if (Math.abs(next - a) < 1e-9 * Math.max(1, a)) {
+        a = next;
+        break;
+      }
+      a = next;
     }
-    var total = cum[cum.length - 1] || 1;
-    var out = [];
-    for (i = 1; i < pts.length - 1; i++) {
-      var t = cum[i] / total;
-      var cx = p0.x + dx * t;
-      var cy = p0.y + dy * t + 4 * t * (1 - t) * sag;
-      var p = pts[i];
-      out.push({
-        x: p.x * (1 - weight) + cx * weight,
-        y: p.y * (1 - weight) + cy * weight,
-      });
+    return Math.max(a, 1e-4);
+  }
+
+  /**
+   * Fit y = y0 + a·cosh((x − x0)/a) through two endpoints with cable length L.
+   * Coordinates are physics-frame (Y positive UP). Returns null if degenerate.
+   */
+  function fitCatenaryParamsYUp(x1, y1, x2, y2, length) {
+    var h = x2 - x1;
+    var v = y2 - y1;
+    var chord = Math.sqrt(h * h + v * v) || 1;
+    var L = Math.max(length, chord * 1.0002);
+    var absH = Math.abs(h);
+    if (absH < 0.75) {
+      /* Degenerate horizontal span — slight nudge so cosh is defined */
+      h = h >= 0 ? 0.75 : -0.75;
+      absH = 0.75;
+      x2 = x1 + h;
+      L = Math.max(L, Math.sqrt(h * h + v * v) * 1.0002);
     }
-    return out;
+    var span = Math.sqrt(L * L - v * v);
+    if (!isFinite(span) || span < absH) {
+      L = Math.sqrt(absH * absH + v * v) * 1.0002;
+      span = Math.sqrt(Math.max(0, L * L - v * v));
+    }
+    var a = solveCatenaryA(absH, span);
+    /* Vertex x-offset for unequal supports:
+       x0 = ½ (x1 + x2 − a ln((L+v)/(L−v))) */
+    var lv = Math.max(L - Math.abs(v), 1e-9);
+    var x0 = 0.5 * (x1 + x2 - a * Math.log((L + v) / (L - v)));
+    if (!isFinite(x0)) x0 = 0.5 * (x1 + x2);
+    var y0 = y1 - a * Math.cosh((x1 - x0) / a);
+    if (!isFinite(y0)) y0 = Math.min(y1, y2) - a;
+    return { a: a, x0: x0, y0: y0, L: L, x1: x1, x2: x2 };
+  }
+
+  /** Evaluate physics-frame catenary Y_up at horizontal x. */
+  function evalCatenaryYUp(params, x) {
+    return params.y0 + params.a * Math.cosh((x - params.x0) / params.a);
+  }
+
+  /**
+   * Sample a true catenary between screen-space points (y+ down).
+   * y_screen = −Y_up, with Y_up = y0 + a cosh((x−x0)/a).
+   */
+  function sampleTrueCatenary(p0, p3, length, count) {
+    count = Math.max(2, count || CATENARY_SAMPLES);
+    var x1 = p0.x;
+    var x2 = p3.x;
+    var y1up = -p0.y;
+    var y2up = -p3.y;
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var L = Math.max(length || chord * CATENARY_DEFAULT_SLACK, chord * 1.0002);
+    var params = fitCatenaryParamsYUp(x1, y1up, x2, y2up, L);
+    var pts = [];
+    var i;
+    for (i = 0; i < count; i++) {
+      var t = count === 1 ? 0.5 : i / (count - 1);
+      var x = x1 + (params.x2 - params.x1) * t;
+      var yUp = evalCatenaryYUp(params, x);
+      pts.push({ x: x, y: -yUp });
+    }
+    /* Exact endpoint lock (numeric cosh drift) */
+    pts[0] = { x: p0.x, y: p0.y };
+    pts[pts.length - 1] = { x: p3.x, y: p3.y };
+    return pts;
+  }
+
+  /** Max drop below chord for a candidate length (screen y+ down). */
+  function catenarySagForLength(p0, p3, length) {
+    return routeSagDepth(sampleTrueCatenary(p0, p3, length, 36));
+  }
+
+  /**
+   * Cable length whose true catenary reaches at least targetSag below the chord.
+   */
+  function catenaryLengthForSag(p0, p3, targetSag) {
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    if (targetSag < 1) return chord * 1.002;
+    var lo = chord * 1.0005;
+    var hi = chord + Math.max(targetSag * 3.5, chord * 0.15);
+    var guard = 0;
+    while (catenarySagForLength(p0, p3, hi) < targetSag && guard < 18) {
+      hi = chord + (hi - chord) * 1.35;
+      guard += 1;
+    }
+    var i;
+    for (i = 0; i < 26; i++) {
+      var mid = (lo + hi) * 0.5;
+      if (catenarySagForLength(p0, p3, mid) < targetSag) lo = mid;
+      else hi = mid;
+    }
+    return (lo + hi) * 0.5;
+  }
+
+  /**
+   * Fit a true catenary between relief tips using the user's drawn length and
+   * sag depth (L ≥ user length and L ≥ length needed for user sag).
+   * Returns mid-span points only (endpoints supplied by strain-relief chains).
+   */
+  function fitTrueCatenaryFromUser(p0, p3, route, count) {
+    count = count || CATENARY_SAMPLES;
+    var poly = [{ x: p0.x, y: p0.y }]
+      .concat(route || [])
+      .concat([{ x: p3.x, y: p3.y }]);
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var userLen = Math.max(polylineLength(poly), chord * 1.002);
+    var userSag = routeSagDepth(poly);
+    var L = userLen;
+    if (userSag > 2) {
+      L = Math.max(L, catenaryLengthForSag(p0, p3, userSag));
+    } else {
+      L = Math.max(L, chord * CATENARY_DEFAULT_SLACK);
+    }
+    L = Math.min(L, chord * 6);
+    var full = sampleTrueCatenary(p0, p3, L, count);
+    return full.slice(1, -1);
+  }
+
+  /** Default hanging span (no user ink) via true catenary + distance-scaled slack. */
+  function naturalCatenarySamples(p0, p3, count) {
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var sag = catenarySagDepth(chord);
+    var L = Math.max(
+      chord * CATENARY_DEFAULT_SLACK,
+      catenaryLengthForSag(p0, p3, sag)
+    );
+    return sampleTrueCatenary(p0, p3, L, count || CATENARY_SAMPLES);
   }
 
   function polylineLength(pts) {
@@ -1114,7 +1251,7 @@
 
   /**
    * Densify an open polyline with Catmull-Rom samples that pass through every
-   * waypoint — preserves user layout/depth while producing silky segments.
+   * waypoint — used for live free-hand polish before catenary lock.
    */
   function catmullRomResample(pts, samplesPerSeg) {
     if (!pts || pts.length < 2) return pts ? pts.slice() : [];
@@ -1332,8 +1469,9 @@
   }
 
   /**
-   * Full connection: keep the user's drawn length/depth/layout, polish with
-   * Catmull-Rom only. Empty ink → natural hanging span. Strain relief at render.
+   * Full connection: fit a true catenary y = c + a·cosh(x/a) between strain-relief
+   * tips, using the user's drawn length and sag depth. Empty ink → default slack.
+   * Straight port exits are applied at render via strainReliefChain.
    */
   function lockDrawnPath(cord) {
     if (!cord) return;
@@ -1344,24 +1482,23 @@
     var bOuter = bChain[bChain.length - 1];
     var route = ensureRoute(cord);
     if (route.length >= 2) {
-      /* Preserve custom shape — do not blend toward a shallow default arc */
-      smoothDrawnRoute(cord, {
-        force: true,
-        samplesPerSeg: SPLINE_SAMPLES_PER_SEG,
-        iterations: 1,
+      /* Light polish of ink metrics, then replace mid-span with true catenary */
+      var reference = route.map(function (p) {
+        return { x: p.x, y: p.y };
       });
-    } else if (cord.sideA.attached && cord.sideB.attached) {
-      cord.route = drapeRouteTowardCatenary(
-        [{ x: (aOuter.x + bOuter.x) / 2, y: (aOuter.y + bOuter.y) / 2 }],
+      cord.route = fitTrueCatenaryFromUser(
         aOuter,
         bOuter,
-        1
+        reference,
+        CATENARY_SAMPLES
       );
+    } else if (cord.sideA.attached && cord.sideB.attached) {
+      var full = naturalCatenarySamples(aOuter, bOuter, CATENARY_SAMPLES);
+      cord.route = full.slice(1, -1);
     }
     route = ensureRoute(cord);
     if (route.length > TRACE_MAX_POINTS) {
-      var ref = route.slice();
-      cord.route = restoreRouteMetrics(downsampleRoute(route, TRACE_MAX_POINTS), ref);
+      cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
     }
     cord.pathLocked = true;
   }
@@ -1414,24 +1551,6 @@
       });
     }
     return out;
-  }
-
-  /** Pure hanging span between strain-relief tips (rest pose). */
-  function naturalCatenarySamples(p0, p3, count) {
-    var dx = p3.x - p0.x;
-    var dy = p3.y - p0.y;
-    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    var sag = catenarySagDepth(dist);
-    var pts = [];
-    var i;
-    for (i = 0; i < count; i++) {
-      var t = count === 1 ? 0.5 : i / (count - 1);
-      pts.push({
-        x: p0.x + dx * t,
-        y: p0.y + dy * t + 4 * t * (1 - t) * sag,
-      });
-    }
-    return pts;
   }
 
   function refreshRopeRest(cord, rope) {
@@ -1786,17 +1905,30 @@
     return d;
   }
 
+  /** Dense polyline through true-catenary samples (no Catmull distortion). */
+  function polylineCommands(pts) {
+    if (!pts || pts.length < 2) return '';
+    var d = '';
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      d += ' L ' + pts[i].x + ' ' + pts[i].y;
+    }
+    return d;
+  }
+
   /**
-   * Straight strain-relief leads/trails + Catmull mid-span through custom waypoints.
+   * Straight strain-relief leads/trails, then mid-span curve.
+   * opts.exactMid: use polyline L segments (true catenary samples).
    */
   function smoothPathThrough(pts, opts) {
     opts = opts || {};
     if (!pts || pts.length < 2) return '';
     var lead = opts.strainLead != null ? opts.strainLead : 0;
     var trail = opts.strainTrail != null ? opts.strainTrail : 0;
+    var exactMid = !!opts.exactMid;
     if (lead < 2 && trail < 2) {
       var full = 'M ' + pts[0].x + ' ' + pts[0].y;
-      return full + catmullRomCubicCommands(pts);
+      return full + (exactMid ? polylineCommands(pts) : catmullRomCubicCommands(pts));
     }
 
     var d = 'M ' + pts[0].x + ' ' + pts[0].y;
@@ -1808,7 +1940,7 @@
     var midEnd = Math.min(pts.length - 1, pts.length - trail);
     if (midEnd > midStart) {
       var mid = pts.slice(midStart, midEnd + 1);
-      d += catmullRomCubicCommands(mid);
+      d += exactMid ? polylineCommands(mid) : catmullRomCubicCommands(mid);
     }
     for (i = midEnd + 1; i < pts.length; i++) {
       d += ' L ' + pts[i].x + ' ' + pts[i].y;
@@ -1817,15 +1949,17 @@
   }
 
   /**
-   * User-traced route: preserve custom depth/layout, silk Catmull mid-span,
-   * straight port/boot exit tangents.
+   * Connected / drawn routes: axial strain relief + true-catenary mid-span.
+   * Free-hand (unlocked) still uses Catmull through live waypoints.
    */
   function cordCablePath(cord) {
     var route = ensureRoute(cord);
     if (route.length || cord.pathLocked) {
+      var exact = !!(cord.pathLocked && cord.sideA.attached && cord.sideB.attached);
       return smoothPathThrough(buildCablePoints(cord), {
         strainLead: STRAIN_LEAD_PTS,
         strainTrail: STRAIN_LEAD_PTS,
+        exactMid: exact,
       });
     }
     return gravityBezierPath(cord);
@@ -1833,43 +1967,52 @@
 
   /**
    * Fallback only for untraced cords (no mouse path yet).
-   * Both ends free → clean chord along boot exit axes (no sideways sag).
-   * One end plugged → light gravity sag toward the free end.
+   * Both ends free → clean chord along boot exit axes.
+   * One end plugged → true catenary with strain-relief stubs.
    */
   function gravityBezierPath(cord) {
-    var p0 = bootAnchor(cord, 'A');
-    var p3 = bootAnchor(cord, 'B');
+    var tipA = bootAnchor(cord, 'A');
+    var tipB = bootAnchor(cord, 'B');
     var tA = bootOutDir(getEndRotation(cord, 'A'));
     var tB = bootOutDir(getEndRotation(cord, 'B'));
-    var dx = p3.x - p0.x;
-    var dy = p3.y - p0.y;
+    var dx = tipB.x - tipA.x;
+    var dy = tipB.y - tipA.y;
     var dist = Math.sqrt(dx * dx + dy * dy) || 1;
     var bothFree = !cord.sideA.attached && !cord.sideB.attached;
 
     if (bothFree) {
-      /* Handles follow each boot’s rear-exit vector for a clean vertical stub */
       var h = Math.min(BOOT_EXIT_STUB + 12, Math.max(BOOT_EXIT_STUB, dist * 0.22));
       return (
-        'M ' + p0.x + ' ' + p0.y +
-        ' C ' + (p0.x + tA.x * h) + ' ' + (p0.y + tA.y * h) + ', ' +
-        (p3.x + tB.x * h) + ' ' + (p3.y + tB.y * h) + ', ' +
-        p3.x + ' ' + p3.y
+        'M ' + tipA.x + ' ' + tipA.y +
+        ' C ' + (tipA.x + tA.x * h) + ' ' + (tipA.y + tA.y * h) + ', ' +
+        (tipB.x + tB.x * h) + ' ' + (tipB.y + tB.y * h) + ', ' +
+        tipB.x + ' ' + tipB.y
       );
     }
 
-    var gravityOffset = Math.min(
-      GRAVITY_SAG_MAX,
-      Math.max(GRAVITY_SAG_MIN, GRAVITY_OFFSET * 0.45 + dist * GRAVITY_SAG_RATIO)
-    );
-    var handle = Math.min(96, Math.max(28, dist * 0.35));
-    var p1x = p0.x + tA.x * handle;
-    var p1y = p0.y + tA.y * handle + gravityOffset * 0.35;
-    var p2x = p3.x + tB.x * handle;
-    var p2y = p3.y + tB.y * handle + gravityOffset * 0.35;
-    return (
-      'M ' + p0.x + ' ' + p0.y +
-      ' C ' + p1x + ' ' + p1y + ', ' + p2x + ' ' + p2y + ', ' + p3.x + ' ' + p3.y
-    );
+    /* Strict axial exits, then true catenary between relief tips */
+    var stub = Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB);
+    var p0 = {
+      x: tipA.x + tA.x * stub,
+      y: tipA.y + tA.y * stub,
+    };
+    var p3 = {
+      x: tipB.x + tB.x * stub,
+      y: tipB.y + tB.y * stub,
+    };
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var sag = catenarySagDepth(chord);
+    var L = Math.max(chord * CATENARY_DEFAULT_SLACK, catenaryLengthForSag(p0, p3, sag));
+    var mid = sampleTrueCatenary(p0, p3, L, CATENARY_SAMPLES);
+    var d =
+      'M ' + tipA.x + ' ' + tipA.y +
+      ' L ' + p0.x + ' ' + p0.y;
+    var i;
+    for (i = 1; i < mid.length; i++) {
+      d += ' L ' + mid[i].x + ' ' + mid[i].y;
+    }
+    d += ' L ' + tipB.x + ' ' + tipB.y;
+    return d;
   }
 
   function endStyle(cord, end) {
@@ -2205,7 +2348,7 @@
               if (c[endKey(otherEnd)].attached) {
                 lockDrawnPath(c);
                 endLinkSession({ silent: true });
-                setStatus('Patch connected · drag the cable body to stretch · release to settle');
+                setStatus('Patch connected · true catenary lock · drag body to stretch');
               }
             } else {
               setEndWorld(c, end, mouse.x, mouse.y);
@@ -2279,7 +2422,7 @@
     var pathLoss = cordLossDb(c);
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap and lock the drawn path (Catmull-smoothed, your depth kept). When both ends are plugged, drag the cable body to stretch it — release and it springs back to your custom shape.</p>';
+      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap. The locked span is a true catenary (y = c + a cosh(x/a)) fitted to your drawn length and sag, with straight strain-relief exits from each port. Drag the cable body to stretch — release springs back to that catenary.</p>';
 
     if (!detail) return;
     detail.hidden = false;
