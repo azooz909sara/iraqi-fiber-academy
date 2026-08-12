@@ -428,12 +428,28 @@
         return;
       }
       if (att.owner === 'coupler') {
+        var pw = null;
+        if (global.FtthLab && typeof FtthLab.getCouplerPortWorld === 'function') {
+          pw = FtthLab.getCouplerPortWorld(att.couplerId, att.port);
+        }
+        if (pw) {
+          att.wx = pw.x;
+          att.wy = pw.y;
+          if (typeof side.lockedRot !== 'number') {
+            side.lockedRot = typeof pw.rot === 'number'
+              ? pw.rot
+              : portAlignedRotation({ owner: 'coupler', port: att.port });
+            att.lockedRot = side.lockedRot;
+          }
+          side.liveRot = null;
+          seatEndAtPort(cord, end, pw.x, pw.y);
+          return;
+        }
         el = document.querySelector(
           '.lab-cpl-port[data-cpl-id="' + att.couplerId + '"][data-cpl-port="' + att.port + '"]'
         );
         if (el) {
-          var faceC = el.querySelector('i') || el;
-          var rC = faceC.getBoundingClientRect();
+          var rC = el.getBoundingClientRect();
           var ptC = clientToWorld(rC.left + rC.width / 2, rC.top + rC.height / 2);
           att.wx = ptC.x;
           att.wy = ptC.y;
@@ -2333,8 +2349,12 @@
     var d = cordCablePath(cord);
     var path = layer.querySelector('[data-pcord-fiber="' + cord.id + '"]');
     var hit = layer.querySelector('.lab-pcord-fiber-hit[data-pcord-drag="' + cord.id + '"]');
+    var selOutline = layer.querySelector(
+      '.lab-pcord-fiber-select[data-pcord-fiber-select="' + cord.id + '"]'
+    );
     if (path) path.setAttribute('d', d);
     if (hit) hit.setAttribute('d', d);
+    if (selOutline) selOutline.setAttribute('d', d);
     var aBtn = layer.querySelector('[data-pcord-id="' + cord.id + '"][data-pcord-end="A"]');
     var bBtn = layer.querySelector('[data-pcord-id="' + cord.id + '"][data-pcord-end="B"]');
     if (aBtn) aBtn.setAttribute('style', endStyle(cord, 'A'));
@@ -2756,10 +2776,73 @@
     rebuildLayer();
   }
 
-  function onLayoutChange() {
+  /** Shift freehand mid-span with a moved end (keeps far tip planted). */
+  function morphRouteForEndMove(cord, end, dx, dy) {
+    if ((!dx && !dy) || !cord) return;
+    var route = ensureRoute(cord);
+    if (!route.length) return;
+    var n = route.length;
+    var i;
+    for (i = 0; i < n; i++) {
+      /* t=0 at A, t=1 at B — weight toward the moved connector */
+      var t = (i + 1) / (n + 1);
+      var w = end === 'A' ? (1 - t) : t;
+      route[i].x += dx * w;
+      route[i].y += dy * w;
+    }
+  }
+
+  /**
+   * After equipment moves (coupler / splitter / OLT): reseat plugs and
+   * rebuild or morph the cable so heads + curve travel as one unit.
+   */
+  function onLayoutChange(payload) {
     if (!layer) return;
+    var onlyCoupler = payload && payload.source === 'coupler' ? payload.couplerId : null;
+
     cords.forEach(function (c) {
+      if (onlyCoupler) {
+        var aOn = c.sideA.attached && c.sideA.attached.owner === 'coupler' &&
+          c.sideA.attached.couplerId === onlyCoupler;
+        var bOn = c.sideB.attached && c.sideB.attached.owner === 'coupler' &&
+          c.sideB.attached.couplerId === onlyCoupler;
+        if (!aOn && !bOn) return;
+      }
+
+      var oax = c.ax;
+      var oay = c.ay;
+      var obx = c.bx;
+      var oby = c.by;
       syncAttachedPositions(c);
+      var dax = c.ax - oax;
+      var day = c.ay - oay;
+      var dbx = c.bx - obx;
+      var dby = c.by - oby;
+      if (!dax && !day && !dbx && !dby) {
+        updateFiberPath(c);
+        return;
+      }
+
+      if (typeof c.fixedLength === 'number') {
+        /* Locked physical length — true catenary follows the new port span */
+        rebuildFixedLengthCatenary(c);
+      } else {
+        if ((dax || day) && !(dbx || dby)) morphRouteForEndMove(c, 'A', dax, day);
+        else if ((dbx || dby) && !(dax || day)) morphRouteForEndMove(c, 'B', dbx, dby);
+        else if ((dax || day) && (dbx || dby)) {
+          if (dax === dbx && day === dby) {
+            var route = ensureRoute(c);
+            var i;
+            for (i = 0; i < route.length; i++) {
+              route[i].x += dax;
+              route[i].y += day;
+            }
+          } else {
+            morphRouteForEndMove(c, 'A', dax, day);
+            morphRouteForEndMove(c, 'B', dbx, dby);
+          }
+        }
+      }
       updateFiberPath(c);
     });
   }

@@ -186,6 +186,7 @@
     if (target.closest('.lab-fx-chassis-frame')) return false;
     if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
     if (target.closest('.lab-pcord')) return false;
+    if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -749,7 +750,7 @@
     showAlert: showAlert,
     setBudget: setBudget,
     refreshPowerBudget: refreshPowerBudget,
-    notifyLayoutChange: function () { notifyTools('onLayoutChange'); },
+    notifyLayoutChange: function (payload) { notifyTools('onLayoutChange', payload); },
     beginDrag: beginDrag,
     endDrag: endDrag,
     getActiveDrag: getActiveDrag,

@@ -171,10 +171,11 @@
   }
 
   function clearSelection() {
+    var had = selection.kind === 'coupler';
     selection = { kind: 'none', couplerId: null };
     selectedTool = null;
     renderToolbox();
-    rebuildLayer();
+    if (had) rebuildLayer();
   }
 
   function deleteSelected() {
@@ -403,8 +404,26 @@
 
   function bindLayerEvents(host) {
     host.querySelectorAll('[data-cpl-node]').forEach(function (node) {
+      /* Click affirms selection (same pattern as splitter / OLT); stop bubble to stage */
+      node.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('.lab-cpl-port')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var id = node.getAttribute('data-cpl-node');
+        if (!id) return;
+        selectCoupler(id, { skipRebuild: true });
+        if (layer) {
+          layer.querySelectorAll('.lab-cpl.is-selected').forEach(function (el) {
+            if (el !== node) el.classList.remove('is-selected');
+          });
+        }
+        node.classList.add('is-selected');
+      });
+
       node.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
+        /* Ports are patch-cord hit targets — don't steal for coupler drag */
+        if (e.target.closest && e.target.closest('.lab-cpl-port')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = node.getAttribute('data-cpl-node');
@@ -437,12 +456,16 @@
           c.y = Math.round(oy + dy);
           node.style.left = c.x + 'px';
           node.style.top = c.y + 'px';
+          /* Keep plugged patch cords locked to this coupler every frame */
           if (!layoutQueued && global.FtthLab &&
               typeof FtthLab.notifyLayoutChange === 'function') {
             layoutQueued = true;
             requestAnimationFrame(function () {
               layoutQueued = false;
-              FtthLab.notifyLayoutChange();
+              FtthLab.notifyLayoutChange({
+                source: 'coupler',
+                couplerId: id,
+              });
             });
           }
         }
@@ -452,9 +475,17 @@
           window.removeEventListener('pointercancel', onUp);
           try { node.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
           node.classList.remove('is-dragging');
+          /* Keep selection + properties panel open after click or drag */
+          if (selection.couplerId === id) {
+            node.classList.add('is-selected');
+            updateInspector();
+          }
           if (moved) {
             if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-              FtthLab.notifyLayoutChange();
+              FtthLab.notifyLayoutChange({
+                source: 'coupler',
+                couplerId: id,
+              });
             }
             pushHistory();
           }
@@ -547,6 +578,21 @@
     return couplers.length * COUPLER_LOSS_DB;
   }
 
+  function getCouplerPortWorld(id, port) {
+    var c = findCoupler(id);
+    if (!c) return null;
+    var face = port === 'B' || port === 'b' ? 'B' : 'A';
+    /* Port hit targets sit on the left/right rims of the coupler box */
+    var px = face === 'B' ? (c.x + CPL_W - 5.5) : (c.x + 5.5);
+    var py = c.y + CPL_H / 2;
+    return {
+      x: px,
+      y: py,
+      rot: face === 'B' ? -90 : 90,
+      polish: normalizePolish(c.polish),
+    };
+  }
+
   function mount(api) {
     ctx = api || {};
     couplers = [];
@@ -564,6 +610,7 @@
 
     if (global.FtthLab) {
       FtthLab.getCouplerLoss = getCouplerLossDb;
+      FtthLab.getCouplerPortWorld = getCouplerPortWorld;
     }
   }
 
