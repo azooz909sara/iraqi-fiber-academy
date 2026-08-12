@@ -188,6 +188,7 @@
     if (target.closest('.lab-pcord')) return false;
     if (target.closest('.lab-pigtail')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
+    if (target.closest('.lab-vfl')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -336,7 +337,7 @@
 
   /**
    * Enforce a single toolbox active highlight across all rail categories
-   * (Active Equipment / Splitters / Fiber Jumpers / Adapters).
+   * (Active Equipment / Splitters / Fiber Jumpers / Adapters / Test Equipment).
    * Pass null to strip every sidebar tool highlight.
    */
   function claimToolboxTool(toolId) {

@@ -293,18 +293,43 @@ body {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
+/* OLT chassis — cool steel with cyan edge */
+.lab-tool__mark--chassis {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: linear-gradient(180deg, #7dd3fc, #0369a1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 0 1px rgba(14, 165, 233, 0.15);
+}
+
+.lab-tool[data-lab-tool="chassis"] .lab-tool__copy strong {
+  color: #7dd3fc;
+}
+
+.lab-tool[data-lab-tool="card"] .lab-tool__copy strong {
+  color: #e2e8f0;
+}
+
+.lab-tool[data-lab-tool="sfp"] .lab-tool__copy strong {
+  color: #7dd3fc;
+}
+
 .lab-tool__mark--card {
   width: 0.72rem;
   height: 1.35rem;
-  background: linear-gradient(180deg, #e2e8f0, #94a3b8);
+  border-color: rgba(148, 163, 184, 0.55);
+  background: linear-gradient(180deg, #e2e8f0, #64748b);
 }
 
 .lab-tool__mark--sfp {
   width: 0.85rem;
   height: 0.85rem;
   border-radius: 0.12rem;
-  background: linear-gradient(180deg, #0ea5e9, #0369a1);
-  border-color: rgba(14, 165, 233, 0.65);
+  background: linear-gradient(180deg, #38bdf8, #0369a1);
+  border-color: rgba(14, 165, 233, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 6px rgba(14, 165, 233, 0.35);
 }
 
 .lab-tool__copy {
@@ -1110,8 +1135,13 @@ body {
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 50%, #0f172a 0 22%, transparent 23%),
-    conic-gradient(from 0deg, #94a3b8, #64748b, #94a3b8);
-  border: 1px solid rgba(148, 163, 184, 0.55);
+    conic-gradient(from 0deg, #38bdf8, #64748b, #38bdf8);
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.25);
+}
+
+.lab-tool--spl .lab-tool__copy strong {
+  color: #bae6fd;
 }
 
 .lab-tool__mark--upc {
@@ -1518,10 +1548,14 @@ body {
   width: 1.35rem;
   height: 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  border: 1px solid rgba(202, 138, 4, 0.75);
   background:
-    linear-gradient(90deg, #64748b 0 18%, #94a3b8 18% 82%, #64748b 82% 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    linear-gradient(90deg, #2563eb 0 18%, #facc15 18% 82%, #16a34a 82% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.lab-tool--pcord .lab-tool__copy strong {
+  color: #fde68a;
 }
 
 .lab-pcord-layer {
@@ -1779,14 +1813,16 @@ body.lab-pcord-stretching {
 .is-apc-text { color: #86efac; }
 
 .lab-fx-port.is-plug-target .lab-fx-port__cage,
-.lab-cas-port.is-plug-target {
+.lab-cas-port.is-plug-target,
+.lab-vfl-port.is-plug-target {
   outline: 1.5px solid #facc15 !important;
   outline-offset: 1px;
   box-shadow: 0 0 8px rgba(250, 204, 21, 0.55);
 }
 
 .lab-fx-port.is-plug-click .lab-fx-port__cage,
-.lab-cas-port.is-plug-click {
+.lab-cas-port.is-plug-click,
+.lab-vfl-port.is-plug-click {
   outline: 2px solid #fde047 !important;
   box-shadow: 0 0 12px rgba(250, 204, 21, 0.85);
 }
@@ -1810,9 +1846,15 @@ body.lab-pcord-linking .lab-pcord-fiber {
   width: 1.15rem;
   height: 0.55rem;
   border-radius: 0.12rem;
-  border: 1px solid rgba(148, 163, 184, 0.45);
-  background: linear-gradient(90deg, #64748b 0%, #94a3b8 42%, #cbd5e1 42%, #cbd5e1 58%, #94a3b8 58%, #64748b 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(59, 130, 246, 0.55);
+  background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 42%, #60a5fa 42%, #60a5fa 58%, #1d4ed8 58%, #3b82f6 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.35),
+    0 0 6px rgba(59, 130, 246, 0.3);
+}
+
+.lab-tool--cpl .lab-tool__copy strong {
+  color: #93c5fd;
 }
 
 .lab-coupler-layer {
@@ -1894,10 +1936,14 @@ body.lab-pcord-linking .lab-pcord-fiber {
   width: 1.35rem;
   height: 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.45);
+  border: 1px solid rgba(202, 138, 4, 0.75);
   background:
-    linear-gradient(90deg, #64748b 0 28%, #94a3b8 28% 78%, #cbd5e1 78% 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    linear-gradient(90deg, #2563eb 0 28%, #facc15 28% 78%, #f8fafc 78% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.lab-tool--pigtail .lab-tool__copy strong {
+  color: #fde68a;
 }
 
 .lab-pigtail-layer {
@@ -2028,4 +2074,474 @@ body.lab-pigtail-dragging {
 [data-lab-term].is-tail-dock {
   outline: 1.5px solid #fde047 !important;
   background: rgba(250, 204, 21, 0.22);
+}
+
+/* ── Visual Fault Locator (VFL) — 10 mW · 650 nm laser pen ── */
+.lab-tool__mark--vfl {
+  width: 0.55rem;
+  height: 1.2rem;
+  border-radius: 0.12rem 0.12rem 0.35rem 0.35rem;
+  border: 1px solid rgba(100, 116, 139, 0.55);
+  background:
+    linear-gradient(180deg,
+      #cbd5e1 0 8%,
+      #0a0a0a 8% 28%,
+      #1e293b 28% 100%);
+  box-shadow: 0 0 5px rgba(148, 163, 184, 0.25);
+  position: relative;
+}
+
+.lab-tool__mark--vfl::before,
+.lab-tool__mark--vfl::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 3px;
+  height: 4px;
+  background: #0a0a0a;
+  border-radius: 1px 1px 0 0;
+}
+
+.lab-tool__mark--vfl::before { left: 1px; }
+.lab-tool__mark--vfl::after { right: 1px; }
+
+.lab-tool--vfl .lab-tool__copy strong {
+  color: #cbd5e1;
+}
+
+.lab-vfl-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.lab-vfl {
+  position: absolute;
+  width: 28px;
+  height: 78px;
+  pointer-events: auto;
+  user-select: none;
+  touch-action: none;
+  z-index: 6;
+}
+
+.lab-vfl.is-dragging,
+.lab-vfl.is-selected {
+  z-index: 14;
+}
+
+.lab-vfl.is-selected .lab-vfl__body {
+  outline: 1.5px solid rgba(148, 163, 184, 0.75);
+  outline-offset: 1px;
+}
+
+/* Protective ear flanges + centered open SC adapter */
+.lab-vfl__head {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 18px;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lab-vfl__flanges {
+  position: absolute;
+  inset: 0;
+  width: 28px;
+  height: 18px;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+}
+
+/* Universal SC port — same plug target rules as splitter .lab-cas-port */
+.lab-vfl-port {
+  position: absolute;
+  left: 7px;
+  top: 1px;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.lab-vfl-port__thread {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 11px;
+  height: 4px;
+  margin-left: -5.5px;
+  border-radius: 1px;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      #64748b 0 0.5px,
+      #cbd5e1 0.5px 1px,
+      #475569 1px 1.5px
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 0 0 0.5px rgba(15, 23, 42, 0.35);
+  pointer-events: none;
+}
+
+.lab-vfl-port__ferrule {
+  position: relative;
+  display: block;
+  width: 6px;
+  height: 10px;
+  margin-bottom: 3px;
+  border-radius: 1px 1px 0.5px 0.5px;
+  border: 0.5px solid rgba(71, 85, 105, 0.9);
+  background:
+    linear-gradient(
+      90deg,
+      #64748b 0%,
+      #f1f5f9 18%,
+      #e2e8f0 42%,
+      #94a3b8 68%,
+      #475569 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 0 0 0.5px rgba(15, 23, 42, 0.25);
+  pointer-events: none;
+}
+
+.lab-vfl-port__bore {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 2px;
+  height: 2px;
+  margin-left: -1px;
+  border-radius: 50%;
+  background: #0f172a;
+  box-shadow: inset 0 0 1px #020617;
+  pointer-events: none;
+}
+
+.lab-vfl.is-mode-cw .lab-vfl-port__ferrule,
+.lab-vfl.is-mode-glint .lab-vfl-port__ferrule,
+.lab-vfl-port.is-emitting .lab-vfl-port__ferrule {
+  border-color: rgba(185, 28, 28, 0.75);
+  background: linear-gradient(180deg, #fecaca 0%, #ef4444 45%, #991b1b 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 6px #f87171,
+    0 0 12px rgba(239, 68, 68, 0.65);
+}
+
+.lab-vfl.is-mode-cw .lab-vfl-port__bore,
+.lab-vfl.is-mode-glint .lab-vfl-port__bore,
+.lab-vfl-port.is-emitting .lab-vfl-port__bore {
+  background: #ef4444;
+  box-shadow: 0 0 4px #f87171, 0 0 8px rgba(239, 68, 68, 0.85);
+}
+
+.lab-vfl-port.is-plugged .lab-vfl-port__ferrule {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 0 1px rgba(250, 204, 21, 0.35);
+}
+
+.lab-vfl-port.is-plug-target {
+  outline: 1.5px solid #facc15 !important;
+  outline-offset: 1px;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.55);
+}
+
+.lab-vfl-port.is-plug-click {
+  outline: 2px solid #fde047 !important;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.85);
+}
+
+.lab-vfl__body {
+  position: absolute;
+  left: 3px;
+  top: 16px;
+  width: 22px;
+  height: 60px;
+  border-radius: 3px 3px 10px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: linear-gradient(180deg, #1a1a1a 0%, #0f172a 30%, #020617 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 6px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  overflow: hidden;
+}
+
+.lab-vfl.is-dragging .lab-vfl__body,
+.lab-vfl__body:active {
+  cursor: grabbing;
+}
+
+.lab-vfl__label {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  font-size: 0.22rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #f8fafc;
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.lab-vfl__caution {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 10px;
+  padding: 0.5px 1px;
+  font-size: 0.18rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #0f172a;
+  text-align: center;
+  background: #f8fafc;
+  border-radius: 1px;
+  pointer-events: none;
+  line-height: 1.15;
+}
+
+.lab-vfl__ring {
+  position: absolute;
+  left: 1px;
+  top: 18px;
+  right: 1px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #64748b, #94a3b8, #64748b);
+  pointer-events: none;
+}
+
+.lab-vfl__switch-row {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 24px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.lab-vfl__modes {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-size: 0.26rem;
+  font-weight: 700;
+  color: #94a3b8;
+  line-height: 1;
+  padding-left: 8px;
+}
+
+.lab-vfl__track {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  width: 5px;
+  height: 26px;
+  border-radius: 999px;
+  background: #020617;
+  border: 1px solid rgba(100, 116, 139, 0.4);
+}
+
+.lab-vfl__slider {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 7px;
+  margin-top: -3.5px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #fb923c, #ea580c);
+  border: 1px solid rgba(234, 88, 12, 0.75);
+  box-shadow: 0 0 4px rgba(249, 115, 22, 0.45);
+}
+
+.lab-vfl.is-mode-cw .lab-vfl__slider,
+.lab-vfl.is-mode-glint .lab-vfl__slider {
+  background: linear-gradient(180deg, #fb923c, #c2410c);
+  border-color: rgba(234, 88, 12, 0.85);
+  box-shadow: 0 0 5px rgba(249, 115, 22, 0.55);
+}
+
+.lab-vfl__grip {
+  position: absolute;
+  left: 3px;
+  right: 3px;
+  bottom: 6px;
+  height: 10px;
+  border-radius: 0 0 6px 6px;
+  background:
+    repeating-linear-gradient(180deg,
+      transparent 0 2px,
+      rgba(148, 163, 184, 0.18) 2px 3px);
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.lab-vfl__beam {
+  position: absolute;
+  left: 13px;
+  top: 0;
+  width: 3px;
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.98), rgba(239, 68, 68, 0.15) 70%, transparent);
+  pointer-events: none;
+  z-index: 6;
+  filter: drop-shadow(0 0 3px #ef4444) drop-shadow(0 0 8px rgba(239, 68, 68, 0.75));
+  transform-origin: 50% 100%;
+}
+
+.lab-vfl__beam.is-glint {
+  animation: lab-vfl-glint 0.55s steps(2, end) infinite;
+}
+
+.lab-vfl.is-mode-cw .lab-vfl__beam {
+  opacity: 1;
+}
+
+@keyframes lab-vfl-glint {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.15; }
+}
+
+body.lab-vfl-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* Red laser glow — CW steady · GLINT pulsing */
+.lab-pcord-fiber.is-vfl-glow,
+.lab-pigtail-fiber.is-vfl-glow {
+  stroke: #ef4444 !important;
+  stroke-width: 3.25px;
+  filter:
+    drop-shadow(0 0 2px #fecaca)
+    drop-shadow(0 0 6px #f87171)
+    drop-shadow(0 0 12px rgba(239, 68, 68, 0.9));
+}
+
+.lab-pcord-fiber.is-vfl-glow--cw,
+.lab-pigtail-fiber.is-vfl-glow--cw {
+  opacity: 1;
+  animation: none;
+}
+
+.lab-pcord-fiber.is-vfl-glow--glint,
+.lab-pigtail-fiber.is-vfl-glow--glint {
+  animation: lab-vfl-fiber-glint 0.55s steps(2, end) infinite;
+}
+
+.lab-pcord-fiber.is-vfl-glow.is-mismatch,
+.lab-pigtail-fiber.is-vfl-glow.is-mismatch {
+  stroke-dasharray: 5 3;
+}
+
+@keyframes lab-vfl-fiber-glint {
+  0%, 49% { opacity: 1; filter: drop-shadow(0 0 3px #fecaca) drop-shadow(0 0 10px #ef4444); }
+  50%, 100% { opacity: 0.2; filter: drop-shadow(0 0 1px rgba(239, 68, 68, 0.35)); }
+}
+
+.lab-cpl.is-vfl-glow,
+.lab-cpl.is-vfl-glow--cw {
+  filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.85));
+}
+
+.lab-cpl.is-vfl-glow--glint {
+  animation: lab-vfl-fiber-glint 0.55s steps(2, end) infinite;
+}
+
+.lab-vfl-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.3rem;
+  margin-bottom: 0.35rem;
+}
+
+.lab-vfl-mode-btn {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.4rem;
+  padding: 0.45rem 0.25rem;
+  background: rgba(15, 23, 42, 0.65);
+  color: var(--lab-muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.lab-vfl-mode-btn.is-active {
+  border-color: rgba(148, 163, 184, 0.55);
+  background: rgba(51, 65, 85, 0.45);
+  color: #e2e8f0;
+}
+
+.lab-vfl-mode-btn[data-vfl-mode$=":CW"].is-active,
+.lab-vfl-mode-btn[data-vfl-mode$=":GLINT"].is-active {
+  border-color: rgba(239, 68, 68, 0.65);
+  background: rgba(239, 68, 68, 0.22);
+  color: #fecaca;
+}
+
+.lab-vfl-mode-hint {
+  margin: 0 0 0.4rem;
+  font-size: 0.68rem;
+  color: var(--lab-muted);
+  line-height: 1.35;
+}
+
+.lab-vfl-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.45rem;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(127, 29, 29, 0.25);
+  font-size: 0.7rem;
+  color: #fecaca;
+}
+
+.lab-vfl-preview__beam {
+  display: block;
+  width: 1.6rem;
+  height: 0.28rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ef4444, #fecaca);
+  box-shadow: 0 0 8px #f87171;
+}
+
+.lab-vfl-preview.is-glint .lab-vfl-preview__beam {
+  animation: lab-vfl-glint 0.55s steps(2, end) infinite;
+}
+
+.lab-vfl-on-text {
+  color: #fca5a5;
 }

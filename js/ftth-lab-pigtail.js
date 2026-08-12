@@ -147,6 +147,9 @@
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' || hit.port === 'b' ? -90 : 90;
     }
+    if (hit && hit.owner === 'vfl') {
+      return 180;
+    }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
       return 180;
@@ -412,6 +415,23 @@
           el: node,
         };
       }
+
+      node = el.closest && el.closest('.lab-vfl-port[data-vfl-port]');
+      if (node) {
+        var vid = node.getAttribute('data-vfl-port');
+        var ferrule = node.querySelector('.lab-vfl-port__ferrule') || node;
+        var rV = ferrule.getBoundingClientRect();
+        var cV = clientToWorld(rV.left + rV.width / 2, rV.top + rV.height / 2);
+        return {
+          owner: 'vfl',
+          vflId: vid,
+          polish: 'UPC',
+          label: 'VFL · SC port',
+          wx: cV.x,
+          wy: cV.y,
+          el: node,
+        };
+      }
     }
     return null;
   }
@@ -454,6 +474,10 @@
   function attachConnector(p, hit) {
     if (!p || !hit) return;
     var mismatch = !polishMatch(p.polish, hit.polish);
+    if (hit.owner === 'vfl') mismatch = false;
+    if (hit.owner === 'vfl' && global.FtthLab && typeof FtthLab.detachPcordsFromVfl === 'function') {
+      FtthLab.detachPcordsFromVfl(hit.vflId, null, null);
+    }
     var lockedRot = resolveUprightPlugRotation(hit, p);
     p.connector.attached = {
       owner: hit.owner,
@@ -461,6 +485,7 @@
       label: hit.label,
       splitterId: hit.splitterId || null,
       couplerId: hit.couplerId || null,
+      vflId: hit.vflId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -490,6 +515,9 @@
       'Connector locked · ' + displayPolish(p.polish) + ' → ' + hit.label +
       (mismatch ? ' · mismatch +' + MISMATCH_PENALTY_DB + ' dB' : '')
     );
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
   }
 
   function detachConnector(p) {
@@ -497,6 +525,9 @@
     p.connector.attached = null;
     p.connector.mismatch = false;
     p.connector.lockedRot = null;
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
   }
 
   function attachTail(p, hit) {
@@ -560,6 +591,19 @@
           att.wx = pt2.x;
           att.wy = pt2.y;
           seatConnectorAtPort(p, pt2.x, pt2.y);
+        }
+      } else if (att.owner === 'vfl') {
+        var pwV = null;
+        if (global.FtthLab && typeof FtthLab.getVflPortWorld === 'function') {
+          pwV = FtthLab.getVflPortWorld(att.vflId);
+        }
+        if (pwV) {
+          att.wx = pwV.x;
+          att.wy = pwV.y;
+          if (typeof p.connector.lockedRot !== 'number') {
+            p.connector.lockedRot = typeof pwV.rot === 'number' ? pwV.rot : 180;
+          }
+          seatConnectorAtPort(p, pwV.x, pwV.y);
         }
       }
     }
@@ -712,6 +756,7 @@
 
     host.innerHTML = html;
     bindLayerEvents(host);
+    reapplyStoredVflGlow();
   }
 
   function updateFiberPath(p) {
@@ -730,7 +775,7 @@
   function clearPlugHighlights() {
     document.querySelectorAll(
       '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-      '.lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
+      '.lab-vfl-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
       '[data-lab-splice].is-plug-target, [data-lab-term].is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
@@ -1056,6 +1101,42 @@
     }
   }
 
+  function getLaserGraphNodes() {
+    return pigtails.map(function (p) {
+      return {
+        id: p.id,
+        connector: p.connector.attached
+          ? {
+              owner: p.connector.attached.owner,
+              couplerId: p.connector.attached.couplerId || null,
+              vflId: p.connector.attached.vflId || null,
+              port: p.connector.attached.port || null,
+            }
+          : null,
+      };
+    });
+  }
+
+  function applyLaserGlow(ids, mode) {
+    var map = {};
+    (ids || []).forEach(function (id) { map[id] = true; });
+    if (!mode && global.FtthLab && FtthLab._vflGlow) mode = FtthLab._vflGlow.mode;
+    mode = String(mode || 'OFF').toUpperCase();
+    if (!layer) return;
+    layer.querySelectorAll('[data-pt-fiber]').forEach(function (el) {
+      var on = !!map[el.getAttribute('data-pt-fiber')] && mode !== 'OFF';
+      el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
+      if (!on) return;
+      el.classList.add('is-vfl-glow');
+      el.classList.add(mode === 'GLINT' ? 'is-vfl-glow--glint' : 'is-vfl-glow--cw');
+    });
+  }
+
+  function reapplyStoredVflGlow() {
+    var glow = global.FtthLab && FtthLab._vflGlow;
+    if (glow) applyLaserGlow(glow.pigtails, glow.mode);
+  }
+
   function updateInspector() {
     var card = document.getElementById('lab-inspector-card');
     var detail = document.getElementById('lab-inspector-detail');
@@ -1208,6 +1289,18 @@
     rebuildLayer();
   }
 
+  function detachPigtailsFromVfl(vflId, exceptId) {
+    pigtails.forEach(function (p) {
+      if (p.id === exceptId) return;
+      if (p.connector.attached && p.connector.attached.owner === 'vfl' &&
+          p.connector.attached.vflId === vflId) {
+        detachConnector(p);
+      }
+    });
+    rebuildLayer();
+    refreshBudget();
+  }
+
   function mount(api) {
     ctx = api || {};
     pigtails = [];
@@ -1240,6 +1333,23 @@
           prevDetach(couplerId);
         }
       };
+
+      FtthLab.detachPigtailsFromVfl = detachPigtailsFromVfl;
+
+      var prevGraph = FtthLab.getFiberLaserGraph;
+      FtthLab.getFiberLaserGraph = function () {
+        var base = typeof prevGraph === 'function'
+          ? (prevGraph() || { pcords: [], pigtails: [] })
+          : { pcords: [], pigtails: [] };
+        base.pigtails = getLaserGraphNodes();
+        return base;
+      };
+
+      var prevGlow = FtthLab.applyFiberLaserGlow;
+      FtthLab.applyFiberLaserGlow = function (targets) {
+        if (typeof prevGlow === 'function') prevGlow(targets);
+        applyLaserGlow(targets && targets.pigtails, targets && targets.mode);
+      };
     }
   }
 
@@ -1256,6 +1366,8 @@
     onToolboxClaim: onToolboxClaim,
     getNetworkLossDb: getNetworkLossDb,
     getMismatchCount: getMismatchCount,
+    getLaserGraphNodes: getLaserGraphNodes,
+    applyLaserGlow: applyLaserGlow,
   };
 
   function tryRegister() {

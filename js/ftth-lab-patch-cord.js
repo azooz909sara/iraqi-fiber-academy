@@ -222,6 +222,9 @@
     if (att.owner === 'coupler') {
       return att.couplerId === hit.couplerId && att.port === hit.port;
     }
+    if (att.owner === 'vfl') {
+      return att.vflId === hit.vflId;
+    }
     return false;
   }
 
@@ -242,11 +245,15 @@
   function attachEnd(cord, end, hit) {
     var side = cord[endKey(end)];
     var mismatch = !polishMatch(side.polish, hit.polish);
+    if (hit.owner === 'vfl') mismatch = false;
     clearPortFromOthers(hit, cord.id, end);
+    if (hit.owner === 'vfl' && global.FtthLab && typeof FtthLab.detachPigtailsFromVfl === 'function') {
+      FtthLab.detachPigtailsFromVfl(hit.vflId, null);
+    }
     var otherEnd = oppositeEnd(end);
-    /* Coupler faces are horizontal; OLT/splitter stay vertical (0° / 180°) */
+    /* Coupler faces are horizontal; OLT/splitter/VFL stay vertical (0° / 180°) */
     var lockedRot = resolveUprightPlugRotation(hit, cord, end);
-    if (!(hit && hit.owner === 'coupler')) {
+    if (!(hit && (hit.owner === 'coupler'))) {
       lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
     }
     side.liveRot = null;
@@ -256,6 +263,7 @@
       label: hit.label,
       splitterId: hit.splitterId || null,
       couplerId: hit.couplerId || null,
+      vflId: hit.vflId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -276,6 +284,9 @@
       'Side ' + end + ' locked · ' + displayPolish(side.polish) + ' → ' + hit.label +
       (mismatch ? ' · mismatch warning · +' + MISMATCH_PENALTY_DB + ' dB' : '')
     );
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
   }
 
   function detachEnd(cord, end) {
@@ -293,6 +304,9 @@
     cord.pathLocked = false;
     cord.relocating = otherAttached && typeof cord.fixedLength === 'number';
     clearRopePhysics(cord.id);
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
   }
 
   function clearDrawnPath(cord) {
@@ -373,6 +387,23 @@
           label: 'SC Coupler ' + cport + ' · ' + (cPolish === 'APC' ? 'SC/APC' : 'SC/PC'),
           wx: c3.x,
           wy: c3.y,
+          el: node,
+        };
+      }
+
+      node = el.closest && el.closest('.lab-vfl-port[data-vfl-port]');
+      if (node) {
+        var vid = node.getAttribute('data-vfl-port');
+        var ferrule = node.querySelector('.lab-vfl-port__ferrule') || node;
+        var rV = ferrule.getBoundingClientRect();
+        var cV = clientToWorld(rV.left + rV.width / 2, rV.top + rV.height / 2);
+        return {
+          owner: 'vfl',
+          vflId: vid,
+          polish: 'UPC',
+          label: 'VFL · SC port',
+          wx: cV.x,
+          wy: cV.y,
           el: node,
         };
       }
@@ -466,6 +497,23 @@
           side.liveRot = null;
           seatEndAtPort(cord, end, ptC.x, ptC.y);
         }
+        return;
+      }
+      if (att.owner === 'vfl') {
+        var pwV = null;
+        if (global.FtthLab && typeof FtthLab.getVflPortWorld === 'function') {
+          pwV = FtthLab.getVflPortWorld(att.vflId);
+        }
+        if (pwV) {
+          att.wx = pwV.x;
+          att.wy = pwV.y;
+          if (typeof side.lockedRot !== 'number') {
+            side.lockedRot = typeof pwV.rot === 'number' ? pwV.rot : 180;
+            att.lockedRot = side.lockedRot;
+          }
+          side.liveRot = null;
+          seatEndAtPort(cord, end, pwV.x, pwV.y);
+        }
       }
     });
   }
@@ -514,6 +562,51 @@
       ? 'Power budget · Patch + mismatch ' + loss.toFixed(2) + ' dB'
       : 'Power budget · no active patch paths';
     if (global.FtthLab && FtthLab.setBudget) FtthLab.setBudget(text);
+  }
+
+  /** Attachment snapshot for VFL laser propagation. */
+  function getLaserGraphNodes() {
+    return cords.map(function (c) {
+      return {
+        id: c.id,
+        sideA: c.sideA.attached
+          ? {
+              owner: c.sideA.attached.owner,
+              couplerId: c.sideA.attached.couplerId || null,
+              vflId: c.sideA.attached.vflId || null,
+              port: c.sideA.attached.port || null,
+            }
+          : null,
+        sideB: c.sideB.attached
+          ? {
+              owner: c.sideB.attached.owner,
+              couplerId: c.sideB.attached.couplerId || null,
+              vflId: c.sideB.attached.vflId || null,
+              port: c.sideB.attached.port || null,
+            }
+          : null,
+      };
+    });
+  }
+
+  function applyLaserGlow(ids, mode) {
+    var map = {};
+    (ids || []).forEach(function (id) { map[id] = true; });
+    if (!mode && global.FtthLab && FtthLab._vflGlow) mode = FtthLab._vflGlow.mode;
+    mode = String(mode || 'OFF').toUpperCase();
+    if (!layer) return;
+    layer.querySelectorAll('[data-pcord-fiber]').forEach(function (el) {
+      var on = !!map[el.getAttribute('data-pcord-fiber')] && mode !== 'OFF';
+      el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
+      if (!on) return;
+      el.classList.add('is-vfl-glow');
+      el.classList.add(mode === 'GLINT' ? 'is-vfl-glow--glint' : 'is-vfl-glow--cw');
+    });
+  }
+
+  function reapplyStoredVflGlow() {
+    var glow = global.FtthLab && FtthLab._vflGlow;
+    if (glow) applyLaserGlow(glow.pcords, glow.mode);
   }
 
   function deleteSelected() {
@@ -626,7 +719,8 @@
 
   function clearPortHighlights() {
     document.querySelectorAll(
-      '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target'
+      '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
+      '.lab-vfl-port.is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
 
@@ -1010,6 +1104,9 @@
   function portAlignedRotation(hit) {
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' ? -90 : 90;
+    }
+    if (hit && hit.owner === 'vfl') {
+      return 180;
     }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
@@ -2341,6 +2438,7 @@
 
     host.innerHTML = html;
     bindLayerEvents(host);
+    reapplyStoredVflGlow();
   }
 
   /** Real-time path + free-end pose; plugged ends keep locked style. */
@@ -2513,7 +2611,8 @@
 
         function clearHighlights() {
           document.querySelectorAll(
-            '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target'
+            '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
+            '.lab-vfl-port.is-plug-target'
           ).forEach(function (n) { n.classList.remove('is-plug-target'); });
         }
 
@@ -2919,6 +3018,21 @@
     }
   }
 
+  function detachPcordsFromVfl(vflId, exceptCordId, exceptEnd) {
+    cords.forEach(function (c) {
+      ['A', 'B'].forEach(function (end) {
+        if (c.id === exceptCordId && end === exceptEnd) return;
+        var side = c[endKey(end)];
+        if (side.attached && side.attached.owner === 'vfl' &&
+            side.attached.vflId === vflId) {
+          detachEnd(c, end);
+        }
+      });
+    });
+    rebuildLayer();
+    refreshBudget();
+  }
+
   function mount(api) {
     ctx = api || {};
     cords = [];
@@ -2951,6 +3065,22 @@
       };
       FtthLab.refreshCouplerPolish = refreshCouplerPolish;
       FtthLab.detachPortsForCoupler = detachPortsForCoupler;
+      FtthLab.detachPcordsFromVfl = detachPcordsFromVfl;
+
+      var prevGraph = FtthLab.getFiberLaserGraph;
+      FtthLab.getFiberLaserGraph = function () {
+        var base = typeof prevGraph === 'function'
+          ? (prevGraph() || { pcords: [], pigtails: [] })
+          : { pcords: [], pigtails: [] };
+        base.pcords = getLaserGraphNodes();
+        return base;
+      };
+
+      var prevGlow = FtthLab.applyFiberLaserGlow;
+      FtthLab.applyFiberLaserGlow = function (targets) {
+        applyLaserGlow(targets && targets.pcords, targets && targets.mode);
+        if (typeof prevGlow === 'function') prevGlow(targets);
+      };
     }
   }
 
@@ -2971,6 +3101,8 @@
     getNetworkLossDb: getNetworkLossDb,
     getMismatchCount: getMismatchCount,
     rebuildLayer: rebuildLayer,
+    getLaserGraphNodes: getLaserGraphNodes,
+    applyLaserGlow: applyLaserGlow,
   };
 
   function tryRegister() {

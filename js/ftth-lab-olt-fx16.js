@@ -629,7 +629,7 @@
       (chassisPlaced ? ' is-used' : '') +
       '" draggable="' + (chassisPlaced ? 'false' : 'true') +
       '" data-lab-tool="chassis" role="listitem">' +
-      '<span class="lab-tool__mark" aria-hidden="true"></span>' +
+      '<span class="lab-tool__mark lab-tool__mark--chassis" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy"><strong>Nokia 7360 FX-16</strong><span>OLT</span></span>' +
       '</button>' +
       '<button type="button" class="lab-tool' + (cardSel ? ' is-selected' : '') +
