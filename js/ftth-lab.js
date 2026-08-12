@@ -333,7 +333,7 @@
   var activeToolboxTool = null;
 
   /**
-   * Enforce a single toolbox active highlight across OLT / splitter / patch cord.
+   * Enforce a single toolbox active highlight across OLT / splitter / patch / coupler.
    * Pass null to strip every sidebar tool highlight.
    */
   function claimToolboxTool(toolId) {

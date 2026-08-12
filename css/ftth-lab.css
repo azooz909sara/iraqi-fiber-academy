@@ -1834,3 +1834,100 @@ body.lab-pcord-linking .lab-pcord-fiber {
   stroke: #fde047;
   stroke-width: 2.75;
 }
+
+/* ─── SC Coupler toolbox + workspace adapter ─── */
+
+.lab-tool__mark--cpl {
+  width: 1.15rem;
+  height: 0.55rem;
+  border-radius: 0.12rem;
+  background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 42%, #60a5fa 42%, #60a5fa 58%, #1d4ed8 58%, #3b82f6 100%);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
+}
+
+.lab-tool--cpl.is-selected {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.lab-tool--cpl .lab-tool__copy strong {
+  color: #93c5fd;
+}
+
+.lab-coupler-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Compact — receptacles sized for 14×22 patch-cord head (sideways) */
+.lab-cpl {
+  position: absolute;
+  z-index: 4;
+  width: 40px;
+  height: 18px;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  box-sizing: border-box;
+  will-change: left, top;
+}
+
+.lab-cpl.is-dragging {
+  cursor: grabbing;
+  z-index: 12;
+}
+
+.lab-cpl.is-selected {
+  filter: drop-shadow(0 0 2px rgba(250, 204, 21, 0.75));
+}
+
+.lab-cpl__art {
+  display: block;
+  width: 40px;
+  height: 18px;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lab-cpl-port {
+  position: absolute;
+  top: 1px;
+  width: 11px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  z-index: 2;
+  border-radius: 2px;
+}
+
+.lab-cpl-port--a { left: 0; }
+.lab-cpl-port--b { right: 0; }
+
+.lab-cpl.is-dragging .lab-cpl-port {
+  pointer-events: none;
+}
+
+.lab-cpl-port.is-upc,
+.lab-cpl-port.is-apc {
+  background: transparent;
+}
+
+.lab-cpl-port.is-plug-target {
+  outline: 1.5px solid #fde047;
+  background: rgba(250, 204, 21, 0.2);
+}
+
+.lab-cpl-port.is-plug-click {
+  outline: 1.5px solid #fde047 !important;
+  background: rgba(250, 204, 21, 0.28);
+}
+
+.lab-cpl-config .lab-polish-note {
+  margin-top: 0.45rem;
+}

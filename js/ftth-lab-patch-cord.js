@@ -219,6 +219,9 @@
     if (att.owner === 'olt') {
       return att.slot === hit.slot && att.oltPort === hit.oltPort;
     }
+    if (att.owner === 'coupler') {
+      return att.couplerId === hit.couplerId && att.port === hit.port;
+    }
     return false;
   }
 
@@ -241,15 +244,18 @@
     var mismatch = !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
     var otherEnd = oppositeEnd(end);
-    /* Zero drag rotation, then lock to strict vertical socket pose (0° or 180°) */
+    /* Coupler faces are horizontal; OLT/splitter stay vertical (0° / 180°) */
     var lockedRot = resolveUprightPlugRotation(hit, cord, end);
-    lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
+    if (!(hit && hit.owner === 'coupler')) {
+      lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
+    }
     side.liveRot = null;
     side.attached = {
       owner: hit.owner,
       polish: portPolishNorm(hit.polish) === 'APC' ? 'APC' : 'UPC',
       label: hit.label,
       splitterId: hit.splitterId || null,
+      couplerId: hit.couplerId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -350,6 +356,26 @@
           el: node,
         };
       }
+
+      node = el.closest && el.closest('.lab-cpl-port');
+      if (node) {
+        var cid = node.getAttribute('data-cpl-id');
+        var cport = node.getAttribute('data-cpl-port') || 'A';
+        var cPolish = node.classList.contains('is-apc') ? 'APC' : 'UPC';
+        var cFace = node.querySelector('i') || node;
+        var r3 = cFace.getBoundingClientRect();
+        var c3 = clientToWorld(r3.left + r3.width / 2, r3.top + r3.height / 2);
+        return {
+          owner: 'coupler',
+          couplerId: cid,
+          port: cport,
+          polish: cPolish,
+          label: 'SC Coupler ' + cport + ' · ' + (cPolish === 'APC' ? 'SC/APC' : 'SC/PC'),
+          wx: c3.x,
+          wy: c3.y,
+          el: node,
+        };
+      }
     }
 
     /* Fallback: no element hit — keep free world point available to callers */
@@ -398,6 +424,31 @@
           }
           side.liveRot = null;
           seatEndAtPort(cord, end, pt2.x, pt2.y);
+        }
+        return;
+      }
+      if (att.owner === 'coupler') {
+        el = document.querySelector(
+          '.lab-cpl-port[data-cpl-id="' + att.couplerId + '"][data-cpl-port="' + att.port + '"]'
+        );
+        if (el) {
+          var faceC = el.querySelector('i') || el;
+          var rC = faceC.getBoundingClientRect();
+          var ptC = clientToWorld(rC.left + rC.width / 2, rC.top + rC.height / 2);
+          att.wx = ptC.x;
+          att.wy = ptC.y;
+          if (typeof side.lockedRot !== 'number') {
+            side.lockedRot = portAlignedRotation({
+              owner: 'coupler',
+              port: att.port,
+              el: el,
+              wx: ptC.x,
+              wy: ptC.y,
+            });
+            att.lockedRot = side.lockedRot;
+          }
+          side.liveRot = null;
+          seatEndAtPort(cord, end, ptC.x, ptC.y);
         }
       }
     });
@@ -558,8 +609,9 @@
   /* ─── Dual-state link lifecycle (A locked → B follows → B snap) ─── */
 
   function clearPortHighlights() {
-    document.querySelectorAll('.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target')
-      .forEach(function (n) { n.classList.remove('is-plug-target'); });
+    document.querySelectorAll(
+      '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target'
+    ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
 
   function unbindLinkFollow() {
@@ -936,11 +988,13 @@
   }
 
   /**
-   * Strict vertical socket axis only (never sideways).
-   * 0°  = boot down / ferrule up
-   * 180° = boot up / ferrule down (typical faceplate insert from above)
+   * Strict vertical socket axis for OLT / splitter faceplates.
+   * SC coupler barrel uses horizontal faces (A left / B right).
    */
   function portAlignedRotation(hit) {
+    if (hit && hit.owner === 'coupler') {
+      return hit.port === 'B' ? -90 : 90;
+    }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
       return 180;
@@ -949,8 +1003,9 @@
     return 0;
   }
 
-  /** Pick exact 0° or 180° from vertical approach; ignores horizontal drag heading. */
+  /** Vertical ports: pick 0° or 180°. Coupler: keep horizontal face axis. */
   function resolveUprightPlugRotation(hit, cord, end) {
+    if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var p = getEndWorld(cord, end);
@@ -2437,8 +2492,9 @@
         endDragState = { cordId: id, end: end };
 
         function clearHighlights() {
-          document.querySelectorAll('.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target')
-            .forEach(function (n) { n.classList.remove('is-plug-target'); });
+          document.querySelectorAll(
+            '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target'
+          ).forEach(function (n) { n.classList.remove('is-plug-target'); });
         }
 
         function onMove(ev) {
@@ -2733,6 +2789,47 @@
     rebuildLayer();
   }
 
+  function refreshCouplerPolish(couplerId, polish) {
+    polish = portPolishNorm(polish) === 'APC' ? 'APC' : 'UPC';
+    var warned = false;
+    cords.forEach(function (c) {
+      ['A', 'B'].forEach(function (end) {
+        var side = c[endKey(end)];
+        if (!side.attached || side.attached.owner !== 'coupler') return;
+        if (side.attached.couplerId !== couplerId) return;
+        side.attached.polish = polish;
+        side.attached.label =
+          'SC Coupler ' + side.attached.port + ' · ' +
+          (polish === 'APC' ? 'SC/APC' : 'SC/PC');
+        side.mismatch = !polishMatch(side.polish, polish);
+        side.attached.mismatch = side.mismatch;
+        if (side.mismatch) warned = true;
+      });
+    });
+    if (warned) showWarning(MISMATCH_MSG);
+    rebuildLayer();
+    updateInspector();
+    refreshBudget();
+  }
+
+  function detachPortsForCoupler(couplerId) {
+    var changed = false;
+    cords.forEach(function (c) {
+      ['A', 'B'].forEach(function (end) {
+        var side = c[endKey(end)];
+        if (!side.attached || side.attached.owner !== 'coupler') return;
+        if (side.attached.couplerId !== couplerId) return;
+        detachEnd(c, end);
+        changed = true;
+      });
+    });
+    if (changed) {
+      rebuildLayer();
+      updateInspector();
+      refreshBudget();
+    }
+  }
+
   function mount(api) {
     ctx = api || {};
     cords = [];
@@ -2763,6 +2860,8 @@
         }
         return false;
       };
+      FtthLab.refreshCouplerPolish = refreshCouplerPolish;
+      FtthLab.detachPortsForCoupler = detachPortsForCoupler;
     }
   }
 

@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="lab-brand__meta">
           <h1>FTTH Network &amp; Patch Panel Lab</h1>
-          <p>Blank-slate assembly · OLT · Splitters · Patch Cord</p>
+          <p>Blank-slate assembly · OLT · Splitters · Patch Cord · Coupler</p>
         </div>
       </a>
       <div class="lab-header__actions">
@@ -58,6 +58,10 @@
         <div id="lab-patchcord-tree" class="lab-hw-tree" aria-label="Patch cord tool">
           <!-- Patch Cord tool · ftth-lab-patch-cord.js -->
         </div>
+        <p class="lab-rail__label" style="margin-top:1rem">Adapters</p>
+        <div id="lab-coupler-tree" class="lab-hw-tree" aria-label="SC Coupler tool">
+          <!-- Single SC Coupler · ftth-lab-coupler.js -->
+        </div>
       </aside>
 
       <section class="lab-stage-wrap" aria-label="Lab stage">
@@ -90,7 +94,8 @@
           <li>1 · FX-16 OLT + FGLT-D (active)</li>
           <li>2 · Smart Splitters + UPC/APC (active)</li>
           <li>3 · Patch Cord drag-plug + mismatch warn (active)</li>
-          <li>4 · Patch panel matrix</li>
+          <li>4 · SC Coupler · SC/PC ↔ SC/APC (active)</li>
+          <li>5 · Patch panel matrix</li>
         </ul>
       </aside>
     </main>
@@ -106,6 +111,7 @@
   <script src="js/ftth-lab-olt-fx16.js"></script>
   <script src="js/ftth-lab-splitter.js"></script>
   <script src="js/ftth-lab-patch-cord.js"></script>
+  <script src="js/ftth-lab-coupler.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>
