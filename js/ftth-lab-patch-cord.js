@@ -814,9 +814,10 @@
   var GRAVITY_SAG_RATIO = 0.28;
   var GRAVITY_SAG_MIN = 24;
   var GRAVITY_SAG_MAX = 160;
-  /** Min world distance between recorded mouse-path samples */
-  var TRACE_SAMPLE_PX = 10;
+  /** Min world distance between recorded mouse-path samples (anti-jitter) */
+  var TRACE_SAMPLE_PX = 14;
   var TRACE_MAX_POINTS = 180;
+  var CHAIKIN_ITERATIONS = 2;
 
   function dist2(ax, ay, bx, by) {
     var dx = ax - bx;
@@ -985,21 +986,22 @@
 
   /**
    * Record the mouse trail while the free end is dragged.
-   * Once pathLocked, samples are never modified.
+   * Distance dead-band rejects hand jitter; pathLocked freezes further samples.
    */
   function appendRoutePoint(cord, x, y) {
-    if (!cord || cord.pathLocked) return;
+    if (!cord || cord.pathLocked) return false;
     var route = ensureRoute(cord);
     var last = route[route.length - 1];
     if (!last) {
       route.push({ x: x, y: y });
-      return;
+      return true;
     }
-    if (dist2(last.x, last.y, x, y) < TRACE_SAMPLE_PX) return;
+    if (dist2(last.x, last.y, x, y) < TRACE_SAMPLE_PX) return false;
     route.push({ x: x, y: y });
     if (route.length > TRACE_MAX_POINTS * 2) {
       cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
     }
+    return true;
   }
 
   function downsampleRoute(pts, maxN) {
@@ -1014,9 +1016,77 @@
     return out;
   }
 
+  /** Drop near-duplicate vertices before Chaikin (keeps endpoints). */
+  function simplifyRouteMinDist(pts, minDist) {
+    if (!pts || pts.length < 3) return pts ? pts.slice() : [];
+    var out = [{ x: pts[0].x, y: pts[0].y }];
+    var i;
+    for (i = 1; i < pts.length - 1; i++) {
+      var prev = out[out.length - 1];
+      if (dist2(prev.x, prev.y, pts[i].x, pts[i].y) >= minDist) {
+        out.push({ x: pts[i].x, y: pts[i].y });
+      }
+    }
+    var last = pts[pts.length - 1];
+    if (dist2(out[out.length - 1].x, out[out.length - 1].y, last.x, last.y) < 0.5) {
+      out[out.length - 1] = { x: last.x, y: last.y };
+    } else {
+      out.push({ x: last.x, y: last.y });
+    }
+    return out;
+  }
+
+  /**
+   * Chaikin's corner-cutting on an open polyline (endpoints preserved).
+   * Softens jagged hand-drawn corners into an organic sagging curve.
+   */
+  function chaikinSmooth(pts, iterations) {
+    if (!pts || pts.length < 3) return pts ? pts.slice() : [];
+    iterations = iterations == null ? CHAIKIN_ITERATIONS : iterations;
+    var curr = pts.slice();
+    var n;
+    for (n = 0; n < iterations; n++) {
+      if (curr.length < 3) break;
+      var next = [{ x: curr[0].x, y: curr[0].y }];
+      var i;
+      for (i = 0; i < curr.length - 1; i++) {
+        var p = curr[i];
+        var q = curr[i + 1];
+        next.push({
+          x: 0.75 * p.x + 0.25 * q.x,
+          y: 0.75 * p.y + 0.25 * q.y,
+        });
+        next.push({
+          x: 0.25 * p.x + 0.75 * q.x,
+          y: 0.25 * p.y + 0.75 * q.y,
+        });
+      }
+      next.push({
+        x: curr[curr.length - 1].x,
+        y: curr[curr.length - 1].y,
+      });
+      curr = next;
+    }
+    return curr;
+  }
+
+  /** Post-draw cleanup: simplify jitter → Chaikin → optional downsample. */
+  function smoothDrawnRoute(cord) {
+    if (!cord || cord.pathLocked) return;
+    var route = ensureRoute(cord);
+    if (route.length < 3) return;
+    route = simplifyRouteMinDist(route, TRACE_SAMPLE_PX * 0.75);
+    route = chaikinSmooth(route, CHAIKIN_ITERATIONS);
+    if (route.length > TRACE_MAX_POINTS) {
+      route = downsampleRoute(route, TRACE_MAX_POINTS);
+    }
+    cord.route = route;
+  }
+
   /** Freeze the traced path so it never auto-recalculates after both ends are plugged. */
   function lockDrawnPath(cord) {
     if (!cord) return;
+    smoothDrawnRoute(cord);
     var route = ensureRoute(cord);
     if (route.length > TRACE_MAX_POINTS) {
       cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
@@ -1422,6 +1492,7 @@
               if (!c.pathLocked) {
                 var seatTip = bootExitStub(c, end);
                 appendRoutePoint(c, seatTip.x, seatTip.y);
+                smoothDrawnRoute(c);
               }
               pluggedNow = true;
               flashPort(hit.el);
@@ -1432,10 +1503,12 @@
               }
             } else {
               setEndWorld(c, end, mouse.x, mouse.y);
+              if (!c.pathLocked && ensureRoute(c).length >= 3) smoothDrawnRoute(c);
               setStatus('Side ' + end + ' free · release over a port to snap-lock');
             }
           } else {
             setEndWorld(c, end, mouse.x, mouse.y);
+            if (!c.pathLocked && ensureRoute(c).length >= 3) smoothDrawnRoute(c);
             setStatus('Side ' + end + ' free · click-and-drag to draw, release on a port');
           }
 
