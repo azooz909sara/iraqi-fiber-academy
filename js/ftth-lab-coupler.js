@@ -512,26 +512,20 @@
     var isApc = normalizePolish(c.polish) === 'APC';
     card.innerHTML =
       '<h2>SC Coupler</h2>' +
-      '<p>Inline SC adapter · both faces share one polish type. ' +
-      'Switch SC/PC (blue) or SC/APC (green) below — visuals and matching update live.</p>';
+      '<p>Both faces share one polish · match jumpers to this type.</p>';
 
     if (!detail) return;
     detail.hidden = false;
     detail.innerHTML =
       '<div class="lab-cpl-config">' +
-      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">Connector type</p>' +
+      '<p class="lab-inspector__label">Connector type</p>' +
       '<div class="lab-polish-toggle" role="group" aria-label="SC Coupler type">' +
       '<button type="button" class="lab-polish-btn is-upc' + (!isApc ? ' is-active' : '') +
       '" data-cpl-polish="' + c.id + ':UPC">SC/PC · Blue</button>' +
       '<button type="button" class="lab-polish-btn is-apc' + (isApc ? ' is-active' : '') +
       '" data-cpl-polish="' + c.id + ':APC">SC/APC · Green</button>' +
       '</div>' +
-      '<p class="lab-polish-note ' + (isApc ? 'lab-polish-note--apc' : 'lab-polish-note--upc') + '">' +
-      (isApc
-        ? 'APC · green · angled polish · match only SC/APC jumpers'
-        : 'PC/UPC · blue · flat polish · match only SC/PC jumpers') +
-      '</p>' +
-      '<div class="lab-spl-sheet" style="margin-top:0.55rem">' +
+      '<div class="lab-spl-sheet">' +
       '<div><span>Type</span><strong class="' +
       (isApc ? 'is-apc-text' : 'is-upc-text') + '">' + displayPolish(c.polish) +
       '</strong></div>' +
@@ -552,19 +546,20 @@
     if (rm) {
       rm.addEventListener('click', function () {
         removeCoupler(c.id);
-        if (global.FtthLab && typeof FtthLab.clearWorkspaceSelection === 'function') {
-          /* keep inspector tidy */
-        }
-        var idleCard = document.getElementById('lab-inspector-card');
-        var idleDetail = document.getElementById('lab-inspector-detail');
-        if (idleCard) {
-          idleCard.innerHTML =
-            '<h2>Empty Workspace</h2>' +
-            '<p>Blank slate. Drag equipment from the toolbox onto the grid.</p>';
-        }
-        if (idleDetail) {
-          idleDetail.hidden = true;
-          idleDetail.innerHTML = '';
+        if (global.FtthLab && typeof FtthLab.resetInspectorIdle === 'function') {
+          FtthLab.resetInspectorIdle();
+        } else {
+          var idleCard = document.getElementById('lab-inspector-card');
+          var idleDetail = document.getElementById('lab-inspector-detail');
+          if (idleCard) {
+            idleCard.innerHTML =
+              '<h2>No selection</h2>' +
+              '<p>Select equipment on the canvas, or drag an item from the toolbox.</p>';
+          }
+          if (idleDetail) {
+            idleDetail.hidden = true;
+            idleDetail.innerHTML = '';
+          }
         }
       });
     }

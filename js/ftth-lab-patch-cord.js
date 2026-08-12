@@ -2706,7 +2706,7 @@
   function polishToggleHtml(cordId, end, polish, label) {
     var isApc = normalizePolish(polish) === 'APC';
     return (
-      '<p class="lab-inspector__label" style="margin:0.55rem 0 0.35rem">' + label + '</p>' +
+      '<p class="lab-inspector__label">' + label + '</p>' +
       '<div class="lab-polish-toggle" role="group" aria-label="' + label + '">' +
       '<button type="button" class="lab-polish-btn is-upc' + (!isApc ? ' is-active' : '') +
       '" data-pc-polish="' + cordId + ':' + end + ':PC">SC/PC · Blue</button>' +
@@ -2725,29 +2725,32 @@
     if (!c) return;
 
     var pathLoss = cordLossDb(c);
+    var locked = typeof c.fixedLength === 'number';
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>End A and End B use the same rules: plugging one end locks only that end. First full connection locks the cable length permanently. Relocating a connector keeps that fixed length (elastic tether — no path growth); snapping into a new port re-fits a true catenary for the new span. Drag the cable body to stretch — release springs back to the locked-length catenary.</p>';
+      '<p>' + (locked
+        ? 'Length locked · relocating keeps span; plug into ports to re-seat.'
+        : 'Drag ends onto ports · first full connect locks length.') + '</p>';
 
     if (!detail) return;
     detail.hidden = false;
     detail.innerHTML =
       '<div class="lab-pcord-config">' +
-      polishToggleHtml(c.id, 'A', c.sideA.polish, 'Side A Connector') +
+      polishToggleHtml(c.id, 'A', c.sideA.polish, 'Side A') +
       '<p class="lab-pcord-attach' + (c.sideA.mismatch ? ' is-warn' : '') + '">' +
       (c.sideA.attached
         ? 'A → ' + c.sideA.attached.label +
           (c.sideA.mismatch ? ' · MISMATCH +' + MISMATCH_PENALTY_DB + ' dB' : '')
-        : 'A · unplugged — drag end to a port') +
+        : 'A · unplugged') +
       '</p>' +
-      polishToggleHtml(c.id, 'B', c.sideB.polish, 'Side B Connector') +
+      polishToggleHtml(c.id, 'B', c.sideB.polish, 'Side B') +
       '<p class="lab-pcord-attach' + (c.sideB.mismatch ? ' is-warn' : '') + '">' +
       (c.sideB.attached
         ? 'B → ' + c.sideB.attached.label +
           (c.sideB.mismatch ? ' · MISMATCH +' + MISMATCH_PENALTY_DB + ' dB' : '')
-        : 'B · unplugged — drag end to a port') +
+        : 'B · unplugged') +
       '</p>' +
-      '<div class="lab-spl-sheet" style="margin-top:0.55rem">' +
+      '<div class="lab-spl-sheet">' +
       '<div><span>Side A</span><strong class="' +
       (normalizePolish(c.sideA.polish) === 'APC' ? 'is-apc-text' : 'is-upc-text') + '">' +
       displayPolish(c.sideA.polish) + '</strong></div>' +
@@ -2755,6 +2758,9 @@
       (normalizePolish(c.sideB.polish) === 'APC' ? 'is-apc-text' : 'is-upc-text') + '">' +
       displayPolish(c.sideB.polish) + '</strong></div>' +
       '<div><span>Path loss</span><strong>' + pathLoss.toFixed(2) + ' dB</strong></div>' +
+      (locked
+        ? '<div><span>Length</span><strong>' + Math.round(c.fixedLength) + ' px</strong></div>'
+        : '') +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-pcord="' + c.id +
       '">Remove Patch Cord</button>' +

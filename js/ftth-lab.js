@@ -186,6 +186,7 @@
     if (target.closest('.lab-fx-chassis-frame')) return false;
     if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
     if (target.closest('.lab-pcord')) return false;
+    if (target.closest('.lab-pigtail')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
@@ -334,7 +335,7 @@
   var activeToolboxTool = null;
 
   /**
-   * Enforce a single toolbox active highlight across OLT / splitter / patch / coupler.
+   * Enforce a single toolbox active highlight across OLT / splitter / patch / pigtail / coupler.
    * Pass null to strip every sidebar tool highlight.
    */
   function claimToolboxTool(toolId) {
@@ -354,8 +355,8 @@
     var detail = $('lab-inspector-detail');
     if (card) {
       card.innerHTML =
-        '<h2>Empty Workspace</h2>' +
-        '<p>Blank slate. Drag Nokia 7360 FX-16 from the toolbox onto the grid to begin assembly.</p>';
+        '<h2>No selection</h2>' +
+        '<p>Select equipment on the canvas, or drag an item from the toolbox.</p>';
     }
     if (detail) {
       detail.hidden = true;
@@ -763,6 +764,7 @@
     claimToolboxTool: claimToolboxTool,
     getActiveToolboxTool: getActiveToolboxTool,
     clearWorkspaceSelection: clearWorkspaceSelection,
+    resetInspectorIdle: resetInspectorIdle,
     tryPatchPort: null,
     _patchPending: null,
   };

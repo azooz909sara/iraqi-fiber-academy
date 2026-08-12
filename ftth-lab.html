@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="40" height="40" />
         <div class="lab-brand__meta">
           <h1>FTTH Network &amp; Patch Panel Lab</h1>
-          <p>Blank-slate assembly · OLT · Splitters · Patch Cord · Coupler</p>
+          <p>Blank-slate assembly · OLT · Splitters · Patch Cord · Pigtail · Coupler</p>
         </div>
       </a>
       <div class="lab-header__actions">
@@ -54,9 +54,12 @@
         <div id="lab-splitter-tree" class="lab-hw-tree" aria-label="Splitter tool">
           <!-- Single Splitter tool · ftth-lab-splitter.js -->
         </div>
-        <p class="lab-rail__label" style="margin-top:1rem">Patch Cords</p>
+        <p class="lab-rail__label" style="margin-top:1rem">Fiber Jumpers</p>
         <div id="lab-patchcord-tree" class="lab-hw-tree" aria-label="Patch cord tool">
           <!-- Patch Cord tool · ftth-lab-patch-cord.js -->
+        </div>
+        <div id="lab-pigtail-tree" class="lab-hw-tree" aria-label="SC Pigtail tool">
+          <!-- SC Pigtail · ftth-lab-pigtail.js -->
         </div>
         <p class="lab-rail__label" style="margin-top:1rem">Adapters</p>
         <div id="lab-coupler-tree" class="lab-hw-tree" aria-label="SC Coupler tool">
@@ -82,21 +85,13 @@
         </div>
       </section>
 
-      <aside class="lab-inspector" aria-label="Lab guide">
-        <p class="lab-inspector__label">Selection</p>
+      <aside class="lab-inspector" aria-label="Properties">
+        <p class="lab-inspector__label">Properties</p>
         <div class="lab-inspector__card" id="lab-inspector-card">
-          <h2>Empty Workspace</h2>
-          <p>Blank slate. Drag Nokia 7360 FX-16 from the toolbox onto the grid to begin assembly.</p>
+          <h2>No selection</h2>
+          <p>Select equipment on the canvas, or drag an item from the toolbox.</p>
         </div>
-        <div id="lab-inspector-detail" hidden></div>
-        <p class="lab-inspector__label" style="margin-top:0.9rem">Integration Roadmap</p>
-        <ul class="lab-module-list">
-          <li>1 · FX-16 OLT + FGLT-D (active)</li>
-          <li>2 · Smart Splitters + UPC/APC (active)</li>
-          <li>3 · Patch Cord drag-plug + mismatch warn (active)</li>
-          <li>4 · SC Coupler · SC/PC ↔ SC/APC (active)</li>
-          <li>5 · Patch panel matrix</li>
-        </ul>
+        <div id="lab-inspector-detail" class="lab-inspector__detail" hidden></div>
       </aside>
     </main>
 
@@ -111,6 +106,7 @@
   <script src="js/ftth-lab-olt-fx16.js"></script>
   <script src="js/ftth-lab-splitter.js"></script>
   <script src="js/ftth-lab-patch-cord.js"></script>
+  <script src="js/ftth-lab-pigtail.js"></script>
   <script src="js/ftth-lab-coupler.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>

@@ -902,8 +902,7 @@
       }
       card.innerHTML =
         '<h2>Patch Link</h2>' +
-        '<p>' + link.fromPort + ' → ' + link.toPort + ' · ' + link.cablePolish +
-        '. Press Delete to remove.</p>';
+        '<p>' + link.fromPort + ' → ' + link.toPort + ' · ' + link.cablePolish + '</p>';
       if (detail) {
         detail.hidden = false;
         detail.innerHTML =
@@ -931,7 +930,7 @@
 
     card.innerHTML =
       '<h2>Splitter · ' + spec.ratio + '</h2>' +
-      '<p>Configure ratio and per-port APC/UPC polish. The cassette updates live on the workspace.</p>';
+      '<p>Ratio, port counts, and APC/UPC polish.</p>';
 
     if (!detail) return;
 
@@ -954,7 +953,7 @@
       '" data-cfg-ins="' + s.id + '" />' +
       '</label>' +
       '<div class="lab-cas-cfg-list">' +
-      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">INPUT</p>' +
+      '<p class="lab-inspector__label">INPUT</p>' +
       bankBulkHtml(s, 'in') +
       portConfigRows(s, s.inputs, 'in') +
       '</div>' +
@@ -964,7 +963,7 @@
       '" data-cfg-outs="' + s.id + '" />' +
       '</label>' +
       '<div class="lab-cas-cfg-list">' +
-      '<p class="lab-inspector__label" style="margin:0 0 0.35rem">OUTPUT</p>' +
+      '<p class="lab-inspector__label">OUTPUT</p>' +
       bankBulkHtml(s, 'out') +
       portConfigRows(s, s.outputs, 'out') +
       '</div>' +

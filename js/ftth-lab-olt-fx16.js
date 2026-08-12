@@ -843,38 +843,38 @@
     var detail = document.getElementById('lab-inspector-detail');
     if (!card) return;
 
-    var title = 'Empty Workspace';
-    var body = 'Blank slate. Drag Nokia 7360 FX-16 from the toolbox onto the grid, then FGLT-D into LT slots, then SFP into square ports.';
+    var title = 'No selection';
+    var body = 'Select equipment on the canvas, or drag an item from the toolbox.';
 
     if (selection.kind === 'lib-chassis') {
       title = 'Nokia 7360 FX-16 · OLT';
-      body = 'Drag onto the empty workspace to place the chassis.';
+      body = 'Drag onto the workspace to place the chassis.';
     } else if (selection.kind === 'lib-card') {
       title = 'FGLT-D Line Card';
       body = chassisPlaced
-        ? 'Drag onto an empty LT slot, or click an empty slot while selected.'
-        : 'Place the FX-16 chassis on the workspace before installing cards.';
+        ? 'Drop onto an empty LT slot, or click a slot while selected.'
+        : 'Place the FX-16 chassis before installing cards.';
     } else if (selection.kind === 'lib-sfp') {
       title = 'SFP Transceiver';
       body = occupiedSlots().length
-        ? 'Drag onto an empty square port on an installed FGLT-D.'
-        : 'Install an FGLT-D card first, then drop SFP modules into its ports.';
+        ? 'Drop onto an empty square port on an FGLT-D.'
+        : 'Install an FGLT-D card first, then insert SFPs.';
     } else if (selection.kind === 'chassis') {
       title = 'Nokia 7360 ISAM FX-16';
-      body = 'Chassis on workspace · 16 empty LT slots. Drag FGLT-D from the toolbox into a slot.';
+      body = '16 LT slots · drag FGLT-D from the toolbox into a slot.';
     } else if (selection.kind === 'slot') {
       title = 'LT Slot ' + pad2(selection.slot);
       body = installed[selection.slot]
-        ? 'FGLT-D installed. Click ports or eject the card.'
-        : 'Blanking plate. Drop FGLT-D here to install.';
+        ? 'FGLT-D installed · select ports or eject the card.'
+        : 'Empty slot · drop FGLT-D here to install.';
     } else if (selection.kind === 'card') {
       title = 'FGLT-D · LT' + pad2(selection.slot);
-      body = '16 square SFP cages. Drop SFP modules from the toolbox into empty cages.';
+      body = '16 SFP cages · drop modules into empty ports.';
     } else if (selection.kind === 'port') {
       var active = hasSfp(selection.slot, selection.port);
       title = 'Port ' + selection.port + (active ? ' · SFP Active' : ' · Empty');
       body = 'LT' + pad2(selection.slot) + ' · ' + portId(selection.slot, selection.port) +
-        (active ? ' · transceiver seated · jumper-ready' : ' · drop an SFP from the toolbox');
+        (active ? ' · jumper-ready' : ' · insert an SFP');
     }
 
     card.innerHTML = '<h2>' + title + '</h2><p>' + body + '</p>';
@@ -895,7 +895,7 @@
           : '') +
         '</div>' +
         (activePort
-          ? '<p class="lab-inspector__label" style="margin:0.55rem 0 0.4rem">SFP connector polish</p>' +
+          ? '<p class="lab-inspector__label">SFP polish</p>' +
             '<div class="lab-polish-toggle" role="group">' +
             '<button type="button" class="lab-polish-btn is-upc' +
             (polish === 'UPC' ? ' is-active' : '') +
@@ -936,7 +936,7 @@
           '" data-lab-port="' + i + '">P' + i + '</button>';
       }
       detail.innerHTML =
-        '<p class="lab-inspector__label" style="margin:0 0 0.45rem">Square SFP Ports</p>' +
+        '<p class="lab-inspector__label">SFP ports</p>' +
         '<div class="lab-port-grid">' + ports + '</div>' +
         '<button type="button" class="lab-eject-btn" data-lab-eject="' + slot + '">Eject FGLT-D</button>';
       detail.hidden = false;

@@ -179,12 +179,22 @@ body {
 
 .lab-rail__label,
 .lab-inspector__label {
-  margin: 0 0 0.65rem;
+  margin: 0 0 0.5rem;
   font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--lab-cyan);
+}
+
+.lab-inspector__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.lab-inspector__detail[hidden] {
+  display: none;
 }
 
 /* ── Toolbox drawer (3 drag tools) ── */
@@ -397,41 +407,24 @@ body {
 
 .lab-inspector__card {
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 0.75rem;
+  border-radius: 0.65rem;
   background: var(--lab-card);
-  padding: 0.85rem;
-  margin-bottom: 0.75rem;
+  padding: 0.7rem 0.75rem;
+  margin-bottom: 0.65rem;
 }
 
 .lab-inspector__card h2 {
-  margin: 0 0 0.35rem;
-  font-size: 0.95rem;
+  margin: 0 0 0.25rem;
+  font-size: 0.9rem;
+  line-height: 1.25;
   color: #fff;
 }
 
 .lab-inspector__card p {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   color: var(--lab-muted);
-  line-height: 1.55;
-}
-
-.lab-module-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.lab-module-list li {
-  padding: 0.45rem 0.55rem;
-  border-radius: 0.5rem;
-  border: 1px dashed rgba(148, 163, 184, 0.2);
-  background: rgba(15, 23, 42, 0.55);
-  font-size: 0.72rem;
-  color: var(--lab-muted);
+  line-height: 1.4;
 }
 
 /* ── Nokia FX-16 OLT · reference front elevation + inventory ── */
@@ -1416,7 +1409,7 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.35rem;
-  margin-bottom: 0.65rem;
+  margin-bottom: 0.45rem;
 }
 
 .lab-polish-btn {
@@ -1439,26 +1432,6 @@ body {
 .lab-polish-btn.is-apc.is-active {
   border-color: #22c55e;
   background: rgba(22, 163, 74, 0.25);
-  color: #86efac;
-}
-
-.lab-polish-note {
-  margin: 0;
-  padding: 0.55rem 0.65rem;
-  border-radius: 0.45rem;
-  font-size: 0.74rem;
-  line-height: 1.4;
-}
-
-.lab-polish-note--upc {
-  background: rgba(37, 99, 235, 0.15);
-  border: 1px solid rgba(59, 130, 246, 0.35);
-  color: #93c5fd;
-}
-
-.lab-polish-note--apc {
-  background: rgba(22, 163, 74, 0.15);
-  border: 1px solid rgba(34, 197, 94, 0.35);
   color: #86efac;
 }
 
@@ -1928,6 +1901,161 @@ body.lab-pcord-linking .lab-pcord-fiber {
   background: rgba(250, 204, 21, 0.28);
 }
 
-.lab-cpl-config .lab-polish-note {
+/* ── SC Pigtail — SC connector + bare fiber tail ── */
+.lab-tool__mark--pigtail {
+  width: 1.35rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(202, 138, 4, 0.75);
+  background:
+    linear-gradient(90deg, #2563eb 0 28%, #facc15 28% 78%, #f8fafc 78% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.lab-tool--pigtail {
+  border-color: rgba(234, 179, 8, 0.32);
+  background: linear-gradient(180deg, rgba(55, 48, 8, 0.55), rgba(15, 23, 42, 0.72));
+}
+
+.lab-tool--pigtail.is-selected {
+  border-color: rgba(250, 204, 21, 0.65);
+  background: rgba(161, 98, 7, 0.28);
+}
+
+.lab-tool--pigtail .lab-tool__copy strong {
+  color: #fde68a;
+}
+
+.lab-pigtail-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.lab-pigtail-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.lab-pigtail-fiber-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  stroke-linecap: round;
+  fill: none;
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+.lab-pigtail-fiber {
+  stroke: #facc15;
+  stroke-width: 2.15;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
+}
+
+.lab-pigtail-fiber.is-selected {
+  stroke: #fde047;
+  stroke-width: 2.65;
+}
+
+.lab-pigtail-fiber.is-mismatch {
+  stroke: #fb923c;
+  stroke-dasharray: 5 3;
+}
+
+.lab-pigtail {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lab-pigtail__conn {
+  z-index: 3;
+  /* Inherits .lab-pcord__end housing/boot/ferrule layout & colors */
+}
+
+.lab-pigtail__conn.lab-pcord__end {
+  pointer-events: auto;
+}
+
+.lab-pigtail__tail {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  width: 10px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: grab;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.lab-pigtail__tail:active,
+.lab-pigtail__tail.is-dragging {
+  cursor: grabbing;
+}
+
+.lab-pigtail__buffer {
+  display: block;
+  width: 3.5px;
+  height: 10px;
+  border-radius: 1px 1px 0 0;
+  background: linear-gradient(180deg, #fde047, #eab308 70%, #a16207);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.25);
+}
+
+.lab-pigtail__cleave {
+  display: block;
+  width: 2px;
+  height: 5px;
+  border-radius: 0 0 1px 1px;
+  background: linear-gradient(180deg, #f8fafc, #cbd5e1);
+  box-shadow: 0 0 2px rgba(255, 255, 255, 0.45);
+}
+
+.lab-pigtail__tail.is-attached .lab-pigtail__cleave {
+  background: linear-gradient(180deg, #e2e8f0, #94a3b8);
+}
+
+.lab-pigtail.is-selected .lab-pigtail__tail:not(.is-attached) {
+  filter: drop-shadow(0 0 3px rgba(250, 204, 21, 0.55));
+}
+
+body.lab-pigtail-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.lab-splice-point.is-plug-target,
+.lab-term-point.is-plug-target,
+[data-lab-splice].is-plug-target,
+[data-lab-term].is-plug-target {
+  outline: 1.5px solid #fde047;
+  outline-offset: 1px;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.45);
+}
+
+.lab-splice-point.is-tail-dock,
+.lab-term-point.is-tail-dock,
+[data-lab-splice].is-tail-dock,
+[data-lab-term].is-tail-dock {
+  outline: 1.5px solid #fde047 !important;
+  background: rgba(250, 204, 21, 0.22);
+}
+
+#lab-pigtail-tree {
   margin-top: 0.45rem;
 }
