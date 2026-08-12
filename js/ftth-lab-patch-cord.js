@@ -803,7 +803,9 @@
    * World pos = button center (transform-origin 50% 50%).
    */
   var BOOT_EXIT_OFFSET = END_H / 2; /* rear tip of boot flush with button bottom */
-  var BOOT_EXIT_STUB = 10; /* straight run past the tip before any curve */
+  var BOOT_EXIT_STUB = 10; /* first strain-relief marker past the tip */
+  var STRAIN_RELIEF_PX = 22; /* total straight exit before curvature is allowed */
+  var STRAIN_LEAD_PTS = 3; /* tip + 2 collinear relief points per end */
   var BODY_CLEAR_PX = END_H / 2 + 3;
   var HEADING_MIN_PX = 2.5; /* ignore micro jitter when updating live heading */
   var HEADING_SMOOTH = 0.42; /* blend factor toward new motion heading */
@@ -814,6 +816,8 @@
   var GRAVITY_SAG_RATIO = 0.28;
   var GRAVITY_SAG_MIN = 24;
   var GRAVITY_SAG_MAX = 160;
+  /** How strongly locked routes blend toward a hanging catenary (0–1) */
+  var GRAVITY_BLEND = 0.4;
   /** Min world distance between recorded mouse-path samples (anti-jitter) */
   var TRACE_SAMPLE_PX = 14;
   var TRACE_MAX_POINTS = 180;
@@ -957,7 +961,7 @@
     return localToWorld(p.x, p.y, 0, BOOT_EXIT_OFFSET, rot);
   }
 
-  /** Short outward stub past the boot tip so the fiber leaves straight before curving. */
+  /** Short outward stub past the boot tip (compat / recording). */
   function bootExitStub(cord, end) {
     var tip = bootAnchor(cord, end);
     var t = bootOutDir(getEndRotation(cord, end));
@@ -967,10 +971,67 @@
     };
   }
 
+  /**
+   * Strict strain-relief chain: tip → mid → outer, all on the port/boot axis.
+   * First STRAIN_RELIEF_PX must stay straight before any spline curvature.
+   */
+  function strainReliefChain(cord, end) {
+    var tip = bootAnchor(cord, end);
+    var t = bootOutDir(getEndRotation(cord, end));
+    var midD = STRAIN_RELIEF_PX * 0.45;
+    var outD = STRAIN_RELIEF_PX;
+    return [
+      tip,
+      { x: tip.x + t.x * midD, y: tip.y + t.y * midD },
+      { x: tip.x + t.x * outD, y: tip.y + t.y * outD },
+    ];
+  }
+
   /** True if a sample sits inside/near a connector body (would pierce housing if used). */
   function pointInsideConnectorBody(cord, end, x, y) {
     var c = getEndWorld(cord, end);
     return dist2(c.x, c.y, x, y) < BODY_CLEAR_PX;
+  }
+
+  /** Sag depth grows with span (short = shallow, long = deep drape). */
+  function catenarySagDepth(dist) {
+    return Math.min(
+      GRAVITY_SAG_MAX,
+      Math.max(GRAVITY_SAG_MIN * 0.45, dist * GRAVITY_SAG_RATIO)
+    );
+  }
+
+  /**
+   * Blend user midpoints toward a hanging catenary between relief tips.
+   * Preserves overall drawn shape while adding natural gravity drape.
+   */
+  function drapeRouteTowardCatenary(route, p0, p3, weight) {
+    if (!route || !route.length) return [];
+    weight = weight == null ? GRAVITY_BLEND : weight;
+    var dx = p3.x - p0.x;
+    var dy = p3.y - p0.y;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var sag = catenarySagDepth(dist);
+
+    var pts = [{ x: p0.x, y: p0.y }].concat(route).concat([{ x: p3.x, y: p3.y }]);
+    var cum = [0];
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      cum[i] = cum[i - 1] + dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    var total = cum[cum.length - 1] || 1;
+    var out = [];
+    for (i = 1; i < pts.length - 1; i++) {
+      var t = cum[i] / total;
+      var cx = p0.x + dx * t;
+      var cy = p0.y + dy * t + 4 * t * (1 - t) * sag;
+      var p = pts[i];
+      out.push({
+        x: p.x * (1 - weight) + cx * weight,
+        y: p.y * (1 - weight) + cy * weight,
+      });
+    }
+    return out;
   }
 
   function ensureRoute(cord) {
@@ -1071,23 +1132,45 @@
   }
 
   /** Post-draw cleanup: simplify jitter → Chaikin → optional downsample. */
-  function smoothDrawnRoute(cord) {
-    if (!cord || cord.pathLocked) return;
+  function smoothDrawnRoute(cord, opts) {
+    opts = opts || {};
+    if (!cord || (cord.pathLocked && !opts.force)) return;
     var route = ensureRoute(cord);
     if (route.length < 3) return;
+    var iters = opts.iterations != null ? opts.iterations : CHAIKIN_ITERATIONS;
     route = simplifyRouteMinDist(route, TRACE_SAMPLE_PX * 0.75);
-    route = chaikinSmooth(route, CHAIKIN_ITERATIONS);
+    route = chaikinSmooth(route, iters);
     if (route.length > TRACE_MAX_POINTS) {
       route = downsampleRoute(route, TRACE_MAX_POINTS);
     }
     cord.route = route;
   }
 
-  /** Freeze the traced path so it never auto-recalculates after both ends are plugged. */
+  /**
+   * Full connection: keep drawn waypoints, Chaikin-smooth, then blend a
+   * distance-scaled catenary drape. Strain relief is applied at render time.
+   */
   function lockDrawnPath(cord) {
     if (!cord) return;
-    smoothDrawnRoute(cord);
+    cord.pathLocked = false;
+    smoothDrawnRoute(cord, { force: true, iterations: Math.max(CHAIKIN_ITERATIONS, 3) });
+    var aChain = strainReliefChain(cord, 'A');
+    var bChain = strainReliefChain(cord, 'B');
+    var aOuter = aChain[aChain.length - 1];
+    var bOuter = bChain[bChain.length - 1];
     var route = ensureRoute(cord);
+    if (route.length >= 2) {
+      cord.route = drapeRouteTowardCatenary(route, aOuter, bOuter, GRAVITY_BLEND);
+    } else if (cord.sideA.attached && cord.sideB.attached) {
+      /* No ink — pure hanging span between relief tips */
+      cord.route = drapeRouteTowardCatenary(
+        [{ x: (aOuter.x + bOuter.x) / 2, y: (aOuter.y + bOuter.y) / 2 }],
+        aOuter,
+        bOuter,
+        1
+      );
+    }
+    route = ensureRoute(cord);
     if (route.length > TRACE_MAX_POINTS) {
       cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
     }
@@ -1095,13 +1178,15 @@
   }
 
   function buildCablePoints(cord) {
-    var a = bootAnchor(cord, 'A');
-    var b = bootAnchor(cord, 'B');
-    var aStub = bootExitStub(cord, 'A');
-    var bStub = bootExitStub(cord, 'B');
+    var aChain = strainReliefChain(cord, 'A');
+    var bChain = strainReliefChain(cord, 'B');
+    var a = aChain[0];
+    var b = bChain[0];
+    var aOuter = aChain[aChain.length - 1];
+    var bOuter = bChain[bChain.length - 1];
+    var aDir = bootOutDir(getEndRotation(cord, 'A'));
+    var bDir = bootOutDir(getEndRotation(cord, 'B'));
     var route = ensureRoute(cord).slice();
-
-    if (!route.length) return [a, aStub, bStub, b];
 
     if (route.length >= 1) {
       var dFirstA = dist2(route[0].x, route[0].y, a.x, a.y);
@@ -1109,41 +1194,47 @@
       if (dLastA < dFirstA) route.reverse();
     }
 
-    /* Keep only mid-span samples — drop anything inside a connector or on the exit stubs */
+    var clearR = STRAIN_RELIEF_PX + 2;
     var cleaned = [];
     var i;
     for (i = 0; i < route.length; i++) {
       var p = route[i];
       if (pointInsideConnectorBody(cord, 'A', p.x, p.y)) continue;
       if (pointInsideConnectorBody(cord, 'B', p.x, p.y)) continue;
-      if (dist2(p.x, p.y, a.x, a.y) < 3) continue;
-      if (dist2(p.x, p.y, b.x, b.y) < 3) continue;
-      if (dist2(p.x, p.y, aStub.x, aStub.y) < 2.5) continue;
-      if (dist2(p.x, p.y, bStub.x, bStub.y) < 2.5) continue;
-      if (cleaned.length && dist2(cleaned[cleaned.length - 1].x, cleaned[cleaned.length - 1].y, p.x, p.y) < 2) {
+      /* Keep mid-span clear of the straight strain-relief zones */
+      if ((p.x - a.x) * aDir.x + (p.y - a.y) * aDir.y < clearR &&
+          dist2(p.x, p.y, a.x, a.y) < clearR + 8) continue;
+      if ((p.x - b.x) * bDir.x + (p.y - b.y) * bDir.y < clearR &&
+          dist2(p.x, p.y, b.x, b.y) < clearR + 8) continue;
+      if (dist2(p.x, p.y, a.x, a.y) < 4) continue;
+      if (dist2(p.x, p.y, b.x, b.y) < 4) continue;
+      if (dist2(p.x, p.y, aOuter.x, aOuter.y) < 3) continue;
+      if (dist2(p.x, p.y, bOuter.x, bOuter.y) < 3) continue;
+      if (cleaned.length &&
+          dist2(cleaned[cleaned.length - 1].x, cleaned[cleaned.length - 1].y, p.x, p.y) < 2) {
         continue;
       }
       cleaned.push(p);
     }
 
-    return [a, aStub].concat(cleaned).concat([bStub, b]);
+    /* tip → relief mid → relief outer … midpoints … outer → mid → tip */
+    return aChain.concat(cleaned).concat(bChain.slice().reverse());
   }
 
-  /** Smooth SVG path through recorded waypoints (Catmull-Rom → cubic Bezier). */
-  function smoothPathThrough(pts) {
+  /** Catmull-Rom cubic commands; pen is already at pts[0]. */
+  function catmullRomCubicCommands(pts) {
     if (!pts || pts.length < 2) return '';
     if (pts.length === 2) {
-      return 'M ' + pts[0].x + ' ' + pts[0].y + ' L ' + pts[1].x + ' ' + pts[1].y;
+      return ' L ' + pts[1].x + ' ' + pts[1].y;
     }
     if (pts.length === 3) {
       return (
-        'M ' + pts[0].x + ' ' + pts[0].y +
         ' Q ' + pts[1].x + ' ' + pts[1].y + ', ' + pts[2].x + ' ' + pts[2].y
       );
     }
-    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var d = '';
+    var k = 5.2; /* slightly softer than prior for organic hang */
     var i;
-    var k = 4.5;
     for (i = 0; i < pts.length - 1; i++) {
       var p0 = pts[i - 1] || pts[i];
       var p1 = pts[i];
@@ -1159,13 +1250,46 @@
   }
 
   /**
-   * Prefer the user-traced route. Fall back to a light gravity sag only when
-   * no path has been drawn yet (idle / untraced span).
+   * Path with mandatory straight strain-relief leads/trails, Catmull mid-span.
+   */
+  function smoothPathThrough(pts, opts) {
+    opts = opts || {};
+    if (!pts || pts.length < 2) return '';
+    var lead = opts.strainLead != null ? opts.strainLead : 0;
+    var trail = opts.strainTrail != null ? opts.strainTrail : 0;
+    if (lead < 2 && trail < 2) {
+      /* Legacy full-spline path */
+      var full = 'M ' + pts[0].x + ' ' + pts[0].y;
+      return full + catmullRomCubicCommands(pts);
+    }
+
+    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var i;
+    for (i = 1; i < lead && i < pts.length; i++) {
+      d += ' L ' + pts[i].x + ' ' + pts[i].y;
+    }
+    var midStart = Math.max(0, lead - 1);
+    var midEnd = Math.min(pts.length - 1, pts.length - trail);
+    if (midEnd > midStart) {
+      var mid = pts.slice(midStart, midEnd + 1);
+      d += catmullRomCubicCommands(mid);
+    }
+    for (i = midEnd + 1; i < pts.length; i++) {
+      d += ' L ' + pts[i].x + ' ' + pts[i].y;
+    }
+    return d;
+  }
+
+  /**
+   * User-traced route with strain relief + catenary-aware mid-span when locked.
    */
   function cordCablePath(cord) {
     var route = ensureRoute(cord);
     if (route.length || cord.pathLocked) {
-      return smoothPathThrough(buildCablePoints(cord));
+      return smoothPathThrough(buildCablePoints(cord), {
+        strainLead: STRAIN_LEAD_PTS,
+        strainTrail: STRAIN_LEAD_PTS,
+      });
     }
     return gravityBezierPath(cord);
   }
