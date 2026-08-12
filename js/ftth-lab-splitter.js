@@ -546,6 +546,9 @@
     if (!btn) return;
 
     btn.addEventListener('click', function () {
+      if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+        FtthLab.claimToolboxTool('smart-splitter');
+      }
       selectedTool = 'splitter';
       if (global.FtthLab) FtthLab._patchPending = null;
       renderToolbox();
@@ -553,6 +556,9 @@
     });
 
     btn.addEventListener('dragstart', function (e) {
+      if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+        FtthLab.claimToolboxTool('smart-splitter');
+      }
       selectedTool = 'splitter';
       dragLib = { type: DEFAULT_SPLITTER };
       if (global.FtthLab && typeof FtthLab.beginDrag === 'function') {
@@ -831,6 +837,7 @@
     if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
       FtthLab.setSelectionOwner('smart-splitter');
     }
+    /* Keep toolbox arm after place/select — only ESC / background / other tool clears it */
     updateInspector();
     rebuildLayer();
   }
@@ -1011,6 +1018,22 @@
     rebuildLayer();
   }
 
+  function onToolboxClaim(payload) {
+    var id = payload && payload.toolId;
+    if (id === 'smart-splitter') return;
+    if (selectedTool) {
+      selectedTool = null;
+      renderToolbox();
+    }
+  }
+
+  function clearSelection() {
+    selection = { kind: 'none', splitterId: null, linkId: null };
+    selectedTool = null;
+    renderToolbox();
+    rebuildLayer();
+  }
+
   function mount(api) {
     ctx = api || {};
     splitters = [];
@@ -1046,6 +1069,8 @@
     undo: undo,
     redo: redo,
     deleteSelected: deleteSelected,
+    clearSelection: clearSelection,
+    onToolboxClaim: onToolboxClaim,
     getNetworkLossDb: getNetworkLossDb,
   };
 

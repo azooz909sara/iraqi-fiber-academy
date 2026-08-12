@@ -460,6 +460,7 @@
   function selectCord(id) {
     selection = { kind: 'cord', cordId: id };
     claimSelection();
+    /* Keep toolbox arm after place/select — only ESC / background / other tool clears it */
     updateInspector();
     rebuildLayer();
   }
@@ -488,11 +489,17 @@
     var btn = host.querySelector('[data-lab-tool="patchcord"]');
     if (!btn) return;
     btn.addEventListener('click', function () {
+      if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+        FtthLab.claimToolboxTool('patch-cord');
+      }
       selectedTool = 'patchcord';
       renderToolbox();
       setStatus('Patch Cord · click-and-hold End A or End B to drag — no auto-follow');
     });
     btn.addEventListener('dragstart', function (e) {
+      if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+        FtthLab.claimToolboxTool('patch-cord');
+      }
       selectedTool = 'patchcord';
       dragLib = { kind: 'patchcord' };
       if (global.FtthLab && FtthLab.beginDrag) FtthLab.beginDrag({ kind: 'patchcord' });
@@ -2707,6 +2714,25 @@
     cancelLinkSession();
   }
 
+  function onToolboxClaim(payload) {
+    var id = payload && payload.toolId;
+    if (id === 'patch-cord') return;
+    if (selectedTool) {
+      selectedTool = null;
+      renderToolbox();
+    }
+  }
+
+  function clearSelection() {
+    selection = { kind: 'none', cordId: null };
+    selectedTool = null;
+    endDragState = null;
+    clearAllRopePhysics();
+    cancelLinkSession();
+    renderToolbox();
+    rebuildLayer();
+  }
+
   function mount(api) {
     ctx = api || {};
     cords = [];
@@ -2746,6 +2772,8 @@
     onViewChange: onViewChange,
     onLayoutChange: onLayoutChange,
     cancelPatch: cancelPatch,
+    clearSelection: clearSelection,
+    onToolboxClaim: onToolboxClaim,
     undo: undo,
     redo: redo,
     deleteSelected: deleteSelected,

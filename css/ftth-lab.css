@@ -124,6 +124,18 @@ body {
   line-height: 1;
 }
 
+.lab-icon-btn svg {
+  display: block;
+  margin: 0 auto;
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.lab-icon-btn--delete:hover:not(:disabled) {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.12);
+}
+
 .lab-home-link {
   display: inline-flex;
   align-items: center;

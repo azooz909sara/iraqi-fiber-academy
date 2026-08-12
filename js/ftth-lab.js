@@ -194,6 +194,7 @@
     if (!stage || stage.dataset.panBound === '1') return;
     stage.dataset.panBound = '1';
     var pan = null;
+    var panMoved = false;
 
     stage.addEventListener('pointerdown', function (e) {
       if (state.viewMode !== '2d') return;
@@ -201,6 +202,7 @@
       var leftEmpty = e.button === 0 && isCanvasPanTarget(e.target);
       if (!middle && !leftEmpty) return;
       if (middle) e.preventDefault();
+      panMoved = false;
       pan = {
         x: e.clientX,
         y: e.clientY,
@@ -214,6 +216,9 @@
 
     stage.addEventListener('pointermove', function (e) {
       if (!pan) return;
+      if (Math.abs(e.clientX - pan.x) > 3 || Math.abs(e.clientY - pan.y) > 3) {
+        panMoved = true;
+      }
       state.pan2dX = pan.panX + (e.clientX - pan.x);
       state.pan2dY = pan.panY + (e.clientY - pan.y);
       applyZoom2d();
@@ -228,6 +233,17 @@
     stage.addEventListener('pointerup', endPan);
     stage.addEventListener('pointercancel', endPan);
     stage.addEventListener('lostpointercapture', endPan);
+
+    /* Empty workspace click clears toolbox arm + selection (not after a pan drag) */
+    stage.addEventListener('click', function (e) {
+      if (state.viewMode !== '2d') return;
+      if (panMoved) {
+        panMoved = false;
+        return;
+      }
+      if (!isCanvasPanTarget(e.target)) return;
+      clearWorkspaceSelection();
+    });
 
     /* Prevent middle-click autoscroll */
     stage.addEventListener('auxclick', function (e) {
@@ -312,6 +328,49 @@
 
   function setSelectionOwner(toolId) {
     selectionOwner = toolId || null;
+  }
+
+  var activeToolboxTool = null;
+
+  /**
+   * Enforce a single toolbox active highlight across OLT / splitter / patch cord.
+   * Pass null to strip every sidebar tool highlight.
+   */
+  function claimToolboxTool(toolId) {
+    activeToolboxTool = toolId || null;
+    document.querySelectorAll('.lab-rail .lab-tool.is-selected').forEach(function (el) {
+      el.classList.remove('is-selected');
+    });
+    notifyTools('onToolboxClaim', { toolId: activeToolboxTool });
+  }
+
+  function getActiveToolboxTool() {
+    return activeToolboxTool;
+  }
+
+  function resetInspectorIdle() {
+    var card = $('lab-inspector-card');
+    var detail = $('lab-inspector-detail');
+    if (card) {
+      card.innerHTML =
+        '<h2>Empty Workspace</h2>' +
+        '<p>Blank slate. Drag Nokia 7360 FX-16 from the toolbox onto the grid to begin assembly.</p>';
+    }
+    if (detail) {
+      detail.hidden = true;
+      detail.innerHTML = '';
+    }
+  }
+
+  /** ESC: clear workspace selection, disarm tools, reset active UI states. */
+  function clearWorkspaceSelection() {
+    if (global.FtthLab) global.FtthLab._patchPending = null;
+    notifyTools('cancelPatch');
+    notifyTools('clearSelection');
+    claimToolboxTool(null);
+    selectionOwner = null;
+    resetInspectorIdle();
+    setStatus('Selection cleared');
   }
 
   function deleteSelected() {
@@ -478,8 +537,10 @@
 
     var undoBtn = $('lab-btn-undo');
     var redoBtn = $('lab-btn-redo');
+    var deleteBtn = $('lab-btn-delete');
     if (undoBtn) undoBtn.addEventListener('click', undo);
     if (redoBtn) redoBtn.addEventListener('click', redo);
+    if (deleteBtn) deleteBtn.addEventListener('click', function () { deleteSelected(); });
 
     /* Capture-phase on window: works without focusing a field; blocks browser Undo/Redo */
     if (!bindUi._keysBound) {
@@ -510,11 +571,8 @@
         if (isTypingTarget(e.target)) return;
 
         if (key === 'Escape') {
-          if (global.FtthLab && global.FtthLab._patchPending) {
-            global.FtthLab._patchPending = null;
-            setStatus('Patch cancelled');
-          }
-          notifyTools('cancelPatch');
+          e.preventDefault();
+          clearWorkspaceSelection();
           return;
         }
         if (key === 'Delete' || key === 'Backspace') {
@@ -535,7 +593,7 @@
     state.booted = true;
     flushPendingTools();
     setViewMode('2d');
-    setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Delete selected · scroll to zoom');
+    setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Del delete · Esc clear · scroll to zoom');
   }
 
   function showAlert(msg, kind) {
@@ -701,6 +759,9 @@
     updateHistoryUi: updateHistoryUi,
     deleteSelected: deleteSelected,
     setSelectionOwner: setSelectionOwner,
+    claimToolboxTool: claimToolboxTool,
+    getActiveToolboxTool: getActiveToolboxTool,
+    clearWorkspaceSelection: clearWorkspaceSelection,
     tryPatchPort: null,
     _patchPending: null,
   };

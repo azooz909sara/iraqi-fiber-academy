@@ -52,6 +52,8 @@
     cardId: null,
     sfpId: null,
   };
+  /** Sidebar arm highlight only — independent of workspace item selection */
+  var armedToolbox = null;
 
   var portWiring = {};
   var dragState = null;
@@ -79,6 +81,7 @@
     cardSeq = 0;
     sfpSeq = 0;
     selection = { kind: 'none', slot: null, port: null, cardId: null, sfpId: null };
+    armedToolbox = null;
     history = [];
     historyIndex = -1;
   }
@@ -480,16 +483,34 @@
     }
   }
 
+  function claimOltToolbox() {
+    if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+      FtthLab.claimToolboxTool('olt-fx16');
+    }
+  }
+
+  function disarmToolboxHighlight() {
+    if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+      FtthLab.claimToolboxTool(null);
+    } else {
+      armedToolbox = null;
+      renderToolbox();
+    }
+  }
+
   function selectLibraryChassis(opts) {
     opts = opts || {};
     claimSelection();
+    claimOltToolbox();
+    armedToolbox = 'chassis';
     selection = { kind: 'lib-chassis', slot: null, port: null, cardId: null, sfpId: null };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
     setStatus('FX-16 selected · drag onto the empty workspace grid to place');
   }
 
-  function selectChassis() {
+  function selectChassis(opts) {
+    opts = opts || {};
     if (!chassisPlaced) {
       selectLibraryChassis();
       return;
@@ -497,7 +518,7 @@
     claimSelection();
     selection = { kind: 'chassis', slot: null, port: null, cardId: null, sfpId: null };
     updateInspector();
-    renderToolbox();
+    if (opts.keepArm || armedToolbox) renderToolbox();
     setStatus('FX-16 on workspace · drag FGLT-D into LT slots 01–16');
   }
 
@@ -505,7 +526,6 @@
     claimSelection();
     selection = { kind: 'slot', slot: slot, port: null, cardId: null, sfpId: null };
     updateInspector();
-    renderToolbox();
     setStatus(installed[slot]
       ? 'LT' + pad2(slot) + ' · FGLT-D installed'
       : 'LT' + pad2(slot) + ' · blanking plate · drop FGLT-D here');
@@ -525,7 +545,6 @@
       sfpId: null,
     };
     updateInspector();
-    renderToolbox();
     setStatus('FGLT-D in LT' + pad2(slot) + ' · drag SFP into square ports 1–16');
   }
 
@@ -552,7 +571,6 @@
           sfpId: sfpMap[slot][port].id,
         };
         updateInspector();
-        renderToolbox();
         return;
       }
     }
@@ -565,7 +583,6 @@
       sfpId: hasSfp(slot, port) ? sfpMap[slot][port].id : null,
     };
     updateInspector();
-    renderToolbox();
     setStatus(
       hasSfp(slot, port)
         ? 'Port ' + port + ' · SFP active · ' + portId(slot, port) +
@@ -577,6 +594,8 @@
   function selectLibraryCard(cardId, opts) {
     opts = opts || {};
     claimSelection();
+    claimOltToolbox();
+    armedToolbox = 'card';
     selection = { kind: 'lib-card', slot: null, port: null, cardId: cardId, sfpId: null };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
@@ -586,6 +605,8 @@
   function selectLibrarySfp(sfpId, opts) {
     opts = opts || {};
     claimSelection();
+    claimOltToolbox();
+    armedToolbox = 'sfp';
     selection = { kind: 'lib-sfp', slot: null, port: null, cardId: null, sfpId: sfpId };
     updateInspector();
     if (!opts.keepToolbox) renderToolbox();
@@ -598,9 +619,9 @@
     var host = document.getElementById('lab-hw-tree');
     if (!host) return;
 
-    var chassisSel = selection.kind === 'lib-chassis' || selection.kind === 'chassis';
-    var cardSel = selection.kind === 'lib-card';
-    var sfpSel = selection.kind === 'lib-sfp';
+    var chassisSel = armedToolbox === 'chassis';
+    var cardSel = armedToolbox === 'card';
+    var sfpSel = armedToolbox === 'sfp';
 
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -663,8 +684,11 @@
 
     if (chassisBtn) {
       chassisBtn.addEventListener('click', function () {
-        if (chassisPlaced) selectChassis();
-        else selectLibraryChassis();
+        claimOltToolbox();
+        armedToolbox = 'chassis';
+        if (chassisPlaced) selectChassis({ keepArm: true });
+        else selectLibraryChassis({ keepToolbox: true });
+        renderToolbox();
       });
       chassisBtn.addEventListener('dragstart', function (e) {
         if (chassisPlaced) {
@@ -1499,6 +1523,24 @@
     return pickables.slice();
   }
 
+  function onToolboxClaim(payload) {
+    var id = payload && payload.toolId;
+    if (id === 'olt-fx16') return;
+    armedToolbox = null;
+    if (selection.kind === 'lib-chassis' || selection.kind === 'lib-card' ||
+        selection.kind === 'lib-sfp') {
+      selection = { kind: 'none', slot: null, port: null, cardId: null, sfpId: null };
+    }
+    renderToolbox();
+  }
+
+  function clearSelection() {
+    armedToolbox = null;
+    selection = { kind: 'none', slot: null, port: null, cardId: null, sfpId: null };
+    renderToolbox();
+    syncSelectionUi();
+  }
+
   var tool = {
     id: 'olt-fx16',
     mount: mount,
@@ -1507,6 +1549,8 @@
     undo: undo,
     redo: redo,
     deleteSelected: deleteSelected,
+    clearSelection: clearSelection,
+    onToolboxClaim: onToolboxClaim,
     getPortWiring: getPortWiring,
     getPickables: getPickables,
     installCard: installCard,
