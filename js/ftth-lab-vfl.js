@@ -346,6 +346,9 @@
     var pigtailExits = {};
     var splitterExits = {};
     var visitedSplEntry = {};
+    var visitedCplEntry = {};
+    var couplerPass = {};
+    var visitedPcordHop = {};
 
     function markPcord(id) {
       if (!id || pcords[id]) return false;
@@ -405,6 +408,68 @@
         }
       }
       return null;
+    }
+
+    function normalizeCplPort(port) {
+      return (port === 'B' || port === 'b') ? 'B' : 'A';
+    }
+
+    function oppositeCplPort(port) {
+      if (global.FtthLab && typeof FtthLab.getCouplerOppositePort === 'function') {
+        return FtthLab.getCouplerOppositePort(port);
+      }
+      return normalizeCplPort(port) === 'B' ? 'A' : 'B';
+    }
+
+    function findFiberOnCouplerPort(cid, portId) {
+      var face = normalizeCplPort(portId);
+      var i;
+      var att;
+      for (i = 0; i < (graph.pcords || []).length; i++) {
+        var c = graph.pcords[i];
+        att = c.sideA;
+        if (att && att.owner === 'coupler' && att.couplerId === cid &&
+            normalizeCplPort(att.port) === face) {
+          return { kind: 'pcord', id: c.id, fromEnd: 'A' };
+        }
+        att = c.sideB;
+        if (att && att.owner === 'coupler' && att.couplerId === cid &&
+            normalizeCplPort(att.port) === face) {
+          return { kind: 'pcord', id: c.id, fromEnd: 'B' };
+        }
+      }
+      for (i = 0; i < (graph.pigtails || []).length; i++) {
+        var p = graph.pigtails[i];
+        att = p.connector;
+        if (att && att.owner === 'coupler' && att.couplerId === cid &&
+            normalizeCplPort(att.port) === face) {
+          return { kind: 'pigtail', id: p.id };
+        }
+      }
+      return null;
+    }
+
+    /**
+     * SC adapter = optically transparent bridge.
+     * Light on face A passes to face B (and reverse) at full source intensity.
+     */
+    function injectCoupler(cid, entryPort) {
+      if (!cid || !entryPort) return;
+      if (global.FtthLab && typeof FtthLab.isCouplerId === 'function' &&
+          !FtthLab.isCouplerId(cid)) {
+        return;
+      }
+      var face = normalizeCplPort(entryPort);
+      var key = cid + ':' + face;
+      if (visitedCplEntry[key]) return;
+      visitedCplEntry[key] = true;
+      couplerPass[cid] = true;
+
+      var exitFace = oppositeCplPort(face);
+      var fiber = findFiberOnCouplerPort(cid, exitFace);
+      if (!fiber) return;
+      if (fiber.kind === 'pcord') injectPcord(fiber.id, fiber.fromEnd);
+      else injectPigtail(fiber.id);
     }
 
     function emitFromSplitterPort(sid, portSpec, intensity) {
@@ -476,10 +541,14 @@
     /**
      * Light enters at fromEnd and travels toward the opposite end.
      * Open end → workspace exit flare. Splitter → optical fan-out.
-     * Coupler / OLT still terminate the beam (no through path).
+     * Coupler → full-pass to opposite face at matching intensity.
+     * OLT terminates the beam.
      */
     function injectPcord(id, fromEnd) {
-      var first = markPcord(id);
+      var hop = id + ':' + (fromEnd === 'B' ? 'B' : 'A');
+      if (visitedPcordHop[hop]) return;
+      visitedPcordHop[hop] = true;
+      markPcord(id);
       var c = findPcord(graph, id);
       if (!c) return;
       var exitEnd = fromEnd === 'A' ? 'B' : 'A';
@@ -492,8 +561,11 @@
         injectSplitter(exitAtt.splitterId, exitAtt.port);
         return;
       }
-      /* Coupler / OLT / VFL far end: core glows, no further hop from this path */
-      if (!first) return;
+      if (exitAtt && exitAtt.owner === 'coupler') {
+        injectCoupler(exitAtt.couplerId, exitAtt.port);
+        return;
+      }
+      /* OLT / VFL far end: core glows, no further hop */
     }
 
     /** Light enters at SC connector; exits bare cleave only when tail is free. */
@@ -532,6 +604,7 @@
       pcordExits: pcordExits,
       pigtailExits: pigtailExits,
       splitterExits: splitterExits,
+      couplerPass: couplerPass,
     };
   }
 

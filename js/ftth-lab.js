@@ -794,7 +794,11 @@
     getSplitterLaserModels: function () { return []; },
     refreshVflLaser: null,
     refreshSplitterPorts: null,
-    /** Recompute VFL → fiber → PLC port glow (dim forward / high reverse). */
+    getCouplerOppositePort: function (port) {
+      return (port === 'B' || port === 'b') ? 'A' : 'B';
+    },
+    isCouplerId: function () { return false; },
+    /** Recompute VFL → fiber → PLC / coupler glow (full-pass adapters). */
     refreshOpticalLaser: function () {
       if (typeof api.refreshVflLaser === 'function') api.refreshVflLaser();
     },

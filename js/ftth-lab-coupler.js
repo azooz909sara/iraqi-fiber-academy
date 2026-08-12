@@ -400,6 +400,7 @@
     });
     host.innerHTML = html;
     bindLayerEvents(host);
+    reapplyStoredVflGlow();
   }
 
   function bindLayerEvents(host) {
@@ -588,6 +589,45 @@
     };
   }
 
+  function getCouplerOppositePort(port) {
+    return (port === 'B' || port === 'b') ? 'A' : 'B';
+  }
+
+  function isCouplerId(id) {
+    return !!findCoupler(id);
+  }
+
+  function applyCouplerLaserGlow(targets) {
+    if (!layer) return;
+    var mode = String((targets && targets.mode) || 'OFF').toUpperCase();
+    var pass = (targets && targets.couplerPass) || {};
+    var on = mode !== 'OFF';
+    layer.querySelectorAll('[data-cpl-node]').forEach(function (el) {
+      var id = el.getAttribute('data-cpl-node');
+      var active = on && !!pass[id];
+      el.classList.toggle('is-laser-pass', active);
+      el.classList.toggle('is-laser-pass--glint', active && mode === 'GLINT');
+      el.classList.toggle('is-laser-pass--cw', active && mode !== 'GLINT');
+    });
+  }
+
+  function reapplyStoredVflGlow() {
+    if (global.FtthLab && FtthLab._vflGlow) {
+      applyCouplerLaserGlow(FtthLab._vflGlow);
+    } else if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
+  }
+
+  function onLayoutChange(payload) {
+    if (payload && payload.live) return;
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    } else {
+      reapplyStoredVflGlow();
+    }
+  }
+
   function mount(api) {
     ctx = api || {};
     couplers = [];
@@ -606,6 +646,14 @@
     if (global.FtthLab) {
       FtthLab.getCouplerLoss = getCouplerLossDb;
       FtthLab.getCouplerPortWorld = getCouplerPortWorld;
+      FtthLab.getCouplerOppositePort = getCouplerOppositePort;
+      FtthLab.isCouplerId = isCouplerId;
+
+      var prevGlow = FtthLab.applyFiberLaserGlow;
+      FtthLab.applyFiberLaserGlow = function (targets) {
+        if (typeof prevGlow === 'function') prevGlow(targets);
+        applyCouplerLaserGlow(targets);
+      };
     }
   }
 
@@ -613,6 +661,7 @@
     id: 'sc-coupler',
     mount: mount,
     onViewChange: onViewChange,
+    onLayoutChange: onLayoutChange,
     placeCoupler: placeCoupler,
     undo: undo,
     redo: redo,
