@@ -4,6 +4,7 @@
  * On full connect, mid-span is a true catenary y = c + a·cosh(x/a); cable
  * length is locked (fixedLength) and preserved when relocating a connector.
  * Relocate = fixed-length tether + catenary reset on the new port span.
+ * Gravity lock: mid-span sag is always +Y (down); upward bulges are mirrored.
  */
 (function (global) {
   'use strict';
@@ -1329,6 +1330,8 @@
     var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
     var L = Math.max(length || chord * CATENARY_DEFAULT_SLACK, chord * 1.0002);
     var params = fitCatenaryParamsYUp(x1, y1up, x2, y2up, L);
+    /* a must stay positive so cosh hangs down in Y-up (= +Y sag on screen) */
+    if (!(params.a > 0)) params.a = Math.abs(params.a) || 1;
     var pts = [];
     var i;
     for (i = 0; i < count; i++) {
@@ -1340,7 +1343,7 @@
     /* Exact endpoint lock (numeric cosh drift) */
     pts[0] = { x: p0.x, y: p0.y };
     pts[pts.length - 1] = { x: p3.x, y: p3.y };
-    return pts;
+    return enforceDownwardSag(pts);
   }
 
   /** Max drop below chord for a candidate length (screen y+ down). */
@@ -1439,6 +1442,33 @@
     return sag;
   }
 
+  /**
+   * Gravity lock (screen y+ down): mid-span may never rise above the end-to-end
+   * chord. Any upward bulge is mirrored to a positive downward offset.
+   */
+  function enforceDownwardSag(pts) {
+    if (!pts || pts.length < 3) return pts ? pts.slice() : [];
+    var a = pts[0];
+    var b = pts[pts.length - 1];
+    var n = pts.length;
+    var out = new Array(n);
+    out[0] = { x: a.x, y: a.y };
+    out[n - 1] = { x: b.x, y: b.y };
+    var i;
+    for (i = 1; i < n - 1; i++) {
+      var t = i / (n - 1);
+      var cy = a.y + (b.y - a.y) * t;
+      var y = pts[i].y;
+      var drop = y - cy; /* >0 = below chord (gravity OK) */
+      if (drop < 0) {
+        /* Upward inversion — flip to equal downward sag */
+        y = cy - drop;
+      }
+      out[i] = { x: pts[i].x, y: y };
+    }
+    return out;
+  }
+
   /** Uniform Catmull-Rom sample on segment p1→p2 (t in [0,1]). */
   function catmullRomPoint(p0, p1, p2, p3, t) {
     var t2 = t * t;
@@ -1522,9 +1552,13 @@
       var cx = a.x + dx * t;
       var cy = a.y + dy * t;
       var p = smoothed[i];
+      var ox = p.x - cx;
+      var oy = p.y - cy;
+      /* Never restore an upward bulge — force positive downward offset */
+      if (oy < 0) oy = -oy;
       out.push({
-        x: cx + (p.x - cx) * sagScale,
-        y: cy + (p.y - cy) * sagScale,
+        x: cx + ox * sagScale,
+        y: cy + oy * sagScale,
       });
     }
     out.push({ x: b.x, y: b.y });
@@ -1538,16 +1572,19 @@
           var tt = cum[i] / total;
           var bx = a.x + dx * tt;
           var by = a.y + dy * tt;
+          var mx = out[i].x - bx;
+          var my = out[i].y - by;
+          if (my < 0) my = -my;
           mid.push({
-            x: bx + (out[i].x - bx) * lenScale,
-            y: by + (out[i].y - by) * lenScale,
+            x: bx + mx * lenScale,
+            y: by + my * lenScale,
           });
         }
         mid.push({ x: b.x, y: b.y });
-        return mid;
+        return enforceDownwardSag(mid);
       }
     }
-    return out;
+    return enforceDownwardSag(out);
   }
 
   function ensureRoute(cord) {
@@ -1907,12 +1944,16 @@
   }
 
   function writeRopeToRoute(cord, rope) {
+    var ends = reliefSpanEnds(cord);
     var mid = [];
     var i;
     for (i = 1; i < rope.particles.length - 1; i++) {
       mid.push({ x: rope.particles[i].x, y: rope.particles[i].y });
     }
-    cord.route = mid;
+    var full = enforceDownwardSag(
+      [{ x: ends.a.x, y: ends.a.y }].concat(mid).concat([{ x: ends.b.x, y: ends.b.y }])
+    );
+    cord.route = full.slice(1, -1);
     cord.pathLocked = true;
   }
 
@@ -1995,6 +2036,8 @@
   function stepRope(rope) {
     var pts = rope.particles;
     var i;
+    var a = pts[0];
+    var b = pts[pts.length - 1];
     for (i = 0; i < pts.length; i++) {
       var p = pts[i];
       if (p.pinned) continue;
@@ -2006,6 +2049,16 @@
       p.y += vy;
       p.x += (p.ox - p.x) * PHYS_REST_SPRING;
       p.y += (p.oy - p.y) * PHYS_REST_SPRING;
+    }
+    /* Gravity clamp: no particle may sit above the end-to-end chord */
+    for (i = 1; i < pts.length - 1; i++) {
+      var q = pts[i];
+      var t = i / (pts.length - 1);
+      var cy = a.y + (b.y - a.y) * t;
+      if (q.y < cy) {
+        q.y = cy + (cy - q.y);
+        if (q.py < cy) q.py = cy;
+      }
     }
     for (var it = 0; it < PHYS_STRUCT_ITERS; it++) {
       solveRopeConstraints(rope, false);
@@ -2163,6 +2216,15 @@
       cleaned.push(p);
     }
 
+    if (cleaned.length >= 1) {
+      var span = enforceDownwardSag(
+        [{ x: aOuter.x, y: aOuter.y }]
+          .concat(cleaned)
+          .concat([{ x: bOuter.x, y: bOuter.y }])
+      );
+      cleaned = span.slice(1, -1);
+    }
+
     /* tip → relief mid → relief outer … midpoints … outer → mid → tip */
     return aChain.concat(cleaned).concat(bChain.slice().reverse());
   }
@@ -2307,6 +2369,7 @@
     var mid = pts.slice(midStart, midEnd + 1);
     mid = catmullRomResample(mid, 4);
     if (mid.length >= 4) mid = chaikinSmooth(mid, 1);
+    mid = enforceDownwardSag(mid);
     return pts.slice(0, midStart).concat(mid).concat(pts.slice(midEnd + 1));
   }
 

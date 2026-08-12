@@ -798,6 +798,11 @@
       return (port === 'B' || port === 'b') ? 'A' : 'B';
     },
     isCouplerId: function () { return false; },
+    /**
+     * Lab 2D world uses screen Y+ downward. Fiber mid-span sag / catenary
+     * offsets must stay on the +Y (hanging) side of the chord — never upward.
+     */
+    worldYDown: true,
     /** Recompute VFL → fiber → PLC / coupler glow (full-pass adapters). */
     refreshOpticalLaser: function () {
       if (typeof api.refreshVflLaser === 'function') api.refreshVflLaser();
