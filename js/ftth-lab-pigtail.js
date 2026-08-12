@@ -715,7 +715,13 @@
     if (!host) return;
     pigtails.forEach(syncAttached);
 
-    var html = '<svg class="lab-pigtail-svg" aria-hidden="true">';
+    var html =
+      '<svg class="lab-pigtail-svg" aria-hidden="true">' +
+      '<defs>' +
+      '<filter id="lab-vfl-core-beam-pt" x="-30%" y="-30%" width="160%" height="160%">' +
+      '<feGaussianBlur in="SourceGraphic" stdDeviation="0.55" result="blur"/>' +
+      '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' +
+      '</defs>';
     pigtails.forEach(function (p) {
       var path = fiberPath(p);
       var bad = p.connector.mismatch;
@@ -724,7 +730,9 @@
         '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + path +
         '" fill="none" />' +
         '<path class="lab-pigtail-fiber' + (bad ? ' is-mismatch' : '') + sel +
-        '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" />';
+        '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" />' +
+        '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + path +
+        '" fill="none" />';
     });
     html += '</svg>';
 
@@ -750,6 +758,10 @@
         'title="Bare fiber · splice / termination" aria-label="Bare fiber tail">' +
         '<span class="lab-pigtail__buffer" aria-hidden="true"></span>' +
         '<span class="lab-pigtail__cleave" aria-hidden="true"></span>' +
+        '<span class="lab-vfl-exit-flare lab-vfl-exit-flare--tail" aria-hidden="true">' +
+        '<i class="lab-vfl-exit-flare__aura"></i>' +
+        '<i class="lab-vfl-exit-flare__hot"></i>' +
+        '</span>' +
         '</button>' +
         '</div>';
     });
@@ -764,8 +776,10 @@
     var d = fiberPath(p);
     var path = layer.querySelector('[data-pt-fiber="' + p.id + '"]');
     var hit = layer.querySelector('.lab-pigtail-fiber-hit[data-pt-drag="' + p.id + '"]');
+    var laser = layer.querySelector('[data-pt-laser="' + p.id + '"]');
     if (path) path.setAttribute('d', d);
     if (hit) hit.setAttribute('d', d);
+    if (laser) laser.setAttribute('d', d);
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (aBtn) aBtn.setAttribute('style', connectorStyle(p));
@@ -1110,31 +1124,59 @@
               owner: p.connector.attached.owner,
               couplerId: p.connector.attached.couplerId || null,
               vflId: p.connector.attached.vflId || null,
+              splitterId: p.connector.attached.splitterId || null,
               port: p.connector.attached.port || null,
+              slot: p.connector.attached.slot != null ? p.connector.attached.slot : null,
+              oltPort: p.connector.attached.oltPort != null ? p.connector.attached.oltPort : null,
+            }
+          : null,
+        tail: p.tail.attached
+          ? {
+              owner: p.tail.attached.owner,
+              spliceId: p.tail.attached.spliceId || null,
+              termId: p.tail.attached.termId || null,
             }
           : null,
       };
     });
   }
 
-  function applyLaserGlow(ids, mode) {
+  function applyLaserGlow(ids, mode, meta) {
+    meta = meta || {};
     var map = {};
+    var exits = meta.pigtailExits || {};
     (ids || []).forEach(function (id) { map[id] = true; });
     if (!mode && global.FtthLab && FtthLab._vflGlow) mode = FtthLab._vflGlow.mode;
     mode = String(mode || 'OFF').toUpperCase();
     if (!layer) return;
+
     layer.querySelectorAll('[data-pt-fiber]').forEach(function (el) {
-      var on = !!map[el.getAttribute('data-pt-fiber')] && mode !== 'OFF';
+      el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
+    });
+
+    layer.querySelectorAll('[data-pt-laser]').forEach(function (el) {
+      var id = el.getAttribute('data-pt-laser');
+      var on = !!map[id] && mode !== 'OFF';
       el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
       if (!on) return;
       el.classList.add('is-vfl-glow');
       el.classList.add(mode === 'GLINT' ? 'is-vfl-glow--glint' : 'is-vfl-glow--cw');
     });
+
+    layer.querySelectorAll('[data-pt-id][data-pt-end]').forEach(function (el) {
+      var id = el.getAttribute('data-pt-id');
+      var end = el.getAttribute('data-pt-end');
+      el.classList.remove('is-vfl-laser-exit', 'is-vfl-laser-exit--cw', 'is-vfl-laser-exit--glint');
+      if (map[id] && exits[id] === end && mode !== 'OFF' && !el.classList.contains('is-attached')) {
+        el.classList.add('is-vfl-laser-exit');
+        el.classList.add(mode === 'GLINT' ? 'is-vfl-laser-exit--glint' : 'is-vfl-laser-exit--cw');
+      }
+    });
   }
 
   function reapplyStoredVflGlow() {
     var glow = global.FtthLab && FtthLab._vflGlow;
-    if (glow) applyLaserGlow(glow.pigtails, glow.mode);
+    if (glow) applyLaserGlow(glow.pigtails, glow.mode, { pigtailExits: glow.pigtailExits });
   }
 
   function updateInspector() {
@@ -1206,11 +1248,17 @@
   function onLayoutChange(payload) {
     if (!layer) return;
     var onlyCoupler = payload && payload.source === 'coupler' ? payload.couplerId : null;
+    var onlyVfl = payload && payload.source === 'vfl' ? payload.vflId : null;
     pigtails.forEach(function (p) {
       if (onlyCoupler) {
         var on = p.connector.attached && p.connector.attached.owner === 'coupler' &&
           p.connector.attached.couplerId === onlyCoupler;
         if (!on) return;
+      }
+      if (onlyVfl) {
+        var onV = p.connector.attached && p.connector.attached.owner === 'vfl' &&
+          p.connector.attached.vflId === onlyVfl;
+        if (!onV) return;
       }
       var oax = p.ax;
       var oay = p.ay;
@@ -1301,6 +1349,34 @@
     refreshBudget();
   }
 
+  /** Rigid group translate for pigtails plugged into a VFL port. */
+  function translateForVfl(vflId, dx, dy, opts) {
+    opts = opts || {};
+    if (!dx && !dy) return;
+    var changed = false;
+    pigtails.forEach(function (p) {
+      if (!p.connector.attached || p.connector.attached.owner !== 'vfl' ||
+          p.connector.attached.vflId !== vflId) return;
+      changed = true;
+      p.ax += dx;
+      p.ay += dy;
+      p.bx += dx;
+      p.by += dy;
+      if (p.route && p.route.length) {
+        p.route.forEach(function (pt) {
+          pt.x += dx;
+          pt.y += dy;
+        });
+      }
+      syncAttached(p);
+      if (opts.live) updateFiberPath(p);
+    });
+    if (changed && !opts.live) rebuildLayer();
+    if (changed && global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
+  }
+
   function mount(api) {
     ctx = api || {};
     pigtails = [];
@@ -1336,6 +1412,14 @@
 
       FtthLab.detachPigtailsFromVfl = detachPigtailsFromVfl;
 
+      var prevTranslate = FtthLab.translateVflGroup;
+      FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {
+        if (typeof prevTranslate === 'function' && prevTranslate !== translateForVfl) {
+          prevTranslate(vflId, dx, dy, opts);
+        }
+        translateForVfl(vflId, dx, dy, opts);
+      };
+
       var prevGraph = FtthLab.getFiberLaserGraph;
       FtthLab.getFiberLaserGraph = function () {
         var base = typeof prevGraph === 'function'
@@ -1348,7 +1432,11 @@
       var prevGlow = FtthLab.applyFiberLaserGlow;
       FtthLab.applyFiberLaserGlow = function (targets) {
         if (typeof prevGlow === 'function') prevGlow(targets);
-        applyLaserGlow(targets && targets.pigtails, targets && targets.mode);
+        applyLaserGlow(
+          targets && targets.pigtails,
+          targets && targets.mode,
+          { pigtailExits: targets && targets.pigtailExits }
+        );
       };
     }
   }
@@ -1368,6 +1456,7 @@
     getMismatchCount: getMismatchCount,
     getLaserGraphNodes: getLaserGraphNodes,
     applyLaserGlow: applyLaserGlow,
+    translateForVfl: translateForVfl,
   };
 
   function tryRegister() {

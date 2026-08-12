@@ -263,10 +263,32 @@
 
   /* ─── Laser propagation (emit from central SC adapter when fiber is plugged) ─── */
 
+  /** Open end — ferrule or cleave exposed to workspace; beam may exit here. */
+  function isOpenEnd(att) {
+    return !att;
+  }
+
+  function findPcord(graph, id) {
+    var i;
+    for (i = 0; i < (graph.pcords || []).length; i++) {
+      if (graph.pcords[i].id === id) return graph.pcords[i];
+    }
+    return null;
+  }
+
+  function findPigtail(graph, id) {
+    var i;
+    for (i = 0; i < (graph.pigtails || []).length; i++) {
+      if (graph.pigtails[i].id === id) return graph.pigtails[i];
+    }
+    return null;
+  }
+
   function collectLaserTargets() {
     var pcords = {};
     var pigtails = {};
-    var couplers = {};
+    var pcordExits = {};
+    var pigtailExits = {};
 
     function markPcord(id) {
       if (!id || pcords[id]) return;
@@ -276,10 +298,6 @@
       if (!id || pigtails[id]) return;
       pigtails[id] = true;
     }
-    function markCoupler(id) {
-      if (!id || couplers[id]) return;
-      couplers[id] = true;
-    }
 
     var graph = null;
     if (global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function') {
@@ -287,68 +305,32 @@
     }
     graph = graph || { pcords: [], pigtails: [] };
 
-    function fibersOnCouplerPort(cplId, port) {
-      var list = [];
-      (graph.pcords || []).forEach(function (c) {
-        ['A', 'B'].forEach(function (end) {
-          var att = end === 'A' ? c.sideA : c.sideB;
-          if (att && att.owner === 'coupler' && att.couplerId === cplId &&
-              String(att.port) === String(port)) {
-            list.push({ kind: 'pcord', id: c.id, end: end });
-          }
-        });
-      });
-      (graph.pigtails || []).forEach(function (p) {
-        var att = p.connector;
-        if (att && att.owner === 'coupler' && att.couplerId === cplId &&
-            String(att.port) === String(port)) {
-          list.push({ kind: 'pigtail', id: p.id, end: 'A' });
-        }
-      });
-      return list;
-    }
-
+    /**
+     * Light enters at fromEnd and travels toward the opposite end.
+     * Glows this cord only; exit beam appears only on an open opposite end.
+     * Stops at coupler / splitter / OLT — no through-propagation.
+     */
     function injectPcord(id, fromEnd) {
       markPcord(id);
-      var c = null;
-      for (var i = 0; i < (graph.pcords || []).length; i++) {
-        if (graph.pcords[i].id === id) { c = graph.pcords[i]; break; }
-      }
+      var c = findPcord(graph, id);
       if (!c) return;
-      var other = fromEnd === 'A' ? 'B' : 'A';
-      var att = other === 'A' ? c.sideA : c.sideB;
-      if (att && att.owner === 'coupler') {
-        walkCoupler(att.couplerId, att.port);
+      var exitEnd = fromEnd === 'A' ? 'B' : 'A';
+      var exitAtt = exitEnd === 'A' ? c.sideA : c.sideB;
+      if (isOpenEnd(exitAtt)) {
+        pcordExits[id] = exitEnd;
       }
+      /* Blocked at plugged port — core glows but no workspace exit beam */
     }
 
+    /** Light enters at SC connector; exits bare cleave only when tail is free. */
     function injectPigtail(id) {
       markPigtail(id);
-      var p = null;
-      for (var i = 0; i < (graph.pigtails || []).length; i++) {
-        if (graph.pigtails[i].id === id) { p = graph.pigtails[i]; break; }
+      var p = findPigtail(graph, id);
+      if (!p) return;
+      if (isOpenEnd(p.tail)) {
+        pigtailExits[id] = 'B';
       }
-      if (!p || !p.connector) return;
-      if (p.connector.owner === 'coupler') {
-        walkCoupler(p.connector.couplerId, p.connector.port);
-      }
-    }
-
-    function walkCoupler(cplId, entryPort) {
-      if (!cplId || couplers[cplId + ':' + entryPort]) return;
-      markCoupler(cplId);
-      couplers[cplId + ':' + entryPort] = true;
-      var other = entryPort === 'B' || entryPort === 'b' ? 'A' : 'B';
-      /* Through-path: entry face → opposite face */
-      fibersOnCouplerPort(cplId, other).forEach(function (f) {
-        if (f.kind === 'pcord') injectPcord(f.id, f.end);
-        else injectPigtail(f.id);
-      });
-      /* Also glow anything still on the entry face (VFL / dual plugs) */
-      fibersOnCouplerPort(cplId, entryPort).forEach(function (f) {
-        if (f.kind === 'pcord') markPcord(f.id);
-        else markPigtail(f.id);
-      });
+      /* Tail parked on splice / termination — light stops at the tray */
     }
 
     devices.forEach(function (d) {
@@ -373,11 +355,8 @@
       mode: activeEmitMode(),
       pcords: Object.keys(pcords),
       pigtails: Object.keys(pigtails),
-      couplers: Object.keys(couplers).reduce(function (acc, key) {
-        var id = key.indexOf(':') >= 0 ? key.split(':')[0] : key;
-        if (id && acc.indexOf(id) < 0) acc.push(id);
-        return acc;
-      }, []),
+      pcordExits: pcordExits,
+      pigtailExits: pigtailExits,
     };
   }
 
@@ -391,9 +370,6 @@
 
   function refreshLaserGlow() {
     var targets = collectLaserTargets();
-    var cplMap = {};
-    (targets.couplers || []).forEach(function (id) { cplMap[id] = true; });
-    targets.couplers = Object.keys(cplMap);
     targets.mode = targets.mode || 'OFF';
 
     if (global.FtthLab) {
@@ -404,23 +380,43 @@
     } else {
       applyDomGlow(targets);
     }
-    document.querySelectorAll('.lab-cpl').forEach(function (el) {
-      var id = el.getAttribute('data-cpl-node');
-      setFiberGlowClass(el, !!(id && cplMap[id]), targets.mode);
-    });
   }
 
   function applyDomGlow(targets) {
     var mode = (targets && targets.mode) || 'OFF';
     var pc = {};
     var pt = {};
+    var pcExits = (targets && targets.pcordExits) || {};
+    var ptExits = (targets && targets.pigtailExits) || {};
     (targets.pcords || []).forEach(function (id) { pc[id] = true; });
     (targets.pigtails || []).forEach(function (id) { pt[id] = true; });
-    document.querySelectorAll('[data-pcord-fiber]').forEach(function (el) {
-      setFiberGlowClass(el, !!pc[el.getAttribute('data-pcord-fiber')], mode);
+
+    document.querySelectorAll('[data-pcord-fiber], [data-pt-fiber]').forEach(function (el) {
+      el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
     });
-    document.querySelectorAll('[data-pt-fiber]').forEach(function (el) {
-      setFiberGlowClass(el, !!pt[el.getAttribute('data-pt-fiber')], mode);
+    document.querySelectorAll('[data-pcord-laser]').forEach(function (el) {
+      setFiberGlowClass(el, !!pc[el.getAttribute('data-pcord-laser')], mode);
+    });
+    document.querySelectorAll('[data-pt-laser]').forEach(function (el) {
+      setFiberGlowClass(el, !!pt[el.getAttribute('data-pt-laser')], mode);
+    });
+    document.querySelectorAll('[data-pcord-id][data-pcord-end]').forEach(function (el) {
+      var cid = el.getAttribute('data-pcord-id');
+      var end = el.getAttribute('data-pcord-end');
+      el.classList.remove('is-vfl-laser-exit', 'is-vfl-laser-exit--cw', 'is-vfl-laser-exit--glint');
+      if (pc[cid] && pcExits[cid] === end && mode !== 'OFF' && !el.classList.contains('is-attached')) {
+        el.classList.add('is-vfl-laser-exit');
+        el.classList.add(mode === 'GLINT' ? 'is-vfl-laser-exit--glint' : 'is-vfl-laser-exit--cw');
+      }
+    });
+    document.querySelectorAll('[data-pt-id][data-pt-end]').forEach(function (el) {
+      var pid = el.getAttribute('data-pt-id');
+      var end = el.getAttribute('data-pt-end');
+      el.classList.remove('is-vfl-laser-exit', 'is-vfl-laser-exit--cw', 'is-vfl-laser-exit--glint');
+      if (pt[pid] && ptExits[pid] === end && mode !== 'OFF' && !el.classList.contains('is-attached')) {
+        el.classList.add('is-vfl-laser-exit');
+        el.classList.add(mode === 'GLINT' ? 'is-vfl-laser-exit--glint' : 'is-vfl-laser-exit--cw');
+      }
     });
   }
 
@@ -539,12 +535,20 @@
 
         function onMove(ev) {
           moved = true;
-          d.x = Math.round(ox + (ev.clientX - sx) / zoom);
-          d.y = Math.round(oy + (ev.clientY - sy) / zoom);
+          var newX = Math.round(ox + (ev.clientX - sx) / zoom);
+          var newY = Math.round(oy + (ev.clientY - sy) / zoom);
+          var dx = newX - d.x;
+          var dy = newY - d.y;
+          d.x = newX;
+          d.y = newY;
           var el = layer && layer.querySelector('[data-vfl-node="' + id + '"]');
           if (el) {
             el.style.left = d.x + 'px';
             el.style.top = d.y + 'px';
+          }
+          if ((dx || dy) && global.FtthLab &&
+              typeof FtthLab.translateVflGroup === 'function') {
+            FtthLab.translateVflGroup(id, dx, dy, { live: true });
           }
         }
         function onUp() {
@@ -794,6 +798,7 @@
     if (global.FtthLab) {
       FtthLab.refreshVflLaser = refreshLaserGlow;
       FtthLab.getVflPortWorld = getVflPortWorld;
+      document.documentElement.style.setProperty('--lab-vfl-exit-flare-size', '72px');
     }
   }
 

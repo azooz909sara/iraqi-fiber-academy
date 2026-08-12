@@ -1563,6 +1563,7 @@ body {
   inset: 0;
   pointer-events: none;
   z-index: 4;
+  overflow: visible;
 }
 
 .lab-pcord-svg {
@@ -1951,6 +1952,7 @@ body.lab-pcord-linking .lab-pcord-fiber {
   inset: 0;
   pointer-events: none;
   z-index: 4;
+  overflow: visible;
 }
 
 .lab-pigtail-svg {
@@ -2436,45 +2438,169 @@ body.lab-vfl-dragging {
   cursor: grabbing;
 }
 
-/* Red laser glow — CW steady · GLINT pulsing */
+/* VFL laser — thin inner core beam; yellow jacket never tinted */
 .lab-pcord-fiber.is-vfl-glow,
-.lab-pigtail-fiber.is-vfl-glow {
-  stroke: #ef4444 !important;
-  stroke-width: 3.25px;
-  filter:
-    drop-shadow(0 0 2px #fecaca)
-    drop-shadow(0 0 6px #f87171)
-    drop-shadow(0 0 12px rgba(239, 68, 68, 0.9));
+.lab-pigtail-fiber.is-vfl-glow,
+.lab-pcord-fiber.is-vfl-glow--cw,
+.lab-pigtail-fiber.is-vfl-glow--cw,
+.lab-pcord-fiber.is-vfl-glow--glint,
+.lab-pigtail-fiber.is-vfl-glow--glint {
+  stroke: #facc15 !important;
+  stroke-width: 2.25;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35)) !important;
+  animation: none !important;
 }
 
-.lab-pcord-fiber.is-vfl-glow--cw,
-.lab-pigtail-fiber.is-vfl-glow--cw {
+.lab-pigtail-fiber.is-vfl-glow,
+.lab-pigtail-fiber.is-vfl-glow--cw,
+.lab-pigtail-fiber.is-vfl-glow--glint {
+  stroke-width: 2.15;
+}
+
+.lab-pcord-laser-core,
+.lab-pigtail-laser-core {
+  stroke: transparent;
+  stroke-width: 0.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  opacity: 0;
+  vector-effect: non-scaling-stroke;
+}
+
+.lab-pcord-laser-core.is-vfl-glow,
+.lab-pigtail-laser-core.is-vfl-glow {
+  opacity: 1;
+  stroke: #ff2222;
+  filter: url(#lab-vfl-core-beam);
+}
+
+.lab-pigtail-laser-core.is-vfl-glow {
+  filter: url(#lab-vfl-core-beam-pt);
+}
+
+.lab-pcord-laser-core.is-vfl-glow--cw,
+.lab-pigtail-laser-core.is-vfl-glow--cw {
   opacity: 1;
   animation: none;
 }
 
-.lab-pcord-fiber.is-vfl-glow--glint,
-.lab-pigtail-fiber.is-vfl-glow--glint {
-  animation: lab-vfl-fiber-glint 0.55s steps(2, end) infinite;
+.lab-pcord-laser-core.is-vfl-glow--glint,
+.lab-pigtail-laser-core.is-vfl-glow--glint {
+  animation: lab-vfl-core-glint 0.55s steps(2, end) infinite;
 }
 
-.lab-pcord-fiber.is-vfl-glow.is-mismatch,
-.lab-pigtail-fiber.is-vfl-glow.is-mismatch {
-  stroke-dasharray: 5 3;
+@keyframes lab-vfl-core-glint {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.22; }
 }
 
-@keyframes lab-vfl-fiber-glint {
-  0%, 49% { opacity: 1; filter: drop-shadow(0 0 3px #fecaca) drop-shadow(0 0 10px #ef4444); }
-  50%, 100% { opacity: 0.2; filter: drop-shadow(0 0 1px rgba(239, 68, 68, 0.35)); }
+/* Laser exit — soft circular flare/aura at open ferrule or bare cleave */
+.lab-pcord__end.is-vfl-laser-exit:not(.is-attached) .lab-pcord__ferrule {
+  background: #fff5f5 !important;
+  border-color: #fca5a5 !important;
+  box-shadow:
+    0 0 2px #fecaca,
+    0 0 6px rgba(248, 113, 113, 0.85);
 }
 
-.lab-cpl.is-vfl-glow,
-.lab-cpl.is-vfl-glow--cw {
-  filter: drop-shadow(0 0 4px rgba(239, 68, 68, 0.85));
+.lab-pigtail__tail.is-vfl-laser-exit:not(.is-attached) .lab-pigtail__cleave {
+  background: linear-gradient(180deg, #fff5f5, #fecaca) !important;
+  box-shadow:
+    0 0 2px #fecaca,
+    0 0 6px rgba(248, 113, 113, 0.85);
 }
 
-.lab-cpl.is-vfl-glow--glint {
-  animation: lab-vfl-fiber-glint 0.55s steps(2, end) infinite;
+/* Circular radiant flare — scatters into air (not a stick beam) */
+.lab-vfl-exit-flare {
+  --flare-size: var(--lab-vfl-exit-flare-size, 72px);
+  position: absolute;
+  left: 50%;
+  top: 2px;
+  width: var(--flare-size);
+  height: var(--flare-size);
+  margin-left: calc(var(--flare-size) / -2);
+  margin-top: calc(var(--flare-size) / -2);
+  pointer-events: none;
+  overflow: visible;
+  z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  transform: none;
+}
+
+.lab-vfl-exit-flare__aura,
+.lab-vfl-exit-flare__hot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Soft pink-red aura with smooth radial falloff into workspace air */
+.lab-vfl-exit-flare__aura {
+  background: radial-gradient(
+    circle closest-side,
+    rgba(255, 180, 180, 0.95) 0%,
+    rgba(255, 90, 90, 0.78) 12%,
+    rgba(239, 68, 68, 0.48) 28%,
+    rgba(248, 113, 113, 0.22) 48%,
+    rgba(252, 165, 165, 0.08) 68%,
+    transparent 100%
+  );
+  filter: blur(1.2px);
+}
+
+/* White-hot pinpoint at ceramic ferrule core */
+.lab-vfl-exit-flare__hot {
+  inset: 38%;
+  background: radial-gradient(
+    circle,
+    #ffffff 0%,
+    #ffe4e4 28%,
+    rgba(255, 100, 100, 0.55) 55%,
+    transparent 78%
+  );
+  box-shadow:
+    0 0 3px #fff,
+    0 0 8px #fecaca,
+    0 0 16px rgba(239, 68, 68, 0.75);
+}
+
+/* Pigtail cleave — flare centered on tip (local bottom) */
+.lab-vfl-exit-flare--tail {
+  top: auto;
+  bottom: 2px;
+  margin-top: 0;
+  margin-bottom: calc(var(--flare-size) / -2);
+}
+
+.lab-pcord__end.is-vfl-laser-exit:not(.is-attached) .lab-vfl-exit-flare,
+.lab-pigtail__tail.is-vfl-laser-exit:not(.is-attached) .lab-vfl-exit-flare {
+  opacity: 1;
+  visibility: visible;
+}
+
+.lab-pcord__end.is-vfl-laser-exit--glint:not(.is-attached) .lab-vfl-exit-flare,
+.lab-pigtail__tail.is-vfl-laser-exit--glint:not(.is-attached) .lab-vfl-exit-flare,
+.lab-pcord__end.is-vfl-laser-exit--glint:not(.is-attached) .lab-pcord__ferrule,
+.lab-pigtail__tail.is-vfl-laser-exit--glint:not(.is-attached) .lab-pigtail__cleave {
+  animation: lab-vfl-exit-glint 0.55s steps(2, end) infinite;
+}
+
+@keyframes lab-vfl-exit-glint {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0.12; }
+}
+
+.lab-pcord__end.is-vfl-laser-exit {
+  overflow: visible;
+  z-index: 20;
+}
+
+.lab-pigtail__tail.is-vfl-laser-exit {
+  overflow: visible;
+  z-index: 20;
 }
 
 .lab-vfl-mode-toggle {
