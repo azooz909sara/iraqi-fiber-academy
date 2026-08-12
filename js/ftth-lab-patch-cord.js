@@ -1,10 +1,9 @@
 /**
  * Patch Cord — symmetrical click-and-drag for End A and End B
  * Plugged end stays locked; free end moves only on mouse-down+hold.
- * On full connect, mid-span is a true catenary y = c + a·cosh(x/a) fitted to
- * the user's drawn length/sag, with straight axial strain-relief port exits.
- * Fully linked cords: drag the fiber body for elastic stretch; release settles
- * back toward the fitted catenary rest shape.
+ * On full connect, mid-span is a true catenary y = c + a·cosh(x/a); cable
+ * length is locked (fixedLength) and preserved when relocating a connector.
+ * Relocate = fixed-length tether + catenary reset on the new port span.
  */
 (function (global) {
   'use strict';
@@ -169,6 +168,8 @@
       sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null, liveRot: null },
       route: [],
       pathLocked: false,
+      fixedLength: null, /* locked mid-span length once both ends first connect */
+      relocating: false, /* true while moving a plugged end to a new port */
     };
     cords.push(cord);
     selectCord(cord.id);
@@ -273,12 +274,27 @@
 
   function detachEnd(cord, end) {
     var side = cord[endKey(end)];
+    var other = oppositeEnd(end);
+    var otherAttached = !!(cord[endKey(other)] && cord[endKey(other)].attached);
+    /* Capture span length before unlock so relocate cannot grow the cable */
+    if (typeof cord.fixedLength !== 'number' && (cord.pathLocked || otherAttached)) {
+      var measured = measureCableSpanLength(cord);
+      if (measured > 0) cord.fixedLength = measured;
+    }
     side.attached = null;
     side.mismatch = false;
     side.lockedRot = null;
-    /* Keep last live heading if any; drag will update it */
     cord.pathLocked = false;
+    cord.relocating = otherAttached && typeof cord.fixedLength === 'number';
     clearRopePhysics(cord.id);
+  }
+
+  function clearDrawnPath(cord) {
+    if (!cord) return;
+    cord.route = [];
+    cord.pathLocked = false;
+    cord.relocating = false;
+    /* Keep fixedLength — physical cord length survives path clears / relocates */
   }
 
   /* ─── Hit-test equipment ports ─── */
@@ -651,6 +667,8 @@
       sideB: { polish: polish, attached: null, mismatch: false, lockedRot: null, liveRot: null },
       route: [],
       pathLocked: false,
+      fixedLength: null,
+      relocating: false,
     };
     cords.push(cord);
     attachEnd(cord, 'A', hit);
@@ -1345,18 +1363,13 @@
     return cord.route;
   }
 
-  function clearDrawnPath(cord) {
-    if (!cord) return;
-    cord.route = [];
-    cord.pathLocked = false;
-  }
-
   /**
-   * Record the mouse trail while the free end is dragged.
-   * Distance dead-band rejects hand jitter; pathLocked freezes further samples.
+   * Record the mouse trail while the free end is dragged (first-time routing only).
+   * Relocate / fixed-length mode never appends — length stays locked.
    */
   function appendRoutePoint(cord, x, y) {
-    if (!cord || cord.pathLocked) return false;
+    if (!cord || cord.pathLocked || cord.relocating) return false;
+    if (typeof cord.fixedLength === 'number') return false;
     var route = ensureRoute(cord);
     var last = route[route.length - 1];
     if (!last) {
@@ -1469,9 +1482,87 @@
   }
 
   /**
-   * Full connection: fit a true catenary y = c + a·cosh(x/a) between strain-relief
-   * tips, using the user's drawn length and sag depth. Empty ink → default slack.
-   * Straight port exits are applied at render via strainReliefChain.
+   * Arc length of current span from strain-relief tip A → route → tip B.
+   */
+  function measureCableSpanLength(cord) {
+    if (!cord) return 0;
+    var ends = reliefSpanEnds(cord);
+    var poly = [{ x: ends.a.x, y: ends.a.y }]
+      .concat(ensureRoute(cord))
+      .concat([{ x: ends.b.x, y: ends.b.y }]);
+    var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
+    return Math.max(polylineLength(poly), chord * 1.002);
+  }
+
+  /**
+   * Resolve the immutable cable length for catenary fitting.
+   * Never grows on relocate; only set once on first full connect.
+   */
+  function resolveFixedCableLength(cord, p0, p3, route) {
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    if (typeof cord.fixedLength === 'number' && cord.fixedLength > 0) {
+      if (chord >= cord.fixedLength) return chord * 1.0002; /* taut — ports at max reach */
+      return cord.fixedLength;
+    }
+    var poly = [{ x: p0.x, y: p0.y }].concat(route || []).concat([{ x: p3.x, y: p3.y }]);
+    var userLen = Math.max(polylineLength(poly), chord * 1.002);
+    var userSag = routeSagDepth(poly);
+    var L = userLen;
+    if (userSag > 2) L = Math.max(L, catenaryLengthForSag(p0, p3, userSag));
+    else L = Math.max(L, chord * CATENARY_DEFAULT_SLACK);
+    L = Math.min(L, chord * 6);
+    cord.fixedLength = L;
+    return L;
+  }
+
+  /** Keep free connector within fixedLength of the anchored relief tip. */
+  function clampFreeEndToFixedLength(cord, freeEnd) {
+    if (!cord || typeof cord.fixedLength !== 'number') return;
+    var other = oppositeEnd(freeEnd);
+    if (!cord[endKey(other)].attached) return;
+    var L = cord.fixedLength;
+    var anchTip = bootAnchor(cord, other);
+    var freeTip = bootAnchor(cord, freeEnd);
+    var dx = freeTip.x - anchTip.x;
+    var dy = freeTip.y - anchTip.y;
+    var d = Math.sqrt(dx * dx + dy * dy) || 1;
+    if (d <= L * 0.999) return;
+    var s = (L * 0.998) / d;
+    var newTipX = anchTip.x + dx * s;
+    var newTipY = anchTip.y + dy * s;
+    var t = bootOutDir(getEndRotation(cord, freeEnd));
+    setEndWorld(
+      cord,
+      freeEnd,
+      newTipX - t.x * BOOT_EXIT_OFFSET,
+      newTipY - t.y * BOOT_EXIT_OFFSET
+    );
+  }
+
+  /**
+   * Rebuild mid-span as a true catenary at the cord's locked length (tether preview).
+   */
+  function rebuildFixedLengthCatenary(cord) {
+    if (!cord || typeof cord.fixedLength !== 'number') return;
+    var ends = reliefSpanEnds(cord);
+    var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
+    var L = cord.fixedLength;
+    if (chord >= L) L = chord * 1.0002;
+    var full = sampleTrueCatenary(ends.a, ends.b, L, CATENARY_SAMPLES);
+    cord.route = full.slice(1, -1);
+  }
+
+  /** True if both seated relief tips fit within the locked cable length. */
+  function spanFitsFixedLength(cord) {
+    if (typeof cord.fixedLength !== 'number') return true;
+    var ends = reliefSpanEnds(cord);
+    var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 0;
+    return chord <= cord.fixedLength * 0.998;
+  }
+
+  /**
+   * Full connection: fit true catenary between strain-relief tips at fixedLength.
+   * First connect captures length; relocates reuse it — never accumulate.
    */
   function lockDrawnPath(cord) {
     if (!cord) return;
@@ -1481,26 +1572,19 @@
     var aOuter = aChain[aChain.length - 1];
     var bOuter = bChain[bChain.length - 1];
     var route = ensureRoute(cord);
-    if (route.length >= 2) {
-      /* Light polish of ink metrics, then replace mid-span with true catenary */
-      var reference = route.map(function (p) {
-        return { x: p.x, y: p.y };
-      });
-      cord.route = fitTrueCatenaryFromUser(
-        aOuter,
-        bOuter,
-        reference,
-        CATENARY_SAMPLES
-      );
-    } else if (cord.sideA.attached && cord.sideB.attached) {
-      var full = naturalCatenarySamples(aOuter, bOuter, CATENARY_SAMPLES);
-      cord.route = full.slice(1, -1);
-    }
-    route = ensureRoute(cord);
-    if (route.length > TRACE_MAX_POINTS) {
-      cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
+    var L = resolveFixedCableLength(
+      cord,
+      aOuter,
+      bOuter,
+      route.length ? route : null
+    );
+    var full = sampleTrueCatenary(aOuter, bOuter, L, CATENARY_SAMPLES);
+    cord.route = full.slice(1, -1);
+    if (cord.route.length > TRACE_MAX_POINTS) {
+      cord.route = downsampleRoute(cord.route, TRACE_MAX_POINTS);
     }
     cord.pathLocked = true;
+    cord.relocating = false;
   }
 
   function clearRopePhysics(cordId) {
@@ -1776,8 +1860,13 @@
         updateFiberPath(c);
         rope.frames += 1;
         if (ropeEnergy(rope) < PHYS_SETTLE_EPS || rope.frames > PHYS_MAX_SETTLE) {
-          snapRopeToRest(rope);
-          writeRopeToRoute(c, rope);
+          if (typeof c.fixedLength === 'number' &&
+              c.sideA.attached && c.sideB.attached) {
+            rebuildFixedLengthCatenary(c);
+          } else {
+            snapRopeToRest(rope);
+            writeRopeToRoute(c, rope);
+          }
           updateFiberPath(c);
           rope.settling = false;
           settledIds.push(c.id);
@@ -1794,8 +1883,18 @@
   function beginRopeSettle(cord) {
     var rope = ropePhysics[cord.id];
     if (!rope) return;
-    /* Spring back to pre-stretch custom shape (depth/length preserved) */
-    if (rope.grabBase) {
+    /* Prefer locked cable length catenary as rest pose */
+    if (typeof cord.fixedLength === 'number' &&
+        cord.sideA.attached && cord.sideB.attached) {
+      var ends = reliefSpanEnds(cord);
+      var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
+      var L = cord.fixedLength;
+      if (chord >= L) L = chord * 1.0002;
+      bindRopeRestToPoints(
+        rope,
+        sampleTrueCatenary(ends.a, ends.b, L, rope.particles.length)
+      );
+    } else if (rope.grabBase) {
       bindRopeRestToPoints(rope, rope.grabBase);
     } else {
       refreshRopeRest(cord, rope);
@@ -1804,7 +1903,6 @@
     var i;
     for (i = 1; i < rope.particles.length - 1; i++) {
       var p = rope.particles[i];
-      /* Verlet kick toward rest → overshoot / soft oscillation */
       p.px = p.x - (p.ox - p.x) * PHYS_RELEASE_KICK;
       p.py = p.y - (p.oy - p.y) * PHYS_RELEASE_KICK;
     }
@@ -2311,14 +2409,20 @@
         var lastWorld = { x: startWorld.x, y: startWorld.y };
 
         /*
-         * Free end + other plugged → continue / extend manual path on this drag.
-         * Never wipe cord.route — preserve existing waypoints across re-grabs.
+         * First-time routing only: seed path when free end starts drawing.
+         * Relocate / fixed-length cords never append ink.
          */
-        if (!wasAttached && otherWasLocked && !c.pathLocked) {
+        if (!wasAttached && otherWasLocked && !c.pathLocked &&
+            typeof c.fixedLength !== 'number' && !c.relocating) {
           if (!ensureRoute(c).length) {
             var seedBoot = bootAnchor(c, otherEnd);
             appendRoutePoint(c, seedBoot.x, seedBoot.y);
           }
+        }
+
+        /* Fixed-length relocate whenever the other end is anchored and length is locked */
+        if (otherWasLocked && typeof c.fixedLength === 'number') {
+          c.relocating = true;
         }
 
         btn.classList.add('is-dragging');
@@ -2346,10 +2450,14 @@
             detachEnd(c, end);
             lastWorld.x = mouse.x;
             lastWorld.y = mouse.y;
-            /* Keep cord.route intact — do not clearDrawnPath on unplug */
             btn.classList.remove('is-attached', 'is-mismatch', 'is-tension');
             btn.classList.add('is-unplugging');
-            setStatus('Side ' + end + ' unplugged from ' + (portHome.label || 'port'));
+            setStatus(
+              c.relocating
+                ? 'Side ' + end + ' relocating · fixed length ' +
+                  Math.round(c.fixedLength) + 'px · snap into a port'
+                : 'Side ' + end + ' unplugged from ' + (portHome.label || 'port')
+            );
             refreshBudget();
             updateInspector();
           }
@@ -2370,8 +2478,15 @@
           }
 
           setEndWorld(c, end, mouse.x, mouse.y);
-          if (c[endKey(otherEnd)].attached && !c.pathLocked) {
-            /* Record at the free boot tip (not the connector center) to avoid body piercing */
+
+          if (c.relocating && typeof c.fixedLength === 'number' &&
+              c[endKey(otherEnd)].attached) {
+            /* Fixed-length elastic tether — no path accumulation */
+            clampFreeEndToFixedLength(c, end);
+            rebuildFixedLengthCatenary(c);
+          } else if (c[endKey(otherEnd)].attached && !c.pathLocked &&
+                     typeof c.fixedLength !== 'number') {
+            /* First-time freehand routing only */
             var tip = bootExitStub(c, end);
             appendRoutePoint(c, tip.x, tip.y);
           }
@@ -2413,27 +2528,59 @@
             );
             if (dScreen <= PLUG_SNAP_PX * 1.75) {
               attachEnd(c, end, hit);
-              if (!c.pathLocked) {
-                var seatTip = bootExitStub(c, end);
-                appendRoutePoint(c, seatTip.x, seatTip.y);
-                smoothDrawnRoute(c);
-              }
-              pluggedNow = true;
-              flashPort(hit.el);
-              if (c[endKey(otherEnd)].attached) {
-                lockDrawnPath(c);
-                endLinkSession({ silent: true });
-                setStatus('Patch connected · true catenary lock · drag body to stretch');
+              /* Reject ports beyond the locked cable reach */
+              if (c[endKey(otherEnd)].attached && !spanFitsFixedLength(c)) {
+                detachEnd(c, end);
+                c.relocating = typeof c.fixedLength === 'number';
+                setEndWorld(c, end, mouse.x, mouse.y);
+                clampFreeEndToFixedLength(c, end);
+                rebuildFixedLengthCatenary(c);
+                setStatus(
+                  'Port out of reach · cable length locked at ' +
+                  Math.round(c.fixedLength) + 'px'
+                );
+              } else {
+                if (!c.pathLocked && typeof c.fixedLength !== 'number' && !c.relocating) {
+                  var seatTip = bootExitStub(c, end);
+                  appendRoutePoint(c, seatTip.x, seatTip.y);
+                  smoothDrawnRoute(c);
+                }
+                pluggedNow = true;
+                flashPort(hit.el);
+                if (c[endKey(otherEnd)].attached) {
+                  lockDrawnPath(c);
+                  endLinkSession({ silent: true });
+                  setStatus(
+                    'Patch connected · length ' + Math.round(c.fixedLength) +
+                    'px · true catenary'
+                  );
+                }
               }
             } else {
               setEndWorld(c, end, mouse.x, mouse.y);
-              if (!c.pathLocked && ensureRoute(c).length >= 3) smoothDrawnRoute(c);
+              if (c.relocating && typeof c.fixedLength === 'number') {
+                clampFreeEndToFixedLength(c, end);
+                rebuildFixedLengthCatenary(c);
+              } else if (!c.pathLocked && ensureRoute(c).length >= 3) {
+                smoothDrawnRoute(c);
+              }
               setStatus('Side ' + end + ' free · release over a port to snap-lock');
             }
           } else {
             setEndWorld(c, end, mouse.x, mouse.y);
-            if (!c.pathLocked && ensureRoute(c).length >= 3) smoothDrawnRoute(c);
-            setStatus('Side ' + end + ' free · click-and-drag to draw, release on a port');
+            if (c.relocating && typeof c.fixedLength === 'number') {
+              clampFreeEndToFixedLength(c, end);
+              rebuildFixedLengthCatenary(c);
+              setStatus(
+                'Side ' + end + ' relocating · fixed length ' +
+                Math.round(c.fixedLength) + 'px'
+              );
+            } else if (!c.pathLocked && ensureRoute(c).length >= 3) {
+              smoothDrawnRoute(c);
+              setStatus('Side ' + end + ' free · click-and-drag to draw, release on a port');
+            } else {
+              setStatus('Side ' + end + ' free · click-and-drag to draw, release on a port');
+            }
           }
 
           endDragState = null;
@@ -2497,7 +2644,7 @@
     var pathLoss = cordLossDb(c);
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap. The locked span is a true catenary (y = c + a cosh(x/a)) fitted to your drawn length and sag, with straight strain-relief exits from each port. Drag the cable body to stretch — release springs back to that catenary.</p>';
+      '<p>End A and End B use the same rules: plugging one end locks only that end. First full connection locks the cable length permanently. Relocating a connector keeps that fixed length (elastic tether — no path growth); snapping into a new port re-fits a true catenary for the new span. Drag the cable body to stretch — release springs back to the locked-length catenary.</p>';
 
     if (!detail) return;
     detail.hidden = false;
