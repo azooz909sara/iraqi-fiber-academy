@@ -125,8 +125,22 @@
 
   /* ─── 2D mouse-wheel zoom ─── */
 
+  var transformSettleTimer = null;
+
   function clampZoom(z) {
     return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+  }
+
+  /** Promote world layer only while transforming; settle clears will-change for sharp paint. */
+  function markWorldTransforming() {
+    var world = $('lab-2d-world');
+    if (world) world.classList.add('is-transforming');
+    if (transformSettleTimer) clearTimeout(transformSettleTimer);
+    transformSettleTimer = setTimeout(function () {
+      transformSettleTimer = null;
+      var w = $('lab-2d-world');
+      if (w) w.classList.remove('is-transforming');
+    }, 180);
   }
 
   function applyZoom2d() {
@@ -135,7 +149,7 @@
       world.style.width = WORLD_SIZE + 'px';
       world.style.height = WORLD_SIZE + 'px';
       world.style.transform =
-        'translate(' + state.pan2dX + 'px, ' + state.pan2dY + 'px) scale(' + state.zoom2d + ')';
+        'translate3d(' + state.pan2dX + 'px, ' + state.pan2dY + 'px, 0) scale(' + state.zoom2d + ')';
     }
     var chip = $('lab-hud-zoom');
     if (chip) chip.textContent = 'Zoom ' + Math.round(state.zoom2d * 100) + '%';
@@ -145,6 +159,7 @@
     var stage = $('lab-canvas-2d');
     if (!stage) {
       state.zoom2d = clampZoom(nextZoom);
+      markWorldTransforming();
       applyZoom2d();
       return;
     }
@@ -158,6 +173,7 @@
     state.pan2dX = mx - ((mx - state.pan2dX) * (next / prev));
     state.pan2dY = my - ((my - state.pan2dY) * (next / prev));
     state.zoom2d = next;
+    markWorldTransforming();
     applyZoom2d();
   }
 
@@ -214,6 +230,7 @@
         pointerId: e.pointerId,
       };
       stage.classList.add('is-panning');
+      markWorldTransforming();
       try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
     });
 
@@ -224,6 +241,7 @@
       }
       state.pan2dX = pan.panX + (e.clientX - pan.x);
       state.pan2dY = pan.panY + (e.clientY - pan.y);
+      markWorldTransforming();
       applyZoom2d();
     });
 
@@ -231,6 +249,7 @@
       if (!pan) return;
       pan = null;
       stage.classList.remove('is-panning');
+      markWorldTransforming();
     }
 
     stage.addEventListener('pointerup', endPan);

@@ -400,6 +400,11 @@ body {
   width: 20000px;
   height: 20000px;
   transform-origin: 0 0;
+  /* Do NOT keep permanent will-change — it caches a low-res bitmap under scale() */
+}
+
+/* Only while actively panning/zooming — cleared after settle for sharp re-raster */
+.lab-2d-world.is-transforming {
   will-change: transform;
 }
 
@@ -435,6 +440,30 @@ body {
   width: 100%;
   height: 100%;
   /* Tools mount DOM / SVG layers here */
+}
+
+/*
+ * Crisp DOM widgets under CSS world scale.
+ * Own compositor layer (translateZ) + no filter bitmaps on text ancestors
+ * so Chromium rasterizes labels at display resolution on first mount.
+ */
+.lab-vfl,
+.lab-cas-cassette,
+.lab-cpl,
+.lab-fx-chassis-frame {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.lab-vfl *,
+.lab-cas-cassette *,
+.lab-cpl * {
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 #lab-canvas-2d.is-drop-target,
@@ -2126,6 +2155,9 @@ body.lab-pigtail-dragging {
   user-select: none;
   touch-action: none;
   z-index: 6;
+  /* Keep integer layout box; layer already promoted via translateZ(0) above */
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .lab-vfl.is-dragging,
@@ -2156,7 +2188,9 @@ body.lab-pigtail-dragging {
   height: 18px;
   overflow: visible;
   pointer-events: none;
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.45));
+  /* Prefer box-shadow over filter:drop-shadow — filters force blurry bitmaps under scale */
+  filter: none;
+  shape-rendering: geometricPrecision;
 }
 
 /* Universal SC port — same plug target rules as splitter .lab-cas-port */
@@ -2283,7 +2317,8 @@ body.lab-pigtail-dragging {
   background: linear-gradient(180deg, #1a1a1a 0%, #0f172a 30%, #020617 100%);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 2px 6px rgba(0, 0, 0, 0.4);
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    0 1px 2px rgba(0, 0, 0, 0.35);
   cursor: grab;
   overflow: hidden;
 }
@@ -2298,14 +2333,16 @@ body.lab-pigtail-dragging {
   left: 0;
   right: 0;
   top: 4px;
-  font-size: 0.22rem;
+  font-size: 5px;
   font-weight: 800;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   color: #f8fafc;
   text-align: center;
   pointer-events: none;
   white-space: nowrap;
   line-height: 1.1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .lab-vfl__caution {
@@ -2313,9 +2350,9 @@ body.lab-pigtail-dragging {
   left: 1px;
   right: 1px;
   top: 10px;
-  padding: 0.5px 1px;
-  font-size: 0.18rem;
-  font-weight: 700;
+  padding: 1px 1px;
+  font-size: 4px;
+  font-weight: 800;
   letter-spacing: 0.02em;
   color: #0f172a;
   text-align: center;
@@ -2323,6 +2360,8 @@ body.lab-pigtail-dragging {
   border-radius: 1px;
   pointer-events: none;
   line-height: 1.15;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .lab-vfl__ring {
@@ -2354,11 +2393,13 @@ body.lab-pigtail-dragging {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  font-size: 0.26rem;
-  font-weight: 700;
+  font-size: 6px;
+  font-weight: 800;
   color: #94a3b8;
   line-height: 1;
   padding-left: 8px;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: geometricPrecision;
 }
 
 .lab-vfl__track {
@@ -2416,7 +2457,11 @@ body.lab-pigtail-dragging {
   background: linear-gradient(180deg, rgba(239, 68, 68, 0.98), rgba(239, 68, 68, 0.15) 70%, transparent);
   pointer-events: none;
   z-index: 6;
-  filter: drop-shadow(0 0 3px #ef4444) drop-shadow(0 0 8px rgba(239, 68, 68, 0.75));
+  /* box-shadow instead of filter:drop-shadow — avoids filtered-layer blur under scale */
+  filter: none;
+  box-shadow:
+    0 0 3px #ef4444,
+    0 0 8px rgba(239, 68, 68, 0.75);
   transform-origin: 50% 100%;
 }
 
