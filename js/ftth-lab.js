@@ -788,6 +788,12 @@
     resetInspectorIdle: resetInspectorIdle,
     tryPatchPort: null,
     _patchPending: null,
+    /* Optical / VFL laser — tools fill these in on mount */
+    getFiberLaserGraph: function () { return { pcords: [], pigtails: [] }; },
+    applyFiberLaserGlow: function () {},
+    getSplitterLaserModels: function () { return []; },
+    refreshVflLaser: null,
+    refreshSplitterPorts: null,
   };
 
   global.FtthLab = api;

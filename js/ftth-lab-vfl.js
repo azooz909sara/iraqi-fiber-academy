@@ -344,14 +344,18 @@
     var pigtails = {};
     var pcordExits = {};
     var pigtailExits = {};
+    var splitterExits = {};
+    var visitedSplEntry = {};
 
     function markPcord(id) {
-      if (!id || pcords[id]) return;
+      if (!id || pcords[id]) return false;
       pcords[id] = true;
+      return true;
     }
     function markPigtail(id) {
-      if (!id || pigtails[id]) return;
+      if (!id || pigtails[id]) return false;
       pigtails[id] = true;
+      return true;
     }
 
     var graph = null;
@@ -360,21 +364,119 @@
     }
     graph = graph || { pcords: [], pigtails: [] };
 
+    function splitterModels() {
+      if (global.FtthLab && typeof FtthLab.getSplitterLaserModels === 'function') {
+        return FtthLab.getSplitterLaserModels() || [];
+      }
+      return [];
+    }
+
+    function findModel(sid) {
+      var list = splitterModels();
+      var i;
+      for (i = 0; i < list.length; i++) {
+        if (list[i].id === sid) return list[i];
+      }
+      return null;
+    }
+
+    function findFiberOnSplitterPort(sid, portId) {
+      var i;
+      var att;
+      for (i = 0; i < (graph.pcords || []).length; i++) {
+        var c = graph.pcords[i];
+        att = c.sideA;
+        if (att && att.owner === 'splitter' && att.splitterId === sid &&
+            att.port === portId) {
+          return { kind: 'pcord', id: c.id, fromEnd: 'A' };
+        }
+        att = c.sideB;
+        if (att && att.owner === 'splitter' && att.splitterId === sid &&
+            att.port === portId) {
+          return { kind: 'pcord', id: c.id, fromEnd: 'B' };
+        }
+      }
+      for (i = 0; i < (graph.pigtails || []).length; i++) {
+        var p = graph.pigtails[i];
+        att = p.connector;
+        if (att && att.owner === 'splitter' && att.splitterId === sid &&
+            att.port === portId) {
+          return { kind: 'pigtail', id: p.id };
+        }
+      }
+      return null;
+    }
+
+    function emitFromSplitterPort(sid, portSpec) {
+      var portId = typeof portSpec === 'string' ? portSpec : portSpec.id;
+      var dustCap = typeof portSpec === 'object' ? !!portSpec.dustCap : false;
+      var fiber = findFiberOnSplitterPort(sid, portId);
+      if (fiber) {
+        if (fiber.kind === 'pcord') injectPcord(fiber.id, fiber.fromEnd);
+        else injectPigtail(fiber.id);
+        return;
+      }
+      /* Open OUT with dust cap removed → beam exits the cassette port */
+      if (!dustCap && String(portId).indexOf('OUT') === 0) {
+        splitterExits[sid + ':' + portId] = true;
+      }
+    }
+
+    /**
+     * PLC optical split: light on an IN fans out to every OUT.
+     * Reverse: light on an OUT returns on all IN ports (passive chip).
+     */
+    function injectSplitter(sid, entryPort) {
+      if (!sid || !entryPort) return;
+      var key = sid + ':' + entryPort;
+      if (visitedSplEntry[key]) return;
+      visitedSplEntry[key] = true;
+
+      var model = findModel(sid);
+      if (!model) return;
+
+      var isIn = (model.inputs || []).indexOf(entryPort) >= 0;
+      var isOut = false;
+      var oi;
+      for (oi = 0; oi < (model.outputs || []).length; oi++) {
+        if (model.outputs[oi].id === entryPort) {
+          isOut = true;
+          break;
+        }
+      }
+
+      if (isIn) {
+        (model.outputs || []).forEach(function (op) {
+          emitFromSplitterPort(sid, op);
+        });
+      } else if (isOut) {
+        (model.inputs || []).forEach(function (ip) {
+          emitFromSplitterPort(sid, ip);
+        });
+      }
+    }
+
     /**
      * Light enters at fromEnd and travels toward the opposite end.
-     * Glows this cord only; exit beam appears only on an open opposite end.
-     * Stops at coupler / splitter / OLT — no through-propagation.
+     * Open end → workspace exit flare. Splitter → optical fan-out.
+     * Coupler / OLT still terminate the beam (no through path).
      */
     function injectPcord(id, fromEnd) {
-      markPcord(id);
+      var first = markPcord(id);
       var c = findPcord(graph, id);
       if (!c) return;
       var exitEnd = fromEnd === 'A' ? 'B' : 'A';
       var exitAtt = exitEnd === 'A' ? c.sideA : c.sideB;
       if (isOpenEnd(exitAtt)) {
         pcordExits[id] = exitEnd;
+        return;
       }
-      /* Blocked at plugged port — core glows but no workspace exit beam */
+      if (exitAtt && exitAtt.owner === 'splitter') {
+        injectSplitter(exitAtt.splitterId, exitAtt.port);
+        return;
+      }
+      /* Coupler / OLT / VFL far end: core glows, no further hop from this path */
+      if (!first) return;
     }
 
     /** Light enters at SC connector; exits bare cleave only when tail is free. */
@@ -412,6 +514,7 @@
       pigtails: Object.keys(pigtails),
       pcordExits: pcordExits,
       pigtailExits: pigtailExits,
+      splitterExits: splitterExits,
     };
   }
 

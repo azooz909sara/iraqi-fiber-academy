@@ -63,9 +63,20 @@
     var list = [];
     var n = Math.max(1, Math.min(64, parseInt(count, 10) || 1));
     for (var i = 1; i <= n; i++) {
-      list.push({ id: prefix + i, polish: defaultPolish || 'UPC' });
+      var port = { id: prefix + i, polish: defaultPolish || 'UPC' };
+      /* OUT ports ship with black dust caps installed (real PLC cassette). */
+      if (prefix === 'OUT') port.dustCap = true;
+      list.push(port);
     }
     return list;
+  }
+
+  function isOutPort(portId) {
+    return String(portId || '').indexOf('OUT') === 0;
+  }
+
+  function hasDustCap(port) {
+    return !!(port && isOutPort(port.id) && port.dustCap !== false);
   }
 
   function buildPortsFromSpec(type) {
@@ -311,9 +322,14 @@
     if (!s) return;
     count = Math.max(1, Math.min(64, parseInt(count, 10) || 1));
     var prev = {};
-    s.outputs.forEach(function (p) { prev[p.id] = p.polish; });
+    s.outputs.forEach(function (p) {
+      prev[p.id] = { polish: p.polish, dustCap: p.dustCap !== false };
+    });
     s.outputs = makePorts('OUT', count, 'UPC').map(function (p) {
-      if (prev[p.id]) p.polish = prev[p.id];
+      if (prev[p.id]) {
+        p.polish = prev[p.id].polish;
+        p.dustCap = prev[p.id].dustCap;
+      }
       return p;
     });
     pruneDeadLinks(s);
@@ -353,6 +369,31 @@
     return splitterId + ':' + port;
   }
 
+  function isFiberAttachedToPort(splitterId, port) {
+    if (!global.FtthLab || typeof FtthLab.getFiberLaserGraph !== 'function') {
+      return false;
+    }
+    var graph = FtthLab.getFiberLaserGraph();
+    if (!graph) return false;
+    var i;
+    var att;
+    for (i = 0; i < (graph.pcords || []).length; i++) {
+      var c = graph.pcords[i];
+      att = c.sideA;
+      if (att && att.owner === 'splitter' && att.splitterId === splitterId &&
+          att.port === port) return true;
+      att = c.sideB;
+      if (att && att.owner === 'splitter' && att.splitterId === splitterId &&
+          att.port === port) return true;
+    }
+    for (i = 0; i < (graph.pigtails || []).length; i++) {
+      att = graph.pigtails[i].connector;
+      if (att && att.owner === 'splitter' && att.splitterId === splitterId &&
+          att.port === port) return true;
+    }
+    return false;
+  }
+
   function isPortBusy(splitterId, port) {
     var key = portKey(splitterId, port);
     for (var i = 0; i < connections.length; i++) {
@@ -361,7 +402,84 @@
         return true;
       }
     }
-    return false;
+    return isFiberAttachedToPort(splitterId, port);
+  }
+
+  function toggleDustCap(splitterId, portId) {
+    var s = findSplitter(splitterId);
+    var p = getPort(s, portId);
+    if (!s || !p || !isOutPort(portId)) return;
+    if (isPortBusy(splitterId, portId)) {
+      setStatus('Unplug the fiber before fitting the dust cap');
+      return;
+    }
+    var capped = hasDustCap(p);
+    p.dustCap = !capped;
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
+    setStatus(
+      p.dustCap !== false
+        ? 'Dust cap on · ' + portId
+        : 'Dust cap removed · ' + portId + ' open'
+    );
+  }
+
+  /** Models for VFL optical fan-out (IN → all OUTs). */
+  function getLaserModels() {
+    return splitters.map(function (s) {
+      return {
+        id: s.id,
+        inputs: s.inputs.map(function (p) { return p.id; }),
+        outputs: s.outputs.map(function (p) {
+          return { id: p.id, dustCap: hasDustCap(p) };
+        }),
+      };
+    });
+  }
+
+  function syncPortLinkedClasses() {
+    if (!layer) return;
+    layer.querySelectorAll('.lab-cas-port').forEach(function (btn) {
+      var sid = btn.getAttribute('data-spl-id');
+      var port = btn.getAttribute('data-spl-port');
+      var busy = isPortBusy(sid, port);
+      btn.classList.toggle('is-linked', busy);
+      var shell = btn.closest('.lab-cas-port-shell');
+      if (shell) shell.classList.toggle('is-linked', busy);
+    });
+  }
+
+  function applySplitterLaserGlow(targets) {
+    syncPortLinkedClasses();
+    if (!layer) return;
+    var mode = String((targets && targets.mode) || 'OFF').toUpperCase();
+    var exits = (targets && targets.splitterExits) || {};
+    layer.querySelectorAll('.lab-cas-port[data-port-kind="out"]').forEach(function (el) {
+      var key = el.getAttribute('data-spl-id') + ':' + el.getAttribute('data-spl-port');
+      var on = mode !== 'OFF' && !!exits[key] && !el.classList.contains('is-linked');
+      el.classList.remove(
+        'is-vfl-laser-exit',
+        'is-vfl-laser-exit--cw',
+        'is-vfl-laser-exit--glint'
+      );
+      if (!on) return;
+      el.classList.add('is-vfl-laser-exit');
+      el.classList.add(mode === 'GLINT' ? 'is-vfl-laser-exit--glint' : 'is-vfl-laser-exit--cw');
+    });
+  }
+
+  function reapplyStoredVflGlow() {
+    if (global.FtthLab && FtthLab._vflGlow) {
+      applySplitterLaserGlow(FtthLab._vflGlow);
+    } else if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    } else {
+      syncPortLinkedClasses();
+    }
   }
 
   function connectPorts(from, to, cablePolish) {
@@ -675,13 +793,43 @@
     var busy = isPortBusy(s.id, port.id);
     var polishClass = port.polish === 'APC' ? 'is-apc' : 'is-upc';
     var num = port.id.replace(/^IN|^OUT/, '');
+    var capped = kind === 'out' && hasDustCap(port) && !busy;
+    var flare =
+      kind === 'out'
+        ? '<span class="lab-cas-port__flare" aria-hidden="true">' +
+          '<span class="lab-cas-port__flare-halo"></span>' +
+          '<span class="lab-cas-port__flare-core"></span>' +
+          '<span class="lab-cas-port__flare-hot"></span>' +
+          '</span>' +
+          '<span class="lab-cas-port__beam" aria-hidden="true"></span>'
+        : '';
+    /* Dust cap: covering when installed; stowed beside port when removed (click to refit). */
+    var cap =
+      kind === 'out' && !busy
+        ? '<button type="button" class="lab-cas-port__dustcap' +
+          (hasDustCap(port) ? '' : ' is-stowed') + '" ' +
+          'data-spl-dustcap="' + s.id + ':' + port.id + '" ' +
+          'title="' +
+          (hasDustCap(port)
+            ? 'Dust cap · click to remove'
+            : 'Dust cap stowed · click to refit') +
+          '" aria-label="Dust cap for ' + port.id + '"></button>'
+        : '';
     return (
+      '<span class="lab-cas-port-shell' + (busy ? ' is-linked' : '') +
+      (capped ? ' is-capped' : '') + '">' +
       '<button type="button" class="lab-cas-port ' + polishClass +
       (busy ? ' is-linked' : '') +
+      (capped ? ' is-capped' : '') +
       '" data-spl-id="' + s.id + '" data-spl-port="' + port.id + '" ' +
-      'title="' + port.id + ' · ' + port.polish + '" data-port-kind="' + kind + '">' +
-      '<i></i><span>' + num + '</span>' +
-      '</button>'
+      'title="' + port.id + ' · ' + port.polish +
+      (capped ? ' · dust cap on' : '') +
+      '" data-port-kind="' + kind + '">' +
+      '<i></i><span class="lab-cas-port__num">' + num + '</span>' +
+      flare +
+      '</button>' +
+      cap +
+      '</span>'
     );
   }
 
@@ -745,6 +893,7 @@
 
     host.innerHTML = html;
     bindLayerEvents(host);
+    reapplyStoredVflGlow();
   }
 
   function bindLayerEvents(host) {
@@ -774,7 +923,7 @@
             node.style.top = Math.round(s.y) + 'px';
           }
           if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-            FtthLab.notifyLayoutChange();
+            FtthLab.notifyLayoutChange({ source: 'splitter', live: true });
           }
         }
         function onUp() {
@@ -783,7 +932,7 @@
           if (moved) {
             pushHistory();
             if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-              FtthLab.notifyLayoutChange();
+              FtthLab.notifyLayoutChange({ source: 'splitter' });
             }
           }
         }
@@ -794,8 +943,21 @@
 
     host.querySelectorAll('[data-spl-node]').forEach(function (node) {
       node.addEventListener('click', function (e) {
-        if (e.target.closest('.lab-cas-port')) return;
+        if (e.target.closest('.lab-cas-port, [data-spl-dustcap]')) return;
         selectSplitter(node.getAttribute('data-spl-node'));
+      });
+    });
+
+    host.querySelectorAll('[data-spl-dustcap]').forEach(function (cap) {
+      cap.addEventListener('pointerdown', function (e) {
+        e.stopPropagation();
+      });
+      cap.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var parts = (cap.getAttribute('data-spl-dustcap') || '').split(':');
+        if (parts.length < 2) return;
+        toggleDustCap(parts[0], parts[1]);
       });
     });
 
@@ -808,14 +970,28 @@
         var s = findSplitter(id);
         if (!s) return;
 
-        /* Linked port + no pending patch → select link for Delete */
+        var port = getPort(s, portId);
         var pending = global.FtthLab && FtthLab._patchPending;
+
+        /* Auto-uncap OUT before accepting a fiber plug */
+        if (pending && port && hasDustCap(port) && !isPortBusy(id, portId)) {
+          port.dustCap = false;
+        }
+
+        /* Linked port + no pending patch → select link for Delete */
         if (!pending && isPortBusy(id, portId)) {
           var link = findLinkAt(id, portId);
           if (link) {
             selectLink(link);
             return;
           }
+        }
+
+        /* Capped OUT with no pending patch: tip to remove dust cap first */
+        if (!pending && port && hasDustCap(port) && !isPortBusy(id, portId)) {
+          selectSplitter(id);
+          setStatus('Remove dust cap on ' + portId + ' before patching');
+          return;
         }
 
         selectSplitter(id);
@@ -1017,6 +1193,20 @@
     rebuildLayer();
   }
 
+  function onLayoutChange(payload) {
+    /* Live equipment drag: only refresh linked/laser classes — avoid DOM rebuild. */
+    if (payload && payload.live) {
+      syncPortLinkedClasses();
+      return;
+    }
+    syncPortLinkedClasses();
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    } else {
+      reapplyStoredVflGlow();
+    }
+  }
+
   function onToolboxClaim(payload) {
     var id = payload && payload.toolId;
     if (id === 'smart-splitter') return;
@@ -1056,6 +1246,16 @@
       FtthLab.getSplitterLoss = function (type) {
         return SPLITTER_SPECS[type] ? SPLITTER_SPECS[type].lossDb : null;
       };
+      FtthLab.getSplitterLaserModels = getLaserModels;
+      FtthLab.refreshSplitterPorts = function () {
+        rebuildLayer();
+      };
+
+      var prevGlow = FtthLab.applyFiberLaserGlow;
+      FtthLab.applyFiberLaserGlow = function (targets) {
+        if (typeof prevGlow === 'function') prevGlow(targets);
+        applySplitterLaserGlow(targets);
+      };
     }
   }
 
@@ -1063,6 +1263,7 @@
     id: 'smart-splitter',
     mount: mount,
     onViewChange: onViewChange,
+    onLayoutChange: onLayoutChange,
     placeSplitter: placeSplitter,
     onPatchPort: onPatchPort,
     undo: undo,
@@ -1071,6 +1272,8 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     getNetworkLossDb: getNetworkLossDb,
+    getLaserModels: getLaserModels,
+    applySplitterLaserGlow: applySplitterLaserGlow,
   };
 
   function tryRegister() {
