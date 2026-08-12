@@ -1547,6 +1547,83 @@ body {
   visibility: visible;
 }
 
+/* Scenario A — forward split: attenuated / dim OUT glow */
+.lab-cas-port.is-vfl-laser-exit--dim .lab-cas-port__flare {
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  margin-top: -9px;
+  opacity: 0.55;
+  filter: saturate(0.85);
+}
+
+.lab-cas-port.is-vfl-laser-exit--dim .lab-cas-port__beam {
+  height: 0.65rem;
+  top: -0.65rem;
+  opacity: 0.42;
+  box-shadow:
+    0 0 2px rgba(239, 68, 68, 0.55),
+    0 0 5px rgba(239, 68, 68, 0.35);
+}
+
+.lab-cas-port.is-vfl-laser-exit--dim i {
+  box-shadow:
+    0 0 2px rgba(239, 68, 68, 0.55),
+    0 0 5px rgba(239, 68, 68, 0.4);
+  background: linear-gradient(180deg, #fca5a5, #ef4444) !important;
+  border-color: rgba(252, 165, 165, 0.75) !important;
+  opacity: 0.85;
+}
+
+/* Scenario B — reverse injection: concentrated high intensity on IN */
+.lab-cas-port.is-vfl-laser-exit--high .lab-cas-port__flare {
+  width: 36px;
+  height: 36px;
+  margin-left: -18px;
+  margin-top: -18px;
+  opacity: 1;
+  filter: brightness(1.25) saturate(1.15);
+}
+
+.lab-cas-port.is-vfl-laser-exit--high .lab-cas-port__flare-halo {
+  background: radial-gradient(
+    circle,
+    rgba(254, 202, 202, 0.95) 0%,
+    rgba(239, 68, 68, 0.7) 32%,
+    rgba(239, 68, 68, 0.25) 55%,
+    transparent 72%
+  );
+  filter: blur(1.4px);
+}
+
+.lab-cas-port.is-vfl-laser-exit--high .lab-cas-port__beam {
+  height: 1.55rem;
+  top: -1.55rem;
+  width: 4px;
+  margin-left: -2px;
+  opacity: 1;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(254, 202, 202, 0.35) 12%,
+    rgba(239, 68, 68, 1) 55%,
+    #fff 100%
+  );
+  box-shadow:
+    0 0 6px #ef4444,
+    0 0 14px rgba(239, 68, 68, 0.95),
+    0 0 22px rgba(254, 202, 202, 0.55);
+}
+
+.lab-cas-port.is-vfl-laser-exit--high i {
+  box-shadow:
+    0 0 6px #fff,
+    0 0 12px #ef4444,
+    0 0 20px rgba(239, 68, 68, 0.95);
+  background: linear-gradient(180deg, #ffffff, #fecaca, #ef4444) !important;
+  border-color: #fff !important;
+}
+
 .lab-cas-port.is-vfl-laser-exit i {
   box-shadow:
     0 0 4px #ef4444,

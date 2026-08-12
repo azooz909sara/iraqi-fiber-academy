@@ -794,6 +794,10 @@
     getSplitterLaserModels: function () { return []; },
     refreshVflLaser: null,
     refreshSplitterPorts: null,
+    /** Recompute VFL → fiber → PLC port glow (dim forward / high reverse). */
+    refreshOpticalLaser: function () {
+      if (typeof api.refreshVflLaser === 'function') api.refreshVflLaser();
+    },
   };
 
   global.FtthLab = api;

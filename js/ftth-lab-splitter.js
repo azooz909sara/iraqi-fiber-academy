@@ -63,20 +63,29 @@
     var list = [];
     var n = Math.max(1, Math.min(64, parseInt(count, 10) || 1));
     for (var i = 1; i <= n; i++) {
-      var port = { id: prefix + i, polish: defaultPolish || 'UPC' };
-      /* OUT ports ship with black dust caps installed (real PLC cassette). */
-      if (prefix === 'OUT') port.dustCap = true;
-      list.push(port);
+      list.push({
+        id: prefix + i,
+        polish: defaultPolish || 'UPC',
+        /* IN + OUT ship with black SC dust caps installed */
+        dustCap: true,
+      });
     }
     return list;
   }
 
-  function isOutPort(portId) {
-    return String(portId || '').indexOf('OUT') === 0;
+  function hasDustCap(port) {
+    return !!(port && port.dustCap !== false);
   }
 
-  function hasDustCap(port) {
-    return !!(port && isOutPort(port.id) && port.dustCap !== false);
+  function portCapSnapshot(p) {
+    return { polish: p.polish, dustCap: p.dustCap !== false };
+  }
+
+  function applyPortSnapshot(p, prev) {
+    if (!prev) return p;
+    p.polish = prev.polish;
+    p.dustCap = prev.dustCap;
+    return p;
   }
 
   function buildPortsFromSpec(type) {
@@ -131,6 +140,15 @@
     connSeq = snap.connSeq || 0;
     selection = { kind: 'none', splitterId: null, linkId: null };
     if (global.FtthLab) FtthLab._patchPending = null;
+    /* Migrate older cassettes that lacked IN dust caps */
+    splitters.forEach(function (s) {
+      (s.inputs || []).forEach(function (p) {
+        if (p.dustCap === undefined) p.dustCap = true;
+      });
+      (s.outputs || []).forEach(function (p) {
+        if (p.dustCap === undefined) p.dustCap = true;
+      });
+    });
     rebuildLayer();
     updateInspector();
     updateBudgetHud();
@@ -305,10 +323,9 @@
     if (!s) return;
     count = Math.max(1, Math.min(8, parseInt(count, 10) || 1));
     var prev = {};
-    s.inputs.forEach(function (p) { prev[p.id] = p.polish; });
+    s.inputs.forEach(function (p) { prev[p.id] = portCapSnapshot(p); });
     s.inputs = makePorts('IN', count, 'UPC').map(function (p) {
-      if (prev[p.id]) p.polish = prev[p.id];
-      return p;
+      return applyPortSnapshot(p, prev[p.id]);
     });
     pruneDeadLinks(s);
     rebuildLayer();
@@ -322,15 +339,9 @@
     if (!s) return;
     count = Math.max(1, Math.min(64, parseInt(count, 10) || 1));
     var prev = {};
-    s.outputs.forEach(function (p) {
-      prev[p.id] = { polish: p.polish, dustCap: p.dustCap !== false };
-    });
+    s.outputs.forEach(function (p) { prev[p.id] = portCapSnapshot(p); });
     s.outputs = makePorts('OUT', count, 'UPC').map(function (p) {
-      if (prev[p.id]) {
-        p.polish = prev[p.id].polish;
-        p.dustCap = prev[p.id].dustCap;
-      }
-      return p;
+      return applyPortSnapshot(p, prev[p.id]);
     });
     pruneDeadLinks(s);
     rebuildLayer();
@@ -408,7 +419,7 @@
   function toggleDustCap(splitterId, portId) {
     var s = findSplitter(splitterId);
     var p = getPort(s, portId);
-    if (!s || !p || !isOutPort(portId)) return;
+    if (!s || !p) return;
     if (isPortBusy(splitterId, portId)) {
       setStatus('Unplug the fiber before fitting the dust cap');
       return;
@@ -428,15 +439,16 @@
     );
   }
 
-  /** Models for VFL optical fan-out (IN → all OUTs). */
+  /** Models for VFL optical fan-out / reverse injection. */
   function getLaserModels() {
+    function spec(p) {
+      return { id: p.id, dustCap: hasDustCap(p) };
+    }
     return splitters.map(function (s) {
       return {
         id: s.id,
-        inputs: s.inputs.map(function (p) { return p.id; }),
-        outputs: s.outputs.map(function (p) {
-          return { id: p.id, dustCap: hasDustCap(p) };
-        }),
+        inputs: s.inputs.map(spec),
+        outputs: s.outputs.map(spec),
       };
     });
   }
@@ -453,21 +465,30 @@
     });
   }
 
+  function clearPortLaserClasses(el) {
+    el.classList.remove(
+      'is-vfl-laser-exit',
+      'is-vfl-laser-exit--cw',
+      'is-vfl-laser-exit--glint',
+      'is-vfl-laser-exit--dim',
+      'is-vfl-laser-exit--high'
+    );
+  }
+
   function applySplitterLaserGlow(targets) {
     syncPortLinkedClasses();
     if (!layer) return;
     var mode = String((targets && targets.mode) || 'OFF').toUpperCase();
     var exits = (targets && targets.splitterExits) || {};
-    layer.querySelectorAll('.lab-cas-port[data-port-kind="out"]').forEach(function (el) {
+    layer.querySelectorAll('.lab-cas-port').forEach(function (el) {
       var key = el.getAttribute('data-spl-id') + ':' + el.getAttribute('data-spl-port');
-      var on = mode !== 'OFF' && !!exits[key] && !el.classList.contains('is-linked');
-      el.classList.remove(
-        'is-vfl-laser-exit',
-        'is-vfl-laser-exit--cw',
-        'is-vfl-laser-exit--glint'
-      );
-      if (!on) return;
+      var intensity = exits[key];
+      clearPortLaserClasses(el);
+      if (mode === 'OFF' || !intensity || el.classList.contains('is-linked')) return;
+      if (intensity === true) intensity = 'dim';
+      if (intensity !== 'high' && intensity !== 'dim') intensity = 'dim';
       el.classList.add('is-vfl-laser-exit');
+      el.classList.add('is-vfl-laser-exit--' + intensity);
       el.classList.add(mode === 'GLINT' ? 'is-vfl-laser-exit--glint' : 'is-vfl-laser-exit--cw');
     });
   }
@@ -793,28 +814,25 @@
     var busy = isPortBusy(s.id, port.id);
     var polishClass = port.polish === 'APC' ? 'is-apc' : 'is-upc';
     var num = port.id.replace(/^IN|^OUT/, '');
-    var capped = kind === 'out' && hasDustCap(port) && !busy;
+    var capped = hasDustCap(port) && !busy;
     var flare =
-      kind === 'out'
-        ? '<span class="lab-cas-port__flare" aria-hidden="true">' +
-          '<span class="lab-cas-port__flare-halo"></span>' +
-          '<span class="lab-cas-port__flare-core"></span>' +
-          '<span class="lab-cas-port__flare-hot"></span>' +
-          '</span>' +
-          '<span class="lab-cas-port__beam" aria-hidden="true"></span>'
-        : '';
+      '<span class="lab-cas-port__flare" aria-hidden="true">' +
+      '<span class="lab-cas-port__flare-halo"></span>' +
+      '<span class="lab-cas-port__flare-core"></span>' +
+      '<span class="lab-cas-port__flare-hot"></span>' +
+      '</span>' +
+      '<span class="lab-cas-port__beam" aria-hidden="true"></span>';
     /* Dust cap: covering when installed; stowed beside port when removed (click to refit). */
-    var cap =
-      kind === 'out' && !busy
-        ? '<button type="button" class="lab-cas-port__dustcap' +
-          (hasDustCap(port) ? '' : ' is-stowed') + '" ' +
-          'data-spl-dustcap="' + s.id + ':' + port.id + '" ' +
-          'title="' +
-          (hasDustCap(port)
-            ? 'Dust cap · click to remove'
-            : 'Dust cap stowed · click to refit') +
-          '" aria-label="Dust cap for ' + port.id + '"></button>'
-        : '';
+    var cap = !busy
+      ? '<button type="button" class="lab-cas-port__dustcap' +
+        (hasDustCap(port) ? '' : ' is-stowed') + '" ' +
+        'data-spl-dustcap="' + s.id + ':' + port.id + '" ' +
+        'title="' +
+        (hasDustCap(port)
+          ? 'Dust cap · click to remove'
+          : 'Dust cap stowed · click to refit') +
+        '" aria-label="Dust cap for ' + port.id + '"></button>'
+      : '';
     return (
       '<span class="lab-cas-port-shell' + (busy ? ' is-linked' : '') +
       (capped ? ' is-capped' : '') + '">' +

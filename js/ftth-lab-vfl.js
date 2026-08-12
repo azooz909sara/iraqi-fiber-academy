@@ -407,24 +407,28 @@
       return null;
     }
 
-    function emitFromSplitterPort(sid, portSpec) {
+    function emitFromSplitterPort(sid, portSpec, intensity) {
       var portId = typeof portSpec === 'string' ? portSpec : portSpec.id;
       var dustCap = typeof portSpec === 'object' ? !!portSpec.dustCap : false;
+      var level = intensity === 'high' ? 'high' : 'dim';
       var fiber = findFiberOnSplitterPort(sid, portId);
       if (fiber) {
         if (fiber.kind === 'pcord') injectPcord(fiber.id, fiber.fromEnd);
         else injectPigtail(fiber.id);
         return;
       }
-      /* Open OUT with dust cap removed → beam exits the cassette port */
-      if (!dustCap && String(portId).indexOf('OUT') === 0) {
-        splitterExits[sid + ':' + portId] = true;
-      }
+      /* Open ferrule (dust cap removed) → beam exits this cassette port */
+      if (dustCap) return;
+      var key = sid + ':' + portId;
+      /* High reverse injection wins over dim forward split if both present */
+      if (splitterExits[key] === 'high') return;
+      splitterExits[key] = level;
     }
 
     /**
-     * PLC optical split: light on an IN fans out to every OUT.
-     * Reverse: light on an OUT returns on all IN ports (passive chip).
+     * PLC optics:
+     *  A) Light on IN → split to all OUTs at dim (attenuated) intensity
+     *  B) Light on OUT → reverse to all INs (+ other open INs) at high intensity
      */
     function injectSplitter(sid, entryPort) {
       if (!sid || !entryPort) return;
@@ -435,24 +439,37 @@
       var model = findModel(sid);
       if (!model) return;
 
-      var isIn = (model.inputs || []).indexOf(entryPort) >= 0;
+      function portIdOf(spec) {
+        return typeof spec === 'string' ? spec : spec.id;
+      }
+
+      var isIn = false;
       var isOut = false;
-      var oi;
-      for (oi = 0; oi < (model.outputs || []).length; oi++) {
-        if (model.outputs[oi].id === entryPort) {
+      var ii;
+      for (ii = 0; ii < (model.inputs || []).length; ii++) {
+        if (portIdOf(model.inputs[ii]) === entryPort) {
+          isIn = true;
+          break;
+        }
+      }
+      for (ii = 0; ii < (model.outputs || []).length; ii++) {
+        if (portIdOf(model.outputs[ii]) === entryPort) {
           isOut = true;
           break;
         }
       }
 
       if (isIn) {
+        /* Scenario A — forward split, attenuated on every OUT */
         (model.outputs || []).forEach(function (op) {
-          emitFromSplitterPort(sid, op);
+          emitFromSplitterPort(sid, op, 'dim');
         });
       } else if (isOut) {
+        /* Scenario B — reverse: concentrated high intensity on every IN */
         (model.inputs || []).forEach(function (ip) {
-          emitFromSplitterPort(sid, ip);
+          emitFromSplitterPort(sid, ip, 'high');
         });
+        /* Other open INs already covered; sibling OUTs stay dark (high isolation) */
       }
     }
 
