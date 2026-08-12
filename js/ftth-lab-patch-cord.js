@@ -835,10 +835,10 @@
   var CHAIKIN_ITERATIONS = 2;
   /** Catmull-Rom densify: samples per segment when polishing free-hand ink */
   var SPLINE_SAMPLES_PER_SEG = 5;
-  /** SVG Catmull handle divisor for non-catenary mid-spans */
-  var CATMULL_HANDLE_K = 5.0;
+  /** SVG Catmull handle divisor — lower = silkier mid-span (always cubic, never raw L) */
+  var CATMULL_HANDLE_K = 3.8;
   /* ─── Mid-span rope / spring-damper (fully linked cords) ─── */
-  var PHYS_SEGMENTS = 20;
+  var PHYS_SEGMENTS = 28;
   var PHYS_DAMPING = 0.9;
   var PHYS_REST_SPRING = 0.07;
   var PHYS_STRUCT_ITERS = 5;
@@ -1877,58 +1877,101 @@
     return aChain.concat(cleaned).concat(bChain.slice().reverse());
   }
 
-  /** Catmull-Rom cubic commands; pen is already at pts[0]. */
-  function catmullRomCubicCommands(pts) {
+  /** Catmull-Rom / cubic spline commands; pen is already at pts[0].
+   *  opts.inTan / opts.outTan (unit vectors) keep G1 continuity with strain-relief stubs.
+   */
+  function catmullRomCubicCommands(pts, opts) {
+    opts = opts || {};
     if (!pts || pts.length < 2) return '';
+    var inTan = opts.inTan || null;
+    var outTan = opts.outTan || null;
+    var k = CATMULL_HANDLE_K;
+
     if (pts.length === 2) {
-      return ' L ' + pts[1].x + ' ' + pts[1].y;
-    }
-    if (pts.length === 3) {
+      var h2 = dist2(pts[0].x, pts[0].y, pts[1].x, pts[1].y) / 3;
+      if (h2 < 0.5) return ' L ' + pts[1].x + ' ' + pts[1].y;
+      var i0 = inTan || {
+        x: (pts[1].x - pts[0].x) / (h2 * 3 || 1),
+        y: (pts[1].y - pts[0].y) / (h2 * 3 || 1),
+      };
+      var o0 = outTan || i0;
       return (
-        ' Q ' + pts[1].x + ' ' + pts[1].y + ', ' + pts[2].x + ' ' + pts[2].y
+        ' C ' + (pts[0].x + i0.x * h2) + ' ' + (pts[0].y + i0.y * h2) + ', ' +
+        (pts[1].x - o0.x * h2) + ' ' + (pts[1].y - o0.y * h2) + ', ' +
+        pts[1].x + ' ' + pts[1].y
       );
     }
+
+    if (pts.length === 3) {
+      /* Promote Q to C with optional end tangents for fluid joins */
+      var a = pts[0];
+      var b = pts[1];
+      var c = pts[2];
+      var hA = dist2(a.x, a.y, b.x, b.y) / 3;
+      var hB = dist2(b.x, b.y, c.x, c.y) / 3;
+      var tIn = inTan || { x: (b.x - a.x) / (hA * 3 || 1), y: (b.y - a.y) / (hA * 3 || 1) };
+      var tOut = outTan || { x: (c.x - b.x) / (hB * 3 || 1), y: (c.y - b.y) / (hB * 3 || 1) };
+      return (
+        ' C ' + (a.x + tIn.x * hA) + ' ' + (a.y + tIn.y * hA) + ', ' +
+        (b.x - (c.x - a.x) / k) + ' ' + (b.y - (c.y - a.y) / k) + ', ' +
+        b.x + ' ' + b.y +
+        ' C ' + (b.x + (c.x - a.x) / k) + ' ' + (b.y + (c.y - a.y) / k) + ', ' +
+        (c.x - tOut.x * hB) + ' ' + (c.y - tOut.y * hB) + ', ' +
+        c.x + ' ' + c.y
+      );
+    }
+
     var d = '';
-    var k = CATMULL_HANDLE_K;
     var i;
     for (i = 0; i < pts.length - 1; i++) {
       var p0 = pts[i - 1] || pts[i];
       var p1 = pts[i];
       var p2 = pts[i + 1];
       var p3 = pts[i + 2] || p2;
-      var c1x = p1.x + (p2.x - p0.x) / k;
-      var c1y = p1.y + (p2.y - p0.y) / k;
-      var c2x = p2.x - (p3.x - p1.x) / k;
-      var c2y = p2.y - (p3.y - p1.y) / k;
+      var seg = dist2(p1.x, p1.y, p2.x, p2.y);
+      var c1x;
+      var c1y;
+      var c2x;
+      var c2y;
+      if (i === 0 && inTan) {
+        var hIn = Math.max(seg / 3, 4);
+        c1x = p1.x + inTan.x * hIn;
+        c1y = p1.y + inTan.y * hIn;
+      } else {
+        c1x = p1.x + (p2.x - p0.x) / k;
+        c1y = p1.y + (p2.y - p0.y) / k;
+      }
+      if (i === pts.length - 2 && outTan) {
+        var hOut = Math.max(seg / 3, 4);
+        c2x = p2.x - outTan.x * hOut;
+        c2y = p2.y - outTan.y * hOut;
+      } else {
+        c2x = p2.x - (p3.x - p1.x) / k;
+        c2y = p2.y - (p3.y - p1.y) / k;
+      }
       d += ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + p2.x + ' ' + p2.y;
     }
     return d;
   }
 
-  /** Dense polyline through true-catenary samples (no Catmull distortion). */
-  function polylineCommands(pts) {
-    if (!pts || pts.length < 2) return '';
-    var d = '';
-    var i;
-    for (i = 1; i < pts.length; i++) {
-      d += ' L ' + pts[i].x + ' ' + pts[i].y;
-    }
-    return d;
+  function unitVec(x, y) {
+    var d = Math.sqrt(x * x + y * y);
+    if (d < 1e-8) return { x: 0, y: 1 };
+    return { x: x / d, y: y / d };
   }
 
   /**
-   * Straight strain-relief leads/trails, then mid-span curve.
-   * opts.exactMid: use polyline L segments (true catenary samples).
+   * Straight strain-relief leads/trails (L only on the short axial stubs),
+   * mid-span always cubic-spline interpolated — never raw polyline vertices.
    */
   function smoothPathThrough(pts, opts) {
     opts = opts || {};
     if (!pts || pts.length < 2) return '';
     var lead = opts.strainLead != null ? opts.strainLead : 0;
     var trail = opts.strainTrail != null ? opts.strainTrail : 0;
-    var exactMid = !!opts.exactMid;
+
     if (lead < 2 && trail < 2) {
-      var full = 'M ' + pts[0].x + ' ' + pts[0].y;
-      return full + (exactMid ? polylineCommands(pts) : catmullRomCubicCommands(pts));
+      return 'M ' + pts[0].x + ' ' + pts[0].y + catmullRomCubicCommands(pts);
     }
 
     var d = 'M ' + pts[0].x + ' ' + pts[0].y;
@@ -1940,7 +1983,21 @@
     var midEnd = Math.min(pts.length - 1, pts.length - trail);
     if (midEnd > midStart) {
       var mid = pts.slice(midStart, midEnd + 1);
-      d += exactMid ? polylineCommands(mid) : catmullRomCubicCommands(mid);
+      var inTan = null;
+      var outTan = null;
+      if (midStart >= 1) {
+        inTan = unitVec(
+          pts[midStart].x - pts[midStart - 1].x,
+          pts[midStart].y - pts[midStart - 1].y
+        );
+      }
+      if (midEnd + 1 < pts.length) {
+        outTan = unitVec(
+          pts[midEnd + 1].x - pts[midEnd].x,
+          pts[midEnd + 1].y - pts[midEnd].y
+        );
+      }
+      d += catmullRomCubicCommands(mid, { inTan: inTan, outTan: outTan });
     }
     for (i = midEnd + 1; i < pts.length; i++) {
       d += ' L ' + pts[i].x + ' ' + pts[i].y;
@@ -1949,17 +2006,35 @@
   }
 
   /**
-   * Connected / drawn routes: axial strain relief + true-catenary mid-span.
-   * Free-hand (unlocked) still uses Catmull through live waypoints.
+   * Render-only densify of the free mid-span so sparse rope / catenary samples
+   * never show polygonal corners. Strain-relief stubs are left untouched.
+   */
+  function densifyMidSpanForSpline(pts, lead, trail) {
+    if (!pts || pts.length < lead + trail) return pts;
+    var midStart = Math.max(0, lead - 1);
+    var midEnd = Math.min(pts.length - 1, pts.length - trail);
+    if (midEnd - midStart < 2) return pts;
+    var mid = pts.slice(midStart, midEnd + 1);
+    mid = catmullRomResample(mid, 4);
+    if (mid.length >= 4) mid = chaikinSmooth(mid, 1);
+    return pts.slice(0, midStart).concat(mid).concat(pts.slice(midEnd + 1));
+  }
+
+  /**
+   * Always spline-smooth mid-span (drag, settle, locked catenary, free-hand).
+   * Strain-relief stubs stay straight; cubic handles match their exit tangents.
    */
   function cordCablePath(cord) {
     var route = ensureRoute(cord);
     if (route.length || cord.pathLocked) {
-      var exact = !!(cord.pathLocked && cord.sideA.attached && cord.sideB.attached);
-      return smoothPathThrough(buildCablePoints(cord), {
+      var pts = densifyMidSpanForSpline(
+        buildCablePoints(cord),
+        STRAIN_LEAD_PTS,
+        STRAIN_LEAD_PTS
+      );
+      return smoothPathThrough(pts, {
         strainLead: STRAIN_LEAD_PTS,
         strainTrail: STRAIN_LEAD_PTS,
-        exactMid: exact,
       });
     }
     return gravityBezierPath(cord);
@@ -1968,7 +2043,7 @@
   /**
    * Fallback only for untraced cords (no mouse path yet).
    * Both ends free → clean chord along boot exit axes.
-   * One end plugged → true catenary with strain-relief stubs.
+   * One end plugged → true catenary samples drawn as a cubic spline.
    */
   function gravityBezierPath(cord) {
     var tipA = bootAnchor(cord, 'A');
@@ -1990,7 +2065,7 @@
       );
     }
 
-    /* Strict axial exits, then true catenary between relief tips */
+    /* Strict axial exits, then cubic spline through true-catenary samples */
     var stub = Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB);
     var p0 = {
       x: tipA.x + tA.x * stub,
@@ -2004,15 +2079,15 @@
     var sag = catenarySagDepth(chord);
     var L = Math.max(chord * CATENARY_DEFAULT_SLACK, catenaryLengthForSag(p0, p3, sag));
     var mid = sampleTrueCatenary(p0, p3, L, CATENARY_SAMPLES);
-    var d =
+    /* Arrive at p3 heading toward tipB (= −bootOut on B) for seamless stub join */
+    var uA = unitVec(tA.x, tA.y);
+    var uB = unitVec(-tB.x, -tB.y);
+    return (
       'M ' + tipA.x + ' ' + tipA.y +
-      ' L ' + p0.x + ' ' + p0.y;
-    var i;
-    for (i = 1; i < mid.length; i++) {
-      d += ' L ' + mid[i].x + ' ' + mid[i].y;
-    }
-    d += ' L ' + tipB.x + ' ' + tipB.y;
-    return d;
+      ' L ' + p0.x + ' ' + p0.y +
+      catmullRomCubicCommands(mid, { inTan: uA, outTan: uB }) +
+      ' L ' + tipB.x + ' ' + tipB.y
+    );
   }
 
   function endStyle(cord, end) {
