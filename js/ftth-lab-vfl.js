@@ -250,15 +250,70 @@
     rebuildLayer();
   }
 
+  function switchTopPct(mode) {
+    mode = normalizeMode(mode);
+    if (mode === 'CW') return '14%';
+    if (mode === 'GLINT') return '86%';
+    return '50%';
+  }
+
+  function modeFromTrackRatio(t) {
+    if (t < 0.33) return 'CW';
+    if (t < 0.67) return 'OFF';
+    return 'GLINT';
+  }
+
   function setMode(id, mode) {
     var d = findDevice(id);
     if (!d) return;
-    d.mode = normalizeMode(mode);
+    var next = normalizeMode(mode);
+    if (normalizeMode(d.mode) === next) {
+      refreshLaserGlow();
+      updateInspector();
+      return;
+    }
+    d.mode = next;
     rebuildLayer();
     updateInspector();
     pushHistory();
     refreshLaserGlow();
     setStatus('VFL · ' + modeLabel(d.mode) + ' · 650 nm · 10 mW');
+  }
+
+  /** Live track drag — update UI + laser without history spam. */
+  function applyModeLive(id, mode) {
+    var d = findDevice(id);
+    if (!d) return;
+    var next = normalizeMode(mode);
+    if (normalizeMode(d.mode) === next) return;
+    d.mode = next;
+    var node = layer && layer.querySelector('[data-vfl-node="' + id + '"]');
+    if (node) {
+      node.classList.remove('is-mode-cw', 'is-mode-off', 'is-mode-glint');
+      node.classList.add('is-mode-' + next.toLowerCase());
+      var slider = node.querySelector('.lab-vfl__slider');
+      if (slider) slider.style.top = switchTopPct(next);
+      node.querySelectorAll('[data-vfl-set-mode]').forEach(function (btn) {
+        var m = (btn.getAttribute('data-vfl-set-mode') || '').split(':')[1];
+        btn.classList.toggle('is-active', m === next);
+      });
+      var laserOn = next !== 'OFF';
+      var beam = node.querySelector('.lab-vfl__beam');
+      if (laserOn && !beam) {
+        var span = document.createElement('span');
+        span.className = 'lab-vfl__beam' + (next === 'GLINT' ? ' is-glint' : '');
+        span.setAttribute('aria-hidden', 'true');
+        node.appendChild(span);
+      } else if (!laserOn && beam) {
+        beam.parentNode.removeChild(beam);
+      } else if (beam) {
+        beam.classList.toggle('is-glint', next === 'GLINT');
+      }
+      var port = node.querySelector('[data-vfl-port]');
+      if (port) port.classList.toggle('is-emitting', laserOn);
+    }
+    refreshLaserGlow();
+    updateInspector();
   }
 
   /* ─── Laser propagation (emit from central SC adapter when fiber is plugged) ─── */
@@ -440,7 +495,7 @@
     var modeClass = ' is-mode-' + mode.toLowerCase();
     var plugged = d.plugged ? ' is-plugged' : '';
     var laserOn = mode !== 'OFF';
-    var switchPos = mode === 'CW' ? '14%' : (mode === 'GLINT' ? '86%' : '50%');
+    var switchPos = switchTopPct(mode);
     return (
       '<div class="lab-vfl' + selected + modeClass + plugged + '" data-vfl-node="' + d.id + '" ' +
       'style="left:' + Math.round(d.x) + 'px;top:' + Math.round(d.y) + 'px" ' +
@@ -476,10 +531,22 @@
       '<span class="lab-vfl__label">FAULT LOCATOR</span>' +
       '<span class="lab-vfl__caution" aria-hidden="true">CAUTION · LASER</span>' +
       '<span class="lab-vfl__ring" aria-hidden="true"></span>' +
-      '<span class="lab-vfl__switch-row" aria-hidden="true">' +
-      '<span class="lab-vfl__modes"><b>CW</b><b>OFF</b><b>GLINT</b></span>' +
-      '<span class="lab-vfl__track"><i class="lab-vfl__slider" style="top:' + switchPos + '"></i></span>' +
-      '</span>' +
+      '<div class="lab-vfl__switch-row" data-vfl-switch="' + d.id + '" ' +
+      'role="group" aria-label="VFL laser mode switch">' +
+      '<button type="button" class="lab-vfl__mode-hit' + (mode === 'CW' ? ' is-active' : '') +
+      '" data-vfl-set-mode="' + d.id + ':CW" title="CW · Continuous">CW</button>' +
+      '<button type="button" class="lab-vfl__mode-hit' + (mode === 'OFF' ? ' is-active' : '') +
+      '" data-vfl-set-mode="' + d.id + ':OFF" title="OFF">OFF</button>' +
+      '<button type="button" class="lab-vfl__mode-hit' + (mode === 'GLINT' ? ' is-active' : '') +
+      '" data-vfl-set-mode="' + d.id + ':GLINT" title="GLINT · Pulsing">GLINT</button>' +
+      '<div class="lab-vfl__track" data-vfl-switch-track="' + d.id + '" ' +
+      'title="Drag to set CW / OFF / GLINT" role="slider" ' +
+      'aria-valuemin="0" aria-valuemax="2" aria-valuenow="' +
+      (mode === 'CW' ? '0' : mode === 'GLINT' ? '2' : '1') + '" ' +
+      'aria-valuetext="' + mode + '">' +
+      '<i class="lab-vfl__slider" style="top:' + switchPos + '"></i>' +
+      '</div>' +
+      '</div>' +
       '<span class="lab-vfl__grip" aria-hidden="true"></span>' +
       '</div>' +
       (laserOn
@@ -504,6 +571,9 @@
     host.querySelectorAll('[data-vfl-node]').forEach(function (node) {
       node.addEventListener('click', function (e) {
         if (e.target.closest('[data-vfl-port]')) return;
+        if (e.target.closest(
+          '[data-vfl-switch], [data-vfl-set-mode], [data-vfl-switch-track]'
+        )) return;
         e.stopPropagation();
         selectVfl(node.getAttribute('data-vfl-node'));
       });
@@ -516,9 +586,95 @@
       });
     });
 
+    /* Click CW / OFF / GLINT labels */
+    host.querySelectorAll('[data-vfl-set-mode]').forEach(function (btn) {
+      btn.addEventListener('pointerdown', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      btn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var parts = (btn.getAttribute('data-vfl-set-mode') || '').split(':');
+        if (parts.length < 2) return;
+        selectVfl(parts[0]);
+        setMode(parts[0], parts[1]);
+      });
+    });
+
+    /* Click / drag orange slider track → CW / OFF / GLINT */
+    host.querySelectorAll('[data-vfl-switch-track]').forEach(function (track) {
+      track.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var id = track.getAttribute('data-vfl-switch-track');
+        var d = findDevice(id);
+        if (!d) return;
+        selectVfl(id);
+        var startMode = normalizeMode(d.mode);
+        var lastMode = startMode;
+
+        function ratioFromEvent(ev) {
+          var r = track.getBoundingClientRect();
+          var t = r.height > 0 ? (ev.clientY - r.top) / r.height : 0.5;
+          if (t < 0) t = 0;
+          if (t > 1) t = 1;
+          return t;
+        }
+
+        function applyFromEvent(ev, liveThumb) {
+          var t = ratioFromEvent(ev);
+          var mode = modeFromTrackRatio(t);
+          if (mode !== lastMode) {
+            lastMode = mode;
+            applyModeLive(id, mode);
+          }
+          var slider = track.querySelector('.lab-vfl__slider');
+          if (slider && liveThumb) {
+            slider.style.top = Math.max(8, Math.min(92, t * 100)) + '%';
+          } else if (slider) {
+            slider.style.top = switchTopPct(mode);
+          }
+        }
+
+        applyFromEvent(e, false);
+        try { track.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+        function onMove(ev) {
+          applyFromEvent(ev, true);
+        }
+        function onUp(ev) {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+          try { track.releasePointerCapture(e.pointerId); } catch (err2) { /* ignore */ }
+          var finalMode = modeFromTrackRatio(ratioFromEvent(ev));
+          if (finalMode !== startMode) {
+            /* Commit once: rebuild + history (applyModeLive already set d.mode) */
+            d.mode = normalizeMode(finalMode);
+            rebuildLayer();
+            updateInspector();
+            pushHistory();
+            refreshLaserGlow();
+            setStatus('VFL · ' + modeLabel(d.mode) + ' · 650 nm · 10 mW');
+          } else {
+            rebuildLayer();
+            refreshLaserGlow();
+          }
+        }
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
+      });
+    });
+
     host.querySelectorAll('[data-vfl-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
+        if (e.target.closest(
+          '[data-vfl-switch], [data-vfl-set-mode], [data-vfl-switch-track], .lab-vfl__slider'
+        )) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-vfl-drag');
