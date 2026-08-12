@@ -2,6 +2,8 @@
  * Patch Cord — symmetrical click-and-drag for End A and End B
  * Plugged end stays locked; free end moves only on mouse-down+hold.
  * Manual mouse path is recorded and frozen when the free end snaps.
+ * Fully linked cords: drag the fiber body for elastic stretch; release
+ * runs a Verlet spring-damper settle into natural gravity sag.
  */
 (function (global) {
   'use strict';
@@ -28,6 +30,9 @@
   /** Dual-state link: A locked in port, B follows mouse until snap */
   var linkSession = null; /* { cordId, freeEnd } */
   var suppressPortClickUntil = 0;
+  /** Ephemeral rope sim keyed by cord id (not persisted in history) */
+  var ropePhysics = {};
+  var physRafId = 0;
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -102,6 +107,7 @@
     if (!snap) return;
     historyLocked = true;
     endLinkSession({ silent: true });
+    clearAllRopePhysics();
     cords = cloneJson(snap.cords) || [];
     seq = snap.seq || 0;
     selection = { kind: 'none', cordId: null };
@@ -174,6 +180,7 @@
 
   function removeCord(id) {
     if (linkSession && linkSession.cordId === id) endLinkSession({ silent: true });
+    clearRopePhysics(id);
     cords = cords.filter(function (c) { return c.id !== id; });
     if (selection.cordId === id) selection = { kind: 'none', cordId: null };
     rebuildLayer();
@@ -270,6 +277,7 @@
     side.lockedRot = null;
     /* Keep last live heading if any; drag will update it */
     cord.pathLocked = false;
+    clearRopePhysics(cord.id);
   }
 
   /* ─── Hit-test equipment ports ─── */
@@ -817,11 +825,27 @@
   var GRAVITY_SAG_MIN = 24;
   var GRAVITY_SAG_MAX = 160;
   /** How strongly locked routes blend toward a hanging catenary (0–1) */
-  var GRAVITY_BLEND = 0.4;
+  var GRAVITY_BLEND = 0.4; /* unused on custom ink — keep for empty-span fallback */
   /** Min world distance between recorded mouse-path samples (anti-jitter) */
   var TRACE_SAMPLE_PX = 14;
   var TRACE_MAX_POINTS = 180;
   var CHAIKIN_ITERATIONS = 2;
+  /** Catmull-Rom densify: samples per segment when locking / polishing ink */
+  var SPLINE_SAMPLES_PER_SEG = 5;
+  /** SVG Catmull handle divisor — lower = silkier mid-span (still through waypoints) */
+  var CATMULL_HANDLE_K = 5.0;
+  /* ─── Mid-span rope / spring-damper (fully linked cords) ─── */
+  var PHYS_SEGMENTS = 20;
+  var PHYS_DAMPING = 0.9;
+  var PHYS_REST_SPRING = 0.07;
+  var PHYS_STRUCT_ITERS = 5;
+  var PHYS_STRUCT_STRENGTH = 0.52;
+  var PHYS_GRAB_SIGMA = 2.6; /* particle-index falloff for rubber pull */
+  var PHYS_GRAB_NEIGHBOR = 0.62;
+  var PHYS_RELEASE_KICK = 0.38; /* initial Verlet impulse toward rest */
+  var PHYS_SUBSTEPS = 2;
+  var PHYS_SETTLE_EPS = 0.55;
+  var PHYS_MAX_SETTLE = 220;
 
   function dist2(ax, ay, bx, by) {
     var dx = ax - bx;
@@ -1002,8 +1026,8 @@
   }
 
   /**
-   * Blend user midpoints toward a hanging catenary between relief tips.
-   * Preserves overall drawn shape while adding natural gravity drape.
+   * Blend midpoints toward a hanging catenary (empty-span fallback only).
+   * Custom user ink must not call this with a high weight — it flattens depth.
    */
   function drapeRouteTowardCatenary(route, p0, p3, weight) {
     if (!route || !route.length) return [];
@@ -1030,6 +1054,151 @@
         x: p.x * (1 - weight) + cx * weight,
         y: p.y * (1 - weight) + cy * weight,
       });
+    }
+    return out;
+  }
+
+  function polylineLength(pts) {
+    if (!pts || pts.length < 2) return 0;
+    var len = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      len += dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    return len;
+  }
+
+  /**
+   * Max drop below the end-to-end chord (y+ down) — measures user sag depth.
+   */
+  function routeSagDepth(pts) {
+    if (!pts || pts.length < 3) return 0;
+    var a = pts[0];
+    var b = pts[pts.length - 1];
+    var dy = b.y - a.y;
+    var cum = [0];
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      cum[i] = cum[i - 1] + dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    var total = cum[cum.length - 1] || 1;
+    var sag = 0;
+    for (i = 1; i < pts.length - 1; i++) {
+      var t = cum[i] / total;
+      var cy = a.y + dy * t;
+      var drop = pts[i].y - cy;
+      if (drop > sag) sag = drop;
+    }
+    return sag;
+  }
+
+  /** Uniform Catmull-Rom sample on segment p1→p2 (t in [0,1]). */
+  function catmullRomPoint(p0, p1, p2, p3, t) {
+    var t2 = t * t;
+    var t3 = t2 * t;
+    return {
+      x: 0.5 * (
+        (2 * p1.x) +
+        (-p0.x + p2.x) * t +
+        (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+        (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3
+      ),
+      y: 0.5 * (
+        (2 * p1.y) +
+        (-p0.y + p2.y) * t +
+        (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+        (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3
+      ),
+    };
+  }
+
+  /**
+   * Densify an open polyline with Catmull-Rom samples that pass through every
+   * waypoint — preserves user layout/depth while producing silky segments.
+   */
+  function catmullRomResample(pts, samplesPerSeg) {
+    if (!pts || pts.length < 2) return pts ? pts.slice() : [];
+    if (pts.length === 2) {
+      return samplePolyline(pts, Math.max(2, samplesPerSeg + 1));
+    }
+    samplesPerSeg = Math.max(2, samplesPerSeg || SPLINE_SAMPLES_PER_SEG);
+    var out = [];
+    var segs = pts.length - 1;
+    var i;
+    var s;
+    for (i = 0; i < segs; i++) {
+      var p0 = pts[i === 0 ? 0 : i - 1];
+      var p1 = pts[i];
+      var p2 = pts[i + 1];
+      var p3 = pts[i + 2 < pts.length ? i + 2 : pts.length - 1];
+      for (s = 0; s < samplesPerSeg; s++) {
+        if (i > 0 && s === 0) continue;
+        out.push(catmullRomPoint(p0, p1, p2, p3, s / samplesPerSeg));
+      }
+    }
+    var last = pts[pts.length - 1];
+    out.push({ x: last.x, y: last.y });
+    return out;
+  }
+
+  /**
+   * After any shrink-prone polish, restore chord-relative sag + path length
+   * so the cable keeps the user's drawn depth instead of collapsing shallow.
+   */
+  function restoreRouteMetrics(smoothed, reference) {
+    if (!smoothed || smoothed.length < 3 || !reference || reference.length < 2) {
+      return smoothed;
+    }
+    var targetSag = routeSagDepth(reference);
+    var targetLen = polylineLength(reference);
+    var curSag = routeSagDepth(smoothed);
+    var a = smoothed[0];
+    var b = smoothed[smoothed.length - 1];
+    var dx = b.x - a.x;
+    var dy = b.y - a.y;
+    var cum = [0];
+    var i;
+    for (i = 1; i < smoothed.length; i++) {
+      cum[i] = cum[i - 1] + dist2(
+        smoothed[i - 1].x, smoothed[i - 1].y,
+        smoothed[i].x, smoothed[i].y
+      );
+    }
+    var total = cum[cum.length - 1] || 1;
+    var sagScale = curSag > 1e-3 ? targetSag / curSag : 1;
+    if (sagScale > 0.99 && sagScale < 1.01 && Math.abs(polylineLength(smoothed) - targetLen) < 4) {
+      return smoothed;
+    }
+    var out = [{ x: a.x, y: a.y }];
+    for (i = 1; i < smoothed.length - 1; i++) {
+      var t = cum[i] / total;
+      var cx = a.x + dx * t;
+      var cy = a.y + dy * t;
+      var p = smoothed[i];
+      out.push({
+        x: cx + (p.x - cx) * sagScale,
+        y: cy + (p.y - cy) * sagScale,
+      });
+    }
+    out.push({ x: b.x, y: b.y });
+    var newLen = polylineLength(out);
+    if (newLen > 1e-3 && targetLen > 1e-3) {
+      var lenScale = targetLen / newLen;
+      if (Math.abs(lenScale - 1) > 0.02 && Math.abs(lenScale - 1) < 0.45) {
+        var mid = [];
+        mid.push({ x: a.x, y: a.y });
+        for (i = 1; i < out.length - 1; i++) {
+          var tt = cum[i] / total;
+          var bx = a.x + dx * tt;
+          var by = a.y + dy * tt;
+          mid.push({
+            x: bx + (out[i].x - bx) * lenScale,
+            y: by + (out[i].y - by) * lenScale,
+          });
+        }
+        mid.push({ x: b.x, y: b.y });
+        return mid;
+      }
     }
     return out;
   }
@@ -1077,7 +1246,7 @@
     return out;
   }
 
-  /** Drop near-duplicate vertices before Chaikin (keeps endpoints). */
+  /** Drop near-duplicate vertices before spline polish (keeps endpoints). */
   function simplifyRouteMinDist(pts, minDist) {
     if (!pts || pts.length < 3) return pts ? pts.slice() : [];
     var out = [{ x: pts[0].x, y: pts[0].y }];
@@ -1099,7 +1268,7 @@
 
   /**
    * Chaikin's corner-cutting on an open polyline (endpoints preserved).
-   * Softens jagged hand-drawn corners into an organic sagging curve.
+   * Softens jagged hand-drawn corners — may shorten; pair with restoreRouteMetrics.
    */
   function chaikinSmooth(pts, iterations) {
     if (!pts || pts.length < 3) return pts ? pts.slice() : [];
@@ -1131,38 +1300,57 @@
     return curr;
   }
 
-  /** Post-draw cleanup: simplify jitter → Chaikin → optional downsample. */
+  /**
+   * Polish user ink: simplify jitter → Catmull-Rom densify (shape/depth kept).
+   * Optional light Chaikin + metric restore for extra silk without shallow collapse.
+   */
   function smoothDrawnRoute(cord, opts) {
     opts = opts || {};
     if (!cord || (cord.pathLocked && !opts.force)) return;
     var route = ensureRoute(cord);
-    if (route.length < 3) return;
-    var iters = opts.iterations != null ? opts.iterations : CHAIKIN_ITERATIONS;
-    route = simplifyRouteMinDist(route, TRACE_SAMPLE_PX * 0.75);
-    route = chaikinSmooth(route, iters);
+    if (route.length < 2) return;
+    var reference = route.map(function (p) {
+      return { x: p.x, y: p.y };
+    });
+    route = simplifyRouteMinDist(route, TRACE_SAMPLE_PX * 0.65);
+    if (route.length < 2) {
+      cord.route = reference;
+      return;
+    }
+    var perSeg = opts.samplesPerSeg != null ? opts.samplesPerSeg : SPLINE_SAMPLES_PER_SEG;
+    route = catmullRomResample(route, perSeg);
+    var chaikinIters = opts.iterations != null ? opts.iterations : 0;
+    if (chaikinIters > 0 && route.length >= 3) {
+      route = chaikinSmooth(route, Math.min(chaikinIters, 2));
+      route = restoreRouteMetrics(route, reference);
+    }
     if (route.length > TRACE_MAX_POINTS) {
       route = downsampleRoute(route, TRACE_MAX_POINTS);
+      route = restoreRouteMetrics(route, reference);
     }
     cord.route = route;
   }
 
   /**
-   * Full connection: keep drawn waypoints, Chaikin-smooth, then blend a
-   * distance-scaled catenary drape. Strain relief is applied at render time.
+   * Full connection: keep the user's drawn length/depth/layout, polish with
+   * Catmull-Rom only. Empty ink → natural hanging span. Strain relief at render.
    */
   function lockDrawnPath(cord) {
     if (!cord) return;
     cord.pathLocked = false;
-    smoothDrawnRoute(cord, { force: true, iterations: Math.max(CHAIKIN_ITERATIONS, 3) });
     var aChain = strainReliefChain(cord, 'A');
     var bChain = strainReliefChain(cord, 'B');
     var aOuter = aChain[aChain.length - 1];
     var bOuter = bChain[bChain.length - 1];
     var route = ensureRoute(cord);
     if (route.length >= 2) {
-      cord.route = drapeRouteTowardCatenary(route, aOuter, bOuter, GRAVITY_BLEND);
+      /* Preserve custom shape — do not blend toward a shallow default arc */
+      smoothDrawnRoute(cord, {
+        force: true,
+        samplesPerSeg: SPLINE_SAMPLES_PER_SEG,
+        iterations: 1,
+      });
     } else if (cord.sideA.attached && cord.sideB.attached) {
-      /* No ink — pure hanging span between relief tips */
       cord.route = drapeRouteTowardCatenary(
         [{ x: (aOuter.x + bOuter.x) / 2, y: (aOuter.y + bOuter.y) / 2 }],
         aOuter,
@@ -1172,9 +1360,358 @@
     }
     route = ensureRoute(cord);
     if (route.length > TRACE_MAX_POINTS) {
-      cord.route = downsampleRoute(route, TRACE_MAX_POINTS);
+      var ref = route.slice();
+      cord.route = restoreRouteMetrics(downsampleRoute(route, TRACE_MAX_POINTS), ref);
     }
     cord.pathLocked = true;
+  }
+
+  function clearRopePhysics(cordId) {
+    if (!cordId || !ropePhysics[cordId]) return;
+    ropePhysics[cordId].settling = false;
+    delete ropePhysics[cordId];
+  }
+
+  function clearAllRopePhysics() {
+    Object.keys(ropePhysics).forEach(function (id) {
+      ropePhysics[id].settling = false;
+    });
+    ropePhysics = {};
+    if (physRafId) {
+      cancelAnimationFrame(physRafId);
+      physRafId = 0;
+    }
+  }
+
+  function reliefSpanEnds(cord) {
+    var aChain = strainReliefChain(cord, 'A');
+    var bChain = strainReliefChain(cord, 'B');
+    return {
+      a: aChain[aChain.length - 1],
+      b: bChain[bChain.length - 1],
+    };
+  }
+
+  /** Evenly resample a polyline to n points (arc-length). */
+  function samplePolyline(pts, n) {
+    if (!pts || pts.length < 2 || n < 2) return pts ? pts.slice() : [];
+    var cum = [0];
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      cum[i] = cum[i - 1] + dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    var total = cum[cum.length - 1] || 1;
+    var out = [];
+    for (var k = 0; k < n; k++) {
+      var target = (k / (n - 1)) * total;
+      var j = 1;
+      while (j < cum.length - 1 && cum[j] < target) j += 1;
+      var seg = cum[j] - cum[j - 1] || 1;
+      var t = (target - cum[j - 1]) / seg;
+      out.push({
+        x: pts[j - 1].x + (pts[j].x - pts[j - 1].x) * t,
+        y: pts[j - 1].y + (pts[j].y - pts[j - 1].y) * t,
+      });
+    }
+    return out;
+  }
+
+  /** Pure hanging span between strain-relief tips (rest pose). */
+  function naturalCatenarySamples(p0, p3, count) {
+    var dx = p3.x - p0.x;
+    var dy = p3.y - p0.y;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    var sag = catenarySagDepth(dist);
+    var pts = [];
+    var i;
+    for (i = 0; i < count; i++) {
+      var t = count === 1 ? 0.5 : i / (count - 1);
+      pts.push({
+        x: p0.x + dx * t,
+        y: p0.y + dy * t + 4 * t * (1 - t) * sag,
+      });
+    }
+    return pts;
+  }
+
+  function refreshRopeRest(cord, rope) {
+    /* Prefer the user's / pre-stretch shape; only fall back to catenary if empty */
+    if (rope.grabBase && rope.grabBase.length === rope.particles.length) {
+      bindRopeRestToPoints(rope, rope.grabBase);
+      return;
+    }
+    var ends = reliefSpanEnds(cord);
+    var shaped = [];
+    var route = ensureRoute(cord);
+    if (route.length >= 1) {
+      shaped = samplePolyline(
+        [{ x: ends.a.x, y: ends.a.y }].concat(route).concat([{ x: ends.b.x, y: ends.b.y }]),
+        rope.particles.length
+      );
+    } else {
+      shaped = naturalCatenarySamples(ends.a, ends.b, rope.particles.length);
+    }
+    bindRopeRestToPoints(rope, shaped);
+  }
+
+  function bindRopeRestToPoints(rope, pts) {
+    if (!rope || !pts || pts.length !== rope.particles.length) return;
+    var i;
+    for (i = 0; i < pts.length; i++) {
+      rope.particles[i].ox = pts[i].x;
+      rope.particles[i].oy = pts[i].y;
+    }
+    for (i = 0; i < pts.length - 1; i++) {
+      rope.lens[i] = dist2(pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y) || 1;
+    }
+  }
+
+  function buildRopeFromCord(cord) {
+    var ends = reliefSpanEnds(cord);
+    var n = PHYS_SEGMENTS;
+    var route = ensureRoute(cord);
+    var poly;
+    if (route.length >= 1) {
+      poly = samplePolyline(
+        [{ x: ends.a.x, y: ends.a.y }].concat(route).concat([{ x: ends.b.x, y: ends.b.y }]),
+        n
+      );
+    } else {
+      poly = naturalCatenarySamples(ends.a, ends.b, n);
+    }
+    /* Rest pose = current custom span (not a shallow default catenary) */
+    var rest = poly.map(function (p) {
+      return { x: p.x, y: p.y };
+    });
+    var particles = [];
+    var lens = [];
+    var i;
+    for (i = 0; i < n; i++) {
+      particles.push({
+        x: poly[i].x,
+        y: poly[i].y,
+        px: poly[i].x,
+        py: poly[i].y,
+        ox: rest[i].x,
+        oy: rest[i].y,
+        pinned: i === 0 || i === n - 1,
+      });
+    }
+    for (i = 0; i < n - 1; i++) {
+      /* Prefer live span lengths while stretching; settle retargets to rest shape */
+      lens.push(dist2(poly[i].x, poly[i].y, poly[i + 1].x, poly[i + 1].y) || 1);
+    }
+    return {
+      particles: particles,
+      lens: lens,
+      grabIdx: -1,
+      grabBase: null,
+      settling: false,
+      frames: 0,
+    };
+  }
+
+  function writeRopeToRoute(cord, rope) {
+    var mid = [];
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      mid.push({ x: rope.particles[i].x, y: rope.particles[i].y });
+    }
+    cord.route = mid;
+    cord.pathLocked = true;
+  }
+
+  function pinRopeEnds(cord, rope) {
+    var ends = reliefSpanEnds(cord);
+    var a = rope.particles[0];
+    var b = rope.particles[rope.particles.length - 1];
+    a.x = a.px = ends.a.x;
+    a.y = a.py = ends.a.y;
+    b.x = b.px = ends.b.x;
+    b.y = b.py = ends.b.y;
+  }
+
+  function findNearestRopeIndex(rope, wx, wy) {
+    var best = 1;
+    var bestD = Infinity;
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      var p = rope.particles[i];
+      var d = dist2(p.x, p.y, wx, wy);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /** Elastic rubber-band pull from pre-grab snapshot toward the pointer. */
+  function applyRopeGrab(rope, wx, wy) {
+    var g = rope.grabIdx;
+    var base = rope.grabBase;
+    if (g < 0 || !base) return;
+    var dx = wx - base[g].x;
+    var dy = wy - base[g].y;
+    var sigma = PHYS_GRAB_SIGMA;
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      var w = Math.exp(-((i - g) * (i - g)) / (2 * sigma * sigma));
+      var pull = i === g ? 1 : w * PHYS_GRAB_NEIGHBOR;
+      var p = rope.particles[i];
+      p.x = base[i].x + dx * pull;
+      p.y = base[i].y + dy * pull;
+      p.px = p.x;
+      p.py = p.y;
+    }
+    /* Soft length constraints so neighbors feel springy while stretching */
+    for (var it = 0; it < 3; it++) {
+      solveRopeConstraints(rope, true);
+    }
+  }
+
+  function solveRopeConstraints(rope, protectGrab) {
+    var pts = rope.particles;
+    var i;
+    for (i = 0; i < rope.lens.length; i++) {
+      var p1 = pts[i];
+      var p2 = pts[i + 1];
+      var dx = p2.x - p1.x;
+      var dy = p2.y - p1.y;
+      var d = Math.sqrt(dx * dx + dy * dy) || 1;
+      var diff = ((d - rope.lens[i]) / d) * PHYS_STRUCT_STRENGTH * 0.5;
+      var move1 = !p1.pinned && !(protectGrab && i === rope.grabIdx);
+      var move2 = !p2.pinned && !(protectGrab && (i + 1) === rope.grabIdx);
+      if (move1 && move2) {
+        p1.x += dx * diff;
+        p1.y += dy * diff;
+        p2.x -= dx * diff;
+        p2.y -= dy * diff;
+      } else if (move1) {
+        p1.x += dx * diff * 2;
+        p1.y += dy * diff * 2;
+      } else if (move2) {
+        p2.x -= dx * diff * 2;
+        p2.y -= dy * diff * 2;
+      }
+    }
+  }
+
+  function stepRope(rope) {
+    var pts = rope.particles;
+    var i;
+    for (i = 0; i < pts.length; i++) {
+      var p = pts[i];
+      if (p.pinned) continue;
+      var vx = (p.x - p.px) * PHYS_DAMPING;
+      var vy = (p.y - p.py) * PHYS_DAMPING;
+      p.px = p.x;
+      p.py = p.y;
+      p.x += vx;
+      p.y += vy;
+      p.x += (p.ox - p.x) * PHYS_REST_SPRING;
+      p.y += (p.oy - p.y) * PHYS_REST_SPRING;
+    }
+    for (var it = 0; it < PHYS_STRUCT_ITERS; it++) {
+      solveRopeConstraints(rope, false);
+    }
+  }
+
+  function ropeEnergy(rope) {
+    var e = 0;
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      var p = rope.particles[i];
+      e += Math.abs(p.x - p.px) + Math.abs(p.y - p.py);
+      e += (Math.abs(p.x - p.ox) + Math.abs(p.y - p.oy)) * 0.12;
+    }
+    return e;
+  }
+
+  function snapRopeToRest(rope) {
+    var i;
+    for (i = 0; i < rope.particles.length; i++) {
+      var p = rope.particles[i];
+      p.x = p.px = p.ox;
+      p.y = p.py = p.oy;
+    }
+  }
+
+  function ensurePhysLoop() {
+    if (physRafId) return;
+    function tick() {
+      physRafId = 0;
+      var any = false;
+      var settledIds = [];
+      cords.forEach(function (c) {
+        var rope = ropePhysics[c.id];
+        if (!rope || !rope.settling) return;
+        if (!(c.sideA.attached && c.sideB.attached)) {
+          rope.settling = false;
+          return;
+        }
+        pinRopeEnds(c, rope);
+        var s;
+        for (s = 0; s < PHYS_SUBSTEPS; s++) stepRope(rope);
+        writeRopeToRoute(c, rope);
+        updateFiberPath(c);
+        rope.frames += 1;
+        if (ropeEnergy(rope) < PHYS_SETTLE_EPS || rope.frames > PHYS_MAX_SETTLE) {
+          snapRopeToRest(rope);
+          writeRopeToRoute(c, rope);
+          updateFiberPath(c);
+          rope.settling = false;
+          settledIds.push(c.id);
+        } else {
+          any = true;
+        }
+      });
+      if (settledIds.length && !historyLocked) pushHistory();
+      if (any) physRafId = requestAnimationFrame(tick);
+    }
+    physRafId = requestAnimationFrame(tick);
+  }
+
+  function beginRopeSettle(cord) {
+    var rope = ropePhysics[cord.id];
+    if (!rope) return;
+    /* Spring back to pre-stretch custom shape (depth/length preserved) */
+    if (rope.grabBase) {
+      bindRopeRestToPoints(rope, rope.grabBase);
+    } else {
+      refreshRopeRest(cord, rope);
+    }
+    pinRopeEnds(cord, rope);
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      var p = rope.particles[i];
+      /* Verlet kick toward rest → overshoot / soft oscillation */
+      p.px = p.x - (p.ox - p.x) * PHYS_RELEASE_KICK;
+      p.py = p.y - (p.oy - p.y) * PHYS_RELEASE_KICK;
+    }
+    rope.grabIdx = -1;
+    rope.settling = true;
+    rope.frames = 0;
+    ensurePhysLoop();
+  }
+
+  /**
+   * Start interactive mid-span stretch on a fully connected cord.
+   */
+  function beginRopeGrab(cord, wx, wy) {
+    clearRopePhysics(cord.id);
+    var rope = buildRopeFromCord(cord);
+    pinRopeEnds(cord, rope);
+    rope.grabIdx = findNearestRopeIndex(rope, wx, wy);
+    rope.grabBase = rope.particles.map(function (p) {
+      return { x: p.x, y: p.y };
+    });
+    bindRopeRestToPoints(rope, rope.grabBase);
+    rope.settling = false;
+    ropePhysics[cord.id] = rope;
+    applyRopeGrab(rope, wx, wy);
+    writeRopeToRoute(cord, rope);
+    return rope;
   }
 
   function buildCablePoints(cord) {
@@ -1233,7 +1770,7 @@
       );
     }
     var d = '';
-    var k = 5.2; /* slightly softer than prior for organic hang */
+    var k = CATMULL_HANDLE_K;
     var i;
     for (i = 0; i < pts.length - 1; i++) {
       var p0 = pts[i - 1] || pts[i];
@@ -1250,7 +1787,7 @@
   }
 
   /**
-   * Path with mandatory straight strain-relief leads/trails, Catmull mid-span.
+   * Straight strain-relief leads/trails + Catmull mid-span through custom waypoints.
    */
   function smoothPathThrough(pts, opts) {
     opts = opts || {};
@@ -1258,7 +1795,6 @@
     var lead = opts.strainLead != null ? opts.strainLead : 0;
     var trail = opts.strainTrail != null ? opts.strainTrail : 0;
     if (lead < 2 && trail < 2) {
-      /* Legacy full-spline path */
       var full = 'M ' + pts[0].x + ' ' + pts[0].y;
       return full + catmullRomCubicCommands(pts);
     }
@@ -1281,7 +1817,8 @@
   }
 
   /**
-   * User-traced route with strain relief + catenary-aware mid-span when locked.
+   * User-traced route: preserve custom depth/layout, silk Catmull mid-span,
+   * straight port/boot exit tangents.
    */
   function cordCablePath(cord) {
     var route = ensureRoute(cord);
@@ -1427,7 +1964,7 @@
   }
 
   function bindLayerEvents(host) {
-    /* Whole free cord move via fiber (plugged ends stay locked) */
+    /* Fiber body: free cord translate · fully linked → elastic mid-span pull */
     host.querySelectorAll('[data-pcord-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -1446,24 +1983,69 @@
         var oby = c.by;
         var aLocked = !!c.sideA.attached;
         var bLocked = !!c.sideB.attached;
-        /* Path routing is only via click-drag on a connector end — never auto / fiber-glue */
-        if (aLocked || bLocked) {
-          setStatus('Click-and-hold a free connector end to drag and draw the path');
+
+        /* Half-linked: path still drawn via free connector end only */
+        if ((aLocked && !bLocked) || (!aLocked && bLocked)) {
+          setStatus('Click-and-hold the free connector end to drag and draw the path');
           return;
         }
+
+        /* Both ports locked — rubber-band mid-span stretch + spring settle */
+        if (aLocked && bLocked) {
+          var world0 = clientToWorld(e.clientX, e.clientY);
+          beginRopeGrab(c, world0.x, world0.y);
+          updateFiberPath(c);
+          document.body.classList.add('lab-pcord-stretching');
+          grip.classList.add('is-stretching');
+          setStatus('Stretching patch cord · release to spring back to your drawn shape');
+          var stretched = false;
+
+          function onStretchMove(ev) {
+            stretched = true;
+            var rope = ropePhysics[c.id];
+            if (!rope) return;
+            var w = clientToWorld(ev.clientX, ev.clientY);
+            applyRopeGrab(rope, w.x, w.y);
+            writeRopeToRoute(c, rope);
+            updateFiberPath(c);
+          }
+          function onStretchUp() {
+            window.removeEventListener('pointermove', onStretchMove);
+            window.removeEventListener('pointerup', onStretchUp);
+            document.body.classList.remove('lab-pcord-stretching');
+            grip.classList.remove('is-stretching');
+            if (ropePhysics[c.id]) {
+              beginRopeSettle(c);
+              setStatus(
+                stretched
+                  ? 'Patch cord relaxing · settling to your custom depth and layout'
+                  : 'Patch cord selected · drag the cable body to stretch'
+              );
+            }
+          }
+          window.addEventListener('pointermove', onStretchMove);
+          window.addEventListener('pointerup', onStretchUp);
+          return;
+        }
+
+        /* Both free — translate whole cord */
         var moved = false;
+        var route0 = ensureRoute(c).map(function (p) {
+          return { x: p.x, y: p.y };
+        });
 
         function onMove(ev) {
           moved = true;
           var dx = (ev.clientX - sx) / zoom;
           var dy = (ev.clientY - sy) / zoom;
-          if (!aLocked) {
-            c.ax = oax + dx;
-            c.ay = oay + dy;
-          }
-          if (!bLocked) {
-            c.bx = obx + dx;
-            c.by = oby + dy;
+          c.ax = oax + dx;
+          c.ay = oay + dy;
+          c.bx = obx + dx;
+          c.by = oby + dy;
+          if (route0.length) {
+            c.route = route0.map(function (p) {
+              return { x: p.x + dx, y: p.y + dy };
+            });
           }
           updateFiberPath(c);
         }
@@ -1623,7 +2205,7 @@
               if (c[endKey(otherEnd)].attached) {
                 lockDrawnPath(c);
                 endLinkSession({ silent: true });
-                setStatus('Patch connected · drawn path locked (End ' + end + ' snapped)');
+                setStatus('Patch connected · drag the cable body to stretch · release to settle');
               }
             } else {
               setEndWorld(c, end, mouse.x, mouse.y);
@@ -1697,7 +2279,7 @@
     var pathLoss = cordLossDb(c);
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap and lock the drawn path.</p>';
+      '<p>End A and End B use the same rules: plugging one end locks only that end — the free end stays where it is (no auto-shrink or snap-back). Move the free end only with click-and-hold drag; release on a port to snap and lock the drawn path (Catmull-smoothed, your depth kept). When both ends are plugged, drag the cable body to stretch it — release and it springs back to your custom shape.</p>';
 
     if (!detail) return;
     detail.hidden = false;
@@ -1756,6 +2338,7 @@
 
   function cancelPatch() {
     endDragState = null;
+    clearAllRopePhysics();
     cancelLinkSession();
   }
 
@@ -1770,6 +2353,7 @@
     selectedTool = null;
     dragLib = null;
     endDragState = null;
+    clearAllRopePhysics();
     endLinkSession({ silent: true });
     renderToolbox();
     bindStageDrop();

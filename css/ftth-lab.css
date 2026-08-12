@@ -1561,11 +1561,21 @@ body {
 
 .lab-pcord-fiber-hit {
   stroke: transparent;
-  stroke-width: 12;
+  stroke-width: 14;
   stroke-linecap: round;
   fill: none;
   pointer-events: stroke;
   cursor: grab;
+}
+
+.lab-pcord-fiber-hit.is-stretching,
+body.lab-pcord-stretching .lab-pcord-fiber-hit {
+  cursor: grabbing;
+}
+
+body.lab-pcord-stretching {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .lab-pcord-fiber {
