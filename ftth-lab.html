@@ -45,25 +45,39 @@
     </header>
 
     <main class="lab-main">
-      <aside class="lab-rail" aria-label="Tool drawer">
-        <p class="lab-rail__label">Toolbox</p>
-        <div id="lab-hw-tree" class="lab-hw-tree" aria-label="OLT tools">
-          <!-- Filled by ftth-lab-olt-fx16.js -->
-        </div>
-        <p class="lab-rail__label" style="margin-top:1rem">Smart Splitters</p>
-        <div id="lab-splitter-tree" class="lab-hw-tree" aria-label="Splitter tool">
-          <!-- Single Splitter tool · ftth-lab-splitter.js -->
-        </div>
-        <p class="lab-rail__label" style="margin-top:1rem">Fiber Jumpers</p>
-        <div id="lab-patchcord-tree" class="lab-hw-tree" aria-label="Patch cord tool">
-          <!-- Patch Cord tool · ftth-lab-patch-cord.js -->
-        </div>
-        <div id="lab-pigtail-tree" class="lab-hw-tree" aria-label="SC Pigtail tool">
-          <!-- SC Pigtail · ftth-lab-pigtail.js -->
-        </div>
-        <p class="lab-rail__label" style="margin-top:1rem">Adapters</p>
-        <div id="lab-coupler-tree" class="lab-hw-tree" aria-label="SC Coupler tool">
-          <!-- Single SC Coupler · ftth-lab-coupler.js -->
+      <aside class="lab-rail" aria-label="Toolbox">
+        <p class="lab-rail__title">Toolbox</p>
+        <div class="lab-rail__panel">
+          <section class="lab-rail__group" aria-labelledby="lab-cat-active">
+            <h3 class="lab-rail__cat" id="lab-cat-active">Active Equipment</h3>
+            <div id="lab-hw-tree" class="lab-hw-tree" aria-label="OLT tools">
+              <!-- Filled by ftth-lab-olt-fx16.js -->
+            </div>
+          </section>
+
+          <section class="lab-rail__group" aria-labelledby="lab-cat-splitters">
+            <h3 class="lab-rail__cat" id="lab-cat-splitters">Splitters</h3>
+            <div id="lab-splitter-tree" class="lab-hw-tree" aria-label="Splitter tool">
+              <!-- Single Splitter tool · ftth-lab-splitter.js -->
+            </div>
+          </section>
+
+          <section class="lab-rail__group" aria-labelledby="lab-cat-jumpers">
+            <h3 class="lab-rail__cat" id="lab-cat-jumpers">Fiber Jumpers</h3>
+            <div id="lab-patchcord-tree" class="lab-hw-tree" aria-label="Patch cord tool">
+              <!-- Patch Cord tool · ftth-lab-patch-cord.js -->
+            </div>
+            <div id="lab-pigtail-tree" class="lab-hw-tree" aria-label="SC Pigtail tool">
+              <!-- SC Pigtail · ftth-lab-pigtail.js -->
+            </div>
+          </section>
+
+          <section class="lab-rail__group" aria-labelledby="lab-cat-adapters">
+            <h3 class="lab-rail__cat" id="lab-cat-adapters">Adapters</h3>
+            <div id="lab-coupler-tree" class="lab-hw-tree" aria-label="SC Coupler tool">
+              <!-- Single SC Coupler · ftth-lab-coupler.js -->
+            </div>
+          </section>
         </div>
       </aside>
 

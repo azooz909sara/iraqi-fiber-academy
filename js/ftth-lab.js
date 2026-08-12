@@ -335,7 +335,8 @@
   var activeToolboxTool = null;
 
   /**
-   * Enforce a single toolbox active highlight across OLT / splitter / patch / pigtail / coupler.
+   * Enforce a single toolbox active highlight across all rail categories
+   * (Active Equipment / Splitters / Fiber Jumpers / Adapters).
    * Pass null to strip every sidebar tool highlight.
    */
   function claimToolboxTool(toolId) {

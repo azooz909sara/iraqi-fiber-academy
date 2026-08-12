@@ -177,14 +177,49 @@ body {
   border-left: 1px solid var(--lab-border);
 }
 
-.lab-rail__label,
+/* Master sidebar title (TOOLBOX / PROPERTIES) */
+.lab-rail__title,
 .lab-inspector__label {
+  margin: 0 0 0.75rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lab-cyan);
+}
+
+/* Backward-compatible alias if any scripts still inject .lab-rail__label */
+.lab-rail__label {
   margin: 0 0 0.5rem;
   font-size: 0.65rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--lab-cyan);
+}
+
+.lab-rail__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.95rem;
+}
+
+.lab-rail__group {
+  margin: 0;
+  padding: 0;
+  border: none;
+  min-width: 0;
+}
+
+.lab-rail__cat {
+  margin: 0 0 0.45rem;
+  padding: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+  line-height: 1.2;
 }
 
 .lab-inspector__detail {
@@ -197,9 +232,13 @@ body {
   display: none;
 }
 
-/* ── Toolbox drawer (3 drag tools) ── */
+/* ── Toolbox drawer ── */
 .lab-hw-tree {
-  margin-bottom: 0.35rem;
+  margin-bottom: 0;
+}
+
+.lab-hw-tree + .lab-hw-tree {
+  margin-top: 0.45rem;
 }
 
 .lab-toolbox {
@@ -1071,37 +1110,8 @@ body {
   border-radius: 50%;
   background:
     radial-gradient(circle at 50% 50%, #0f172a 0 22%, transparent 23%),
-    conic-gradient(from 0deg, #38bdf8, #64748b, #38bdf8);
-  border: 1px solid rgba(56, 189, 248, 0.55);
-}
-
-.lab-tool--spl {
-  padding: 0.65rem 0.75rem;
-  border-radius: 0.4rem;
-  border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(15, 23, 42, 0.55);
-  gap: 0.65rem;
-}
-
-.lab-tool--spl .lab-tool__copy {
-  gap: 0.15rem;
-}
-
-.lab-tool--spl .lab-tool__copy strong {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: #e2e8f0;
-}
-
-.lab-tool--spl .lab-tool__copy span {
-  font-size: 0.66rem;
-  font-weight: 600;
-  color: var(--lab-muted);
-}
-
-.lab-tool--spl.is-selected {
-  border-color: rgba(56, 189, 248, 0.5);
-  background: rgba(14, 165, 233, 0.1);
+    conic-gradient(from 0deg, #94a3b8, #64748b, #94a3b8);
+  border: 1px solid rgba(148, 163, 184, 0.55);
 }
 
 .lab-tool__mark--upc {
@@ -1508,24 +1518,10 @@ body {
   width: 1.35rem;
   height: 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(202, 138, 4, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.45);
   background:
-    linear-gradient(90deg, #2563eb 0 18%, #facc15 18% 82%, #16a34a 82% 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-}
-
-.lab-tool--pcord {
-  border-color: rgba(234, 179, 8, 0.35);
-  background: linear-gradient(180deg, rgba(66, 48, 6, 0.55), rgba(15, 23, 42, 0.72));
-}
-
-.lab-tool--pcord.is-selected {
-  border-color: rgba(250, 204, 21, 0.65);
-  background: rgba(161, 98, 7, 0.28);
-}
-
-.lab-tool--pcord .lab-tool__copy strong {
-  color: #fde68a;
+    linear-gradient(90deg, #64748b 0 18%, #94a3b8 18% 82%, #64748b 82% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .lab-pcord-layer {
@@ -1814,17 +1810,9 @@ body.lab-pcord-linking .lab-pcord-fiber {
   width: 1.15rem;
   height: 0.55rem;
   border-radius: 0.12rem;
-  background: linear-gradient(90deg, #3b82f6 0%, #1d4ed8 42%, #60a5fa 42%, #60a5fa 58%, #1d4ed8 58%, #3b82f6 100%);
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.35);
-}
-
-.lab-tool--cpl.is-selected {
-  border-color: rgba(59, 130, 246, 0.55);
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.lab-tool--cpl .lab-tool__copy strong {
-  color: #93c5fd;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: linear-gradient(90deg, #64748b 0%, #94a3b8 42%, #cbd5e1 42%, #cbd5e1 58%, #94a3b8 58%, #64748b 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
 .lab-coupler-layer {
@@ -1906,24 +1894,10 @@ body.lab-pcord-linking .lab-pcord-fiber {
   width: 1.35rem;
   height: 0.55rem;
   border-radius: 999px;
-  border: 1px solid rgba(202, 138, 4, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.45);
   background:
-    linear-gradient(90deg, #2563eb 0 28%, #facc15 28% 78%, #f8fafc 78% 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
-}
-
-.lab-tool--pigtail {
-  border-color: rgba(234, 179, 8, 0.32);
-  background: linear-gradient(180deg, rgba(55, 48, 8, 0.55), rgba(15, 23, 42, 0.72));
-}
-
-.lab-tool--pigtail.is-selected {
-  border-color: rgba(250, 204, 21, 0.65);
-  background: rgba(161, 98, 7, 0.28);
-}
-
-.lab-tool--pigtail .lab-tool__copy strong {
-  color: #fde68a;
+    linear-gradient(90deg, #64748b 0 28%, #94a3b8 28% 78%, #cbd5e1 78% 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 
 .lab-pigtail-layer {
@@ -2054,8 +2028,4 @@ body.lab-pigtail-dragging {
 [data-lab-term].is-tail-dock {
   outline: 1.5px solid #fde047 !important;
   background: rgba(250, 204, 21, 0.22);
-}
-
-#lab-pigtail-tree {
-  margin-top: 0.45rem;
 }
