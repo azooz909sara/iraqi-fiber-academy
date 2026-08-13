@@ -206,6 +206,7 @@
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;
     if (target.closest('.lab-opm') || target.closest('.lab-opm-port') ||
+        target.closest('.lab-ols') || target.closest('.lab-ols-port') ||
         target.closest('.viavi__key') || target.closest('.viavi__keys')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
@@ -842,6 +843,9 @@
     if (att.owner === 'opm') {
       return 'opm:' + att.opmId;
     }
+    if (att.owner === 'ols') {
+      return 'ols:' + att.olsId;
+    }
     return null;
   }
 
@@ -969,6 +973,9 @@
     var sources = typeof api.getOltTxSources === 'function'
       ? api.getOltTxSources()
       : [];
+    if (typeof api.getOlsTxSources === 'function') {
+      sources = sources.concat(api.getOlsTxSources() || []);
+    }
     if (!sources.length) {
       return {
         dBm: OPM_NOISE_DBM,
@@ -976,17 +983,18 @@
         source: null,
         label: probeKey,
         path: [],
-        note: 'No OLT TX source (install SFP + patch fiber)',
+        note: 'No TX source (OLT SFP or OLS-35 laser ON + docked fiber)',
       };
     }
 
     var wavelengthNm = getOpmWavelengthNm();
-    var wlPenalty = oltWavelengthPenaltyDb(wavelengthNm);
     var best = null;
     var si;
     for (si = 0; si < sources.length; si++) {
       var src = sources[si];
       if (!adj[src.key]) continue;
+      /* OLS emits at its calibrated λ — skip OLT SFP wavelength mismatch penalty */
+      var wlPenalty = (src.kind === 'ols') ? 0 : oltWavelengthPenaltyDb(wavelengthNm);
       var queue = [{ key: src.key, loss: 0, path: [src.key] }];
       var visited = {};
       visited[src.key] = 0;
@@ -1000,7 +1008,7 @@
             source: src,
             label: probeKey,
             path: cur.path.slice(),
-            wavelengthNm: wavelengthNm,
+            wavelengthNm: src.wavelengthNm || wavelengthNm,
           };
           if (!best || cand.dBm > best.dBm) best = cand;
           continue;
@@ -1028,12 +1036,12 @@
         source: null,
         label: probeKey,
         path: [],
-        note: 'No optical path to active OLT source',
+        note: 'No optical path to active TX source',
       };
     }
     best.dBm = Math.round(best.dBm * 100) / 100;
     best.lossDb = Math.round(best.lossDb * 100) / 100;
-    best.wavelengthNm = wavelengthNm;
+    if (!best.wavelengthNm) best.wavelengthNm = wavelengthNm;
     return best;
   }
 
@@ -1323,6 +1331,7 @@
     },
     isCouplerId: function () { return false; },
     getOltTxSources: function () { return []; },
+    getOlsTxSources: function () { return []; },
     getOpticalSplitters: function () { return []; },
     hitTestLabPort: null,
     probeOpticalAt: probeOpticalAt,

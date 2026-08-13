@@ -625,13 +625,64 @@ body.opm-page {
   color: rgba(226, 232, 240, 0.8);
 }
 
+.lab-opm--viavi {
+  --opm-cell: 24px;
+  --opm-cols: 5;
+  --opm-rows: 7;
+  --opm-design-w: 220px;
+  --opm-fit: 0.5454545455;
+  width: calc(var(--opm-cols) * var(--opm-cell));
+  height: calc(var(--opm-rows) * var(--opm-cell));
+  overflow: visible;
+  resize: none !important;
+}
+
+.lab-opm--viavi .lab-resize-handle,
+.lab-opm--fixed .lab-resize-handle {
+  display: none !important;
+}
+
 .lab-opm--viavi .viavi {
-  width: 100%;
+  width: var(--opm-design-w);
   margin: 0;
   filter: none;
+  transform: scale(var(--opm-fit));
+  transform-origin: top left;
 }
 
 .lab-opm--viavi .viavi__port {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.lab-ols--viavi {
+  --ols-cell: 24px;
+  --ols-cols: 5;
+  --ols-rows: 7;
+  --ols-design-w: 220px;
+  --ols-fit: 0.5454545455;
+  width: calc(var(--ols-cols) * var(--ols-cell));
+  height: calc(var(--ols-rows) * var(--ols-cell));
+  overflow: visible;
+  resize: none !important;
+}
+
+.lab-ols--viavi .lab-resize-handle,
+.lab-ols--fixed .lab-resize-handle {
+  display: none !important;
+}
+
+.lab-ols--viavi .viavi,
+.lab-ols--viavi .ols-viavi {
+  width: var(--ols-design-w);
+  margin: 0;
+  filter: none;
+  transform: scale(var(--ols-fit));
+  transform-origin: top left;
+}
+
+.lab-ols--viavi .viavi__port,
+.lab-ols-port {
   pointer-events: auto;
   cursor: crosshair;
 }

@@ -625,7 +625,6 @@ body {
 .lab-vfl:hover > .lab-resize-handle,
 .lab-cas-cassette.is-selected > .lab-resize-handle,
 .lab-cas-cassette:hover > .lab-resize-handle,
-.lab-opm.is-resizing > .lab-resize-handle,
 .lab-vfl.is-resizing > .lab-resize-handle,
 .lab-cas-cassette.is-resizing > .lab-resize-handle {
   opacity: 1;
@@ -641,7 +640,6 @@ body.lab-node-resizing .lab-2d-stage {
   cursor: nwse-resize !important;
 }
 
-.lab-opm.is-resizing,
 .lab-vfl.is-resizing,
 .lab-cas-cassette.is-resizing {
   z-index: 60;
@@ -3249,11 +3247,27 @@ body.lab-vfl-dragging {
 }
 
 .lab-opm--viavi {
+  /* Master size: exactly 5×7 lab grid cells (24px) — locked, non-resizable */
+  --opm-cell: 24px;
+  --opm-cols: 5;
+  --opm-rows: 7;
+  --opm-design-w: 220px;
+  /* 120px / 220px design width — unitless so transform:scale() stays valid */
+  --opm-fit: 0.5454545455;
   position: absolute;
-  width: 220px;
+  width: calc(var(--opm-cols) * var(--opm-cell));
+  height: calc(var(--opm-rows) * var(--opm-cell));
+  box-sizing: border-box;
   overflow: visible;
   z-index: 49;
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.45));
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.4));
+  resize: none !important;
+}
+
+.lab-opm--viavi .lab-resize-handle,
+.lab-opm--fixed .lab-resize-handle {
+  display: none !important;
+  pointer-events: none !important;
 }
 
 .lab-opm--viavi.is-selected {
@@ -3263,10 +3277,13 @@ body.lab-vfl-dragging {
 }
 
 .lab-opm--viavi .viavi {
-  width: 100%;
+  width: var(--opm-design-w);
   margin: 0;
   padding: 0 6px 4px;
   filter: none;
+  transform: scale(var(--opm-fit));
+  transform-origin: top left;
+  pointer-events: auto;
 }
 
 .lab-opm--viavi .viavi__face {
@@ -3281,6 +3298,11 @@ body.lab-vfl-dragging {
 .lab-opm--viavi .viavi__port {
   pointer-events: auto;
   cursor: crosshair;
+}
+
+.lab-opm--viavi .viavi__adapter-knurl,
+.lab-opm--viavi .viavi__adapter-bore {
+  pointer-events: auto;
 }
 
 .viavi {
@@ -3662,6 +3684,287 @@ body.lab-vfl-dragging {
 
 .lab-tool__mark--opm {
   background: linear-gradient(135deg, #1e3a8a, #38bdf8);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+/* ─── Optical Laser Source (Viavi OLS-35) — same 5×7 fixed footprint as OLP-38 ─── */
+
+.lab-ols-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 48;
+}
+
+.lab-ols-layer > * {
+  pointer-events: auto;
+}
+
+.lab-ols--viavi {
+  --ols-cell: 24px;
+  --ols-cols: 5;
+  --ols-rows: 7;
+  --ols-design-w: 220px;
+  --ols-fit: 0.5454545455;
+  position: absolute;
+  width: calc(var(--ols-cols) * var(--ols-cell));
+  height: calc(var(--ols-rows) * var(--ols-cell));
+  box-sizing: border-box;
+  overflow: visible;
+  z-index: 49;
+  filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.4));
+  resize: none !important;
+}
+
+.lab-ols--viavi .lab-resize-handle,
+.lab-ols--fixed .lab-resize-handle {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.lab-ols--viavi.is-selected {
+  outline: 2px solid rgba(251, 191, 36, 0.75);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+
+.lab-ols--viavi .viavi,
+.lab-ols--viavi .ols-viavi {
+  width: var(--ols-design-w);
+  margin: 0;
+  padding: 0 6px 4px;
+  filter: none;
+  transform: scale(var(--ols-fit));
+  transform-origin: top left;
+  pointer-events: auto;
+}
+
+.lab-ols--viavi .viavi__face {
+  cursor: grab;
+  user-select: none;
+}
+
+.lab-ols--viavi.is-dragging .viavi__face {
+  cursor: grabbing;
+}
+
+.lab-ols--viavi .viavi__port,
+.lab-ols-port {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.lab-ols--viavi .viavi__adapter-knurl,
+.lab-ols--viavi .viavi__adapter-bore {
+  pointer-events: auto;
+}
+
+.lab-ols--viavi .ols__pad {
+  position: relative;
+  margin-top: 8px;
+  padding: 6px 6px 22px;
+  border-radius: 8px;
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0.22), rgba(71, 85, 105, 0.18)),
+    #4b5563;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.35);
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.lab-ols--viavi .ols__ridges {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 0 2px 4px;
+  height: 6px;
+}
+
+.lab-ols--viavi .ols__ridges span {
+  justify-self: center;
+  width: 3px;
+  height: 6px;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #cbd5e1, #64748b);
+  box-shadow: inset 0 0 0 0.5px rgba(15, 23, 42, 0.25);
+}
+
+/* Exact OLS-35 keypad: 3 softkeys over 2 large keys; green power below MODE */
+.lab-ols--viavi .ols__keys {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: 26px 42px;
+  grid-template-areas:
+    "lambda lambda soft soft hz hz"
+    "mode mode mode laser laser laser";
+  gap: 6px;
+  margin-top: 0;
+  padding: 6px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #1e3a5f, #152848);
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.45);
+  position: relative;
+  z-index: 8;
+  pointer-events: auto;
+}
+
+.lab-ols--viavi .ols__key--lambda { grid-area: lambda; }
+.lab-ols--viavi .ols__key--neutral { grid-area: soft; }
+.lab-ols--viavi .ols__key--hz { grid-area: hz; }
+.lab-ols--viavi .ols__key--mode { grid-area: mode; }
+.lab-ols--viavi .ols__key--laser { grid-area: laser; }
+
+.lab-ols--viavi .ols__keys .viavi__key,
+.lab-ols--viavi .ols__key {
+  height: 100%;
+  min-height: 26px;
+  position: relative;
+  z-index: 8;
+  pointer-events: auto;
+  border-radius: 4px;
+  border: 1px solid rgba(10, 16, 32, 0.55);
+  background: linear-gradient(180deg, #2a4570, #1a2d4d);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.lab-ols--viavi .ols__key--soft {
+  font-size: 0.78rem;
+}
+
+.lab-ols--viavi .ols__key--lambda {
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.lab-ols--viavi .ols__key--neutral,
+.lab-ols--viavi .ols__key--neutral:disabled {
+  opacity: 0.92;
+  cursor: default;
+  color: transparent;
+}
+
+.lab-ols--viavi .ols__key--large {
+  min-height: 42px;
+}
+
+.lab-ols--viavi .ols__key-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1;
+}
+
+.lab-ols--viavi .ols__key-label {
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.lab-ols--viavi .ols__btn-icon {
+  display: block;
+  color: #f8fafc;
+}
+
+.lab-ols--viavi .ols__key--laser.is-on {
+  background: linear-gradient(180deg, #b91c1c, #7f1d1d);
+  border-color: #450a0a;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.45);
+}
+
+.lab-ols--viavi .ols__pwr {
+  position: absolute;
+  left: 10px;
+  bottom: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid #3f6212;
+  background: radial-gradient(circle at 35% 30%, #bef264, #65a30d 55%, #3f6212);
+  color: #f8fafc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+  z-index: 9;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.lab-ols--viavi .ols__pwr:not(.is-powered) {
+  filter: grayscale(0.35) brightness(0.85);
+}
+
+.lab-ols--viavi .ols__lcd--off {
+  background: #0b1220;
+  min-height: 72px;
+  opacity: 0.55;
+}
+
+.lab-ols--viavi.is-laser-on .viavi__port.is-emitting .viavi__adapter-bore {
+  box-shadow:
+    0 0 12px rgba(248, 113, 113, 0.85),
+    0 0 4px rgba(251, 191, 36, 0.55),
+    inset 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.ols__lcd .ols__wl {
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+}
+
+.ols__lcd .ols__batt {
+  margin-left: 4px;
+  font-size: 0.55rem;
+  letter-spacing: -0.08em;
+  opacity: 0.85;
+}
+
+.ols__lcd-soft {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.lab-ols-port {
+  position: absolute;
+  top: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 48px;
+  height: 34px;
+  z-index: 6;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: crosshair;
+  pointer-events: auto;
+}
+
+.lab-ols-port.is-plug-target .viavi__adapter-knurl,
+.lab-ols-port.is-plug-target .viavi__adapter-bore {
+  box-shadow:
+    0 0 10px rgba(251, 191, 36, 0.8),
+    0 0 4px rgba(251, 191, 36, 0.45),
+    inset 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.lab-ols-port.is-plug-click .viavi__adapter-knurl,
+.lab-ols-port.is-plug-click .viavi__adapter-bore {
+  box-shadow:
+    0 0 14px rgba(251, 191, 36, 0.95),
+    0 0 6px rgba(248, 113, 113, 0.55),
+    inset 0 0 2px rgba(0, 0, 0, 0.35);
+}
+
+.lab-tool__mark--ols {
+  background: linear-gradient(135deg, #92400e, #fbbf24);
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
 }
 

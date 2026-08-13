@@ -149,7 +149,7 @@
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' || hit.port === 'b' ? -90 : 90;
     }
-    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) {
       return 180;
     }
     if (hit && (hit.owner === 'splitter' ||
@@ -161,8 +161,8 @@
 
   function resolveUprightPlugRotation(hit, p) {
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
-    /* OPM / VFL top adapters: always ferrule-down / cable-up */
-    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) return 180;
+    /* OPM / VFL / OLS top adapters: always ferrule-down / cable-up */
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) return 180;
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var dY = (hit && typeof hit.wy === 'number') ? (hit.wy - p.ay) : 0;
@@ -461,6 +461,31 @@
           el: node,
         };
       }
+
+      node = el.closest && el.closest('.lab-ols-port[data-ols-port]');
+      if (node) {
+        var olsId = node.getAttribute('data-ols-port');
+        var olsConn = (node.getAttribute('data-ols-connector') || 'SC').toUpperCase();
+        if (olsConn !== 'SC') {
+          if (global.FtthLab && FtthLab.showAlert) {
+            FtthLab.showAlert('OLS-35 accepts SC connectors only (SC Pigtail / Patch Cord).', 'warn');
+          }
+          return null;
+        }
+        var olsKnurl = node.querySelector('.viavi__adapter-knurl, .lab-ols__adapter-knurl') || node;
+        var rS = olsKnurl.getBoundingClientRect();
+        var cS = clientToWorld(rS.left + rS.width / 2, rS.top + rS.height * 0.35);
+        return {
+          owner: 'ols',
+          olsId: olsId,
+          polish: 'UPC',
+          connectorType: 'SC',
+          label: 'Viavi OLS-35 · SC adapter',
+          wx: cS.x,
+          wy: cS.y,
+          el: node,
+        };
+      }
     }
     return null;
   }
@@ -516,6 +541,7 @@
       couplerId: hit.couplerId || null,
       vflId: hit.vflId || null,
       opmId: hit.opmId || null,
+      olsId: hit.olsId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -551,6 +577,9 @@
     if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
       FtthLab.refreshOpmDocks();
     }
+    if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
+      FtthLab.refreshOlsDocks();
+    }
   }
 
   function detachConnector(p) {
@@ -563,6 +592,9 @@
     }
     if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
       FtthLab.refreshOpmDocks();
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
+      FtthLab.refreshOlsDocks();
     }
   }
 
@@ -653,6 +685,19 @@
           att.lockedRot = 180;
           p.connector.liveRot = null;
           seatConnectorAtPort(p, pwO.x, pwO.y);
+        }
+      } else if (att.owner === 'ols') {
+        var pwS = null;
+        if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
+          pwS = FtthLab.getOlsPortWorld(att.olsId);
+        }
+        if (pwS) {
+          att.wx = pwS.x;
+          att.wy = pwS.y;
+          p.connector.lockedRot = 180;
+          att.lockedRot = 180;
+          p.connector.liveRot = null;
+          seatConnectorAtPort(p, pwS.x, pwS.y);
         }
       }
     }
@@ -878,7 +923,7 @@
   function clearPlugHighlights() {
     document.querySelectorAll(
       '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
+      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
       '[data-lab-splice].is-plug-target, [data-lab-term].is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
@@ -986,7 +1031,7 @@
           updateLiveHeading(p, dx, dy);
           var hit = hitTestPort(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
-          if (hit && (hit.owner === 'vfl' || hit.owner === 'opm') &&
+          if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols') &&
               dist2(p.ax, p.ay, hit.wx, hit.wy) < PLUG_SNAP_PX * 3) {
             p.connector.liveRot = 180;
           }
@@ -1236,6 +1281,7 @@
               couplerId: p.connector.attached.couplerId || null,
               vflId: p.connector.attached.vflId || null,
               opmId: p.connector.attached.opmId || null,
+              olsId: p.connector.attached.olsId || null,
               splitterId: p.connector.attached.splitterId || null,
               port: p.connector.attached.port || null,
               slot: p.connector.attached.slot != null ? p.connector.attached.slot : null,

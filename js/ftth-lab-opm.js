@@ -5,8 +5,12 @@
 (function (global) {
   'use strict';
 
-  var OPM_W = 220;
-  var OPM_H = 340;
+  /** Lab grid cell = 24px → master OLP-38 footprint = 5×7 cells (locked). */
+  var OPM_GRID = 24;
+  var OPM_W = 5 * OPM_GRID; /* 120 */
+  var OPM_H = 7 * OPM_GRID; /* 168 */
+  var OPM_DESIGN_W = 220;
+  var OPM_FIT = OPM_W / OPM_DESIGN_W;
   var HISTORY_MAX = 40;
   var DOCK_LOSS_DB = 0.15;
 
@@ -159,7 +163,7 @@
       var d = findDevice(opmId);
       if (!d) return null;
       /* rot 180°: ferrule down into top SC adapter, yellow cable exits upward */
-      return { x: d.x + OPM_W / 2, y: d.y + 12, rot: 180 };
+      return { x: d.x + OPM_W / 2, y: d.y + Math.round(12 * OPM_FIT), rot: 180 };
     }
     var bore = el.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || el;
     var r = bore.getBoundingClientRect();
@@ -293,22 +297,6 @@
     return layer;
   }
 
-  function nodeScale(d) {
-    if (!d) return 1;
-    var s = Number(d.scale);
-    if (!isFinite(s) || s <= 0) return 1;
-    if (global.FtthLab && typeof FtthLab.clampNodeScale === 'function') {
-      return FtthLab.clampNodeScale(s);
-    }
-    return s;
-  }
-
-  function resizeHandleHtml() {
-    return (global.FtthLab && typeof FtthLab.resizeHandleHtml === 'function')
-      ? FtthLab.resizeHandleHtml()
-      : '<span class="lab-resize-handle lab-resize-handle--se" data-lab-resize="se" aria-hidden="true"></span>';
-  }
-
   function softUnitLabel(mode) {
     return mode === 'mw' ? 'Pow. [W]' : 'dBm';
   }
@@ -432,11 +420,9 @@
       var dockedAttr = d.docked ? '1' : '0';
       var mismatchAttr = d.dockMismatch ? '1' : '0';
       var warnAttr = warn ? '1' : '0';
-      var scale = nodeScale(d);
       html +=
-        '<div class="lab-opm lab-opm--viavi' + sel + (d.docked ? ' is-docked' : '') +
-        '" data-opm-node="' + d.id + '" data-lab-scale="' + scale + '" style="left:' + d.x +
-        'px;top:' + d.y + 'px;transform-origin:0 0;transform:translateZ(0) scale(' + scale + ')">' +
+        '<div class="lab-opm lab-opm--viavi lab-opm--fixed' + sel + (d.docked ? ' is-docked' : '') +
+        '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
         '<div class="viavi" data-docked="' + dockedAttr +
         '" data-mismatch="' + mismatchAttr + '" data-warning="' + warnAttr + '">' +
         '<div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>' +
@@ -461,9 +447,7 @@
         '<button type="button" class="viavi__key viavi__key--pwr" data-opm-pwr title="Power" aria-label="Power">⏻</button>' +
         '</div>' +
         '<div class="viavi__model">OLP-38</div>' +
-        '</div></div>' +
-        resizeHandleHtml() +
-        '</div>';
+        '</div></div></div>';
     });
     host.innerHTML = html;
     bindLayerEvents(host);
@@ -473,38 +457,11 @@
   }
 
   function bindLayerEvents(host) {
-    host.querySelectorAll('[data-opm-node]').forEach(function (node) {
-      var id = node.getAttribute('data-opm-node');
-      var d = findDevice(id);
-      if (!d) return;
-      if (global.FtthLab && typeof FtthLab.bindUniformNodeResize === 'function') {
-        FtthLab.bindUniformNodeResize(node, {
-          baseSize: OPM_W,
-          min: 0.55,
-          max: 1.85,
-          getScale: function () { return nodeScale(d); },
-          setScale: function (s) { d.scale = s; },
-          onLive: function () {
-            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-              FtthLab.notifyLayoutChange({ source: 'opm', live: true, opmId: id });
-            }
-          },
-          onCommit: function () {
-            pushHistory();
-            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-              FtthLab.notifyLayoutChange({ source: 'opm', opmId: id });
-            }
-            setStatus('OLP-38 resized · ' + Math.round(nodeScale(d) * 100) + '%');
-          },
-        });
-      }
-    });
-
     host.querySelectorAll('[data-opm-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
         if (isOpmKeyTarget(e)) return;
-        if (closestEl(e.target, '.lab-opm-port, .viavi__lcd, [data-lab-resize]')) return;
+        if (closestEl(e.target, '.lab-opm-port, .viavi__lcd')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-opm-drag');
@@ -556,7 +513,6 @@
       x: pos.x,
       y: pos.y,
       docked: false,
-      scale: 1,
       lastReading: {
         dBm: null,
         lossDb: null,

@@ -342,6 +342,9 @@
     if (att.owner === 'opm') {
       return att.opmId === hit.opmId;
     }
+    if (att.owner === 'ols') {
+      return att.olsId === hit.olsId;
+    }
     return false;
   }
 
@@ -363,15 +366,15 @@
     var side = cord[endKey(end)];
     var mismatch = !polishMatch(side.polish, hit.polish);
     if (hit.owner === 'vfl') mismatch = false;
-    if (hit.owner === 'opm') mismatch = !polishMatch(side.polish, hit.polish);
+    if (hit.owner === 'opm' || hit.owner === 'ols') mismatch = !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
     if (hit.owner === 'vfl' && global.FtthLab && typeof FtthLab.detachPigtailsFromVfl === 'function') {
       FtthLab.detachPigtailsFromVfl(hit.vflId, null);
     }
     var otherEnd = oppositeEnd(end);
-    /* Coupler faces are horizontal; OLT/splitter/VFL stay vertical (0° / 180°) */
+    /* Coupler faces are horizontal; OLT/splitter/VFL/OPM/OLS stay vertical (0° / 180°) */
     var lockedRot = resolveUprightPlugRotation(hit, cord, end);
-    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) {
       lockedRot = 180;
     } else if (!(hit && (hit.owner === 'coupler'))) {
       lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
@@ -385,6 +388,7 @@
       couplerId: hit.couplerId || null,
       vflId: hit.vflId || null,
       opmId: hit.opmId || null,
+      olsId: hit.olsId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -410,8 +414,12 @@
     }
     if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
       FtthLab.refreshOpmDocks();
-    } else if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
-      FtthLab.notifyLayoutChange({ source: 'patch-cord', opm: true });
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
+      FtthLab.refreshOlsDocks();
+    }
+    if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+      FtthLab.notifyLayoutChange({ source: 'patch-cord', opm: true, ols: true });
     }
   }
 
@@ -435,6 +443,9 @@
     }
     if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
       FtthLab.refreshOpmDocks();
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
+      FtthLab.refreshOlsDocks();
     }
   }
 
@@ -563,6 +574,33 @@
           el: node,
         };
       }
+
+      node = el.closest && el.closest('.lab-ols-port[data-ols-port]');
+      if (node) {
+        var olsId = node.getAttribute('data-ols-port');
+        var olsConn = (node.getAttribute('data-ols-connector') || 'SC').toUpperCase();
+        if (olsConn !== 'SC') {
+          if (global.FtthLab && FtthLab.showAlert) {
+            FtthLab.showAlert('OLS-35 accepts SC connectors only (Patch Cord / SC Pigtail).', 'warn');
+          } else if (global.FtthLab && FtthLab.setStatus) {
+            FtthLab.setStatus('Dock rejected · SC connector required');
+          }
+          return null;
+        }
+        var olsKnurl = node.querySelector('.viavi__adapter-knurl, .lab-ols__adapter-knurl') || node;
+        var rS = olsKnurl.getBoundingClientRect();
+        var cS = clientToWorld(rS.left + rS.width / 2, rS.top + rS.height * 0.35);
+        return {
+          owner: 'ols',
+          olsId: olsId,
+          polish: 'UPC',
+          connectorType: 'SC',
+          label: 'Viavi OLS-35 · SC adapter',
+          wx: cS.x,
+          wy: cS.y,
+          el: node,
+        };
+      }
     }
 
     /* Fallback: no element hit — keep free world point available to callers */
@@ -684,6 +722,21 @@
           side.liveRot = null;
           seatEndAtPort(cord, end, pwO.x, pwO.y);
         }
+        return;
+      }
+      if (att.owner === 'ols') {
+        var pwS = null;
+        if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
+          pwS = FtthLab.getOlsPortWorld(att.olsId);
+        }
+        if (pwS) {
+          att.wx = pwS.x;
+          att.wy = pwS.y;
+          side.lockedRot = 180;
+          att.lockedRot = 180;
+          side.liveRot = null;
+          seatEndAtPort(cord, end, pwS.x, pwS.y);
+        }
       }
     });
   }
@@ -758,6 +811,7 @@
           vflId: side.attached.vflId || null,
           splitterId: side.attached.splitterId || null,
           opmId: side.attached.opmId || null,
+          olsId: side.attached.olsId || null,
           port: side.attached.port || null,
           slot: side.attached.slot != null ? side.attached.slot : null,
           oltPort: side.attached.oltPort != null ? side.attached.oltPort : null,
@@ -925,7 +979,7 @@
   function clearPortHighlights() {
     document.querySelectorAll(
       '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target'
+      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
 
@@ -1335,14 +1389,14 @@
   /**
    * Strict vertical socket axis for OLT / splitter faceplates.
    * SC coupler barrel uses horizontal faces (A left / B right).
-   * Top-mounted test gear (VFL / OLP-38): always 180° so ferrule seats
+   * Top-mounted test gear (VFL / OLP-38 / OLS-35): always 180° so ferrule seats
    * downward into the adapter and the yellow cable exits straight up.
    */
   function portAlignedRotation(hit) {
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' ? -90 : 90;
     }
-    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) {
       return 180;
     }
     if (hit && (hit.owner === 'splitter' ||
@@ -1355,7 +1409,7 @@
 
   /** Test-equipment top ports never flip with approach direction. */
   function isTopTestPort(hit) {
-    return !!(hit && (hit.owner === 'vfl' || hit.owner === 'opm'));
+    return !!(hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols'));
   }
 
   /** Vertical ports: pick 0° or 180°. Coupler: keep horizontal face axis. */
@@ -3507,7 +3561,7 @@
         function clearHighlights() {
           document.querySelectorAll(
             '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-            '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target'
+            '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target'
           ).forEach(function (n) { n.classList.remove('is-plug-target'); });
         }
 
