@@ -149,11 +149,8 @@
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' || hit.port === 'b' ? -90 : 90;
     }
-    if (hit && hit.owner === 'vfl') {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
       return 180;
-    }
-    if (hit && hit.owner === 'opm') {
-      return 0;
     }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
@@ -164,6 +161,8 @@
 
   function resolveUprightPlugRotation(hit, p) {
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
+    /* OPM / VFL top adapters: always ferrule-down / cable-up */
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) return 180;
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var dY = (hit && typeof hit.wy === 'number') ? (hit.wy - p.ay) : 0;
@@ -637,9 +636,9 @@
         if (pwV) {
           att.wx = pwV.x;
           att.wy = pwV.y;
-          if (typeof p.connector.lockedRot !== 'number') {
-            p.connector.lockedRot = typeof pwV.rot === 'number' ? pwV.rot : 180;
-          }
+          p.connector.lockedRot = 180;
+          att.lockedRot = 180;
+          p.connector.liveRot = null;
           seatConnectorAtPort(p, pwV.x, pwV.y);
         }
       } else if (att.owner === 'opm') {
@@ -650,9 +649,9 @@
         if (pwO) {
           att.wx = pwO.x;
           att.wy = pwO.y;
-          if (typeof p.connector.lockedRot !== 'number') {
-            p.connector.lockedRot = typeof pwO.rot === 'number' ? pwO.rot : 0;
-          }
+          p.connector.lockedRot = 180;
+          att.lockedRot = 180;
+          p.connector.liveRot = null;
           seatConnectorAtPort(p, pwO.x, pwO.y);
         }
       }
@@ -987,6 +986,10 @@
           updateLiveHeading(p, dx, dy);
           var hit = hitTestPort(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
+          if (hit && (hit.owner === 'vfl' || hit.owner === 'opm') &&
+              dist2(p.ax, p.ay, hit.wx, hit.wy) < PLUG_SNAP_PX * 3) {
+            p.connector.liveRot = 180;
+          }
           updateFiberPath(p);
         }
 

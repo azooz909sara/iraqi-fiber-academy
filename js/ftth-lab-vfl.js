@@ -74,6 +74,7 @@
     var d = findDevice(vflId);
     if (!d) return null;
     var pw = portWorld(d);
+    /* rot 180°: SC housing seated on top adapter, boot/cable exits straight up */
     return { x: pw.x, y: pw.y, rot: 180 };
   }
 

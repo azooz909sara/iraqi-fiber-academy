@@ -158,12 +158,13 @@
     if (!el) {
       var d = findDevice(opmId);
       if (!d) return null;
-      return { x: d.x + OPM_W / 2, y: d.y + 12, rot: 0 };
+      /* rot 180°: ferrule down into top SC adapter, yellow cable exits upward */
+      return { x: d.x + OPM_W / 2, y: d.y + 12, rot: 180 };
     }
     var bore = el.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || el;
     var r = bore.getBoundingClientRect();
     var pt = clientToWorld(r.left + r.width / 2, r.top + r.height * 0.35);
-    return { x: pt.x, y: pt.y, rot: 0 };
+    return { x: pt.x, y: pt.y, rot: 180 };
   }
 
   function measureAtDock(opmId) {

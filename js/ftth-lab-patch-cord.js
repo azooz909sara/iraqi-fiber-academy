@@ -371,7 +371,9 @@
     var otherEnd = oppositeEnd(end);
     /* Coupler faces are horizontal; OLT/splitter/VFL stay vertical (0° / 180°) */
     var lockedRot = resolveUprightPlugRotation(hit, cord, end);
-    if (!(hit && (hit.owner === 'coupler'))) {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
+      lockedRot = 180;
+    } else if (!(hit && (hit.owner === 'coupler'))) {
       lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
     }
     side.liveRot = null;
@@ -661,10 +663,9 @@
         if (pwV) {
           att.wx = pwV.x;
           att.wy = pwV.y;
-          if (typeof side.lockedRot !== 'number') {
-            side.lockedRot = typeof pwV.rot === 'number' ? pwV.rot : 180;
-            att.lockedRot = side.lockedRot;
-          }
+          /* Always re-assert upward cable exit (180°) on top test ports */
+          side.lockedRot = 180;
+          att.lockedRot = 180;
           side.liveRot = null;
           seatEndAtPort(cord, end, pwV.x, pwV.y);
         }
@@ -678,10 +679,8 @@
         if (pwO) {
           att.wx = pwO.x;
           att.wy = pwO.y;
-          if (typeof side.lockedRot !== 'number') {
-            side.lockedRot = typeof pwO.rot === 'number' ? pwO.rot : 0;
-            att.lockedRot = side.lockedRot;
-          }
+          side.lockedRot = 180;
+          att.lockedRot = 180;
           side.liveRot = null;
           seatEndAtPort(cord, end, pwO.x, pwO.y);
         }
@@ -1336,16 +1335,15 @@
   /**
    * Strict vertical socket axis for OLT / splitter faceplates.
    * SC coupler barrel uses horizontal faces (A left / B right).
+   * Top-mounted test gear (VFL / OLP-38): always 180° so ferrule seats
+   * downward into the adapter and the yellow cable exits straight up.
    */
   function portAlignedRotation(hit) {
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' ? -90 : 90;
     }
-    if (hit && hit.owner === 'vfl') {
+    if (hit && (hit.owner === 'vfl' || hit.owner === 'opm')) {
       return 180;
-    }
-    if (hit && hit.owner === 'opm') {
-      return 0;
     }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
@@ -1355,9 +1353,16 @@
     return 0;
   }
 
+  /** Test-equipment top ports never flip with approach direction. */
+  function isTopTestPort(hit) {
+    return !!(hit && (hit.owner === 'vfl' || hit.owner === 'opm'));
+  }
+
   /** Vertical ports: pick 0° or 180°. Coupler: keep horizontal face axis. */
   function resolveUprightPlugRotation(hit, cord, end) {
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
+    /* OPM / VFL: cable always exits upward — ignore approach vector */
+    if (isTopTestPort(hit)) return 180;
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var p = getEndWorld(cord, end);
@@ -1380,6 +1385,8 @@
     }
     /* Live drag heading (nose → motion) drives CSS rotate + bootAnchor */
     if (typeof side.liveRot === 'number') {
+      /* Exact ±180 is the top-port (OPM/VFL) dock preview — do not clamp */
+      if (side.liveRot === 180 || side.liveRot === -180) return 180;
       return clampUprightHeading(side.liveRot);
     }
     var p = getEndWorld(cord, end);
@@ -3570,7 +3577,13 @@
               ev.clientX, ev.clientY,
               br.left + br.width / 2, br.top + br.height / 2
             );
-            if (dScreen <= PLUG_SNAP_PX * 1.6) hit.el.classList.add('is-plug-target');
+            if (dScreen <= PLUG_SNAP_PX * 1.6) {
+              hit.el.classList.add('is-plug-target');
+              /* Preview upward cable exit before snap — no inverted flip at dock */
+              if (isTopTestPort(hit) && !c[endKey(end)].attached) {
+                c[endKey(end)].liveRot = 180;
+              }
+            }
           }
         }
 
