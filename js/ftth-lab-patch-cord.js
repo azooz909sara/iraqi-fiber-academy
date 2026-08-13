@@ -5,6 +5,7 @@
  * length is locked (fixedLength) and preserved when relocating a connector.
  * Relocate = fixed-length tether + catenary reset on the new port span.
  * Gravity lock: mid-span sag is always +Y (down); upward bulges are mirrored.
+ * Length modes: Free Draw (route/stretch) · Meter Mode (fixed m · pure catenary sag).
  */
 (function (global) {
   'use strict';
@@ -57,6 +58,38 @@
       return FtthLab.clientToWorld2d(clientX, clientY);
     }
     return { x: 0, y: 0 };
+  }
+
+  function getPxPerMeter() {
+    if (global.FtthLab && typeof FtthLab.getPxPerMeter === 'function') {
+      return FtthLab.getPxPerMeter() || 160;
+    }
+    return 160;
+  }
+
+  function metersToPx(m) {
+    if (global.FtthLab && typeof FtthLab.metersToWorldPx === 'function') {
+      return FtthLab.metersToWorldPx(m);
+    }
+    return Number(m) * getPxPerMeter();
+  }
+
+  function pxToMeters(px) {
+    if (global.FtthLab && typeof FtthLab.worldPxToMeters === 'function') {
+      return FtthLab.worldPxToMeters(px);
+    }
+    return Number(px) / getPxPerMeter();
+  }
+
+  function isMeterMode(cord) {
+    return !!(cord && cord.lengthMode === 'meter');
+  }
+
+  function normalizeLengthMeters(m) {
+    var n = Math.round(Number(m) * 2) / 2;
+    if (!isFinite(n) || n < 0.5) n = 0.5;
+    if (n > 100) n = 100;
+    return n;
   }
 
   function claimSelection() {
@@ -113,6 +146,14 @@
     seq = snap.seq || 0;
     selection = { kind: 'none', cordId: null };
     endDragState = null;
+    cords.forEach(function (c) {
+      if (!c.lengthMode) c.lengthMode = 'free';
+      if (typeof c.lengthMeters !== 'number') {
+        c.lengthMeters = typeof c.fixedLength === 'number'
+          ? normalizeLengthMeters(pxToMeters(c.fixedLength))
+          : 3;
+      }
+    });
     rebuildLayer();
     updateInspector();
     refreshBudget();
@@ -153,31 +194,103 @@
     return { x: x, y: y };
   }
 
+  /** Default free-spawn span (px) and face-to-face boot rotations. */
+  function defaultSpawnSpanPx() {
+    if (global.FtthLab && typeof FtthLab.PATCH_CORD_DEFAULT_SPAN_PX === 'number') {
+      return Math.max(80, FtthLab.PATCH_CORD_DEFAULT_SPAN_PX);
+    }
+    return 180;
+  }
+
+  function defaultSpawnRotA() {
+    if (global.FtthLab && typeof FtthLab.PATCH_CORD_DEFAULT_ROT_A === 'number') {
+      return FtthLab.PATCH_CORD_DEFAULT_ROT_A;
+    }
+    return -90; /* boot toward +X (peer) */
+  }
+
+  function defaultSpawnRotB() {
+    if (global.FtthLab && typeof FtthLab.PATCH_CORD_DEFAULT_ROT_B === 'number') {
+      return FtthLab.PATCH_CORD_DEFAULT_ROT_B;
+    }
+    return 90; /* boot toward −X (peer) */
+  }
+
+  function defaultSpawnSagSlack() {
+    if (global.FtthLab && typeof FtthLab.PATCH_CORD_DEFAULT_SAG_SLACK === 'number') {
+      return Math.max(1.05, FtthLab.PATCH_CORD_DEFAULT_SAG_SLACK);
+    }
+    return 1.18;
+  }
+
+  /**
+   * Seed mid-span samples so a fresh cord paints a natural downward catenary
+   * immediately (no straight chord / empty path flash).
+   */
+  function seedInitialCatenaryRoute(cord) {
+    if (!cord) return;
+    var ends = reliefSpanEnds(cord);
+    var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
+    var slack = defaultSpawnSagSlack();
+    var sag = catenarySagDepth(chord);
+    var L = Math.max(
+      chord * slack,
+      catenaryLengthForSag(ends.a, ends.b, sag)
+    );
+    var full = sampleTrueCatenary(ends.a, ends.b, L, CATENARY_SAMPLES);
+    cord.route = full.slice(1, -1);
+    cord.pathLocked = false;
+  }
+
+  /**
+   * Apply horizontal face-to-face pose: A left / B right, boots toward each
+   * other (−90° / +90°), then seed a hanging catenary between the relief tips.
+   */
+  function applyDefaultFreeSpawnPose(cord, originX, originY) {
+    var span = defaultSpawnSpanPx();
+    var rotA = defaultSpawnRotA();
+    var rotB = defaultSpawnRotB();
+    cord.ax = originX;
+    cord.ay = originY;
+    cord.bx = originX + span;
+    cord.by = originY;
+    cord.sideA.liveRot = rotA;
+    cord.sideB.liveRot = rotB;
+    cord.sideA.lockedRot = null;
+    cord.sideB.lockedRot = null;
+    seedInitialCatenaryRoute(cord);
+  }
+
   function placeCord(x, y) {
     seq += 1;
     var pos = (typeof x === 'number' && typeof y === 'number')
       ? { x: x, y: y }
       : defaultPos();
-    var span = 120; /* vertical A (top) → B (bottom) */
     var cord = {
       id: 'pc-' + seq,
       ax: pos.x,
       ay: pos.y,
       bx: pos.x,
-      by: pos.y + span,
+      by: pos.y,
       sideA: { polish: 'PC', attached: null, mismatch: false, lockedRot: null, liveRot: null },
       sideB: { polish: 'PC', attached: null, mismatch: false, lockedRot: null, liveRot: null },
       route: [],
       pathLocked: false,
       fixedLength: null, /* locked mid-span length once both ends first connect */
+      lengthMode: 'free', /* 'free' | 'meter' */
+      lengthMeters: 3, /* Meter Mode target length */
       relocating: false, /* true while moving a plugged end to a new port */
     };
+    applyDefaultFreeSpawnPose(cord, pos.x, pos.y);
     cords.push(cord);
     selectCord(cord.id);
     rebuildLayer();
     pushHistory();
     refreshBudget();
-    setStatus('Patch cord placed · vertical span · drag a free end to route · snap into a port to lock');
+    setStatus(
+      'Patch cord placed · horizontal face-to-face · natural sag · ' +
+      'drag a free end to route · snap into a port to lock'
+    );
     return cord;
   }
 
@@ -855,6 +968,8 @@
       route: [],
       pathLocked: false,
       fixedLength: null,
+      lengthMode: 'free',
+      lengthMeters: 3,
       relocating: false,
     };
     cords.push(cord);
@@ -1023,6 +1138,8 @@
   var BODY_CLEAR_PX = END_H / 2 + 3;
   var HEADING_MIN_PX = 2.5; /* ignore micro jitter when updating live heading */
   var HEADING_SMOOTH = 0.42; /* blend factor toward new motion heading */
+  /* Free-head upright cone: ±90° = full L/R, never ferrule-down (≈180°) */
+  var HEADING_MAX_TILT_DEG = 90;
   var UNPLUG_PULL_PX = 36;
   var PLUG_SNAP_PX = 22;
   /** Base gravity sag (px); also scaled by end-to-end distance */
@@ -1107,12 +1224,38 @@
     return from + d * t;
   }
 
+  /** Clamp free-end CSS rotate into the upright hemisphere (ferrule never nose-down). */
+  function clampUprightHeading(rotDeg) {
+    if (global.FtthLab && typeof FtthLab.clampConnectorHeadingUpright === 'function') {
+      return FtthLab.clampConnectorHeadingUpright(rotDeg, HEADING_MAX_TILT_DEG);
+    }
+    var a = Number(rotDeg);
+    if (!isFinite(a)) return 0;
+    a = ((a + 180) % 360 + 360) % 360 - 180;
+    if (a > HEADING_MAX_TILT_DEG) return HEADING_MAX_TILT_DEG;
+    if (a < -HEADING_MAX_TILT_DEG) return -HEADING_MAX_TILT_DEG;
+    return a;
+  }
+
+  /** Unconstrained nose→motion degrees (used when choosing 0° vs 180° at plug). */
+  function headingRotFromMotionRaw(dx, dy) {
+    return Math.atan2(dx, -dy) * 180 / Math.PI;
+  }
+
   /**
-   * Drag heading: ferrule/nose leads along (dx, dy); boot trails opposite.
-   * Ferrule after rotate = (sin θ, −cos θ) ⇒ θ = atan2(dx, −dy).
+   * Free-drag heading: ferrule/nose leads along motion; boot trails opposite.
+   * Left/right yaw stays smooth (±90°). Vertical downward motion is ignored
+   * so the head stays upright instead of flipping to ~180° (nose-down).
+   * Ferrule after rotate = (sin θ, −cos θ) ⇒ upright θ = 0.
    */
   function headingRotFromMotion(dx, dy) {
-    return Math.atan2(dx, -dy) * 180 / Math.PI;
+    if (global.FtthLab && typeof FtthLab.headingRotFromMotionUpright === 'function') {
+      return FtthLab.headingRotFromMotionUpright(dx, dy, HEADING_MAX_TILT_DEG);
+    }
+    var ax = dx;
+    var ay = dy > 0 ? 0 : dy;
+    if (Math.abs(ax) < 1e-9 && Math.abs(ay) < 1e-9) return 0;
+    return clampUprightHeading(Math.atan2(ax, -ay) * 180 / Math.PI);
   }
 
   /**
@@ -1142,7 +1285,7 @@
     var p = getEndWorld(cord, end);
     var dY = (hit && typeof hit.wy === 'number') ? (hit.wy - p.y) : 0;
     if (Math.abs(dY) < 1) return base;
-    var preferred = headingRotFromMotion(0, dY);
+    var preferred = headingRotFromMotionRaw(0, dY);
     var dBase = Math.abs(((preferred - base + 540) % 360) - 180);
     var dAlt = Math.abs(((preferred - alt + 540) % 360) - 180);
     return dAlt < dBase ? alt : base;
@@ -1158,10 +1301,13 @@
       }
     }
     /* Live drag heading (nose → motion) drives CSS rotate + bootAnchor */
-    if (typeof side.liveRot === 'number') return side.liveRot;
+    if (typeof side.liveRot === 'number') {
+      return clampUprightHeading(side.liveRot);
+    }
     var p = getEndWorld(cord, end);
     var o = end === 'A' ? { x: cord.bx, y: cord.by } : { x: cord.ax, y: cord.ay };
-    return endRotationDeg(p.x, p.y, o.x, o.y);
+    /* Free idle: boot toward cable, but never flip ferrule nose-down */
+    return clampUprightHeading(endRotationDeg(p.x, p.y, o.x, o.y));
   }
 
   /** Apply smoothed motion heading while an end is free / being dragged. */
@@ -1171,7 +1317,9 @@
     if (dist2(0, 0, dx, dy) < HEADING_MIN_PX) return;
     var target = headingRotFromMotion(dx, dy);
     if (typeof side.liveRot === 'number') {
-      side.liveRot = lerpAngleDeg(side.liveRot, target, HEADING_SMOOTH);
+      side.liveRot = clampUprightHeading(
+        lerpAngleDeg(side.liveRot, target, HEADING_SMOOTH)
+      );
     } else {
       side.liveRot = target;
     }
@@ -1211,18 +1359,125 @@
 
   /**
    * Strict strain-relief chain: tip → mid → outer, all on the port/boot axis.
-   * First STRAIN_RELIEF_PX must stay straight before any spline curvature.
+   * Length adapts to connector facing so opposing boots do not fold the span.
    */
   function strainReliefChain(cord, end) {
     var tip = bootAnchor(cord, end);
     var t = bootOutDir(getEndRotation(cord, end));
-    var midD = STRAIN_RELIEF_PX * 0.45;
-    var outD = STRAIN_RELIEF_PX;
+    var u = unitVec(t.x, t.y);
+    var otherTip = end === 'A' ? bootAnchor(cord, 'B') : bootAnchor(cord, 'A');
+    var outD = adaptiveBootStubLength(
+      u,
+      tip,
+      otherTip,
+      Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB)
+    );
+    var midD = outD * 0.45;
     return [
       tip,
-      { x: tip.x + t.x * midD, y: tip.y + t.y * midD },
-      { x: tip.x + t.x * outD, y: tip.y + t.y * outD },
+      { x: tip.x + u.x * midD, y: tip.y + u.y * midD },
+      { x: tip.x + u.x * outD, y: tip.y + u.y * outD },
     ];
+  }
+
+  /** Cosine of boot-out vs tip→other: +1 faces peer, −1 faces away. */
+  function bootFacesToward(bootDir, fromTip, toTip) {
+    var dx = toTip.x - fromTip.x;
+    var dy = toTip.y - fromTip.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    return (bootDir.x * dx + bootDir.y * dy) / len;
+  }
+
+  /**
+   * Strain-relief stub length along boot axis.
+   * Full length when facing the peer; shortened when reversed/sideways so
+   * stubs do not cross or collapse the mid-span chord.
+   */
+  function adaptiveBootStubLength(bootDir, tip, otherTip, baseStub) {
+    var span = dist2(tip.x, tip.y, otherTip.x, otherTip.y) || 1;
+    var face = bootFacesToward(bootDir, tip, otherTip);
+    var scale;
+    if (face >= 0.35) scale = 1;
+    else if (face >= 0) scale = 0.55 + 0.45 * (face / 0.35);
+    else scale = Math.max(0.28, 0.45 + face * 0.35);
+    if (global.FtthLab && typeof FtthLab.adaptiveFiberStubScale === 'function') {
+      scale = FtthLab.adaptiveFiberStubScale(face);
+    }
+    var len = baseStub * scale;
+    var cap = Math.max(BOOT_EXIT_STUB * 0.75, span * 0.28);
+    return Math.max(BOOT_EXIT_STUB * 0.55, Math.min(len, cap));
+  }
+
+  /**
+   * Extra cable length (fraction of tip span) when boots face away / reverse —
+   * gives the catenary room for a natural U-turn hang instead of a kink.
+   */
+  function opposingOrientationSlackFraction(tA, tB, tipA, tipB) {
+    var faceA = bootFacesToward(tA, tipA, tipB);
+    var faceB = bootFacesToward(tB, tipB, tipA);
+    if (global.FtthLab && typeof FtthLab.opposingFiberSlackFraction === 'function') {
+      return FtthLab.opposingFiberSlackFraction(faceA, faceB);
+    }
+    var away = 0;
+    if (faceA < 0.25) away += (0.25 - faceA) * 0.22;
+    if (faceB < 0.25) away += (0.25 - faceB) * 0.22;
+    return away;
+  }
+
+  /** Pull mid-span anchors apart along the tip chord when stubs would cross. */
+  function stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3) {
+    var span = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
+    var chord = unitVec(tipB.x - tipA.x, tipB.y - tipA.y);
+    var midLen = dist2(p0.x, p0.y, p3.x, p3.y);
+    var progress = (p3.x - p0.x) * chord.x + (p3.y - p0.y) * chord.y;
+    var collapsed = midLen < Math.max(14, span * 0.18) || progress < span * 0.12;
+    if (!collapsed) {
+      return { p0: p0, p3: p3, collapsed: false };
+    }
+    var drop = Math.min(36, Math.max(10, span * 0.16));
+    var along = Math.min(STRAIN_RELIEF_PX, span * 0.22);
+    var n0 = {
+      x: tipA.x + chord.x * along + tA.x * (BOOT_EXIT_STUB * 0.7),
+      y: tipA.y + chord.y * along + tA.y * (BOOT_EXIT_STUB * 0.7) + drop * 0.35,
+    };
+    var n3 = {
+      x: tipB.x - chord.x * along + tB.x * (BOOT_EXIT_STUB * 0.7),
+      y: tipB.y - chord.y * along + tB.y * (BOOT_EXIT_STUB * 0.7) + drop * 0.35,
+    };
+    return {
+      p0: { x: p0.x * 0.25 + n0.x * 0.75, y: p0.y * 0.25 + n0.y * 0.75 },
+      p3: { x: p3.x * 0.25 + n3.x * 0.75, y: p3.y * 0.25 + n3.y * 0.75 },
+      collapsed: true,
+    };
+  }
+
+  function blendUnitTan(primary, secondary, weightPrimary) {
+    var w = Math.max(0, Math.min(1, weightPrimary));
+    return unitVec(
+      primary.x * w + secondary.x * (1 - w),
+      primary.y * w + secondary.y * (1 - w)
+    );
+  }
+
+  function naturalCatenaryTangents(mid) {
+    if (!mid || mid.length < 2) {
+      return { inTan: { x: 1, y: 0 }, outTan: { x: 1, y: 0 } };
+    }
+    var a = mid[0];
+    var b = mid[1];
+    var c = mid[mid.length - 2];
+    var d = mid[mid.length - 1];
+    return {
+      inTan: unitVec(b.x - a.x, b.y - a.y),
+      outTan: unitVec(d.x - c.x, d.y - c.y),
+    };
+  }
+
+  /** Boot-tangent blend weight: strong when facing peer, soft when reversed. */
+  function bootTangentBlendWeight(face) {
+    if (face >= 0.4) return 0.92;
+    if (face >= 0) return 0.55 + face * 0.7;
+    return Math.max(0.18, 0.45 + face * 0.3);
   }
 
   /** True if a sample sits inside/near a connector body (would pierce housing if used). */
@@ -1406,6 +1661,14 @@
       catenaryLengthForSag(p0, p3, sag)
     );
     return sampleTrueCatenary(p0, p3, L, count || CATENARY_SAMPLES);
+  }
+
+  /**
+   * Fixed-length mid-span: always a true catenary.
+   * Excess length (L > chord) becomes deeper downward gravitational sag — never loops.
+   */
+  function sampleFixedLengthSpan(p0, p3, lengthPx, count) {
+    return sampleTrueCatenary(p0, p3, lengthPx, count);
   }
 
   function polylineLength(pts) {
@@ -1729,6 +1992,12 @@
    */
   function resolveFixedCableLength(cord, p0, p3, route) {
     var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    if (isMeterMode(cord)) {
+      cord.lengthMeters = normalizeLengthMeters(cord.lengthMeters || 3);
+      cord.fixedLength = metersToPx(cord.lengthMeters);
+      if (chord >= cord.fixedLength) return chord * 1.0002;
+      return cord.fixedLength;
+    }
     if (typeof cord.fixedLength === 'number' && cord.fixedLength > 0) {
       if (chord >= cord.fixedLength) return chord * 1.0002; /* taut — ports at max reach */
       return cord.fixedLength;
@@ -1777,8 +2046,172 @@
     var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
     var L = cord.fixedLength;
     if (chord >= L) L = chord * 1.0002;
-    var full = sampleTrueCatenary(ends.a, ends.b, L, CATENARY_SAMPLES);
+    var full = sampleFixedLengthSpan(ends.a, ends.b, L, CATENARY_SAMPLES);
     cord.route = full.slice(1, -1);
+    cord.pathLocked = true;
+  }
+
+  /** Slack used when laying out Meter Mode free/semi-bound spans (more = deeper sag). */
+  var METER_SAG_SLACK = 1.32;
+
+  /** Chord length that leaves a strong share of L for downward catenary sag. */
+  function meterChordTarget(L) {
+    L = Math.max(Number(L) || 0, 12);
+    /* ~24% of length reserved for hang — small meter steps read as deeper sag */
+    var chord = L / METER_SAG_SLACK;
+    if (chord > L * 0.88) chord = L * 0.82;
+    if (chord < 20) chord = Math.min(L * 0.85, Math.max(16, L - 8));
+    return chord;
+  }
+
+  /** Place connector so its boot tip sits at (tipX, tipY) with boot aimed at aim. */
+  function seatBootTipAt(cord, end, tipX, tipY, aimX, aimY) {
+    var side = cord[endKey(end)];
+    if (!side.attached) {
+      side.liveRot = clampUprightHeading(endRotationDeg(tipX, tipY, aimX, aimY));
+    }
+    var t = bootOutDir(getEndRotation(cord, end));
+    setEndWorld(
+      cord,
+      end,
+      tipX - t.x * BOOT_EXIT_OFFSET,
+      tipY - t.y * BOOT_EXIT_OFFSET
+    );
+  }
+
+  /**
+   * Meter Mode layout for any plug state:
+   *  - both plugged → deepen/shallow catenary sag between fixed ports
+   *  - one free → extend/retract free-tail vector, then hang at full L
+   *  - both free → scale A↔B span, then hang at full L
+   */
+  function layoutMeterLengthGeometry(cord) {
+    if (!cord || typeof cord.fixedLength !== 'number') return;
+    var L = cord.fixedLength;
+    var aOn = !!cord.sideA.attached;
+    var bOn = !!cord.sideB.attached;
+    var chordTarget = meterChordTarget(L);
+
+    if (aOn && bOn) {
+      rebuildFixedLengthCatenary(cord);
+      return;
+    }
+
+    if (aOn !== bOn) {
+      var freeEnd = aOn ? 'B' : 'A';
+      var fixedEnd = aOn ? 'A' : 'B';
+      var anch = bootAnchor(cord, fixedEnd);
+      var freeTip = bootAnchor(cord, freeEnd);
+      var dx = freeTip.x - anch.x;
+      var dy = freeTip.y - anch.y;
+      var d = Math.sqrt(dx * dx + dy * dy);
+      var ux;
+      var uy;
+      if (d < 10) {
+        var out = bootOutDir(getEndRotation(cord, fixedEnd));
+        ux = out.x;
+        uy = out.y;
+      } else {
+        ux = dx / d;
+        uy = dy / d;
+      }
+      seatBootTipAt(
+        cord,
+        freeEnd,
+        anch.x + ux * chordTarget,
+        anch.y + uy * chordTarget,
+        anch.x,
+        anch.y
+      );
+      rebuildFixedLengthCatenary(cord);
+      return;
+    }
+
+    /* Both free — grow/shrink along current A→B axis about midpoint */
+    var tipA = bootAnchor(cord, 'A');
+    var tipB = bootAnchor(cord, 'B');
+    var mx = (tipA.x + tipB.x) * 0.5;
+    var my = (tipA.y + tipB.y) * 0.5;
+    var abx = tipB.x - tipA.x;
+    var aby = tipB.y - tipA.y;
+    var abd = Math.sqrt(abx * abx + aby * aby);
+    var ux2;
+    var uy2;
+    if (abd < 10) {
+      ux2 = 0;
+      uy2 = 1;
+    } else {
+      ux2 = abx / abd;
+      uy2 = aby / abd;
+    }
+    var half = chordTarget * 0.5;
+    seatBootTipAt(cord, 'A', mx - ux2 * half, my - uy2 * half, mx + ux2 * half, my + uy2 * half);
+    seatBootTipAt(cord, 'B', mx + ux2 * half, my + uy2 * half, mx - ux2 * half, my - uy2 * half);
+    rebuildFixedLengthCatenary(cord);
+  }
+
+  function applyMeterLengthToCord(cord) {
+    if (!cord || !isMeterMode(cord)) return;
+    cord.lengthMeters = normalizeLengthMeters(cord.lengthMeters || 3);
+    cord.fixedLength = metersToPx(cord.lengthMeters);
+    cord.pathLocked = true;
+    cord.relocating = false;
+    syncAttachedPositions(cord);
+    layoutMeterLengthGeometry(cord);
+  }
+
+  function setLengthMode(id, mode) {
+    var cord = findCord(id);
+    if (!cord) return;
+    mode = mode === 'meter' ? 'meter' : 'free';
+    if (cord.lengthMode === mode) {
+      updateInspector();
+      return;
+    }
+    cord.lengthMode = mode;
+    clearRopePhysics(cord.id);
+    if (mode === 'meter') {
+      if (typeof cord.lengthMeters !== 'number') {
+        cord.lengthMeters = typeof cord.fixedLength === 'number'
+          ? normalizeLengthMeters(pxToMeters(cord.fixedLength))
+          : 3;
+      }
+      applyMeterLengthToCord(cord);
+      setStatus(
+        'Meter Mode · ' + cord.lengthMeters + ' m · mid-span drag disabled · excess length → deeper sag'
+      );
+    } else {
+      /* Free Draw — keep physical length if known; restore hanging catenary */
+      if (typeof cord.fixedLength === 'number' &&
+          cord.sideA.attached && cord.sideB.attached) {
+        var ends = reliefSpanEnds(cord);
+        var chord = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 1;
+        var L = cord.fixedLength;
+        if (chord >= L) L = chord * 1.0002;
+        var full = sampleTrueCatenary(ends.a, ends.b, L, CATENARY_SAMPLES);
+        cord.route = full.slice(1, -1);
+        cord.pathLocked = true;
+      }
+      setStatus('Free Draw · drag ends to route · stretch mid-span when both ports are linked');
+    }
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+  }
+
+  function setLengthMeters(id, meters) {
+    var cord = findCord(id);
+    if (!cord) return;
+    cord.lengthMode = 'meter';
+    cord.lengthMeters = normalizeLengthMeters(meters);
+    clearRopePhysics(cord.id);
+    applyMeterLengthToCord(cord);
+    /* Instant canvas update — geometry already rebuilt above */
+    rebuildLayer();
+    updateFiberPath(cord);
+    updateInspector();
+    pushHistory();
+    setStatus('Cable length · ' + cord.lengthMeters + ' m');
   }
 
   /** True if both seated relief tips fit within the locked cable length. */
@@ -1807,7 +2240,7 @@
       bOuter,
       route.length ? route : null
     );
-    var full = sampleTrueCatenary(aOuter, bOuter, L, CATENARY_SAMPLES);
+    var full = sampleFixedLengthSpan(aOuter, bOuter, L, CATENARY_SAMPLES, cord);
     cord.route = full.slice(1, -1);
     if (cord.route.length > TRACE_MAX_POINTS) {
       cord.route = downsampleRoute(cord.route, TRACE_MAX_POINTS);
@@ -2137,7 +2570,7 @@
       if (chord >= L) L = chord * 1.0002;
       bindRopeRestToPoints(
         rope,
-        sampleTrueCatenary(ends.a, ends.b, L, rope.particles.length)
+        sampleFixedLengthSpan(ends.a, ends.b, L, rope.particles.length, cord)
       );
     } else if (rope.grabBase) {
       bindRopeRestToPoints(rope, rope.grabBase);
@@ -2217,11 +2650,10 @@
     }
 
     if (cleaned.length >= 1) {
-      var span = enforceDownwardSag(
-        [{ x: aOuter.x, y: aOuter.y }]
-          .concat(cleaned)
-          .concat([{ x: bOuter.x, y: bOuter.y }])
-      );
+      var span = [{ x: aOuter.x, y: aOuter.y }]
+        .concat(cleaned)
+        .concat([{ x: bOuter.x, y: bOuter.y }]);
+      span = enforceDownwardSag(span);
       cleaned = span.slice(1, -1);
     }
 
@@ -2374,73 +2806,121 @@
   }
 
   /**
-   * Always spline-smooth mid-span (drag, settle, locked catenary, free-hand).
-   * Strain-relief stubs stay straight; cubic handles match their exit tangents.
+   * Arc length used for continuous catenary rendering (all modes / live drag).
+   * Prefer live rope span length, then locked meters, then traced length, then default slack.
    */
-  function cordCablePath(cord) {
-    var route = ensureRoute(cord);
-    if (route.length || cord.pathLocked) {
-      var pts = densifyMidSpanForSpline(
-        buildCablePoints(cord),
-        STRAIN_LEAD_PTS,
-        STRAIN_LEAD_PTS
-      );
-      return smoothPathThrough(pts, {
-        strainLead: STRAIN_LEAD_PTS,
-        strainTrail: STRAIN_LEAD_PTS,
-      });
+  function resolveRenderCableLength(cord, p0, p3) {
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var rope = ropePhysics[cord.id];
+    if (rope && rope.particles && rope.particles.length >= 2) {
+      var rlen = 0;
+      var ri;
+      for (ri = 1; ri < rope.particles.length; ri++) {
+        rlen += dist2(
+          rope.particles[ri - 1].x, rope.particles[ri - 1].y,
+          rope.particles[ri].x, rope.particles[ri].y
+        );
+      }
+      if (rlen > chord * 1.001) return Math.max(rlen, chord * 1.0002);
     }
-    return gravityBezierPath(cord);
+    if (typeof cord.fixedLength === 'number' && cord.fixedLength > 0) {
+      return Math.max(cord.fixedLength, chord * 1.0002);
+    }
+    var route = ensureRoute(cord);
+    if (route.length >= 2) {
+      var poly = [{ x: p0.x, y: p0.y }].concat(route).concat([{ x: p3.x, y: p3.y }]);
+      var len = polylineLength(poly);
+      var sag = routeSagDepth(poly);
+      var L = Math.max(len, chord * CATENARY_DEFAULT_SLACK);
+      if (sag > 2) L = Math.max(L, catenaryLengthForSag(p0, p3, sag));
+      return Math.max(L, chord * 1.0002);
+    }
+    var sagD = catenarySagDepth(chord);
+    return Math.max(
+      chord * CATENARY_DEFAULT_SLACK,
+      catenaryLengthForSag(p0, p3, sagD)
+    );
   }
 
   /**
-   * Fallback only for untraced cords (no mouse path yet).
-   * Both ends free → clean chord along boot exit axes.
-   * One end plugged → true catenary samples drawn as a cubic spline.
+   * Universal render path: orientation-aware stubs + downward catenary.
+   * Entry/exit tangents follow each connector's boot facing; opposing /
+   * reversed headings get shortened stubs, extra sag slack, and blended
+   * tangents so the cable never collapses into a sharp S or inverted kink.
    */
-  function gravityBezierPath(cord) {
+  function buildContinuousCatenaryPath(cord) {
     var tipA = bootAnchor(cord, 'A');
     var tipB = bootAnchor(cord, 'B');
-    var tA = bootOutDir(getEndRotation(cord, 'A'));
-    var tB = bootOutDir(getEndRotation(cord, 'B'));
-    var dx = tipB.x - tipA.x;
-    var dy = tipB.y - tipA.y;
-    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-    var bothFree = !cord.sideA.attached && !cord.sideB.attached;
+    var dirA = bootOutDir(getEndRotation(cord, 'A'));
+    var dirB = bootOutDir(getEndRotation(cord, 'B'));
+    var tA = unitVec(dirA.x, dirA.y);
+    var tB = unitVec(dirB.x, dirB.y);
 
-    if (bothFree) {
-      var h = Math.min(BOOT_EXIT_STUB + 12, Math.max(BOOT_EXIT_STUB, dist * 0.22));
+    var baseStub = Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB);
+    var stubA = adaptiveBootStubLength(tA, tipA, tipB, baseStub);
+    var stubB = adaptiveBootStubLength(tB, tipB, tipA, baseStub);
+    var p0 = {
+      x: tipA.x + tA.x * stubA,
+      y: tipA.y + tA.y * stubA,
+    };
+    var p3 = {
+      x: tipB.x + tB.x * stubB,
+      y: tipB.y + tB.y * stubB,
+    };
+    var stab = stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3);
+    p0 = stab.p0;
+    p3 = stab.p3;
+
+    var tipSpan = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
+    var midChord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var L = resolveRenderCableLength(cord, p0, p3);
+    L += tipSpan * opposingOrientationSlackFraction(tA, tB, tipA, tipB);
+    if (stab.collapsed) {
+      L = Math.max(L, midChord * 1.24);
+    }
+    L = Math.max(L, midChord * 1.0002);
+
+    var mid = sampleTrueCatenary(p0, p3, L, CATENARY_SAMPLES);
+    var nat = naturalCatenaryTangents(mid);
+    var faceA = bootFacesToward(tA, tipA, tipB);
+    var faceB = bootFacesToward(tB, tipB, tipA);
+    var uA = blendUnitTan(tA, nat.inTan, bootTangentBlendWeight(faceA));
+    /* Travel arrives at p3 heading into boot B ⇒ −bootOut */
+    var intoB = unitVec(-tB.x, -tB.y);
+    var uB = blendUnitTan(intoB, nat.outTan, bootTangentBlendWeight(faceB));
+
+    var softJoin = stab.collapsed || faceA < 0.15 || faceB < 0.15;
+    if (softJoin) {
+      var hA = Math.max(4, stubA / 3);
+      var hB = Math.max(4, stubB / 3);
       return (
         'M ' + tipA.x + ' ' + tipA.y +
-        ' C ' + (tipA.x + tA.x * h) + ' ' + (tipA.y + tA.y * h) + ', ' +
-        (tipB.x + tB.x * h) + ' ' + (tipB.y + tB.y * h) + ', ' +
+        ' C ' + (tipA.x + tA.x * hA) + ' ' + (tipA.y + tA.y * hA) + ', ' +
+        (p0.x - uA.x * hA) + ' ' + (p0.y - uA.y * hA) + ', ' +
+        p0.x + ' ' + p0.y +
+        catmullRomCubicCommands(mid, { inTan: uA, outTan: uB }) +
+        ' C ' + (p3.x + uB.x * hB) + ' ' + (p3.y + uB.y * hB) + ', ' +
+        (tipB.x + tB.x * hB) + ' ' + (tipB.y + tB.y * hB) + ', ' +
         tipB.x + ' ' + tipB.y
       );
     }
 
-    /* Strict axial exits, then cubic spline through true-catenary samples */
-    var stub = Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB);
-    var p0 = {
-      x: tipA.x + tA.x * stub,
-      y: tipA.y + tA.y * stub,
-    };
-    var p3 = {
-      x: tipB.x + tB.x * stub,
-      y: tipB.y + tB.y * stub,
-    };
-    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
-    var sag = catenarySagDepth(chord);
-    var L = Math.max(chord * CATENARY_DEFAULT_SLACK, catenaryLengthForSag(p0, p3, sag));
-    var mid = sampleTrueCatenary(p0, p3, L, CATENARY_SAMPLES);
-    /* Arrive at p3 heading toward tipB (= −bootOut on B) for seamless stub join */
-    var uA = unitVec(tA.x, tA.y);
-    var uB = unitVec(-tB.x, -tB.y);
     return (
       'M ' + tipA.x + ' ' + tipA.y +
       ' L ' + p0.x + ' ' + p0.y +
       catmullRomCubicCommands(mid, { inTan: uA, outTan: uB }) +
       ' L ' + tipB.x + ' ' + tipB.y
     );
+  }
+
+  /** Public render entry — always continuous gravitational catenary. */
+  function cordCablePath(cord) {
+    return buildContinuousCatenaryPath(cord);
+  }
+
+  /** @deprecated alias — kept for call sites; always continuous catenary. */
+  function gravityBezierPath(cord) {
+    return buildContinuousCatenaryPath(cord);
   }
 
   function endStyle(cord, end) {
@@ -2509,9 +2989,11 @@
       var bad = c.sideA.mismatch || c.sideB.mismatch;
       var sel = selection.cordId === c.id ? ' is-selected' : '';
       html +=
-        '<path class="lab-pcord-fiber-hit" data-pcord-drag="' + c.id + '" d="' + path +
+        '<path class="lab-pcord-fiber-hit' + (isMeterMode(c) ? ' is-meter-mode' : '') +
+        '" data-pcord-drag="' + c.id + '" d="' + path +
         '" fill="none" />' +
         '<path class="lab-pcord-fiber' + (bad ? ' is-mismatch' : '') + sel +
+        (isMeterMode(c) ? ' is-meter-mode' : '') +
         '" data-pcord-fiber="' + c.id + '" d="' + path + '" fill="none" />' +
         '<path class="lab-pcord-laser-core" data-pcord-laser="' + c.id + '" d="' + path +
         '" fill="none" />';
@@ -2580,8 +3062,15 @@
           return;
         }
 
-        /* Both ports locked — rubber-band mid-span stretch + spring settle */
+        /* Both ports locked — rubber-band mid-span (Free Draw only) */
         if (aLocked && bLocked) {
+          if (isMeterMode(c)) {
+            setStatus(
+              'Meter Mode · ' + (c.lengthMeters || pxToMeters(c.fixedLength)).toFixed(1) +
+              ' m · adjust length in Properties · mid-span drag disabled'
+            );
+            return;
+          }
           var world0 = clientToWorld(e.clientX, e.clientY);
           beginRopeGrab(c, world0.x, world0.y);
           updateFiberPath(c);
@@ -2918,17 +3407,68 @@
     if (!c) return;
 
     var pathLoss = cordLossDb(c);
-    var locked = typeof c.fixedLength === 'number';
+    var meter = isMeterMode(c);
+    var meters = normalizeLengthMeters(
+      typeof c.lengthMeters === 'number'
+        ? c.lengthMeters
+        : (typeof c.fixedLength === 'number' ? pxToMeters(c.fixedLength) : 3)
+    );
+    var chordPx = 0;
+    if (c.sideA.attached && c.sideB.attached) {
+      var ends = reliefSpanEnds(c);
+      chordPx = dist2(ends.a.x, ends.a.y, ends.b.x, ends.b.y) || 0;
+    }
+    var excessM = meter && typeof c.fixedLength === 'number'
+      ? Math.max(0, pxToMeters(c.fixedLength - chordPx))
+      : 0;
+
     card.innerHTML =
       '<h2>Patch Cord</h2>' +
-      '<p>' + (locked
-        ? 'Length locked · relocating keeps span; plug into ports to re-seat.'
-        : 'Drag ends onto ports · first full connect locks length.') + '</p>';
+      '<p>' + (meter
+        ? 'Meter Mode · fixed length · longer cable = deeper catenary sag'
+        : 'Free Draw · drag ends to route · stretch mid-span when linked') + '</p>';
 
     if (!detail) return;
     detail.hidden = false;
+
+    var presets = [1, 2, 3, 5, 10];
+    var presetHtml = presets.map(function (m) {
+      return (
+        '<button type="button" class="lab-pcord-len-preset' +
+        (meters === m ? ' is-active' : '') +
+        '" data-pc-len-preset="' + c.id + ':' + m + '">' + m + ' m</button>'
+      );
+    }).join('');
+
     detail.innerHTML =
       '<div class="lab-pcord-config">' +
+      '<p class="lab-inspector__label">Length control</p>' +
+      '<div class="lab-pcord-len-mode" role="group" aria-label="Cable length mode">' +
+      '<button type="button" class="lab-pcord-len-mode-btn' + (!meter ? ' is-active' : '') +
+      '" data-pc-len-mode="' + c.id + ':free">Free Draw</button>' +
+      '<button type="button" class="lab-pcord-len-mode-btn' + (meter ? ' is-active' : '') +
+      '" data-pc-len-mode="' + c.id + ':meter">Meter Mode</button>' +
+      '</div>' +
+      '<div class="lab-pcord-meter"' + (meter ? '' : ' hidden') + '>' +
+      '<label class="lab-pcord-meter-label" for="lab-pcord-len-input-' + c.id +
+      '">Length (meters)</label>' +
+      '<div class="lab-pcord-meter-stepper">' +
+      '<button type="button" class="lab-pcord-meter-btn" data-pc-len-step="' +
+      c.id + ':-0.5" aria-label="Decrease length">−</button>' +
+      '<input id="lab-pcord-len-input-' + c.id +
+      '" class="lab-pcord-meter-input" type="number" min="0.5" max="100" step="0.5" ' +
+      'value="' + meters + '" data-pc-len-meters="' + c.id + '">' +
+      '<button type="button" class="lab-pcord-meter-btn" data-pc-len-step="' +
+      c.id + ':0.5" aria-label="Increase length">+</button>' +
+      '</div>' +
+      '<div class="lab-pcord-len-presets">' + presetHtml + '</div>' +
+      '<p class="lab-pcord-meter-hint">' +
+      (excessM > 0.05
+        ? 'Span ' + pxToMeters(chordPx).toFixed(2) + ' m · excess ' +
+          excessM.toFixed(2) + ' m → deeper sag'
+        : 'Length longer than the port span hangs as gravitational sag') +
+      '</p>' +
+      '</div>' +
       polishToggleHtml(c.id, 'A', c.sideA.polish, 'Side A') +
       '<p class="lab-pcord-attach' + (c.sideA.mismatch ? ' is-warn' : '') + '">' +
       (c.sideA.attached
@@ -2951,8 +3491,12 @@
       (normalizePolish(c.sideB.polish) === 'APC' ? 'is-apc-text' : 'is-upc-text') + '">' +
       displayPolish(c.sideB.polish) + '</strong></div>' +
       '<div><span>Path loss</span><strong>' + pathLoss.toFixed(2) + ' dB</strong></div>' +
-      (locked
-        ? '<div><span>Length</span><strong>' + Math.round(c.fixedLength) + ' px</strong></div>'
+      (typeof c.fixedLength === 'number'
+        ? '<div><span>Length</span><strong>' +
+          (meter
+            ? meters.toFixed(1) + ' m'
+            : Math.round(c.fixedLength) + ' px') +
+          '</strong></div>'
         : '') +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-pcord="' + c.id +
@@ -2965,6 +3509,49 @@
         setEndPolish(parts[0], parts[1], parts[2]);
       });
     });
+    detail.querySelectorAll('[data-pc-len-mode]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-pc-len-mode').split(':');
+        setLengthMode(parts[0], parts[1]);
+      });
+    });
+    detail.querySelectorAll('[data-pc-len-step]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-pc-len-step').split(':');
+        var cur = normalizeLengthMeters(
+          typeof c.lengthMeters === 'number' ? c.lengthMeters : meters
+        );
+        setLengthMeters(parts[0], cur + Number(parts[1]));
+      });
+    });
+    detail.querySelectorAll('[data-pc-len-preset]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-pc-len-preset').split(':');
+        setLengthMeters(parts[0], parts[1]);
+      });
+    });
+    var lenInput = detail.querySelector('[data-pc-len-meters]');
+    if (lenInput) {
+      lenInput.addEventListener('input', function () {
+        var v = Number(lenInput.value);
+        if (!isFinite(v) || v < 0.5) return;
+        cord.lengthMode = 'meter';
+        cord.lengthMeters = normalizeLengthMeters(v);
+        clearRopePhysics(cord.id);
+        applyMeterLengthToCord(cord);
+        rebuildLayer();
+        updateFiberPath(cord);
+      });
+      lenInput.addEventListener('change', function () {
+        setLengthMeters(c.id, lenInput.value);
+      });
+      lenInput.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          setLengthMeters(c.id, lenInput.value);
+        }
+      });
+    }
     var rm = detail.querySelector('[data-remove-pcord]');
     if (rm) {
       rm.addEventListener('click', function () { removeCord(c.id); });
@@ -3233,6 +3820,14 @@
         );
         if (typeof prevGlow === 'function') prevGlow(targets);
       };
+
+      /* Shared continuous-catenary sampler for pigtails / other fiber tools */
+      FtthLab.sampleFiberCatenary = function (p0, p3, length, count) {
+        return sampleTrueCatenary(p0, p3, length, count || CATENARY_SAMPLES);
+      };
+      FtthLab.fiberCatenaryLengthForSag = catenaryLengthForSag;
+      FtthLab.fiberCatenarySagDepth = catenarySagDepth;
+      FtthLab.CATENARY_DEFAULT_SLACK = CATENARY_DEFAULT_SLACK;
     }
   }
 

@@ -30,6 +30,8 @@
   var HEADING_MIN_PX = 2.5;
   var HEADING_SMOOTH = 0.42;
   var HISTORY_MAX = 60;
+  var PIGTAIL_CATENARY_SAMPLES = 48;
+  var PIGTAIL_CATENARY_SLACK = 1.12;
 
   var ctx = null;
   var layer = null;
@@ -635,47 +637,87 @@
     }
   }
 
-  /* ─── Path / render (inherits patch-cord boot → cable geometry) ─── */
+  /* ─── Path / render — continuous downward catenary (all states) ─── */
+
+  function pigtailSlackFactor() {
+    return (global.FtthLab && FtthLab.CATENARY_DEFAULT_SLACK) || PIGTAIL_CATENARY_SLACK;
+  }
+
+  /** Dense hanging samples between two world points (shared FtthLab sampler preferred). */
+  function samplePigtailCatenary(p0, p3, length, count) {
+    count = Math.max(2, count || PIGTAIL_CATENARY_SAMPLES);
+    if (global.FtthLab && typeof FtthLab.sampleFiberCatenary === 'function') {
+      return FtthLab.sampleFiberCatenary(p0, p3, length, count);
+    }
+    /* Parabolic hang fallback before patch-cord mounts (screen Y+ down). */
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var L = Math.max(length || chord * pigtailSlackFactor(), chord * 1.0002);
+    var excess = Math.max(0, L - chord);
+    var sag = Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.45;
+    if (sag < 6) sag = Math.min(36, chord * 0.14);
+    var pts = [];
+    var i;
+    for (i = 0; i < count; i++) {
+      var t = count === 1 ? 0.5 : i / (count - 1);
+      var x = p0.x + (p3.x - p0.x) * t;
+      var y = p0.y + (p3.y - p0.y) * t + 4 * sag * t * (1 - t);
+      pts.push({ x: x, y: y });
+    }
+    pts[0] = { x: p0.x, y: p0.y };
+    pts[count - 1] = { x: p3.x, y: p3.y };
+    return pts;
+  }
 
   /**
-   * Fiber starts at exact boot rear tip (bootAnchor), exits along bootOutDir
-   * for a short strain-relief stub, then curves to the bare tip — same
-   * attachment model as patch-cord gravityBezierPath / strainReliefChain.
+   * Arc length for render: locked length, else traced route length, else natural slack.
+   * Route / freehand ink never becomes the drawn polyline — only length / sag intent.
+   */
+  function resolvePigtailRenderLength(p, p0, tipB) {
+    var chord = dist2(p0.x, p0.y, tipB.x, tipB.y) || 1;
+    if (typeof p.fixedLength === 'number' && p.fixedLength > 0) {
+      return Math.max(p.fixedLength, chord * 1.0002);
+    }
+    if (p.route && p.route.length) {
+      var poly = [{ x: p0.x, y: p0.y }].concat(p.route).concat([{ x: tipB.x, y: tipB.y }]);
+      var len = 0;
+      var i;
+      for (i = 1; i < poly.length; i++) {
+        len += dist2(poly[i - 1].x, poly[i - 1].y, poly[i].x, poly[i].y);
+      }
+      return Math.max(len, chord * pigtailSlackFactor(), chord * 1.0002);
+    }
+    var slack = pigtailSlackFactor();
+    var sagFn = global.FtthLab && FtthLab.fiberCatenarySagDepth;
+    var lenFn = global.FtthLab && FtthLab.fiberCatenaryLengthForSag;
+    if (typeof sagFn === 'function' && typeof lenFn === 'function') {
+      return Math.max(chord * slack, lenFn(p0, tipB, sagFn(chord)));
+    }
+    return Math.max(chord * slack, chord * 1.0002);
+  }
+
+  /**
+   * Fiber starts at boot rear tip, short axial strain-relief stub, then a
+   * continuous gravitational catenary to the bare tip — Free Draw, Meter,
+   * drag, and plugged states all use the same curve (never straight / jagged).
    */
   function fiberPath(p) {
     var tipA = bootAnchor(p);
     var tA = bootOutDir(getConnRot(p));
     var tipB = { x: p.bx, y: p.by };
-    /* Bare tip “enter” direction: from connector toward cleaved end */
-    var tB = unitVec(tipB.x - tipA.x, tipB.y - tipA.y);
-    var dx = tipB.x - tipA.x;
-    var dy = tipB.y - tipA.y;
-    var dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-    if (p.route && p.route.length) {
-      var d = 'M ' + tipA.x + ' ' + tipA.y;
-      var i;
-      for (i = 0; i < p.route.length; i++) {
-        d += ' L ' + p.route[i].x + ' ' + p.route[i].y;
-      }
-      d += ' L ' + tipB.x + ' ' + tipB.y;
-      return d;
-    }
-
-    /* Free / untraced: cubic with axial boot exit (patch-cord bothFree style) */
-    var h = Math.min(BOOT_EXIT_STUB + 12, Math.max(BOOT_EXIT_STUB, dist * 0.22));
     var stub = Math.max(STRAIN_RELIEF_PX * 0.55, BOOT_EXIT_STUB);
     var p0 = {
       x: tipA.x + tA.x * stub,
       y: tipA.y + tA.y * stub,
     };
-    return (
-      'M ' + tipA.x + ' ' + tipA.y +
-      ' L ' + p0.x + ' ' + p0.y +
-      ' C ' + (p0.x + tA.x * h) + ' ' + (p0.y + tA.y * h) + ', ' +
-      (tipB.x - tB.x * h) + ' ' + (tipB.y - tB.y * h) + ', ' +
-      tipB.x + ' ' + tipB.y
-    );
+    var L = resolvePigtailRenderLength(p, p0, tipB);
+    var mid = samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES);
+    var d = 'M ' + tipA.x + ' ' + tipA.y + ' L ' + p0.x + ' ' + p0.y;
+    var i;
+    for (i = 1; i < mid.length - 1; i++) {
+      d += ' L ' + mid[i].x + ' ' + mid[i].y;
+    }
+    d += ' L ' + tipB.x + ' ' + tipB.y;
+    return d;
   }
 
   function connectorStyle(p) {

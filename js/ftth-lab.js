@@ -768,6 +768,22 @@
     getZoom2d: function () { return state.zoom2d; },
     getPan2d: function () { return { x: state.pan2dX, y: state.pan2dY }; },
     getWorldSize: function () { return WORLD_SIZE; },
+    /**
+     * Lab scale for patch-cord Meter Mode (world px per real meter).
+     * Amplified so 1–3 m jumpers read as long hanging spans on the 2D stage
+     * (≈160 px/m — about 3× the previous 50 px/m feel).
+     */
+    getPxPerMeter: function () { return 160; },
+    metersToWorldPx: function (m) {
+      var n = Number(m);
+      if (!isFinite(n) || n < 0) return 0;
+      return n * 160;
+    },
+    worldPxToMeters: function (px) {
+      var n = Number(px);
+      if (!isFinite(n)) return 0;
+      return n / 160;
+    },
     centerWorldInView: centerWorldInView,
     showAlert: showAlert,
     setBudget: setBudget,
@@ -803,6 +819,115 @@
      * offsets must stay on the +Y (hanging) side of the chord — never upward.
      */
     worldYDown: true,
+    /**
+     * Free connector CSS rotate() clamp (degrees).
+     * 0° = ferrule up / boot down. Values outside ±maxTilt put the head
+     * upside-down — keep free ends in the upright hemisphere while still
+     * allowing full left (−90) / right (+90) yaw.
+     */
+    HEADING_MAX_TILT_DEG: 90,
+    /**
+     * Normalize to (−180, 180] then clamp into the upright cone so the
+     * ferrule never flips nose-down during free drag / layout.
+     */
+    clampConnectorHeadingUpright: function (rotDeg, maxTiltDeg) {
+      var maxTilt = maxTiltDeg != null ? maxTiltDeg : api.HEADING_MAX_TILT_DEG;
+      if (!(maxTilt > 0)) maxTilt = 90;
+      var a = Number(rotDeg);
+      if (!isFinite(a)) return 0;
+      a = ((a + 180) % 360 + 360) % 360 - 180;
+      if (a > maxTilt) return maxTilt;
+      if (a < -maxTilt) return -maxTilt;
+      return a;
+    },
+    /**
+     * Motion → free-head CSS degrees. Horizontal drag keeps natural L/R yaw;
+     * downward screen motion is ignored so the nose never aims down.
+     */
+    headingRotFromMotionUpright: function (dx, dy, maxTiltDeg) {
+      var ax = Number(dx) || 0;
+      var ay = Number(dy) || 0;
+      /* Screen Y+ down — drop positive dy so vertical pulls stay upright */
+      if (ay > 0) ay = 0;
+      if (Math.abs(ax) < 1e-9 && Math.abs(ay) < 1e-9) return 0;
+      var rot = Math.atan2(ax, -ay) * 180 / Math.PI;
+      return api.clampConnectorHeadingUpright(rot, maxTiltDeg);
+    },
+    /**
+     * Scale strain-relief stub length from boot→peer facing cosine
+     * (+1 toward peer, −1 away). Short stubs when reversed prevent fold-over.
+     */
+    adaptiveFiberStubScale: function (face) {
+      var f = Number(face);
+      if (!isFinite(f)) return 1;
+      if (f >= 0.35) return 1;
+      if (f >= 0) return 0.55 + 0.45 * (f / 0.35);
+      return Math.max(0.28, 0.45 + f * 0.35);
+    },
+    /**
+     * Extra cable length as a fraction of tip-to-tip span when either boot
+     * faces away — room for a natural U-turn catenary instead of a kink.
+     */
+    opposingFiberSlackFraction: function (faceA, faceB) {
+      var away = 0;
+      var a = Number(faceA);
+      var b = Number(faceB);
+      if (isFinite(a) && a < 0.25) away += (0.25 - a) * 0.22;
+      if (isFinite(b) && b < 0.25) away += (0.25 - b) * 0.22;
+      return away;
+    },
+    /**
+     * Default free patch-cord spawn (horizontal face-to-face + catenary sag).
+     * CSS rotate: bootOut(θ)=(−sin θ, cos θ) → A −90° boot +X, B +90° boot −X.
+     */
+    PATCH_CORD_DEFAULT_SPAN_PX: 180,
+    PATCH_CORD_DEFAULT_ROT_A: -90,
+    PATCH_CORD_DEFAULT_ROT_B: 90,
+    PATCH_CORD_DEFAULT_SAG_SLACK: 1.18,
+    /**
+     * Continuous gravitational fiber curve (screen Y+ down).
+     * Patch-cord mount replaces this with the true cosh sampler; until then
+     * a parabolic hang keeps Free Draw / drag from ever drawing a straight chord.
+     */
+    CATENARY_DEFAULT_SLACK: 1.12,
+    sampleFiberCatenary: function (p0, p3, length, count) {
+      count = Math.max(2, count || 48);
+      if (!p0 || !p3) return [];
+      var dx = p3.x - p0.x;
+      var dy = p3.y - p0.y;
+      var chord = Math.sqrt(dx * dx + dy * dy) || 1;
+      var slack = api.CATENARY_DEFAULT_SLACK || 1.12;
+      var L = Math.max(length || chord * slack, chord * 1.0002);
+      var excess = Math.max(0, L - chord);
+      var sag = Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.45;
+      if (sag < 6) sag = Math.min(40, chord * 0.15);
+      var pts = [];
+      var i;
+      for (i = 0; i < count; i++) {
+        var t = count === 1 ? 0.5 : i / (count - 1);
+        pts.push({
+          x: p0.x + dx * t,
+          y: p0.y + dy * t + 4 * sag * t * (1 - t),
+        });
+      }
+      pts[0] = { x: p0.x, y: p0.y };
+      pts[count - 1] = { x: p3.x, y: p3.y };
+      return pts;
+    },
+    fiberCatenarySagDepth: function (dist) {
+      var d = Math.max(1, Number(dist) || 1);
+      return Math.min(120, Math.max(10, d * 0.14));
+    },
+    fiberCatenaryLengthForSag: function (p0, p3, targetSag) {
+      if (!p0 || !p3) return 1;
+      var dx = p3.x - p0.x;
+      var dy = p3.y - p0.y;
+      var chord = Math.sqrt(dx * dx + dy * dy) || 1;
+      var sag = Math.max(0, Number(targetSag) || 0);
+      if (sag < 1) return chord * 1.002;
+      /* Approximate arc length for a parabolic hang of depth `sag`. */
+      return chord + (8 * sag * sag) / (3 * Math.max(chord, 1));
+    },
     /** Recompute VFL → fiber → PLC / coupler glow (full-pass adapters). */
     refreshOpticalLaser: function () {
       if (typeof api.refreshVflLaser === 'function') api.refreshVflLaser();
