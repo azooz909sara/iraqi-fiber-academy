@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Optical Power Meter trainer — live fiber bench, dBm LCD, GPON/EPON Pass·Warning·Fail | Iraqi Fiber Academy">
+  <title>Optical Power Meter | Iraqi Fiber Academy</title>
+  <link rel="icon" type="image/png" href="images/logo.png" />
+  <link rel="stylesheet" href="css/header.css">
+  <link rel="stylesheet" href="css/ftth-lab.css">
+  <link rel="stylesheet" href="css/power-meter.css">
+</head>
+<body class="opm-page opm-page--bench">
+
+  <div class="opm-app">
+    <header class="opm-header">
+      <a class="opm-brand" href="index.html" title="Iraqi Fiber Academy">
+        <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="36" height="36" />
+        <div class="opm-brand__meta">
+          <h1>Optical Power Meter</h1>
+          <p>Console · live bench</p>
+        </div>
+      </a>
+      <div class="opm-header__actions">
+        <a class="opm-nav-link" href="index.html">Home</a>
+        <a class="opm-nav-link" href="ftth-lab.html">FTTH Lab</a>
+        <a class="opm-nav-link is-active" href="power-meter.html" aria-current="page">Power Meter</a>
+        <div class="auth-slot auth-slot--sim shrink-0" data-auth-slot data-auth-variant="simulator">
+          <button type="button" class="auth-login-btn auth-login-btn--sim" data-auth-login>تسجيل الدخول</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="opm-main opm-main--bench">
+      <section class="opm-panel opm-panel--console" aria-label="Power meter console">
+        <div class="opm-device" aria-label="Optical power meter LCD">
+          <div class="opm-device__brand">
+            <strong>OPM</strong>
+            <span id="opm-live-badge" class="opm-live-badge" hidden>LIVE</span>
+          </div>
+          <div class="opm-lcd" aria-live="polite">
+            <div class="opm-lcd__row">
+              <span class="opm-lcd__value" id="opm-lcd-value">-18.50</span>
+              <span class="opm-lcd__unit" id="opm-lcd-unit">dBm</span>
+            </div>
+            <div class="opm-lcd__meta">
+              <span id="opm-lcd-lambda">λ 1490 nm</span>
+              <span id="opm-lcd-mw">0.0141 mW</span>
+            </div>
+            <div class="opm-lcd__rel" id="opm-lcd-rel" hidden></div>
+          </div>
+        </div>
+
+        <div class="opm-controls">
+          <div class="opm-field opm-field--row">
+            <div class="opm-seg" role="group" aria-label="Wavelength">
+              <button type="button" class="opm-seg__btn" data-opm-wave="1310">1310</button>
+              <button type="button" class="opm-seg__btn is-active" data-opm-wave="1490">1490</button>
+              <button type="button" class="opm-seg__btn" data-opm-wave="1550">1550</button>
+            </div>
+            <div class="opm-seg" role="group" aria-label="PON standard">
+              <button type="button" class="opm-seg__btn is-active" data-opm-std="gpon">GPON</button>
+              <button type="button" class="opm-seg__btn" data-opm-std="epon">EPON</button>
+            </div>
+          </div>
+
+          <div class="opm-input-row">
+            <input
+              class="opm-input"
+              id="opm-power-input"
+              type="number"
+              inputmode="decimal"
+              step="0.01"
+              value="-18.5"
+              aria-label="Optical power"
+            />
+            <div class="opm-unit-toggle" role="group" aria-label="Unit">
+              <button type="button" data-opm-unit="dbm" class="is-active">dBm</button>
+              <button type="button" data-opm-unit="mw">mW</button>
+            </div>
+          </div>
+
+          <div class="opm-actions">
+            <button type="button" class="opm-btn opm-btn--primary" id="opm-btn-ref">Set REF</button>
+            <button type="button" class="opm-btn" id="opm-btn-rel" aria-pressed="false">REL Off</button>
+            <button type="button" class="opm-btn" id="opm-btn-clear-ref">Clear</button>
+          </div>
+
+          <div class="opm-summary" id="opm-verdict" data-status="pass">
+            <span class="opm-verdict__badge" id="opm-verdict-badge">PASS</span>
+            <div class="opm-summary__metrics">
+              <div class="opm-summary__cell">
+                <span>Loss</span>
+                <strong id="opm-stat-loss">—</strong>
+              </div>
+              <div class="opm-summary__cell">
+                <span>mW</span>
+                <strong id="opm-stat-mw">0.014 mW</strong>
+              </div>
+            </div>
+            <p class="opm-summary__hint" id="opm-verdict-title">In window</p>
+          </div>
+
+          <div class="opm-meter" aria-hidden="true">
+            <div class="opm-meter__bar">
+              <div class="opm-meter__needle" id="opm-meter-needle" style="left:55%"></div>
+            </div>
+          </div>
+
+          <div class="opm-chips" aria-label="Thresholds">
+            <span class="opm-chip opm-chip--pass">PASS <strong id="opm-th-pass">−27…−8</strong></span>
+            <span class="opm-chip opm-chip--warn">WARN <strong id="opm-th-warn">−28…−27</strong></span>
+            <span class="opm-chip opm-chip--fail">FAIL <strong id="opm-th-fail">&lt;−28 / &gt;−8</strong></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="opm-panel opm-panel--bench" aria-label="Fiber bench">
+        <div class="opm-bench-head">
+          <h2 class="opm-panel__title" id="opm-bench-title">Bench</h2>
+          <p class="opm-bench-tip">SFP → patch / splitter → OPM probe a port</p>
+          <div class="opm-bench-toolbar" role="toolbar" aria-label="Bench tools">
+            <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-undo" data-lab-undo title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↩️</button>
+            <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-redo" data-lab-redo title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↪️</button>
+            <button type="button" class="lab-toggle-btn lab-icon-btn lab-icon-btn--delete" id="lab-btn-delete" data-lab-delete title="Delete (Del)" aria-label="Delete selected">
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="opm-bench" id="opm-bench">
+          <div class="lab-app lab-app--2d opm-bench__app" id="lab-app">
+            <main class="lab-main opm-bench__main">
+              <aside class="lab-rail" aria-label="Toolbox">
+                <div class="lab-rail__panel">
+                  <section class="lab-rail__group">
+                    <h3 class="lab-rail__cat">Source</h3>
+                    <div id="lab-hw-tree" class="lab-hw-tree"></div>
+                  </section>
+                  <section class="lab-rail__group">
+                    <h3 class="lab-rail__cat">Split</h3>
+                    <div id="lab-splitter-tree" class="lab-hw-tree"></div>
+                  </section>
+                  <section class="lab-rail__group">
+                    <h3 class="lab-rail__cat">Fiber</h3>
+                    <div id="lab-patchcord-tree" class="lab-hw-tree"></div>
+                    <div id="lab-pigtail-tree" class="lab-hw-tree"></div>
+                  </section>
+                  <section class="lab-rail__group">
+                    <h3 class="lab-rail__cat">Adapt</h3>
+                    <div id="lab-coupler-tree" class="lab-hw-tree"></div>
+                  </section>
+                  <section class="lab-rail__group">
+                    <h3 class="lab-rail__cat">Test</h3>
+                    <div id="lab-opm-tree" class="lab-hw-tree"></div>
+                  </section>
+                </div>
+              </aside>
+
+              <section class="lab-stage-wrap" aria-label="Bench stage">
+                <div id="lab-canvas-2d" class="lab-2d-stage">
+                  <div class="lab-2d-world" id="lab-2d-world">
+                    <div class="lab-2d-grid" aria-hidden="true"></div>
+                    <div class="lab-2d-origin" title="Origin" aria-hidden="true"></div>
+                    <div id="lab-2d-mount" class="lab-2d-mount" data-lab-mount="2d"></div>
+                  </div>
+                </div>
+                <div id="lab-canvas-3d" hidden data-lab-mount="3d"></div>
+                <div class="lab-stage-hud">
+                  <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
+                  <span class="lab-hud-chip" id="lab-hud-budget">Budget · —</span>
+                </div>
+              </section>
+
+              <aside class="lab-inspector" hidden aria-hidden="true">
+                <div class="lab-inspector__card" id="lab-inspector-card"></div>
+                <div id="lab-inspector-detail" class="lab-inspector__detail" hidden></div>
+              </aside>
+            </main>
+            <footer class="lab-footer opm-bench__footer">
+              <span id="lab-status">Bench ready</span>
+            </footer>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="js/power-meter.js"></script>
+  <script src="js/ftth-lab.js"></script>
+  <script src="js/ftth-lab-olt-fx16.js"></script>
+  <script src="js/ftth-lab-splitter.js"></script>
+  <script src="js/ftth-lab-patch-cord.js"></script>
+  <script src="js/ftth-lab-pigtail.js"></script>
+  <script src="js/ftth-lab-coupler.js"></script>
+  <script src="js/ftth-lab-opm.js"></script>
+  <script>
+    (function bridgeOpmBench() {
+      function hook() {
+        if (!window.FtthLab || !window.PowerMeterTrainer) return false;
+        if (FtthLab._opmTrainerHooked) return true;
+        var orig = FtthLab.probeOpticalAt;
+        if (typeof orig !== 'function') return false;
+        FtthLab._opmTrainerHooked = true;
+        FtthLab.probeOpticalAt = function (x, y) {
+          var reading = orig.call(FtthLab, x, y);
+          if (reading && window.PowerMeterTrainer) {
+            PowerMeterTrainer.applyLiveReading(reading);
+          }
+          return reading;
+        };
+        if (typeof FtthLab.centerWorldInView === 'function') {
+          setTimeout(function () { FtthLab.centerWorldInView(); }, 80);
+        }
+        setTimeout(function () {
+          var btn = document.querySelector('#lab-opm-tree [data-lab-tool="opm"]');
+          if (btn) btn.click();
+        }, 220);
+        if (FtthLab.setStatus) FtthLab.setStatus('SFP → patch → probe a port');
+        return true;
+      }
+      if (!hook()) {
+        var n = 0;
+        var t = setInterval(function () {
+          if (hook() || ++n > 60) clearInterval(t);
+        }, 50);
+      }
+    })();
+  </script>
+  <script type="module" src="js/auth-manager.js"></script>
+</body>
+</html>

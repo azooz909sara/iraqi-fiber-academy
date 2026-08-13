@@ -1,0 +1,680 @@
+/* Optical Power Meter — standalone training page */
+
+:root {
+  --opm-bg: #070b12;
+  --opm-panel: #0f1623;
+  --opm-card: #152033;
+  --opm-elevated: #1a2740;
+  --opm-border: rgba(56, 189, 248, 0.16);
+  --opm-cyan: #38bdf8;
+  --opm-green: #4ade80;
+  --opm-amber: #fbbf24;
+  --opm-red: #f87171;
+  --opm-text: #e2e8f0;
+  --opm-muted: #94a3b8;
+  --opm-lcd: #061018;
+  --font-ui: "Segoe UI", Tahoma, "Noto Sans Arabic", Arial, sans-serif;
+  --font-mono: "Cascadia Code", "Consolas", "Courier New", monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--opm-bg);
+  color: var(--opm-text);
+  font-family: var(--font-ui);
+}
+
+/* Override ftth-lab.css full-viewport lock when bench is embedded */
+html,
+body.opm-page {
+  height: 100% !important;
+  min-height: 100%;
+  overflow: hidden !important;
+}
+
+body.opm-page {
+  background:
+    radial-gradient(ellipse 80% 50% at 15% -10%, rgba(56, 189, 248, 0.12), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 10%, rgba(74, 222, 128, 0.06), transparent 50%),
+    var(--opm-bg);
+}
+
+.opm-app {
+  min-height: 100vh;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.opm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid var(--opm-border);
+  background: linear-gradient(180deg, #111827 0%, #0b1220 100%);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.opm-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-decoration: none;
+  color: inherit;
+  min-width: 0;
+}
+
+.opm-brand img {
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+.opm-brand__meta h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.opm-brand__meta p {
+  margin: 0.1rem 0 0;
+  font-size: 0.7rem;
+  color: var(--opm-muted);
+}
+
+.opm-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.opm-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--opm-border);
+  color: var(--opm-muted);
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.opm-nav-link:hover {
+  color: var(--opm-cyan);
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.opm-nav-link.is-active {
+  color: var(--opm-cyan);
+  border-color: rgba(56, 189, 248, 0.5);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.opm-main {
+  flex: 1;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  padding: 0.7rem 0.75rem 0.85rem;
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.opm-main--bench .opm-panel--console,
+.opm-main--bench .opm-panel--bench {
+  min-width: 0;
+}
+
+.opm-main--bench .opm-panel--bench {
+  display: flex;
+  flex-direction: column;
+  padding: 0.55rem 0.6rem 0.6rem;
+}
+
+@media (max-width: 1100px) {
+  .opm-main,
+  .opm-main--bench {
+    grid-template-columns: 1fr;
+  }
+}
+
+.opm-panel {
+  background: var(--opm-panel);
+  border: 1px solid var(--opm-border);
+  border-radius: 10px;
+  padding: 0.75rem 0.8rem 0.85rem;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+.opm-panel__title {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.opm-panel__sub {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--opm-muted);
+  line-height: 1.35;
+}
+
+/* Device shell */
+.opm-device {
+  position: relative;
+  max-width: none;
+  margin: 0 0 0.7rem;
+  padding: 0.7rem 0.75rem 0.8rem;
+  border-radius: 12px;
+  background: linear-gradient(165deg, #1e293b 0%, #0f172a 55%, #0a1220 100%);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 10px 24px rgba(0, 0, 0, 0.3);
+}
+
+.opm-device__brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.55rem;
+}
+
+.opm-device__brand strong {
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  color: #94a3b8;
+}
+
+.opm-device__brand span {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-family: var(--font-mono);
+}
+
+.opm-live-badge {
+  font-size: 0.62rem !important;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #0b1220 !important;
+  background: var(--opm-green);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-family: var(--font-ui) !important;
+}
+
+.opm-lcd {
+  padding: 0.85rem 0.95rem;
+  border-radius: 8px;
+  background: var(--opm-lcd);
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  box-shadow: inset 0 0 24px rgba(74, 222, 128, 0.05);
+}
+
+.opm-lcd__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.opm-lcd__value {
+  font-family: var(--font-mono);
+  font-size: 2.15rem;
+  font-weight: 700;
+  color: var(--opm-green);
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 18px rgba(74, 222, 128, 0.25);
+}
+
+.opm-lcd__unit {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  color: #64748b;
+}
+
+.opm-lcd__meta {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 0.55rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #64748b;
+}
+
+.opm-lcd__rel {
+  margin-top: 0.35rem;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--opm-cyan);
+}
+
+.opm-device__ports {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.opm-port {
+  flex: 1;
+  text-align: center;
+  padding: 0.35rem;
+  border-radius: 6px;
+  border: 1px dashed rgba(100, 116, 139, 0.45);
+  font-size: 0.65rem;
+  color: #64748b;
+}
+
+.opm-port strong {
+  display: block;
+  color: #94a3b8;
+  font-size: 0.7rem;
+}
+
+/* Controls */
+.opm-controls {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.opm-field--row {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 0.4rem;
+}
+
+.opm-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.opm-field__label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--opm-muted);
+}
+
+.opm-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.opm-seg__btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.35rem 0.4rem;
+  border-radius: 0.4rem;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-card);
+  color: var(--opm-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.opm-seg__btn:hover {
+  color: var(--opm-text);
+  border-color: rgba(56, 189, 248, 0.35);
+}
+
+.opm-seg__btn.is-active {
+  color: #0b1220;
+  background: var(--opm-cyan);
+  border-color: var(--opm-cyan);
+}
+
+.opm-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.opm-input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-elevated);
+  color: var(--opm-text);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+}
+
+.opm-input:focus {
+  outline: none;
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12);
+}
+
+.opm-unit-toggle {
+  display: flex;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  border: 1px solid var(--opm-border);
+}
+
+.opm-unit-toggle button {
+  padding: 0.45rem 0.7rem;
+  border: none;
+  background: var(--opm-card);
+  color: var(--opm-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.opm-unit-toggle button.is-active {
+  background: rgba(56, 189, 248, 0.18);
+  color: var(--opm-cyan);
+}
+
+.opm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.opm-btn {
+  padding: 0.38rem 0.65rem;
+  border-radius: 0.45rem;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-card);
+  color: var(--opm-text);
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.opm-btn:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--opm-cyan);
+}
+
+.opm-btn--primary {
+  background: rgba(56, 189, 248, 0.14);
+  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--opm-cyan);
+}
+
+.opm-btn--primary:hover {
+  background: rgba(56, 189, 248, 0.22);
+}
+
+/* Compact summary */
+.opm-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  gap: 0.35rem 0.65rem;
+  align-items: center;
+  padding: 0.5rem 0.6rem;
+  border-radius: 8px;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-elevated);
+}
+
+.opm-verdict__badge {
+  grid-row: 1 / 3;
+  flex-shrink: 0;
+  min-width: 3.6rem;
+  text-align: center;
+  padding: 0.55rem 0.4rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.opm-summary[data-status="pass"] .opm-verdict__badge {
+  background: rgba(74, 222, 128, 0.2);
+  color: var(--opm-green);
+}
+
+.opm-summary[data-status="warning"] .opm-verdict__badge {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--opm-amber);
+}
+
+.opm-summary[data-status="fail"] .opm-verdict__badge {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--opm-red);
+}
+
+.opm-summary[data-status="idle"] .opm-verdict__badge {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--opm-muted);
+}
+
+.opm-summary__metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+}
+
+.opm-summary__cell span {
+  display: block;
+  font-size: 0.6rem;
+  color: var(--opm-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.opm-summary__cell strong {
+  font-family: var(--font-mono);
+  font-size: 0.92rem;
+  color: var(--opm-text);
+}
+
+.opm-summary__hint {
+  grid-column: 2;
+  margin: 0;
+  font-size: 0.7rem;
+  color: var(--opm-muted);
+}
+
+.opm-meter {
+  margin: 0;
+}
+
+.opm-meter__bar {
+  position: relative;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    #f87171 0%,
+    #fbbf24 18%,
+    #4ade80 32%,
+    #4ade80 72%,
+    #fbbf24 86%,
+    #f87171 100%
+  );
+  opacity: 0.9;
+}
+
+.opm-meter__needle {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 14px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+  transition: left 0.25s ease;
+}
+
+.opm-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.opm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background: var(--opm-elevated);
+  border: 1px solid var(--opm-border);
+}
+
+.opm-chip strong {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.62rem;
+  color: var(--opm-text);
+}
+
+.opm-chip--pass { color: var(--opm-green); }
+.opm-chip--warn { color: var(--opm-amber); }
+.opm-chip--fail { color: var(--opm-red); }
+
+/* ─── Embedded FTTH Lab bench ─── */
+
+.opm-bench-head {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+
+.opm-bench-tip {
+  margin: 0;
+  flex: 1;
+  min-width: 10rem;
+  font-size: 0.7rem;
+  color: var(--opm-muted);
+}
+
+.opm-bench-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-inline-start: auto;
+}
+
+.opm-bench {
+  flex: 1;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--opm-border);
+  background: var(--opm-bg);
+}
+
+.opm-bench__app.lab-app {
+  height: 100%;
+  min-height: calc(100vh - 7.5rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.opm-bench__main.lab-main {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 148px minmax(0, 1fr);
+}
+
+.opm-bench .lab-inspector {
+  display: none !important;
+}
+
+.opm-bench .lab-rail {
+  padding: 0.4rem;
+}
+
+.opm-bench .lab-rail__title,
+.opm-bench .lab-inspector__label {
+  display: none;
+}
+
+.opm-bench .lab-rail__cat {
+  font-size: 0.58rem;
+  margin: 0.28rem 0 0.18rem;
+}
+
+.opm-bench .lab-tool {
+  padding: 0.3rem 0.35rem;
+}
+
+.opm-bench .lab-tool__copy strong {
+  font-size: 0.64rem;
+}
+
+.opm-bench .lab-tool__copy span {
+  display: none;
+}
+
+.opm-bench .lab-stage-wrap,
+.opm-bench .lab-2d-stage {
+  min-height: 0;
+}
+
+.opm-bench__footer.lab-footer {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.62rem;
+}
+
+@media (max-width: 720px) {
+  html,
+  body.opm-page {
+    height: auto !important;
+    overflow: auto !important;
+  }
+
+  .opm-app {
+    height: auto;
+    overflow: visible;
+  }
+
+  .opm-field--row {
+    grid-template-columns: 1fr;
+  }
+
+  .opm-bench__main.lab-main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(280px, 1fr);
+  }
+
+  .opm-bench__app.lab-app {
+    height: auto;
+    min-height: 520px;
+  }
+
+  .opm-bench .lab-rail {
+    max-height: 140px;
+  }
+}

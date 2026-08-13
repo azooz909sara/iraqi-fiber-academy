@@ -1508,6 +1508,28 @@
     updateUndoRedoUi();
     updateInspector();
     setStatus('Blank workspace · scroll to zoom · تراجع / تقدم خطوة · drag FX-16 to begin');
+
+    if (global.FtthLab) {
+      FtthLab.getOltTxSources = function () {
+        var out = [];
+        var s;
+        var p;
+        for (s = 1; s <= SLOT_COUNT; s++) {
+          if (!installed[s]) continue;
+          for (p = 1; p <= PORT_COUNT; p++) {
+            if (!hasSfp(s, p)) continue;
+            out.push({
+              key: 'olt:' + s + ':' + p,
+              txDbm: 2.5,
+              slot: s,
+              port: p,
+              label: 'OLT LT' + (s < 10 ? '0' : '') + s + '/P' + p,
+            });
+          }
+        }
+        return out;
+      };
+    }
   }
 
   function getPortWiring(portOrId) {

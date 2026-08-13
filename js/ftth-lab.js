@@ -616,6 +616,12 @@
     state.booted = true;
     flushPendingTools();
     setViewMode('2d');
+    handleLaunchQuery();
+    if (api._launchTool === 'opm') {
+      setTimeout(function () {
+        notifyTools('onLaunchRequest', { tool: 'opm' });
+      }, 120);
+    }
     setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Del delete · Esc clear · scroll to zoom');
   }
 
@@ -678,6 +684,7 @@
       text = 'Power budget · Total Signal Loss ' + loss.toFixed(2) + ' dB';
     }
     setBudget(text);
+    refreshOpmDisplay();
     return loss;
   }
 
@@ -754,6 +761,340 @@
     });
   }
 
+  /* ─── Optical Power Meter — live topology & dBm probe ─── */
+
+  var OPM_NOISE_DBM = -70;
+  var COUPLER_PASS_LOSS_DB = 0.2;
+  var PIGTAIL_CONN_LOSS_DB = 0.2;
+  var PIGTAIL_MISMATCH_DB = 0.75;
+  var opmRefreshHook = null;
+
+  function portKeyFromAtt(att) {
+    if (!att || !att.owner) return null;
+    if (att.owner === 'olt') {
+      return 'olt:' + att.slot + ':' + att.oltPort;
+    }
+    if (att.owner === 'splitter') {
+      return 'spl:' + att.splitterId + ':' + att.port;
+    }
+    if (att.owner === 'coupler') {
+      return 'cpl:' + att.couplerId + ':' + (att.port || 'A');
+    }
+    if (att.owner === 'vfl') {
+      return 'vfl:' + att.vflId;
+    }
+    return null;
+  }
+
+  function portKeyFromHit(hit) {
+    if (!hit) return null;
+    return portKeyFromAtt(hit);
+  }
+
+  function addUndirectedEdge(adj, a, b, lossDb) {
+    if (!a || !b) return;
+    lossDb = Math.max(0, Number(lossDb) || 0);
+    if (!adj[a]) adj[a] = [];
+    if (!adj[b]) adj[b] = [];
+    adj[a].push({ to: b, loss: lossDb });
+    adj[b].push({ to: a, loss: lossDb });
+  }
+
+  function buildOpticalAdjacency() {
+    var adj = {};
+    var graph = typeof api.getFiberLaserGraph === 'function'
+      ? api.getFiberLaserGraph()
+      : { pcords: [], pigtails: [] };
+    var pcords = graph.pcords || [];
+    var pigtails = graph.pigtails || [];
+    var i;
+    var j;
+    var k;
+
+    for (i = 0; i < pcords.length; i++) {
+      var c = pcords[i];
+      var ka = portKeyFromAtt(c.sideA);
+      var kb = portKeyFromAtt(c.sideB);
+      var loss = Number(c.lossDb);
+      if (!isFinite(loss)) loss = 0.4;
+      if (ka && kb) {
+        addUndirectedEdge(adj, ka, kb, loss);
+      }
+      if (ka && c.freeB) {
+        addUndirectedEdge(adj, ka, 'pcord:' + c.id + ':B', loss * 0.5);
+      }
+      if (kb && c.freeA) {
+        addUndirectedEdge(adj, kb, 'pcord:' + c.id + ':A', loss * 0.5);
+      }
+      if (!ka && c.freeA) {
+        adj['pcord:' + c.id + ':A'] = adj['pcord:' + c.id + ':A'] || [];
+      }
+      if (!kb && c.freeB) {
+        adj['pcord:' + c.id + ':B'] = adj['pcord:' + c.id + ':B'] || [];
+      }
+    }
+
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      var kc = portKeyFromAtt(p.connector);
+      var tailKey = 'pigtail:' + p.id + ':tail';
+      var ptLoss = PIGTAIL_CONN_LOSS_DB;
+      if (kc) {
+        addUndirectedEdge(adj, kc, tailKey, ptLoss);
+      } else {
+        adj['pigtail:' + p.id + ':conn'] = adj['pigtail:' + p.id + ':conn'] || [];
+        addUndirectedEdge(adj, 'pigtail:' + p.id + ':conn', tailKey, ptLoss);
+      }
+    }
+
+    if (typeof api.getOpticalSplitters === 'function') {
+      var splitters = api.getOpticalSplitters() || [];
+      for (i = 0; i < splitters.length; i++) {
+        var sp = splitters[i];
+        var inPorts = sp.inputs || [];
+        var outPorts = sp.outputs || [];
+        for (j = 0; j < inPorts.length; j++) {
+          for (k = 0; k < outPorts.length; k++) {
+            addUndirectedEdge(
+              adj,
+              'spl:' + sp.id + ':' + inPorts[j],
+              'spl:' + sp.id + ':' + outPorts[k],
+              sp.lossDb || 10
+            );
+          }
+        }
+      }
+    }
+
+    if (typeof api.getCouplerOppositePort === 'function') {
+      var couplerIds = {};
+      pcords.forEach(function (c) {
+        [c.sideA, c.sideB].forEach(function (att) {
+          if (att && att.owner === 'coupler' && att.couplerId) {
+            couplerIds[att.couplerId] = true;
+          }
+        });
+      });
+      pigtails.forEach(function (p) {
+        if (p.connector && p.connector.owner === 'coupler' && p.connector.couplerId) {
+          couplerIds[p.connector.couplerId] = true;
+        }
+      });
+      Object.keys(couplerIds).forEach(function (cid) {
+        addUndirectedEdge(
+          adj,
+          'cpl:' + cid + ':A',
+          'cpl:' + cid + ':B',
+          COUPLER_PASS_LOSS_DB
+        );
+      });
+    }
+
+    return adj;
+  }
+
+  function measureOpticalAtKey(probeKey) {
+    if (!probeKey) {
+      return {
+        dBm: null,
+        lossDb: null,
+        source: null,
+        label: 'No probe target',
+        path: [],
+      };
+    }
+    var adj = buildOpticalAdjacency();
+    var sources = typeof api.getOltTxSources === 'function'
+      ? api.getOltTxSources()
+      : [];
+    if (!sources.length) {
+      return {
+        dBm: OPM_NOISE_DBM,
+        lossDb: null,
+        source: null,
+        label: probeKey,
+        path: [],
+        note: 'No OLT TX source (install SFP + patch fiber)',
+      };
+    }
+
+    var best = null;
+    var si;
+    for (si = 0; si < sources.length; si++) {
+      var src = sources[si];
+      if (!adj[src.key]) continue;
+      var queue = [{ key: src.key, loss: 0, path: [src.key] }];
+      var visited = {};
+      visited[src.key] = 0;
+      var qi = 0;
+      while (qi < queue.length) {
+        var cur = queue[qi++];
+        if (cur.key === probeKey) {
+          var cand = {
+            dBm: src.txDbm - cur.loss,
+            lossDb: cur.loss,
+            source: src,
+            label: probeKey,
+            path: cur.path.slice(),
+          };
+          if (!best || cand.dBm > best.dBm) best = cand;
+          continue;
+        }
+        var edges = adj[cur.key] || [];
+        var ei;
+        for (ei = 0; ei < edges.length; ei++) {
+          var e = edges[ei];
+          var nextLoss = cur.loss + e.loss;
+          if (visited[e.to] != null && visited[e.to] <= nextLoss + 1e-6) continue;
+          visited[e.to] = nextLoss;
+          queue.push({
+            key: e.to,
+            loss: nextLoss,
+            path: cur.path.concat([e.to]),
+          });
+        }
+      }
+    }
+
+    if (!best) {
+      return {
+        dBm: OPM_NOISE_DBM,
+        lossDb: null,
+        source: null,
+        label: probeKey,
+        path: [],
+        note: 'No optical path to active OLT source',
+      };
+    }
+    best.dBm = Math.round(best.dBm * 100) / 100;
+    best.lossDb = Math.round(best.lossDb * 100) / 100;
+    return best;
+  }
+
+  function hitTestProbeTarget(clientX, clientY) {
+    if (typeof api.hitTestLabPort === 'function') {
+      var portHit = api.hitTestLabPort(clientX, clientY);
+      if (portHit) {
+        return {
+          kind: 'port',
+          key: portKeyFromHit(portHit),
+          label: portHit.label || 'Port',
+          hit: portHit,
+        };
+      }
+    }
+
+    var list = document.elementsFromPoint
+      ? document.elementsFromPoint(clientX, clientY)
+      : [];
+    var i;
+    var el;
+    for (i = 0; i < list.length; i++) {
+      el = list[i];
+
+      var pcEnd = el.closest && el.closest('[data-pcord-id][data-pcord-end]');
+      if (pcEnd) {
+        var cid = pcEnd.getAttribute('data-pcord-id');
+        var end = pcEnd.getAttribute('data-pcord-end');
+        return {
+          kind: 'pcord-end',
+          key: 'pcord:' + cid + ':' + end,
+          label: 'Patch Cord · End ' + end,
+        };
+      }
+
+      var pcDrag = el.closest && el.closest('[data-pcord-drag]');
+      if (pcDrag) {
+        var pid = pcDrag.getAttribute('data-pcord-drag');
+        return {
+          kind: 'pcord-fiber',
+          key: 'pcord:' + pid + ':A',
+          label: 'Patch Cord · fiber',
+          altKeys: ['pcord:' + pid + ':B'],
+        };
+      }
+
+      var pigConn = el.closest && el.closest('.lab-pigtail__conn');
+      if (pigConn) {
+        var pnode = pigConn.closest('[data-pigtail-node]');
+        if (pnode) {
+          var ptId = pnode.getAttribute('data-pigtail-node');
+          var graph = typeof api.getFiberLaserGraph === 'function'
+            ? api.getFiberLaserGraph()
+            : { pigtails: [] };
+          var pi;
+          var pk = 'pigtail:' + ptId + ':conn';
+          var plabel = 'SC Pigtail · Connector';
+          for (pi = 0; pi < (graph.pigtails || []).length; pi++) {
+            if (graph.pigtails[pi].id === ptId && graph.pigtails[pi].connector) {
+              var attK = portKeyFromAtt(graph.pigtails[pi].connector);
+              if (attK) {
+                pk = attK;
+                plabel = 'SC Pigtail · ' + (graph.pigtails[pi].connector.port || 'port');
+              }
+              break;
+            }
+          }
+          return { kind: 'pigtail-conn', key: pk, label: plabel };
+        }
+      }
+
+      var pigTail = el.closest && el.closest('.lab-pigtail__tail');
+      if (pigTail) {
+        var pnode2 = pigTail.closest('[data-pigtail-node]');
+        if (pnode2) {
+          return {
+            kind: 'pigtail-tail',
+            key: 'pigtail:' + pnode2.getAttribute('data-pigtail-node') + ':tail',
+            label: 'SC Pigtail · Bare fiber',
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  function probeOpticalAt(clientX, clientY) {
+    var target = hitTestProbeTarget(clientX, clientY);
+    if (!target) {
+      return {
+        dBm: null,
+        lossDb: null,
+        source: null,
+        label: '—',
+        path: [],
+        note: 'Click a port, connector, or fiber to probe',
+      };
+    }
+    var result = measureOpticalAtKey(target.key);
+    if ((!result.source || result.dBm <= OPM_NOISE_DBM + 0.01) && target.altKeys) {
+      var ai;
+      for (ai = 0; ai < target.altKeys.length; ai++) {
+        var alt = measureOpticalAtKey(target.altKeys[ai]);
+        if (alt.source && (!result.source || alt.dBm > result.dBm)) {
+          result = alt;
+        }
+      }
+    }
+    result.probe = target;
+    result.label = target.label || result.label;
+    return result;
+  }
+
+  function refreshOpmDisplay() {
+    if (typeof opmRefreshHook === 'function') opmRefreshHook();
+  }
+
+  function handleLaunchQuery() {
+    try {
+      var params = new URLSearchParams(global.location.search || '');
+      var tool = params.get('tool');
+      if (tool === 'opm' || tool === 'power-meter') {
+        api._launchTool = 'opm';
+      }
+    } catch (err) { /* ignore */ }
+  }
+
   var api = {
     registerTool: registerTool,
     setViewMode: setViewMode,
@@ -788,7 +1129,10 @@
     showAlert: showAlert,
     setBudget: setBudget,
     refreshPowerBudget: refreshPowerBudget,
-    notifyLayoutChange: function (payload) { notifyTools('onLayoutChange', payload); },
+    notifyLayoutChange: function (payload) {
+      notifyTools('onLayoutChange', payload);
+      refreshOpmDisplay();
+    },
     beginDrag: beginDrag,
     endDrag: endDrag,
     getActiveDrag: getActiveDrag,
@@ -814,6 +1158,15 @@
       return (port === 'B' || port === 'b') ? 'A' : 'B';
     },
     isCouplerId: function () { return false; },
+    getOltTxSources: function () { return []; },
+    getOpticalSplitters: function () { return []; },
+    hitTestLabPort: null,
+    probeOpticalAt: probeOpticalAt,
+    measureOpticalAtKey: measureOpticalAtKey,
+    registerOpmRefresh: function (fn) {
+      opmRefreshHook = typeof fn === 'function' ? fn : null;
+    },
+    OPM_NOISE_DBM: OPM_NOISE_DBM,
     /**
      * Lab 2D world uses screen Y+ downward. Fiber mid-span sag / catenary
      * offsets must stay on the +Y (hanging) side of the chord — never upward.

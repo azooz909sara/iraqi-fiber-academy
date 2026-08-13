@@ -36,6 +36,7 @@
           <button type="button" class="lab-toggle-btn" data-lab-view="3d">3D Workspace</button>
         </div>
         <a class="lab-home-link" href="index.html">← Back to Home</a>
+        <a class="lab-home-link" href="power-meter.html">Power Meter</a>
         <a class="lab-home-link" href="simulator.html">FTTH Map Sim</a>
         <a class="lab-home-link" href="fiber-3d-simulator.html">Cable Anatomy</a>
         <div class="auth-slot auth-slot--sim shrink-0" data-auth-slot data-auth-variant="simulator">
@@ -81,6 +82,9 @@
 
           <section class="lab-rail__group" aria-labelledby="lab-cat-test">
             <h3 class="lab-rail__cat" id="lab-cat-test">Test Equipment</h3>
+            <div id="lab-opm-tree" class="lab-hw-tree" aria-label="Optical Power Meter">
+              <!-- OPM · ftth-lab-opm.js -->
+            </div>
             <div id="lab-vfl-tree" class="lab-hw-tree" aria-label="Visual Fault Locator">
               <!-- VFL · ftth-lab-vfl.js -->
             </div>
@@ -130,6 +134,7 @@
   <script src="js/ftth-lab-pigtail.js"></script>
   <script src="js/ftth-lab-coupler.js"></script>
   <script src="js/ftth-lab-vfl.js"></script>
+  <script src="js/ftth-lab-opm.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>

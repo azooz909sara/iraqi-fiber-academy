@@ -1265,6 +1265,17 @@
         return SPLITTER_SPECS[type] ? SPLITTER_SPECS[type].lossDb : null;
       };
       FtthLab.getSplitterLaserModels = getLaserModels;
+      FtthLab.getOpticalSplitters = function () {
+        return splitters.map(function (s) {
+          return {
+            id: s.id,
+            type: s.type,
+            lossDb: lossFor(s),
+            inputs: (s.inputs || []).map(function (p) { return p.id; }),
+            outputs: (s.outputs || []).map(function (p) { return p.id; }),
+          };
+        });
+      };
       FtthLab.refreshSplitterPorts = function () {
         rebuildLayer();
       };

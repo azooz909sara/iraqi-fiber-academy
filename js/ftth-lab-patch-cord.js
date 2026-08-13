@@ -697,6 +697,9 @@
         id: c.id,
         sideA: sideSnap(c.sideA),
         sideB: sideSnap(c.sideB),
+        lossDb: cordLossDb(c),
+        freeA: !c.sideA.attached,
+        freeB: !c.sideB.attached,
       };
     });
   }
@@ -4055,6 +4058,8 @@
       FtthLab.fiberCatenaryLengthForSag = catenaryLengthForSag;
       FtthLab.fiberCatenarySagDepth = catenarySagDepth;
       FtthLab.CATENARY_DEFAULT_SLACK = CATENARY_DEFAULT_SLACK;
+
+      FtthLab.hitTestLabPort = hitTestPort;
     }
   }
 
