@@ -5,8 +5,8 @@
 (function (global) {
   'use strict';
 
-  var OPM_W = 152;
-  var OPM_H = 268;
+  var OPM_W = 220;
+  var OPM_H = 340;
   var HISTORY_MAX = 40;
   var DOCK_LOSS_DB = 0.15;
 
@@ -21,6 +21,84 @@
   var historyLocked = false;
   var wavelengthNm = 1490;
   var unitMode = 'dbm'; /* dbm | mw */
+
+  var WAVELENGTH_ORDER = [850, 980, 1310, 1490, 1550, 1625];
+  var WAVELENGTH_HINT = {
+    850: 'Legacy MM / VCSEL test band',
+    980: 'EDFA pump · specialty sensing',
+    1310: 'Upstream · ONU → OLT (GPON/EPON TX)',
+    1490: 'Downstream · OLT → ONU (GPON primary)',
+    1550: 'Long-haul SM · RF overlay / CATV',
+    1625: 'Maintenance / OTDR band',
+  };
+
+  function resolveWavelengthNm() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.getWavelength === 'function') {
+      var ext = Number(PowerMeterTrainer.getWavelength());
+      if (isFinite(ext) && WAVELENGTH_ORDER.indexOf(ext) >= 0) {
+        wavelengthNm = ext;
+        return ext;
+      }
+    }
+    if (global.FtthLab && typeof FtthLab.getOpmWavelength === 'function') {
+      var wl = Number(FtthLab.getOpmWavelength());
+      if (isFinite(wl) && WAVELENGTH_ORDER.indexOf(wl) >= 0) {
+        wavelengthNm = wl;
+        return wl;
+      }
+    }
+    return wavelengthNm;
+  }
+
+  function resolveUnitMode() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.getUnit === 'function') {
+      var u = PowerMeterTrainer.getUnit();
+      if (u === 'mw' || u === 'dbm') {
+        unitMode = u;
+        return u;
+      }
+    }
+    return unitMode;
+  }
+
+  function wavelengthHint(nm) {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.getWavelengthHint === 'function') {
+      return PowerMeterTrainer.getWavelengthHint(nm) || WAVELENGTH_HINT[nm] || '';
+    }
+    return WAVELENGTH_HINT[nm] || '';
+  }
+
+  function cycleLocalWavelength() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.cycleWavelength === 'function') {
+      PowerMeterTrainer.cycleWavelength();
+      return;
+    }
+    var ix = WAVELENGTH_ORDER.indexOf(resolveWavelengthNm());
+    if (ix < 0) ix = WAVELENGTH_ORDER.indexOf(1490);
+    wavelengthNm = WAVELENGTH_ORDER[(ix + 1) % WAVELENGTH_ORDER.length];
+    if (global.FtthLab && typeof FtthLab.setOpmWavelength === 'function') {
+      FtthLab.setOpmWavelength(wavelengthNm);
+    } else {
+      refreshDockReadings();
+    }
+    rebuildLayer();
+  }
+
+  function toggleLocalUnit() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.toggleUnit === 'function') {
+      PowerMeterTrainer.toggleUnit();
+      return;
+    }
+    unitMode = resolveUnitMode() === 'mw' ? 'dbm' : 'mw';
+    rebuildLayer();
+    lastBroadcast();
+  }
+
+  function toggleLocalStandard() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.toggleStandard === 'function') {
+      PowerMeterTrainer.toggleStandard();
+    }
+  }
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -82,7 +160,7 @@
       if (!d) return null;
       return { x: d.x + OPM_W / 2, y: d.y + 12, rot: 0 };
     }
-    var bore = el.querySelector('.lab-opm__adapter-knurl') || el;
+    var bore = el.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || el;
     var r = bore.getBoundingClientRect();
     var pt = clientToWorld(r.left + r.width / 2, r.top + r.height * 0.35);
     return { x: pt.x, y: pt.y, rot: 0 };
@@ -180,7 +258,15 @@
   }
 
   function lastBroadcast() {
-    var primary = devices.length ? devices[devices.length - 1] : null;
+    var primary = null;
+    var i;
+    for (i = devices.length - 1; i >= 0; i--) {
+      if (devices[i].docked) {
+        primary = devices[i];
+        break;
+      }
+    }
+    if (!primary) primary = devices.length ? devices[devices.length - 1] : null;
     var reading = primary && primary.lastReading;
     if (global.PowerMeterTrainer && typeof PowerMeterTrainer.applyDockReading === 'function') {
       PowerMeterTrainer.applyDockReading(reading, primary);
@@ -202,42 +288,118 @@
     layer.className = 'lab-opm-layer';
     layer.setAttribute('data-lab-opm-layer', '1');
     mount.appendChild(layer);
+    bindKeypadDelegation(layer);
     return layer;
+  }
+
+  function softUnitLabel(mode) {
+    return mode === 'mw' ? 'Pow. [W]' : 'dBm';
   }
 
   function screenMarkup(d) {
     var r = d.lastReading;
-    var docked = !!(d.docked && r && r.docked !== false && (r.source || r.note === 'No optical path to OLT' || r.label === 'SIGNAL LOW'));
     var main;
     var unit = '';
-    if (!d.docked) {
-      main = 'UNCONNECTED';
-    } else if (!r || !isFinite(r.dBm) || !r.source) {
+    var mode = resolveUnitMode();
+    var idle = !d.docked || !r || !isFinite(r.dBm) || !r.source;
+    if (idle) {
       main = 'SIGNAL LOW';
-    } else if (unitMode === 'mw') {
+    } else if (mode === 'mw') {
       main = formatMw(r.dBm) || '——.—';
     } else {
       main = formatDbm(r.dBm);
       unit = 'dBm';
     }
-    var softUnit = unitMode === 'mw' ? 'Pow. [W]' : 'dBm';
+    var wl = resolveWavelengthNm();
+    var softUnit = softUnitLabel(mode);
     return (
-      '<div class="lab-opm__screen" aria-live="polite">' +
-      '<div class="lab-opm__screen-top">' +
-      '<span>Broadband / Expert</span>' +
-      '<span class="lab-opm__batt" aria-hidden="true">▮▮▮</span>' +
+      '<div class="viavi__lcd" aria-live="polite">' +
+      '<div class="viavi__lcd-top">' +
+      '<span class="viavi__lcd-mode">Broadband / Expert</span>' +
+      '<span class="viavi__lcd-clock" aria-label="Session timer">' +
+      '<svg class="viavi__lcd-clock-icon" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
+      '<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
+      '<path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' +
+      '</svg>' +
+      '<span class="viavi__lcd-clock-val">00:00</span>' +
+      '</span>' +
       '</div>' +
-      '<div class="lab-opm__screen-main' + (!d.docked ? ' is-idle' : '') + '">' +
-      '<span class="lab-opm__screen-value">' + main + '</span>' +
-      (unit ? '<span class="lab-opm__screen-unit">' + unit + '</span>' : '') +
+      '<div class="viavi__lcd-main' + (idle ? ' is-idle' : ' is-live') + '">' +
+      '<span class="viavi__lcd-value">' + main + '</span>' +
+      (unit ? '<span class="viavi__lcd-unit">' + unit + '</span>' : '') +
       '</div>' +
-      '<div class="lab-opm__softkeys">' +
-      '<span>' + wavelengthNm + ' nm</span>' +
-      '<span>Abs&gt;Ref</span>' +
-      '<span>' + softUnit + '</span>' +
+      '<div class="viavi__lcd-soft">' +
+      '<span class="viavi__soft-key viavi__lambda-chip">' + wl + ' nm</span>' +
+      '<span class="viavi__soft-key viavi__soft-ref">Abs&gt;Ref</span>' +
+      '<span class="viavi__soft-key viavi__soft-unit">' + softUnit + '</span>' +
       '</div>' +
       '</div>'
     );
+  }
+
+  function closestEl(start, sel) {
+    var t = start;
+    if (t && t.nodeType === 3) t = t.parentElement;
+    return t && t.closest ? t.closest(sel) : null;
+  }
+
+  function isOpmKeyTarget(e) {
+    return !!closestEl(e.target, '.lab-opm .viavi__key, .lab-opm .viavi__keys, .lab-opm button');
+  }
+
+  function handleOpmKey(btn) {
+    if (!btn) return;
+    if (btn.hasAttribute('data-opm-wave-cycle')) {
+      cycleLocalWavelength();
+      return;
+    }
+    if (btn.hasAttribute('data-opm-mode')) {
+      toggleLocalUnit();
+      return;
+    }
+    if (btn.hasAttribute('data-opm-std-cycle')) {
+      toggleLocalStandard();
+      return;
+    }
+    if (btn.hasAttribute('data-opm-save')) {
+      if (global.PowerMeterTrainer && typeof PowerMeterTrainer.takeSnapshot === 'function') {
+        PowerMeterTrainer.takeSnapshot();
+      } else {
+        setStatus('OLP-38 · SAVE');
+      }
+      return;
+    }
+    if (btn.hasAttribute('data-opm-ref')) {
+      var trainerRef = document.getElementById('opm-btn-ref');
+      if (trainerRef) trainerRef.click();
+    }
+  }
+
+  function bindKeypadDelegation(host) {
+    if (!host || host.dataset.opmKeypadBound === '1') return;
+    host.dataset.opmKeypadBound = '1';
+
+    host.addEventListener('pointerdown', function (e) {
+      if (!isOpmKeyTarget(e)) return;
+      e.stopPropagation();
+    }, true);
+
+    host.addEventListener('pointerup', function (e) {
+      if (!isOpmKeyTarget(e)) return;
+      e.stopPropagation();
+    }, true);
+
+    host.addEventListener('click', function (e) {
+      var btn = closestEl(
+        e.target,
+        '[data-opm-wave-cycle], [data-opm-mode], [data-opm-save], [data-opm-std-cycle], [data-opm-ref], [data-opm-pwr]'
+      );
+      if (!btn || !btn.closest('.lab-opm')) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      handleOpmKey(btn);
+    }, true);
   }
 
   function rebuildLayer() {
@@ -247,60 +409,67 @@
     var html = '';
     devices.forEach(function (d) {
       var sel = selection.kind === 'opm' && selection.id === d.id ? ' is-selected' : '';
-      var docked = d.docked ? ' is-docked' : '';
       var mismatch = d.dockMismatch ? ' is-mismatch' : '';
       var warn = d.docked && d.lastReading && !d.lastReading.source ? ' is-warning' : '';
-      var portCls = 'lab-opm-port' + (d.docked ? ' is-occupied' : '') + mismatch + warn;
+      var portCls = 'viavi__port lab-opm-port' + (d.docked ? ' is-occupied' : '') + mismatch + warn;
+      var dockedAttr = d.docked ? '1' : '0';
+      var mismatchAttr = d.dockMismatch ? '1' : '0';
+      var warnAttr = warn ? '1' : '0';
       html +=
-        '<div class="lab-opm lab-opm--viavi' + sel + docked +
+        '<div class="lab-opm lab-opm--viavi' + sel + (d.docked ? ' is-docked' : '') +
         '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
-        '<div class="lab-opm__bumper lab-opm__bumper--tl" aria-hidden="true"></div>' +
-        '<div class="lab-opm__bumper lab-opm__bumper--tr" aria-hidden="true"></div>' +
-        '<div class="lab-opm__bumper lab-opm__bumper--bl" aria-hidden="true"></div>' +
-        '<div class="lab-opm__bumper lab-opm__bumper--br" aria-hidden="true"></div>' +
-        '<div class="lab-opm__body" data-opm-drag="' + d.id + '">' +
+        '<div class="viavi" data-docked="' + dockedAttr +
+        '" data-mismatch="' + mismatchAttr + '" data-warning="' + warnAttr + '">' +
+        '<div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>' +
+        '<div class="viavi__bumper viavi__bumper--tr" aria-hidden="true"></div>' +
+        '<div class="viavi__bumper viavi__bumper--bl" aria-hidden="true"></div>' +
+        '<div class="viavi__bumper viavi__bumper--br" aria-hidden="true"></div>' +
+        '<div class="viavi__face" data-opm-drag="' + d.id + '">' +
         '<div class="' + portCls +
         '" data-opm-port="' + d.id + '" data-opm-connector="SC" title="SC optical adapter · dock patch/pigtail here">' +
-        '<span class="lab-opm__adapter-base" aria-hidden="true"></span>' +
-        '<span class="lab-opm__adapter-knurl" aria-hidden="true"></span>' +
-        '<span class="lab-opm__adapter-bore" aria-hidden="true"></span>' +
+        '<span class="viavi__adapter-base" aria-hidden="true"></span>' +
+        '<span class="viavi__adapter-knurl" aria-hidden="true"></span>' +
+        '<span class="viavi__adapter-bore" aria-hidden="true"></span>' +
         '</div>' +
-        '<div class="lab-opm__badge">VIAVI</div>' +
+        '<div class="viavi__badge">VIAVI</div>' +
         screenMarkup(d) +
-        '<div class="lab-opm__keypad">' +
-        '<button type="button" class="lab-opm__key" data-opm-soft="1" tabindex="-1"></button>' +
-        '<button type="button" class="lab-opm__key" data-opm-soft="2" tabindex="-1"></button>' +
-        '<button type="button" class="lab-opm__key" data-opm-soft="3" tabindex="-1"></button>' +
-        '<button type="button" class="lab-opm__key lab-opm__key--mode" data-opm-mode title="MODE">MODE</button>' +
-        '<button type="button" class="lab-opm__key lab-opm__key--save" data-opm-save title="SAVE">SAVE</button>' +
-        '<button type="button" class="lab-opm__key lab-opm__key--pwr" data-opm-pwr title="Power" aria-label="Power">⏻</button>' +
+        '<div class="viavi__keys">' +
+        '<button type="button" class="viavi__key viavi__key--lambda" data-opm-wave-cycle title="Wavelength — cycle λ" aria-label="Cycle wavelength">λ</button>' +
+        '<button type="button" class="viavi__key" data-opm-std-cycle title="Standard"></button>' +
+        '<button type="button" class="viavi__key" data-opm-ref title="Set REF"></button>' +
+        '<button type="button" class="viavi__key viavi__key--mode" data-opm-mode title="MODE — toggle dBm / mW" aria-label="Toggle dBm and mW">MODE</button>' +
+        '<button type="button" class="viavi__key viavi__key--save" data-opm-save title="SAVE">SAVE</button>' +
+        '<button type="button" class="viavi__key viavi__key--pwr" data-opm-pwr title="Power" aria-label="Power">⏻</button>' +
         '</div>' +
-        '<div class="lab-opm__model">OLP-38</div>' +
-        '</div>' +
-        '</div>';
+        '<div class="viavi__model">OLP-38</div>' +
+        '</div></div></div>';
     });
     host.innerHTML = html;
     bindLayerEvents(host);
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.refreshViaviClocks === 'function') {
+      PowerMeterTrainer.refreshViaviClocks();
+    }
   }
 
   function bindLayerEvents(host) {
     host.querySelectorAll('[data-opm-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
-        if (e.target.closest('.lab-opm-port, .lab-opm__keypad')) return;
+        if (isOpmKeyTarget(e)) return;
+        if (closestEl(e.target, '.lab-opm-port, .viavi__lcd')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-opm-drag');
         var d = findDevice(id);
         if (!d) return;
-        selectOpm(id);
+        selectOpm(id, { skipRebuild: true });
         var zoom = getZoom() || 1;
         var sx = e.clientX;
         var sy = e.clientY;
         var ox = d.x;
         var oy = d.y;
         var node = host.querySelector('[data-opm-node="' + id + '"]');
-        if (node) node.classList.add('is-dragging');
+        if (node) node.classList.add('is-dragging', 'is-selected');
 
         function onMove(ev) {
           d.x = Math.round(ox + (ev.clientX - sx) / zoom);
@@ -325,26 +494,6 @@
         }
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
-      });
-    });
-
-    host.querySelectorAll('[data-opm-mode]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        unitMode = unitMode === 'dbm' ? 'mw' : 'dbm';
-        rebuildLayer();
-        lastBroadcast();
-      });
-    });
-
-    host.querySelectorAll('[data-opm-save]').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        if (global.PowerMeterTrainer && typeof PowerMeterTrainer.takeSnapshot === 'function') {
-          PowerMeterTrainer.takeSnapshot();
-        } else {
-          setStatus('OLP-38 · SAVE');
-        }
       });
     });
   }
@@ -378,11 +527,20 @@
     return d;
   }
 
-  function selectOpm(id) {
+  function selectOpm(id, opts) {
+    opts = opts || {};
     selection = { kind: 'opm', id: id };
     claimSelection();
     renderToolbox();
-    rebuildLayer();
+    if (opts.skipRebuild) {
+      if (layer) {
+        layer.querySelectorAll('[data-opm-node]').forEach(function (n) {
+          n.classList.toggle('is-selected', n.getAttribute('data-opm-node') === id);
+        });
+      }
+    } else {
+      rebuildLayer();
+    }
     updateInspector();
   }
 
@@ -488,9 +646,9 @@
       '<div class="lab-spl-sheet">' +
       '<div><span>Dock</span><strong>' + (d.docked ? 'Occupied' : 'Open') + '</strong></div>' +
       '<div><span>Reading</span><strong>' +
-      (r && isFinite(r.dBm) ? formatDbm(r.dBm) + ' dBm' : (r && r.label) || 'UNCONNECTED') +
+      (r && isFinite(r.dBm) ? formatDbm(r.dBm) + ' dBm' : (r && r.label === 'UNCONNECTED' ? 'SIGNAL LOW' : (r && r.label) || 'SIGNAL LOW')) +
       '</strong></div>' +
-      '<div><span>λ</span><strong>' + wavelengthNm + ' nm</strong></div>' +
+      '<div><span>λ</span><strong>' + resolveWavelengthNm() + ' nm</strong></div>' +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id + '">Remove OLP-38</button>' +
       '</div>';

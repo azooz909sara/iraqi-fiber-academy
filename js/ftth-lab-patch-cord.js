@@ -547,7 +547,7 @@
           }
           return null;
         }
-        var knurl = node.querySelector('.lab-opm__adapter-knurl') || node;
+        var knurl = node.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || node;
         var rO = knurl.getBoundingClientRect();
         var cO = clientToWorld(rO.left + rO.width / 2, rO.top + rO.height * 0.35);
         return {
@@ -691,6 +691,19 @@
 
   /* ─── Loss / budget ─── */
 
+  function cordFiberLengthM(cord) {
+    if (!cord) return 0;
+    if (isMeterMode(cord) && typeof cord.lengthMeters === 'number') {
+      return cord.lengthMeters;
+    }
+    if (typeof cord.fixedLength === 'number' && cord.fixedLength > 0) {
+      return pxToMeters(cord.fixedLength);
+    }
+    var dx = cord.bx - cord.ax;
+    var dy = cord.by - cord.ay;
+    return pxToMeters(Math.sqrt(dx * dx + dy * dy));
+  }
+
   function cordLossDb(cord) {
     var loss = 0;
     var aOn = !!cord.sideA.attached;
@@ -756,6 +769,7 @@
         sideA: sideSnap(c.sideA),
         sideB: sideSnap(c.sideB),
         lossDb: cordLossDb(c),
+        fiberLengthM: cordFiberLengthM(c),
         freeA: !c.sideA.attached,
         freeB: !c.sideB.attached,
       };

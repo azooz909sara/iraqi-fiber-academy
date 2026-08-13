@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="css/ftth-lab.css">
   <link rel="stylesheet" href="css/power-meter.css">
 </head>
-<body class="opm-page opm-page--bench">
+<body class="opm-page opm-page--workspace">
 
   <div class="opm-app">
     <header class="opm-header">
@@ -18,7 +18,7 @@
         <img src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="36" height="36" />
         <div class="opm-brand__meta">
           <h1>Optical Power Meter</h1>
-          <p>Console · live bench</p>
+          <p>Live fiber bench · Viavi OLP-38</p>
         </div>
       </a>
       <div class="opm-header__actions">
@@ -31,93 +31,40 @@
       </div>
     </header>
 
-    <main class="opm-main opm-main--bench">
-      <section class="opm-panel opm-panel--console" aria-label="Viavi OLP-38">
-        <div class="viavi" id="viavi-trainer" data-docked="0" data-mismatch="0" data-warning="0">
-          <div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>
-          <div class="viavi__bumper viavi__bumper--tr" aria-hidden="true"></div>
-          <div class="viavi__bumper viavi__bumper--bl" aria-hidden="true"></div>
-          <div class="viavi__bumper viavi__bumper--br" aria-hidden="true"></div>
+    <main class="opm-workspace" aria-label="FTTH lab workspace">
+      <aside class="opm-sidebar opm-sidebar--toolbox lab-rail" aria-label="Toolbox">
+        <h2 class="lab-rail__title">Toolbox</h2>
+        <div class="lab-rail__panel">
+          <section class="lab-rail__group">
+            <h3 class="lab-rail__cat">Source</h3>
+            <div id="lab-hw-tree" class="lab-hw-tree"></div>
+          </section>
+          <section class="lab-rail__group">
+            <h3 class="lab-rail__cat">Split</h3>
+            <div id="lab-splitter-tree" class="lab-hw-tree"></div>
+          </section>
+          <section class="lab-rail__group">
+            <h3 class="lab-rail__cat">Fiber</h3>
+            <div id="lab-patchcord-tree" class="lab-hw-tree"></div>
+            <div id="lab-pigtail-tree" class="lab-hw-tree"></div>
+          </section>
+          <section class="lab-rail__group">
+            <h3 class="lab-rail__cat">Adapt</h3>
+            <div id="lab-coupler-tree" class="lab-hw-tree"></div>
+          </section>
+          <section class="lab-rail__group">
+            <h3 class="lab-rail__cat">Test</h3>
+            <div id="lab-opm-tree" class="lab-hw-tree"></div>
+          </section>
+        </div>
+      </aside>
 
-          <div class="viavi__face">
-            <div class="viavi__port" id="viavi-trainer-port" title="SC optical adapter — dock on the bench OLP-38">
-              <span class="viavi__adapter-base" aria-hidden="true"></span>
-              <span class="viavi__adapter-knurl" aria-hidden="true"></span>
-              <span class="viavi__adapter-bore" aria-hidden="true"></span>
-            </div>
-            <div class="viavi__badge">VIAVI</div>
-            <div class="viavi__lcd" aria-live="polite">
-              <div class="viavi__lcd-top">
-                <span>Broadband / Expert</span>
-                <span class="viavi__lcd-batt" id="opm-bar-batt-mini">▮▮▮</span>
-                <span id="viavi-timer">00:00</span>
-              </div>
-              <div class="viavi__lcd-main is-idle" id="viavi-lcd-main">
-                <span class="viavi__lcd-value" id="opm-lcd-value">UNCONNECTED</span>
-                <span class="viavi__lcd-unit" id="opm-lcd-unit" hidden></span>
-              </div>
-              <div class="viavi__lcd-soft">
-                <span id="opm-lcd-lambda">1490 nm</span>
-                <span>Abs&gt;Ref</span>
-                <span id="viavi-unit-soft">dBm</span>
-              </div>
-            </div>
-
-            <div class="viavi__keys">
-              <button type="button" class="viavi__key" data-opm-wave-cycle title="Wavelength"></button>
-              <button type="button" class="viavi__key" data-opm-std-cycle title="Standard"></button>
-              <button type="button" class="viavi__key" id="opm-btn-ref" title="Set REF"></button>
-              <button type="button" class="viavi__key viavi__key--mode" id="opm-btn-mode" title="MODE">MODE</button>
-              <button type="button" class="viavi__key viavi__key--save" id="opm-btn-snapshot" title="SAVE">SAVE</button>
-              <button type="button" class="viavi__key viavi__key--pwr" id="opm-btn-pwr" title="Power" aria-label="Power">⏻</button>
-            </div>
-            <div class="viavi__model">OLP-38</div>
+      <section class="opm-stage" aria-label="Interactive bench">
+        <div class="opm-stage-head">
+          <div class="opm-stage-head__copy">
+            <h2 class="opm-stage-head__title">Workspace</h2>
+            <p class="opm-stage-head__tip">SFP → patch → dock SC into OLP-38 metal port</p>
           </div>
-        </div>
-
-        <p class="viavi-hint">Place OLP-38 on the bench → drag an <strong>SC</strong> Patch Cord / Pigtail into the metal adapter. Screen stays <em>UNCONNECTED</em> until docked.</p>
-
-        <div class="opm-summary" id="opm-verdict" data-status="idle" hidden>
-          <span class="opm-verdict__badge" id="opm-verdict-badge">IDLE</span>
-          <div class="opm-summary__metrics">
-            <div class="opm-summary__cell">
-              <span>Loss</span>
-              <strong id="opm-stat-loss">—</strong>
-            </div>
-            <div class="opm-summary__cell">
-              <span>mW</span>
-              <strong id="opm-stat-mw">—</strong>
-            </div>
-          </div>
-          <p class="opm-summary__hint" id="opm-verdict-title">Dock SC cable</p>
-        </div>
-
-        <!-- Hidden controls kept for JS API compatibility -->
-        <div class="opm-hidden-api" hidden>
-          <input id="opm-power-input" type="number" value="" />
-          <button type="button" data-opm-unit="dbm" class="is-active"></button>
-          <button type="button" data-opm-unit="mw"></button>
-          <button type="button" data-opm-wave="1310"></button>
-          <button type="button" data-opm-wave="1490" class="is-active"></button>
-          <button type="button" data-opm-wave="1550"></button>
-          <button type="button" data-opm-std="gpon" class="is-active"></button>
-          <button type="button" data-opm-std="epon"></button>
-          <button type="button" id="opm-btn-rel"></button>
-          <button type="button" id="opm-btn-clear-ref"></button>
-          <span id="opm-live-badge" hidden></span>
-          <span id="opm-lcd-mw"></span>
-          <span id="opm-lcd-rel" hidden></span>
-          <span id="opm-th-pass"></span>
-          <span id="opm-th-warn"></span>
-          <span id="opm-th-fail"></span>
-          <span id="opm-meter-needle"></span>
-        </div>
-      </section>
-
-      <section class="opm-panel opm-panel--bench" aria-label="Fiber bench">
-        <div class="opm-bench-head">
-          <h2 class="opm-panel__title" id="opm-bench-title">Bench</h2>
-          <p class="opm-bench-tip">SFP → patch → dock SC into OLP-38 metal port</p>
           <div class="opm-bench-toolbar" role="toolbar" aria-label="Bench tools">
             <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-undo" data-lab-undo title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↩️</button>
             <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-redo" data-lab-redo title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↪️</button>
@@ -129,61 +76,83 @@
           </div>
         </div>
 
-        <div class="opm-bench" id="opm-bench">
+        <div class="opm-stage__canvas" id="opm-bench">
           <div class="lab-app lab-app--2d opm-bench__app" id="lab-app">
-            <main class="lab-main opm-bench__main">
-              <aside class="lab-rail" aria-label="Toolbox">
-                <div class="lab-rail__panel">
-                  <section class="lab-rail__group">
-                    <h3 class="lab-rail__cat">Source</h3>
-                    <div id="lab-hw-tree" class="lab-hw-tree"></div>
-                  </section>
-                  <section class="lab-rail__group">
-                    <h3 class="lab-rail__cat">Split</h3>
-                    <div id="lab-splitter-tree" class="lab-hw-tree"></div>
-                  </section>
-                  <section class="lab-rail__group">
-                    <h3 class="lab-rail__cat">Fiber</h3>
-                    <div id="lab-patchcord-tree" class="lab-hw-tree"></div>
-                    <div id="lab-pigtail-tree" class="lab-hw-tree"></div>
-                  </section>
-                  <section class="lab-rail__group">
-                    <h3 class="lab-rail__cat">Adapt</h3>
-                    <div id="lab-coupler-tree" class="lab-hw-tree"></div>
-                  </section>
-                  <section class="lab-rail__group">
-                    <h3 class="lab-rail__cat">Test</h3>
-                    <div id="lab-opm-tree" class="lab-hw-tree"></div>
-                  </section>
+            <section class="lab-stage-wrap opm-bench__stage" aria-label="Bench canvas">
+              <div id="lab-canvas-2d" class="lab-2d-stage">
+                <div class="lab-2d-world" id="lab-2d-world">
+                  <div class="lab-2d-grid" aria-hidden="true"></div>
+                  <div class="lab-2d-origin" title="Origin" aria-hidden="true"></div>
+                  <div id="lab-2d-mount" class="lab-2d-mount" data-lab-mount="2d"></div>
                 </div>
-              </aside>
-
-              <section class="lab-stage-wrap" aria-label="Bench stage">
-                <div id="lab-canvas-2d" class="lab-2d-stage">
-                  <div class="lab-2d-world" id="lab-2d-world">
-                    <div class="lab-2d-grid" aria-hidden="true"></div>
-                    <div class="lab-2d-origin" title="Origin" aria-hidden="true"></div>
-                    <div id="lab-2d-mount" class="lab-2d-mount" data-lab-mount="2d"></div>
-                  </div>
-                </div>
-                <div id="lab-canvas-3d" hidden data-lab-mount="3d"></div>
-                <div class="lab-stage-hud">
-                  <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
-                  <span class="lab-hud-chip" id="lab-hud-budget">Budget · —</span>
-                </div>
-              </section>
-
-              <aside class="lab-inspector" hidden aria-hidden="true">
-                <div class="lab-inspector__card" id="lab-inspector-card"></div>
-                <div id="lab-inspector-detail" class="lab-inspector__detail" hidden></div>
-              </aside>
-            </main>
-            <footer class="lab-footer opm-bench__footer" hidden>
+              </div>
+              <div id="lab-canvas-3d" hidden data-lab-mount="3d"></div>
+              <div class="lab-stage-hud">
+                <span class="lab-hud-chip" id="lab-hud-zoom">Zoom 100%</span>
+                <span class="lab-hud-chip" id="lab-hud-budget">Budget · —</span>
+              </div>
+            </section>
+            <footer class="lab-footer opm-bench__footer">
               <span id="lab-status">Bench ready</span>
             </footer>
           </div>
         </div>
       </section>
+
+      <aside class="opm-sidebar opm-sidebar--props lab-inspector" aria-label="Properties">
+        <h2 class="lab-inspector__label">Properties</h2>
+
+        <section class="opm-props-telemetry" aria-label="Live telemetry">
+          <div class="opm-props-verdict" id="opm-props-verdict" data-status="idle">
+            <span class="opm-props-verdict__badge" id="opm-props-verdict-badge">IDLE</span>
+            <span class="opm-props-verdict__title" id="opm-props-verdict-title">Dock SC cable</span>
+          </div>
+          <dl class="opm-props-grid">
+            <div class="opm-props-row">
+              <dt id="opm-props-reading-label">Reading (dBm)</dt>
+              <dd id="opm-props-dbm">SIGNAL LOW</dd>
+            </div>
+            <div class="opm-props-row">
+              <dt id="opm-props-alt-label">mW</dt>
+              <dd id="opm-props-mw">—</dd>
+            </div>
+            <div class="opm-props-row">
+              <dt>Loss</dt>
+              <dd id="opm-props-loss">— dB</dd>
+            </div>
+            <div class="opm-props-row">
+              <dt>Wavelength</dt>
+              <dd id="opm-props-wavelength">1490 nm</dd>
+            </div>
+            <div class="opm-props-row opm-props-row--full">
+              <dt>λ band</dt>
+              <dd id="opm-props-lambda-hint" class="opm-props-hint">Downstream · OLT → ONU (GPON primary)</dd>
+            </div>
+            <div class="opm-props-row opm-props-row--full">
+              <dt>Path</dt>
+              <dd id="opm-props-path" class="opm-props-path">No active optical path</dd>
+            </div>
+            <div class="opm-props-row opm-props-row--full">
+              <dt>Alert</dt>
+              <dd id="opm-props-alert" class="opm-props-alert">Mating OK</dd>
+            </div>
+          </dl>
+          <div class="opm-props-actions">
+            <button type="button" class="opm-props-btn" id="opm-props-snapshot" title="Log current dBm reading">
+              Snapshot <span id="opm-props-snap-count">(0)</span>
+            </button>
+            <button type="button" class="opm-props-btn opm-props-btn--danger" id="opm-props-clear-ws" title="Clear bench workspace">
+              Clear WS
+            </button>
+          </div>
+        </section>
+
+        <div class="lab-inspector__card" id="lab-inspector-card">
+          <h2>No selection</h2>
+          <p>Select equipment on the canvas, or drag an item from the toolbox.</p>
+        </div>
+        <div id="lab-inspector-detail" class="lab-inspector__detail" hidden></div>
+      </aside>
     </main>
 
     <footer class="smart-status-bar opm-smart-bar" id="opm-smart-bar" role="status" aria-live="polite">
@@ -208,17 +177,56 @@
           </span>
           <span id="opm-bar-batt-pct">92%</span>
         </div>
-        <div class="smart-status-bar__actions">
-          <button type="button" class="smart-status-bar__btn" id="opm-btn-snapshot-bar" title="Log current dBm reading">
-            Snapshot <span id="opm-bar-snap-count">(0)</span>
-          </button>
-          <button type="button" class="smart-status-bar__btn smart-status-bar__btn--danger" id="opm-btn-clear-ws" title="Clear bench workspace">
-            Clear WS
-          </button>
-        </div>
       </div>
     </footer>
     <div class="smart-status-bar__toast" id="opm-bar-toast" role="status" aria-live="polite"></div>
+
+    <!-- Hidden controls kept for JS API compatibility -->
+    <div class="opm-hidden-api" hidden aria-hidden="true">
+      <div class="viavi" id="viavi-trainer" data-docked="0" data-mismatch="0" data-warning="0">
+        <span id="viavi-timer">00:00</span>
+        <span id="opm-lcd-value">SIGNAL LOW</span>
+        <span id="opm-lcd-unit" hidden></span>
+        <span id="opm-lcd-lambda">1490 nm</span>
+        <span id="viavi-unit-soft">dBm</span>
+        <span id="opm-lcd-lambda-hint"></span>
+        <div id="viavi-lcd-main"></div>
+      </div>
+      <input id="opm-power-input" type="number" value="" />
+      <button type="button" data-opm-unit="dbm" class="is-active"></button>
+      <button type="button" data-opm-unit="mw"></button>
+      <button type="button" data-opm-wave="850"></button>
+      <button type="button" data-opm-wave="980"></button>
+      <button type="button" data-opm-wave="1310"></button>
+      <button type="button" data-opm-wave="1490" class="is-active"></button>
+      <button type="button" data-opm-wave="1550"></button>
+      <button type="button" data-opm-wave="1625"></button>
+      <button type="button" data-opm-std="gpon" class="is-active"></button>
+      <button type="button" data-opm-std="epon"></button>
+      <button type="button" data-opm-wave-cycle></button>
+      <button type="button" data-opm-std-cycle></button>
+      <button type="button" id="opm-btn-ref" title="Set REF"></button>
+      <button type="button" id="opm-btn-mode" title="MODE"></button>
+      <button type="button" id="opm-btn-snapshot" title="SAVE"></button>
+      <button type="button" id="opm-btn-rel"></button>
+      <button type="button" id="opm-btn-clear-ref"></button>
+      <button type="button" id="opm-btn-snapshot-bar"></button>
+      <button type="button" id="opm-btn-clear-ws"></button>
+      <div id="opm-verdict" data-status="idle" hidden>
+        <span id="opm-verdict-badge">IDLE</span>
+        <strong id="opm-stat-loss">—</strong>
+        <strong id="opm-stat-mw">—</strong>
+        <span id="opm-verdict-title">Dock SC cable</span>
+      </div>
+      <span id="opm-live-badge" hidden></span>
+      <span id="opm-lcd-mw"></span>
+      <span id="opm-lcd-rel" hidden></span>
+      <span id="opm-th-pass"></span>
+      <span id="opm-th-warn"></span>
+      <span id="opm-th-fail"></span>
+      <span id="opm-meter-needle"></span>
+      <span id="opm-bar-snap-count">(0)</span>
+    </div>
   </div>
 
   <script src="js/power-meter.js"></script>
@@ -257,6 +265,10 @@
               PowerMeterTrainer.refreshStatusBar();
             }
           });
+        }
+        if (typeof FtthLab.setOpmWavelength === 'function' &&
+            window.PowerMeterTrainer && typeof PowerMeterTrainer.getWavelength === 'function') {
+          FtthLab.setOpmWavelength(PowerMeterTrainer.getWavelength());
         }
         if (typeof FtthLab.centerWorldInView === 'function') {
           setTimeout(function () { FtthLab.centerWorldInView(); }, 80);

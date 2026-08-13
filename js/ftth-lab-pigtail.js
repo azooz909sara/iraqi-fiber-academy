@@ -448,7 +448,7 @@
           }
           return null;
         }
-        var knurl = node.querySelector('.lab-opm__adapter-knurl') || node;
+        var knurl = node.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || node;
         var rO = knurl.getBoundingClientRect();
         var cO = clientToWorld(rO.left + rO.width / 2, rO.top + rO.height * 0.35);
         return {
@@ -1205,6 +1205,24 @@
     }
   }
 
+  function pigtailFiberLengthM(p) {
+    if (!p) return 0;
+    if (typeof p.fixedLength === 'number' && p.fixedLength > 0) {
+      var ppm = 160;
+      if (global.FtthLab && typeof FtthLab.worldPxToMeters === 'function') {
+        return FtthLab.worldPxToMeters(p.fixedLength);
+      }
+      return p.fixedLength / ppm;
+    }
+    var dx = p.bx - p.ax;
+    var dy = p.by - p.ay;
+    var lenPx = Math.sqrt(dx * dx + dy * dy);
+    if (global.FtthLab && typeof FtthLab.worldPxToMeters === 'function') {
+      return FtthLab.worldPxToMeters(lenPx);
+    }
+    return lenPx / 160;
+  }
+
   function getLaserGraphNodes() {
     return pigtails.map(function (p) {
       return {
@@ -1228,6 +1246,7 @@
               termId: p.tail.attached.termId || null,
             }
           : null,
+        fiberLengthM: pigtailFiberLengthM(p),
       };
     });
   }

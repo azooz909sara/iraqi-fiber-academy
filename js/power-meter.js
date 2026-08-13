@@ -36,10 +36,15 @@
     },
   };
 
+  var WAVELENGTH_ORDER = [850, 980, 1310, 1490, 1550, 1625];
+
   var WAVELENGTH_HINT = {
+    850: 'Legacy MM / VCSEL test band',
+    980: 'EDFA pump · specialty sensing',
     1310: 'Upstream · ONU → OLT (GPON/EPON TX)',
     1490: 'Downstream · OLT → ONU (GPON primary)',
-    1550: 'RF overlay / CATV · or long-haul test',
+    1550: 'Long-haul SM · RF overlay / CATV',
+    1625: 'Maintenance / OTDR band',
   };
 
   var state = {
@@ -59,6 +64,7 @@
 
   var SNAP_KEY = 'opm_trainer_snapshots_v1';
   var toastTimer = null;
+  var sessionStarted = Date.now();
 
   function $(id) {
     return document.getElementById(id);
@@ -155,7 +161,7 @@
     var trainer = $('viavi-trainer');
 
     if (!state.docked) {
-      if (lcdVal) lcdVal.textContent = 'UNCONNECTED';
+      if (lcdVal) lcdVal.textContent = 'SIGNAL LOW';
       if (lcdUnit) {
         lcdUnit.hidden = true;
         lcdUnit.textContent = '';
@@ -205,7 +211,14 @@
     }
 
     if (lcdLambda) lcdLambda.textContent = state.wavelength + ' nm';
+    document.querySelectorAll('.viavi__lambda-chip').forEach(function (el) {
+      el.textContent = state.wavelength + ' nm';
+    });
+    var lcdHint = $('opm-lcd-lambda-hint');
+    if (lcdHint) lcdHint.textContent = WAVELENGTH_HINT[state.wavelength] || '';
     if (softUnit) softUnit.textContent = state.unit === 'mw' ? 'Pow. [W]' : 'dBm';
+
+    renderLcdSoftBar();
 
     var convMw = $('opm-stat-mw');
     var lossStat = $('opm-stat-loss');
@@ -258,16 +271,202 @@
     });
 
     updateBatteryUi();
+    refreshPropertiesPanel();
+  }
+
+  function refreshPropertiesPanel() {
+    var std = STANDARDS[state.standard] || STANDARDS.gpon;
+    var dbm = state.docked ? state.powerDbm : NaN;
+    var mw = isFinite(dbm) ? dbmToMw(dbm) : NaN;
+    var verdict = state.docked ? evaluate(dbm, std) : { status: 'idle', title: 'Dock SC cable', detail: '' };
+
+    var tele = { lossDb: 0, mismatches: 0 };
+    if (global.FtthLab && typeof FtthLab.getNetworkTelemetry === 'function') {
+      tele = FtthLab.getNetworkTelemetry() || tele;
+    } else if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
+      tele.lossDb = FtthLab.refreshPowerBudget() || 0;
+    }
+
+    var pathStr = '';
+    var pathLoss = null;
+    if (state.lastReading && state.lastReading.path && state.lastReading.path.length) {
+      pathStr = formatPathChain(state.lastReading.path);
+      if (isFinite(state.lastReading.lossDb)) pathLoss = state.lastReading.lossDb;
+    }
+    if (!pathStr) {
+      if (tele.lossDb > 0) pathStr = 'Linked topology · probe a port for chain';
+      else pathStr = 'No active optical path';
+    }
+    if (!state.docked) pathStr = 'SIGNAL LOW · dock SC into OLP-38';
+
+    var lossShow = pathLoss != null ? pathLoss : tele.lossDb;
+
+    var verdictWrap = $('opm-props-verdict');
+    var verdictBadge = $('opm-props-verdict-badge');
+    var verdictTitle = $('opm-props-verdict-title');
+    if (verdictWrap) verdictWrap.dataset.status = state.docked ? verdict.status : 'idle';
+    if (verdictBadge) {
+      verdictBadge.textContent = !state.docked
+        ? 'IDLE'
+        : verdict.status === 'pass'
+          ? 'PASS'
+          : verdict.status === 'warning'
+            ? 'WARN'
+            : verdict.status === 'fail'
+              ? 'FAIL'
+              : 'IDLE';
+    }
+    if (verdictTitle) verdictTitle.textContent = state.docked ? verdict.title : 'Dock SC cable';
+
+    var dbmEl = $('opm-props-dbm');
+    var readingLabel = $('opm-props-reading-label');
+    var altLabel = $('opm-props-alt-label');
+    if (readingLabel) {
+      readingLabel.textContent = state.unit === 'mw' ? 'Reading (mW)' : 'Reading (dBm)';
+    }
+    if (altLabel) {
+      altLabel.textContent = state.unit === 'mw' ? 'dBm' : 'mW';
+    }
+    if (dbmEl) {
+      if (!state.docked) dbmEl.textContent = 'SIGNAL LOW';
+      else if (!isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
+        dbmEl.textContent = 'SIGNAL LOW';
+      } else if (state.unit === 'mw') {
+        dbmEl.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+      } else {
+        dbmEl.textContent = formatDbm(dbm) + ' dBm';
+      }
+    }
+
+    var mwEl = $('opm-props-mw');
+    if (mwEl) {
+      if (!state.docked || !isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
+        mwEl.textContent = '—';
+      } else if (state.unit === 'mw') {
+        mwEl.textContent = formatDbm(dbm) + ' dBm';
+      } else {
+        mwEl.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+      }
+    }
+
+    var lossEl = $('opm-props-loss');
+    if (lossEl) {
+      if (state.lastReading && isFinite(state.lastReading.lossDb)) {
+        lossEl.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
+      } else if (state.referenceDbm != null && isFinite(dbm)) {
+        lossEl.textContent = Math.abs(state.referenceDbm - dbm).toFixed(2) + ' dB';
+      } else {
+        lossEl.textContent = lossShow > 0 || pathLoss != null
+          ? Number(lossShow).toFixed(2) + ' dB'
+          : '— dB';
+      }
+    }
+
+    var waveEl = $('opm-props-wavelength');
+    if (waveEl) waveEl.textContent = state.wavelength + ' nm';
+
+    var hintEl = $('opm-props-lambda-hint');
+    if (hintEl) hintEl.textContent = WAVELENGTH_HINT[state.wavelength] || '';
+
+    var pathEl = $('opm-props-path');
+    if (pathEl) pathEl.textContent = pathStr;
+
+    var alertEl = $('opm-props-alert');
+    if (alertEl) {
+      alertEl.classList.remove('is-warn', 'is-critical');
+      if (tele.mismatches > 0) {
+        alertEl.classList.add(tele.mismatches >= 2 ? 'is-critical' : 'is-warn');
+        alertEl.textContent =
+          tele.mismatches + ' APC/UPC mismatch' + (tele.mismatches > 1 ? 'es' : '');
+      } else if (state.lastReading && state.lastReading.mismatch) {
+        alertEl.classList.add('is-warn');
+        alertEl.textContent = 'Connector polish mismatch on path';
+      } else {
+        alertEl.textContent = 'Mating OK';
+      }
+    }
+
+    var snapCount = $('opm-props-snap-count');
+    if (snapCount) snapCount.textContent = '(' + state.snapshots.length + ')';
+  }
+
+  function renderLambdaCycle() {
+    document.querySelectorAll('.viavi__lambda-chip').forEach(function (el) {
+      el.textContent = state.wavelength + ' nm';
+    });
+  }
+
+  function renderLcdSoftBar() {
+    var unitLabel = state.unit === 'mw' ? 'Pow. [W]' : 'dBm';
+    document.querySelectorAll('.viavi__soft-unit').forEach(function (el) {
+      el.textContent = unitLabel;
+    });
+    renderLambdaCycle();
+  }
+
+  function updateViaviClocks(startedAt) {
+    var sec = Math.floor((Date.now() - startedAt) / 1000);
+    var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+    var ss = String(sec % 60).padStart(2, '0');
+    var text = mm + ':' + ss;
+    var timer = $('viavi-timer');
+    if (timer) timer.textContent = text;
+    document.querySelectorAll('.viavi__lcd-clock-val').forEach(function (el) {
+      el.textContent = text;
+    });
+  }
+
+  function syncWavelengthToBench() {
+    if (global.FtthLab && typeof FtthLab.setOpmWavelength === 'function') {
+      FtthLab.setOpmWavelength(state.wavelength);
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
+    } else if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
+      FtthLab.refreshPowerBudget();
+    }
+  }
+
+  function setWavelength(nm) {
+    var n = Number(nm);
+    if (WAVELENGTH_ORDER.indexOf(n) < 0) return;
+    state.wavelength = n;
+    syncWavelengthToBench();
+    render();
+  }
+
+  function cycleWavelength() {
+    var ix = WAVELENGTH_ORDER.indexOf(state.wavelength);
+    if (ix < 0) ix = WAVELENGTH_ORDER.indexOf(1490);
+    state.wavelength = WAVELENGTH_ORDER[(ix + 1) % WAVELENGTH_ORDER.length];
+    syncWavelengthToBench();
+    render();
+  }
+
+  function getWavelength() {
+    return state.wavelength;
+  }
+
+  function toggleUnit() {
+    state.unit = state.unit === 'dbm' ? 'mw' : 'dbm';
+    syncUnitInput();
+    render();
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
+    }
+  }
+
+  function toggleStandard() {
+    state.standard = state.standard === 'gpon' ? 'epon' : 'gpon';
+    render();
+  }
+
+  function getUnit() {
+    return state.unit;
   }
 
   function bind() {
-    document.querySelectorAll('[data-opm-wave]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        state.wavelength = Number(btn.getAttribute('data-opm-wave'));
-        render();
-      });
-    });
-
+    /* Wavelength switching is exclusive to [data-opm-wave-cycle] — see bindStatusBar() */
     document.querySelectorAll('[data-opm-std]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         state.standard = btn.getAttribute('data-opm-std');
@@ -515,7 +714,7 @@
     }
 
     if (pathEl) {
-      if (!state.docked) pathEl.textContent = 'UNCONNECTED · dock SC into OLP-38';
+      if (!state.docked) pathEl.textContent = 'SIGNAL LOW · dock SC into OLP-38';
       else pathEl.textContent = pathStr;
     }
 
@@ -540,6 +739,7 @@
 
     if (snapCount) snapCount.textContent = '(' + state.snapshots.length + ')';
     updateBatteryUi();
+    refreshPropertiesPanel();
   }
 
   function takeSnapshot() {
@@ -576,9 +776,9 @@
   }
 
   function bindStatusBar() {
-    var snapBtn = $('opm-btn-snapshot') || $('opm-btn-snapshot-bar');
+    var snapBtn = $('opm-btn-snapshot') || $('opm-btn-snapshot-bar') || $('opm-props-snapshot');
     var snapBar = $('opm-btn-snapshot-bar');
-    var clearBtn = $('opm-btn-clear-ws');
+    var clearBtn = $('opm-btn-clear-ws') || $('opm-props-clear-ws');
     if (snapBtn) snapBtn.addEventListener('click', takeSnapshot);
     if (snapBar && snapBar !== snapBtn) snapBar.addEventListener('click', takeSnapshot);
     if (clearBtn) clearBtn.addEventListener('click', clearWorkspace);
@@ -586,53 +786,38 @@
     var modeBtn = $('opm-btn-mode');
     if (modeBtn) {
       modeBtn.addEventListener('click', function () {
-        state.unit = state.unit === 'dbm' ? 'mw' : 'dbm';
-        syncUnitInput();
-        render();
+        toggleUnit();
       });
     }
 
     var waveCycle = document.querySelector('[data-opm-wave-cycle]');
     if (waveCycle) {
       waveCycle.addEventListener('click', function () {
-        var order = [1310, 1490, 1550];
-        var ix = order.indexOf(state.wavelength);
-        state.wavelength = order[(ix + 1) % order.length];
-        render();
+        cycleWavelength();
       });
     }
 
-    var stdCycle = document.querySelector('[data-opm-std-cycle]');
+    var stdCycle = document.querySelector('#viavi-trainer [data-opm-std-cycle]');
     if (stdCycle) {
       stdCycle.addEventListener('click', function () {
-        state.standard = state.standard === 'gpon' ? 'epon' : 'gpon';
-        render();
+        toggleStandard();
       });
     }
 
-    var started = Date.now();
+    var started = sessionStarted;
     setInterval(function () {
       if (state.batteryPct > 8) {
         state.batteryPct = Math.max(8, state.batteryPct - 0.08);
         updateBatteryUi();
       }
-      var timer = $('viavi-timer');
-      if (timer) {
-        var sec = Math.floor((Date.now() - started) / 1000);
-        var mm = String(Math.floor(sec / 60)).padStart(2, '0');
-        var ss = String(sec % 60).padStart(2, '0');
-        timer.textContent = mm + ':' + ss;
-      }
+      updateViaviClocks(started);
     }, 45000);
 
     setInterval(function () {
-      var timer = $('viavi-timer');
-      if (!timer) return;
-      var sec = Math.floor((Date.now() - started) / 1000);
-      var mm = String(Math.floor(sec / 60)).padStart(2, '0');
-      var ss = String(sec % 60).padStart(2, '0');
-      timer.textContent = mm + ':' + ss;
+      updateViaviClocks(started);
     }, 1000);
+
+    updateViaviClocks(started);
 
     refreshStatusBar();
   }
@@ -642,6 +827,7 @@
     bind();
     bindStatusBar();
     syncUnitInput();
+    syncWavelengthToBench();
     render();
     refreshStatusBar();
   });
@@ -650,11 +836,24 @@
     applyLiveReading: applyLiveReading,
     applyDockReading: applyDockReading,
     refreshStatusBar: refreshStatusBar,
+    refreshPropertiesPanel: refreshPropertiesPanel,
+    refreshViaviClocks: function () {
+      updateViaviClocks(sessionStarted);
+    },
     takeSnapshot: takeSnapshot,
+    getWavelength: getWavelength,
+    setWavelength: setWavelength,
+    cycleWavelength: cycleWavelength,
+    getWavelengthOrder: function () { return WAVELENGTH_ORDER.slice(); },
+    getWavelengthHint: function (nm) { return WAVELENGTH_HINT[nm] || ''; },
+    getUnit: getUnit,
+    toggleUnit: toggleUnit,
+    toggleStandard: toggleStandard,
     getState: function () {
       return {
         powerDbm: state.powerDbm,
         wavelength: state.wavelength,
+        unit: state.unit,
         standard: state.standard,
         liveFromBench: state.liveFromBench,
         docked: state.docked,

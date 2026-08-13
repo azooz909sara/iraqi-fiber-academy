@@ -205,7 +205,8 @@
     if (target.closest('.lab-pigtail')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;
-    if (target.closest('.lab-opm') || target.closest('.lab-opm-port')) return false;
+    if (target.closest('.lab-opm') || target.closest('.lab-opm-port') ||
+        target.closest('.viavi__key') || target.closest('.viavi__keys')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -376,6 +377,8 @@
     var card = $('lab-inspector-card');
     var detail = $('lab-inspector-detail');
     if (card) {
+      card.hidden = false;
+      card.dataset.opmInspector = '';
       card.innerHTML =
         '<h2>No selection</h2>' +
         '<p>Select equipment on the canvas, or drag an item from the toolbox.</p>';
@@ -769,6 +772,58 @@
   var PIGTAIL_CONN_LOSS_DB = 0.2;
   var PIGTAIL_MISMATCH_DB = 0.75;
   var opmRefreshHook = null;
+  var opmWavelengthNm = 1490;
+
+  /** SM fiber attenuation (dB/km) at common OPM test wavelengths */
+  var FIBER_ATTENUATION_DB_KM = {
+    850: 3.0,
+    980: 2.5,
+    1310: 0.35,
+    1490: 0.25,
+    1550: 0.20,
+    1625: 0.22,
+  };
+
+  /** GPON-class OLT TX coupling penalty when meter is tuned off primary λ */
+  var OLT_WAVELENGTH_PENALTY_DB = {
+    850: 12,
+    980: 9,
+    1310: 0.4,
+    1490: 0,
+    1550: 1.2,
+    1625: 2.5,
+  };
+
+  function getOpmWavelengthNm() {
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.getWavelength === 'function') {
+      var ext = Number(PowerMeterTrainer.getWavelength());
+      if (isFinite(ext) && FIBER_ATTENUATION_DB_KM[ext] != null) return ext;
+    }
+    return opmWavelengthNm;
+  }
+
+  function setOpmWavelength(nm) {
+    var n = Number(nm);
+    if (!isFinite(n) || FIBER_ATTENUATION_DB_KM[n] == null) return;
+    opmWavelengthNm = n;
+    refreshOpmDisplay();
+    refreshPowerBudget();
+  }
+
+  function fiberAttenuationDbPerKm(wavelengthNm) {
+    var alpha = FIBER_ATTENUATION_DB_KM[wavelengthNm];
+    return alpha != null ? alpha : FIBER_ATTENUATION_DB_KM[1490];
+  }
+
+  function fiberSpanLossDb(lengthM, wavelengthNm) {
+    var km = Math.max(0, Number(lengthM) || 0) / 1000;
+    return km * fiberAttenuationDbPerKm(wavelengthNm);
+  }
+
+  function oltWavelengthPenaltyDb(wavelengthNm) {
+    var p = OLT_WAVELENGTH_PENALTY_DB[wavelengthNm];
+    return p != null ? p : 2;
+  }
 
   function portKeyFromAtt(att) {
     if (!att || !att.owner) return null;
@@ -806,6 +861,7 @@
 
   function buildOpticalAdjacency() {
     var adj = {};
+    var wavelengthNm = getOpmWavelengthNm();
     var graph = typeof api.getFiberLaserGraph === 'function'
       ? api.getFiberLaserGraph()
       : { pcords: [], pigtails: [] };
@@ -821,14 +877,15 @@
       var kb = portKeyFromAtt(c.sideB);
       var loss = Number(c.lossDb);
       if (!isFinite(loss)) loss = 0.4;
+      var fiberLoss = fiberSpanLossDb(c.fiberLengthM, wavelengthNm);
       if (ka && kb) {
-        addUndirectedEdge(adj, ka, kb, loss);
+        addUndirectedEdge(adj, ka, kb, loss + fiberLoss);
       }
       if (ka && c.freeB) {
-        addUndirectedEdge(adj, ka, 'pcord:' + c.id + ':B', loss * 0.5);
+        addUndirectedEdge(adj, ka, 'pcord:' + c.id + ':B', (loss + fiberLoss) * 0.5);
       }
       if (kb && c.freeA) {
-        addUndirectedEdge(adj, kb, 'pcord:' + c.id + ':A', loss * 0.5);
+        addUndirectedEdge(adj, kb, 'pcord:' + c.id + ':A', (loss + fiberLoss) * 0.5);
       }
       if (!ka && c.freeA) {
         adj['pcord:' + c.id + ':A'] = adj['pcord:' + c.id + ':A'] || [];
@@ -843,8 +900,9 @@
       var kc = portKeyFromAtt(p.connector);
       var tailKey = 'pigtail:' + p.id + ':tail';
       var ptLoss = PIGTAIL_CONN_LOSS_DB;
+      var pigFiberLoss = fiberSpanLossDb(p.fiberLengthM, wavelengthNm);
       if (kc) {
-        addUndirectedEdge(adj, kc, tailKey, ptLoss);
+        addUndirectedEdge(adj, kc, tailKey, ptLoss + pigFiberLoss);
       } else {
         adj['pigtail:' + p.id + ':conn'] = adj['pigtail:' + p.id + ':conn'] || [];
         addUndirectedEdge(adj, 'pigtail:' + p.id + ':conn', tailKey, ptLoss);
@@ -922,6 +980,8 @@
       };
     }
 
+    var wavelengthNm = getOpmWavelengthNm();
+    var wlPenalty = oltWavelengthPenaltyDb(wavelengthNm);
     var best = null;
     var si;
     for (si = 0; si < sources.length; si++) {
@@ -935,11 +995,12 @@
         var cur = queue[qi++];
         if (cur.key === probeKey) {
           var cand = {
-            dBm: src.txDbm - cur.loss,
-            lossDb: cur.loss,
+            dBm: src.txDbm - cur.loss - wlPenalty,
+            lossDb: cur.loss + wlPenalty,
             source: src,
             label: probeKey,
             path: cur.path.slice(),
+            wavelengthNm: wavelengthNm,
           };
           if (!best || cand.dBm > best.dBm) best = cand;
           continue;
@@ -972,6 +1033,7 @@
     }
     best.dBm = Math.round(best.dBm * 100) / 100;
     best.lossDb = Math.round(best.lossDb * 100) / 100;
+    best.wavelengthNm = wavelengthNm;
     return best;
   }
 
@@ -1184,6 +1246,9 @@
     hitTestLabPort: null,
     probeOpticalAt: probeOpticalAt,
     measureOpticalAtKey: measureOpticalAtKey,
+    getOpmWavelength: getOpmWavelengthNm,
+    setOpmWavelength: setOpmWavelength,
+    fiberSpanLossDb: fiberSpanLossDb,
     registerOpmRefresh: function (fn) {
       if (typeof fn !== 'function') return;
       var prev = opmRefreshHook;
