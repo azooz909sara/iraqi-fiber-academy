@@ -1,13 +1,14 @@
 /**
- * Optical Power Meter (OPM) — live dBm readings from FTTH lab topology.
- * Probes ports, connectors, and fiber paths; traces back to OLT TX sources.
+ * Viavi OLP-38 Optical Power Meter — dockable SC adapter on FTTH lab canvas.
+ * Live dBm only when an SC Patch Cord / Pigtail is snapped into the metal port.
  */
 (function (global) {
   'use strict';
 
-  var OPM_W = 118;
-  var OPM_H = 72;
+  var OPM_W = 152;
+  var OPM_H = 268;
   var HISTORY_MAX = 40;
+  var DOCK_LOSS_DB = 0.15;
 
   var ctx = null;
   var layer = null;
@@ -15,12 +16,11 @@
   var seq = 0;
   var selection = { kind: 'none', id: null };
   var selectedTool = null;
-  var probeMode = false;
-  var lastReading = null;
-  var lastProbeCoords = null;
   var history = [];
   var historyIndex = -1;
   var historyLocked = false;
+  var wavelengthNm = 1490;
+  var unitMode = 'dbm'; /* dbm | mw */
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -57,38 +57,119 @@
   function defaultPos() {
     var w = getWorldSize();
     return {
-      x: Math.round(w / 2 - 80 + devices.length * 36),
-      y: Math.round(w / 2 + 120),
+      x: Math.round(w / 2 + 80 + devices.length * 40),
+      y: Math.round(w / 2 - 40),
     };
   }
 
   function formatDbm(dBm) {
-    if (dBm == null || !isFinite(dBm)) return '——.—';
+    if (dBm == null || !isFinite(dBm)) return null;
     return (dBm >= 0 ? '+' : '') + dBm.toFixed(2);
   }
 
-  function runProbe(clientX, clientY) {
-    if (!global.FtthLab || typeof FtthLab.probeOpticalAt !== 'function') {
+  function formatMw(dBm) {
+    if (dBm == null || !isFinite(dBm)) return null;
+    var mw = Math.pow(10, dBm / 10);
+    if (mw >= 1) return mw.toFixed(3) + ' mW';
+    if (mw >= 0.001) return (mw * 1000).toFixed(2) + ' µW';
+    return (mw * 1e6).toFixed(1) + ' nW';
+  }
+
+  function getPortWorld(opmId) {
+    var el = document.querySelector('.lab-opm-port[data-opm-port="' + opmId + '"]');
+    if (!el) {
+      var d = findDevice(opmId);
+      if (!d) return null;
+      return { x: d.x + OPM_W / 2, y: d.y + 18, rot: 0 };
+    }
+    var bore = el.querySelector('.lab-opm__adapter-knurl') || el;
+    var r = bore.getBoundingClientRect();
+    var pt = clientToWorld(r.left + r.width / 2, r.top + r.height * 0.35);
+    return { x: pt.x, y: pt.y, rot: 0 };
+  }
+
+  function measureAtDock(opmId) {
+    if (!global.FtthLab || typeof FtthLab.measureOpticalAtKey !== 'function') {
       return null;
     }
-    var reading = FtthLab.probeOpticalAt(clientX, clientY);
-    lastReading = reading;
-    lastProbeCoords = { x: clientX, y: clientY };
-    devices.forEach(function (d) {
-      d.lastReading = reading;
-      d.probeLabel = reading.label || '—';
-    });
-    rebuildLayer();
-    updateInspector();
-    if (reading && reading.source) {
-      setStatus(
-        'OPM · ' + formatDbm(reading.dBm) + ' dBm · ' +
-        (reading.label || 'probe') + ' · loss ' + reading.lossDb.toFixed(2) + ' dB'
-      );
-    } else if (reading && reading.note) {
-      setStatus('OPM · ' + reading.note);
+    var key = 'opm:' + opmId;
+    var reading = FtthLab.measureOpticalAtKey(key);
+    if (reading) {
+      reading.docked = true;
+      reading.opmId = opmId;
+      reading.label = reading.label || 'Viavi OLP-38 dock';
     }
     return reading;
+  }
+
+  function isDockOccupied(opmId) {
+    var graph = global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function'
+      ? FtthLab.getFiberLaserGraph()
+      : { pcords: [], pigtails: [] };
+    var i;
+    var pcords = graph.pcords || [];
+    for (i = 0; i < pcords.length; i++) {
+      var c = pcords[i];
+      if (c.sideA && c.sideA.owner === 'opm' && c.sideA.opmId === opmId) return true;
+      if (c.sideB && c.sideB.owner === 'opm' && c.sideB.opmId === opmId) return true;
+    }
+    var pigtails = graph.pigtails || [];
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (p.connector && p.connector.owner === 'opm' && p.connector.opmId === opmId) return true;
+    }
+    return false;
+  }
+
+  function refreshDockReadings() {
+    devices.forEach(function (d) {
+      var occupied = isDockOccupied(d.id);
+      d.docked = occupied;
+      if (!occupied) {
+        d.lastReading = {
+          dBm: null,
+          lossDb: null,
+          source: null,
+          label: 'UNCONNECTED',
+          path: [],
+          note: 'NO CABLE',
+          docked: false,
+        };
+      } else {
+        var reading = measureAtDock(d.id);
+        if (reading && reading.source && isFinite(reading.dBm)) {
+          d.lastReading = reading;
+        } else {
+          d.lastReading = {
+            dBm: reading && reading.dBm,
+            lossDb: reading && reading.lossDb,
+            source: reading && reading.source,
+            label: 'SIGNAL LOW',
+            path: (reading && reading.path) || [],
+            note: (reading && reading.note) || 'No optical path to OLT',
+            docked: true,
+          };
+        }
+      }
+    });
+    lastBroadcast();
+    rebuildLayer();
+    updateInspector();
+  }
+
+  function lastBroadcast() {
+    var primary = devices.length ? devices[devices.length - 1] : null;
+    var reading = primary && primary.lastReading;
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.applyDockReading === 'function') {
+      PowerMeterTrainer.applyDockReading(reading, primary);
+    }
+    if (typeof global.dispatchEvent === 'function') {
+      try {
+        global.dispatchEvent(new CustomEvent('opm-dock-reading', {
+          detail: { reading: reading, device: primary },
+        }));
+      } catch (err) { /* ignore */ }
+    }
   }
 
   function ensureLayer() {
@@ -102,17 +183,37 @@
     return layer;
   }
 
-  function lcdMarkup(d) {
-    var r = d.lastReading || lastReading;
-    var dbm = r && r.dBm != null ? formatDbm(r.dBm) : '——.—';
-    var sub = r && r.source
-      ? '−' + (r.lossDb != null ? r.lossDb.toFixed(1) : '?') + ' dB'
-      : (r && r.note ? 'no path' : 'probe');
+  function screenMarkup(d) {
+    var r = d.lastReading;
+    var docked = !!(d.docked && r && r.docked !== false && (r.source || r.note === 'No optical path to OLT' || r.label === 'SIGNAL LOW'));
+    var main;
+    var unit = '';
+    if (!d.docked) {
+      main = 'UNCONNECTED';
+    } else if (!r || !isFinite(r.dBm) || !r.source) {
+      main = 'SIGNAL LOW';
+    } else if (unitMode === 'mw') {
+      main = formatMw(r.dBm) || '——.—';
+    } else {
+      main = formatDbm(r.dBm);
+      unit = 'dBm';
+    }
+    var softUnit = unitMode === 'mw' ? 'Pow. [W]' : 'dBm';
     return (
-      '<div class="lab-opm__lcd" aria-live="polite">' +
-      '<span class="lab-opm__dbm">' + dbm + '</span>' +
-      '<span class="lab-opm__unit">dBm</span>' +
-      '<span class="lab-opm__sub">' + sub + '</span>' +
+      '<div class="lab-opm__screen" aria-live="polite">' +
+      '<div class="lab-opm__screen-top">' +
+      '<span>Broadband / Expert</span>' +
+      '<span class="lab-opm__batt" aria-hidden="true">▮▮▮</span>' +
+      '</div>' +
+      '<div class="lab-opm__screen-main' + (!d.docked ? ' is-idle' : '') + '">' +
+      '<span class="lab-opm__screen-value">' + main + '</span>' +
+      (unit ? '<span class="lab-opm__screen-unit">' + unit + '</span>' : '') +
+      '</div>' +
+      '<div class="lab-opm__softkeys">' +
+      '<span>' + wavelengthNm + ' nm</span>' +
+      '<span>Abs&gt;Ref</span>' +
+      '<span>' + softUnit + '</span>' +
+      '</div>' +
       '</div>'
     );
   }
@@ -124,15 +225,33 @@
     var html = '';
     devices.forEach(function (d) {
       var sel = selection.kind === 'opm' && selection.id === d.id ? ' is-selected' : '';
+      var docked = d.docked ? ' is-docked' : '';
       html +=
-        '<div class="lab-opm' + sel + (probeMode ? ' is-probe-armed' : '') +
+        '<div class="lab-opm lab-opm--viavi' + sel + docked +
         '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
-        '<div class="lab-opm__body" data-opm-drag="' + d.id + '">' +
-        '<span class="lab-opm__brand">OPM</span>' +
-        lcdMarkup(d) +
-        '<span class="lab-opm__lambda">λ 1490 nm · GPON</span>' +
+        '<div class="lab-opm__bumper lab-opm__bumper--tl" aria-hidden="true"></div>' +
+        '<div class="lab-opm__bumper lab-opm__bumper--tr" aria-hidden="true"></div>' +
+        '<div class="lab-opm__bumper lab-opm__bumper--bl" aria-hidden="true"></div>' +
+        '<div class="lab-opm__bumper lab-opm__bumper--br" aria-hidden="true"></div>' +
+        '<div class="lab-opm-port' + (d.docked ? ' is-occupied' : '') +
+        '" data-opm-port="' + d.id + '" data-opm-connector="SC" title="SC optical adapter · dock patch/pigtail here">' +
+        '<span class="lab-opm__adapter-base" aria-hidden="true"></span>' +
+        '<span class="lab-opm__adapter-knurl" aria-hidden="true"></span>' +
+        '<span class="lab-opm__adapter-bore" aria-hidden="true"></span>' +
         '</div>' +
-        '<div class="lab-opm__probe-tip" title="Virtual probe port"></div>' +
+        '<div class="lab-opm__body" data-opm-drag="' + d.id + '">' +
+        '<div class="lab-opm__badge">VIAVI</div>' +
+        screenMarkup(d) +
+        '<div class="lab-opm__keypad">' +
+        '<button type="button" class="lab-opm__key" data-opm-soft="1" tabindex="-1"></button>' +
+        '<button type="button" class="lab-opm__key" data-opm-soft="2" tabindex="-1"></button>' +
+        '<button type="button" class="lab-opm__key" data-opm-soft="3" tabindex="-1"></button>' +
+        '<button type="button" class="lab-opm__key lab-opm__key--mode" data-opm-mode title="MODE">MODE</button>' +
+        '<button type="button" class="lab-opm__key lab-opm__key--save" data-opm-save title="SAVE">SAVE</button>' +
+        '<button type="button" class="lab-opm__key lab-opm__key--pwr" data-opm-pwr title="Power" aria-label="Power">⏻</button>' +
+        '</div>' +
+        '<div class="lab-opm__model">OLP-38</div>' +
+        '</div>' +
         '</div>';
     });
     host.innerHTML = html;
@@ -143,6 +262,7 @@
     host.querySelectorAll('[data-opm-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
+        if (e.target.closest('.lab-opm-port, .lab-opm__keypad')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-opm-drag');
@@ -164,6 +284,9 @@
             node.style.left = d.x + 'px';
             node.style.top = d.y + 'px';
           }
+          if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+            FtthLab.notifyLayoutChange({ source: 'opm', live: true, opmId: id });
+          }
         }
         function onUp() {
           window.removeEventListener('pointermove', onMove);
@@ -171,26 +294,34 @@
           if (node) node.classList.remove('is-dragging');
           rebuildLayer();
           pushHistory();
+          if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+            FtthLab.notifyLayoutChange({ source: 'opm', opmId: id });
+          }
         }
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
       });
     });
-  }
 
-  function bindStageProbe() {
-    var stage = document.getElementById('lab-canvas-2d');
-    if (!stage || stage.dataset.opmProbeBound === '1') return;
-    stage.dataset.opmProbeBound = '1';
-    stage.addEventListener('pointerdown', function (e) {
-      if (!probeMode || e.button !== 0) return;
-      if (e.target.closest('.lab-opm, .lab-opm-layer, .lab-rail, .lab-inspector, .lab-header')) {
-        return;
-      }
-      if (e.target.closest('[data-opm-drag]')) return;
-      e.preventDefault();
-      runProbe(e.clientX, e.clientY);
-    }, true);
+    host.querySelectorAll('[data-opm-mode]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        unitMode = unitMode === 'dbm' ? 'mw' : 'dbm';
+        rebuildLayer();
+        lastBroadcast();
+      });
+    });
+
+    host.querySelectorAll('[data-opm-save]').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        if (global.PowerMeterTrainer && typeof PowerMeterTrainer.takeSnapshot === 'function') {
+          PowerMeterTrainer.takeSnapshot();
+        } else {
+          setStatus('OLP-38 · SAVE');
+        }
+      });
+    });
   }
 
   function placeOpm(x, y) {
@@ -202,24 +333,30 @@
       id: 'opm-' + seq,
       x: pos.x,
       y: pos.y,
-      lastReading: null,
-      probeLabel: '—',
+      docked: false,
+      lastReading: {
+        dBm: null,
+        lossDb: null,
+        source: null,
+        label: 'UNCONNECTED',
+        path: [],
+        note: 'NO CABLE',
+        docked: false,
+      },
     };
     devices.push(d);
     selectOpm(d.id);
-    probeMode = true;
     rebuildLayer();
     pushHistory();
-    setStatus('OPM placed · click any port, connector, or fiber to measure dBm');
+    lastBroadcast();
+    setStatus('Viavi OLP-38 placed · dock an SC Patch Cord or Pigtail into the top adapter');
     return d;
   }
 
   function selectOpm(id) {
     selection = { kind: 'opm', id: id };
     claimSelection();
-    probeMode = true;
     renderToolbox();
-    document.body.classList.toggle('lab-opm-probing', probeMode);
     rebuildLayer();
     updateInspector();
   }
@@ -227,11 +364,10 @@
   function removeOpm(id) {
     devices = devices.filter(function (d) { return d.id !== id; });
     if (selection.id === id) selection = { kind: 'none', id: null };
-    if (!devices.length) probeMode = false;
-    document.body.classList.toggle('lab-opm-probing', probeMode);
     rebuildLayer();
     updateInspector();
     pushHistory();
+    lastBroadcast();
   }
 
   function renderToolbox() {
@@ -244,8 +380,8 @@
       '" draggable="true" data-lab-tool="opm" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--opm" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>Optical Power Meter</strong>' +
-      '<span>Live dBm · topology probe</span>' +
+      '<strong>Viavi OLP-38</strong>' +
+      '<span>SC dock · live dBm</span>' +
       '</span>' +
       '</button>' +
       '</div>';
@@ -260,7 +396,6 @@
         FtthLab.claimToolboxTool('opm');
       }
       selectedTool = 'opm';
-      probeMode = true;
       renderToolbox();
       if (!devices.length) placeOpm();
       else selectOpm(devices[devices.length - 1].id);
@@ -295,7 +430,7 @@
       if (!drag || drag.kind !== 'opm') return;
       e.preventDefault();
       var pt = clientToWorld(e.clientX, e.clientY);
-      placeOpm(Math.round(pt.x - OPM_W / 2), Math.round(pt.y - OPM_H / 2));
+      placeOpm(Math.round(pt.x - OPM_W / 2), Math.round(pt.y - 24));
       if (global.FtthLab && FtthLab.endDrag) FtthLab.endDrag();
       selectedTool = 'opm';
       renderToolbox();
@@ -306,7 +441,6 @@
     var card = document.getElementById('lab-inspector-card');
     var detail = document.getElementById('lab-inspector-detail');
     if (!card || !detail) return;
-
     if (selection.kind !== 'opm' || !selection.id) {
       if (card.dataset.opmInspector === '1') {
         card.dataset.opmInspector = '';
@@ -316,66 +450,25 @@
       }
       return;
     }
-
     var d = findDevice(selection.id);
     if (!d) return;
     card.dataset.opmInspector = '1';
     card.hidden = true;
     detail.hidden = false;
-
-    var r = d.lastReading || lastReading;
-    var pathHtml = '';
-    if (r && r.path && r.path.length) {
-      pathHtml = '<ol class="lab-opm-path">';
-      r.path.forEach(function (node) {
-        pathHtml += '<li>' + node + '</li>';
-      });
-      pathHtml += '</ol>';
-    }
-
+    var r = d.lastReading;
     detail.innerHTML =
-      '<div class="lab-inspector__card lab-opm-inspector">' +
-      '<h2>Optical Power Meter</h2>' +
-      '<div class="lab-opm-inspector__lcd">' +
-      '<span class="lab-opm-inspector__value">' + formatDbm(r && r.dBm) + '</span>' +
-      '<span class="lab-opm-inspector__unit">dBm</span>' +
-      '</div>' +
-      '<p class="lab-opm-inspector__hint">' +
-      (probeMode
-        ? 'Probe armed — click a port, connector end, or fiber on the canvas.'
-        : 'Enable probe mode to measure.') +
-      '</p>' +
+      '<div class="lab-inspector__card">' +
+      '<h2>Viavi OLP-38</h2>' +
+      '<p>Dock an <strong>SC</strong> Patch Cord or Pigtail into the metal adapter on top.</p>' +
       '<div class="lab-spl-sheet">' +
-      '<div><span>Probe</span><strong>' + (r && r.label ? r.label : '—') + '</strong></div>' +
-      '<div><span>Path loss</span><strong>' +
-      (r && r.lossDb != null ? r.lossDb.toFixed(2) + ' dB' : '—') +
+      '<div><span>Dock</span><strong>' + (d.docked ? 'Occupied' : 'Open') + '</strong></div>' +
+      '<div><span>Reading</span><strong>' +
+      (r && isFinite(r.dBm) ? formatDbm(r.dBm) + ' dBm' : (r && r.label) || 'UNCONNECTED') +
       '</strong></div>' +
-      '<div><span>Source</span><strong>' +
-      (r && r.source ? r.source.label : '—') +
-      '</strong></div>' +
-      '<div><span>TX level</span><strong>' +
-      (r && r.source ? '+' + r.source.txDbm.toFixed(1) + ' dBm' : '—') +
-      '</strong></div>' +
+      '<div><span>λ</span><strong>' + wavelengthNm + ' nm</strong></div>' +
       '</div>' +
-      (pathHtml ? '<p class="lab-inspector__label">Optical path</p>' + pathHtml : '') +
-      (r && r.note ? '<p class="lab-opm-note">' + r.note + '</p>' : '') +
-      '<div class="lab-opm-inspector__actions">' +
-      '<button type="button" class="lab-toggle-btn' + (probeMode ? ' is-active' : '') +
-      '" data-opm-probe-toggle>' + (probeMode ? 'Probe ON' : 'Probe OFF') + '</button>' +
-      '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id +
-      '">Remove OPM</button>' +
-      '</div>' +
+      '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id + '">Remove OLP-38</button>' +
       '</div>';
-
-    var probeBtn = detail.querySelector('[data-opm-probe-toggle]');
-    if (probeBtn) {
-      probeBtn.addEventListener('click', function () {
-        probeMode = !probeMode;
-        document.body.classList.toggle('lab-opm-probing', probeMode);
-        rebuildLayer();
-        updateInspector();
-      });
-    }
     var rm = detail.querySelector('[data-remove-opm]');
     if (rm) {
       rm.addEventListener('click', function () {
@@ -385,19 +478,6 @@
         }
       });
     }
-  }
-
-  function refreshFromTopology() {
-    if (lastProbeCoords && global.FtthLab && typeof FtthLab.probeOpticalAt === 'function') {
-      var reading = FtthLab.probeOpticalAt(lastProbeCoords.x, lastProbeCoords.y);
-      lastReading = reading;
-      devices.forEach(function (d) {
-        d.lastReading = reading;
-        d.probeLabel = reading.label || '—';
-      });
-    }
-    rebuildLayer();
-    updateInspector();
   }
 
   function pushHistory() {
@@ -414,21 +494,16 @@
   }
 
   function onLayoutChange() {
-    refreshFromTopology();
-    if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
-      FtthLab.refreshPowerBudget();
-    }
+    refreshDockReadings();
   }
 
   function onLaunchRequest(payload) {
     if (!payload || payload.tool !== 'opm') return;
     selectedTool = 'opm';
-    probeMode = true;
     renderToolbox();
-    document.body.classList.toggle('lab-opm-probing', probeMode);
     if (!devices.length) {
       var w = getWorldSize();
-      placeOpm(Math.round(w / 2 - 60), Math.round(w / 2 + 100));
+      placeOpm(Math.round(w / 2 + 40), Math.round(w / 2 - 20));
     } else {
       selectOpm(devices[0].id);
     }
@@ -448,8 +523,6 @@
   function clearSelection() {
     selection = { kind: 'none', id: null };
     selectedTool = null;
-    probeMode = false;
-    document.body.classList.remove('lab-opm-probing');
     renderToolbox();
     rebuildLayer();
   }
@@ -469,20 +542,29 @@
     seq = 0;
     selection = { kind: 'none', id: null };
     selectedTool = null;
-    probeMode = false;
-    lastReading = null;
     history = [];
     historyIndex = -1;
     renderToolbox();
     bindStageDrop();
-    bindStageProbe();
     ensureLayer();
     rebuildLayer();
 
     if (global.FtthLab) {
+      FtthLab.getOpmPortWorld = getPortWorld;
+      FtthLab.refreshOpmDocks = refreshDockReadings;
+      FtthLab.getOpmDevices = function () {
+        return devices.map(function (d) {
+          return {
+            id: d.id,
+            x: d.x,
+            y: d.y,
+            docked: !!d.docked,
+            reading: d.lastReading,
+          };
+        });
+      };
       FtthLab.registerOpmRefresh(function () {
-        refreshFromTopology();
-        updateInspector();
+        refreshDockReadings();
       });
       if (FtthLab._launchTool === 'opm') {
         onLaunchRequest({ tool: 'opm' });
@@ -501,7 +583,7 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     placeOpm: placeOpm,
-    runProbe: runProbe,
+    refreshDockReadings: refreshDockReadings,
   };
 
   function tryRegister() {

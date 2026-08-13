@@ -152,6 +152,9 @@
     if (hit && hit.owner === 'vfl') {
       return 180;
     }
+    if (hit && hit.owner === 'opm') {
+      return 0;
+    }
     if (hit && (hit.owner === 'splitter' ||
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
       return 180;
@@ -434,6 +437,31 @@
           el: node,
         };
       }
+
+      node = el.closest && el.closest('.lab-opm-port[data-opm-port]');
+      if (node) {
+        var oid = node.getAttribute('data-opm-port');
+        var conn = (node.getAttribute('data-opm-connector') || 'SC').toUpperCase();
+        if (conn !== 'SC') {
+          if (global.FtthLab && FtthLab.showAlert) {
+            FtthLab.showAlert('OLP-38 accepts SC connectors only (SC Pigtail / Patch Cord).', 'warn');
+          }
+          return null;
+        }
+        var knurl = node.querySelector('.lab-opm__adapter-knurl') || node;
+        var rO = knurl.getBoundingClientRect();
+        var cO = clientToWorld(rO.left + rO.width / 2, rO.top + rO.height * 0.35);
+        return {
+          owner: 'opm',
+          opmId: oid,
+          polish: 'UPC',
+          connectorType: 'SC',
+          label: 'Viavi OLP-38 · SC adapter',
+          wx: cO.x,
+          wy: cO.y,
+          el: node,
+        };
+      }
     }
     return null;
   }
@@ -488,6 +516,7 @@
       splitterId: hit.splitterId || null,
       couplerId: hit.couplerId || null,
       vflId: hit.vflId || null,
+      opmId: hit.opmId || null,
       port: hit.port || null,
       slot: hit.slot || null,
       oltPort: hit.oltPort || null,
@@ -520,6 +549,9 @@
     if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
       FtthLab.refreshVflLaser();
     }
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
+    }
   }
 
   function detachConnector(p) {
@@ -529,6 +561,9 @@
     p.connector.lockedRot = null;
     if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
       FtthLab.refreshVflLaser();
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
     }
   }
 
@@ -606,6 +641,19 @@
             p.connector.lockedRot = typeof pwV.rot === 'number' ? pwV.rot : 180;
           }
           seatConnectorAtPort(p, pwV.x, pwV.y);
+        }
+      } else if (att.owner === 'opm') {
+        var pwO = null;
+        if (global.FtthLab && typeof FtthLab.getOpmPortWorld === 'function') {
+          pwO = FtthLab.getOpmPortWorld(att.opmId);
+        }
+        if (pwO) {
+          att.wx = pwO.x;
+          att.wy = pwO.y;
+          if (typeof p.connector.lockedRot !== 'number') {
+            p.connector.lockedRot = typeof pwO.rot === 'number' ? pwO.rot : 0;
+          }
+          seatConnectorAtPort(p, pwO.x, pwO.y);
         }
       }
     }
@@ -831,7 +879,7 @@
   function clearPlugHighlights() {
     document.querySelectorAll(
       '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-      '.lab-vfl-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
+      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
       '[data-lab-splice].is-plug-target, [data-lab-term].is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
@@ -1166,6 +1214,7 @@
               owner: p.connector.attached.owner,
               couplerId: p.connector.attached.couplerId || null,
               vflId: p.connector.attached.vflId || null,
+              opmId: p.connector.attached.opmId || null,
               splitterId: p.connector.attached.splitterId || null,
               port: p.connector.attached.port || null,
               slot: p.connector.attached.slot != null ? p.connector.attached.slot : null,

@@ -45,13 +45,20 @@
   var state = {
     wavelength: 1490,
     unit: 'dbm',
-    powerDbm: -18.5,
+    powerDbm: NaN,
     referenceDbm: null,
     relativeOn: false,
     standard: 'gpon',
     liveFromBench: false,
     liveLabel: '',
+    lastReading: null,
+    batteryPct: 92,
+    snapshots: [],
+    docked: false,
   };
+
+  var SNAP_KEY = 'opm_trainer_snapshots_v1';
+  var toastTimer = null;
 
   function $(id) {
     return document.getElementById(id);
@@ -136,46 +143,63 @@
 
   function render() {
     var std = STANDARDS[state.standard] || STANDARDS.gpon;
-    var dbm = state.powerDbm;
+    var dbm = state.docked ? state.powerDbm : NaN;
     var mw = isFinite(dbm) ? dbmToMw(dbm) : NaN;
-    var verdict = evaluate(dbm, std);
+    var verdict = state.docked ? evaluate(dbm, std) : { status: 'idle', title: 'Dock SC cable', detail: '' };
 
     var lcdVal = $('opm-lcd-value');
     var lcdUnit = $('opm-lcd-unit');
     var lcdLambda = $('opm-lcd-lambda');
-    var lcdMw = $('opm-lcd-mw');
-    var lcdRel = $('opm-lcd-rel');
+    var lcdMain = $('viavi-lcd-main');
+    var softUnit = $('viavi-unit-soft');
+    var trainer = $('viavi-trainer');
 
-    if (lcdVal) lcdVal.textContent = formatDbm(dbm);
-    if (lcdUnit) lcdUnit.textContent = 'dBm';
-    if (lcdLambda) lcdLambda.textContent = 'λ ' + state.wavelength + ' nm';
-    if (lcdMw) lcdMw.textContent = isFinite(mw) ? formatMw(mw) + (mw >= 1 ? ' mW' : 'W') : '— mW';
-
-    if (lcdRel) {
-      if (state.relativeOn && state.referenceDbm != null && isFinite(dbm)) {
-        var rel = dbm - state.referenceDbm;
-        lcdRel.hidden = false;
-        lcdRel.textContent =
-          'REL ' + (rel >= 0 ? '+' : '') + rel.toFixed(2) + ' dB  (ref ' + formatDbm(state.referenceDbm) + ' dBm)';
-      } else {
-        lcdRel.hidden = true;
-        lcdRel.textContent = '';
+    if (!state.docked) {
+      if (lcdVal) lcdVal.textContent = 'UNCONNECTED';
+      if (lcdUnit) {
+        lcdUnit.hidden = true;
+        lcdUnit.textContent = '';
       }
+      if (lcdMain) lcdMain.classList.add('is-idle');
+      if (trainer) trainer.setAttribute('data-docked', '0');
+    } else if (!isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
+      if (lcdVal) lcdVal.textContent = 'SIGNAL LOW';
+      if (lcdUnit) {
+        lcdUnit.hidden = true;
+        lcdUnit.textContent = '';
+      }
+      if (lcdMain) lcdMain.classList.remove('is-idle');
+      if (trainer) trainer.setAttribute('data-docked', '1');
+    } else if (state.unit === 'mw') {
+      if (lcdVal) lcdVal.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+      if (lcdUnit) {
+        lcdUnit.hidden = true;
+        lcdUnit.textContent = '';
+      }
+      if (lcdMain) lcdMain.classList.remove('is-idle');
+      if (trainer) trainer.setAttribute('data-docked', '1');
+    } else {
+      if (lcdVal) lcdVal.textContent = formatDbm(dbm);
+      if (lcdUnit) {
+        lcdUnit.hidden = false;
+        lcdUnit.textContent = 'dBm';
+      }
+      if (lcdMain) lcdMain.classList.remove('is-idle');
+      if (trainer) trainer.setAttribute('data-docked', '1');
     }
 
-    var waveHint = $('opm-wave-hint');
-    if (waveHint) waveHint.textContent = WAVELENGTH_HINT[state.wavelength] || '';
-
-    var stdNote = $('opm-std-note');
-    if (stdNote) stdNote.textContent = std.note;
+    if (lcdLambda) lcdLambda.textContent = state.wavelength + ' nm';
+    if (softUnit) softUnit.textContent = state.unit === 'mw' ? 'Pow. [W]' : 'dBm';
 
     var convMw = $('opm-stat-mw');
     var lossStat = $('opm-stat-loss');
     if (convMw) convMw.textContent = isFinite(mw) ? formatMw(mw) + (mw >= 1 ? ' mW' : 'W') : '—';
     if (lossStat) {
-      if (state.referenceDbm != null && isFinite(dbm)) {
+      if (state.lastReading && isFinite(state.lastReading.lossDb)) {
+        lossStat.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
+      } else if (state.referenceDbm != null && isFinite(dbm)) {
         var loss = state.referenceDbm - dbm;
-        lossStat.textContent = (loss >= 0 ? '' : '−') + Math.abs(loss).toFixed(2) + ' dB';
+        lossStat.textContent = Math.abs(loss).toFixed(2) + ' dB';
       } else {
         lossStat.textContent = '—';
       }
@@ -183,10 +207,10 @@
 
     var verdictEl = $('opm-verdict');
     if (verdictEl) {
+      verdictEl.hidden = !state.docked;
       verdictEl.dataset.status = verdict.status;
       var badge = $('opm-verdict-badge');
       var title = $('opm-verdict-title');
-      var detail = $('opm-verdict-detail');
       if (badge) {
         badge.textContent =
           verdict.status === 'pass'
@@ -198,16 +222,7 @@
                 : 'IDLE';
       }
       if (title) title.textContent = verdict.title;
-      if (detail) detail.textContent = verdict.detail;
     }
-
-    var needle = $('opm-meter-needle');
-    if (needle) needle.style.left = needlePercent(dbm, std) + '%';
-
-    var scaleMin = $('opm-scale-min');
-    var scaleMax = $('opm-scale-max');
-    if (scaleMin) scaleMin.textContent = std.scaleMin + ' dBm';
-    if (scaleMax) scaleMax.textContent = std.scaleMax + ' dBm';
 
     var thPass = $('opm-th-pass');
     var thWarn = $('opm-th-warn');
@@ -215,14 +230,6 @@
     if (thPass) thPass.textContent = std.passLow + '…' + std.passHigh;
     if (thWarn) thWarn.textContent = std.warnLow + '…' + std.passLow;
     if (thFail) thFail.textContent = '<' + std.failLow + ' / >' + std.warnHigh;
-
-    var liveBadge = $('opm-live-badge');
-    if (liveBadge) {
-      liveBadge.hidden = !state.liveFromBench;
-      if (state.liveFromBench && state.liveLabel) {
-        liveBadge.title = state.liveLabel;
-      }
-    }
 
     document.querySelectorAll('[data-opm-wave]').forEach(function (btn) {
       btn.classList.toggle('is-active', Number(btn.getAttribute('data-opm-wave')) === state.wavelength);
@@ -234,12 +241,7 @@
       btn.classList.toggle('is-active', btn.getAttribute('data-opm-unit') === state.unit);
     });
 
-    var relBtn = $('opm-btn-rel');
-    if (relBtn) {
-      relBtn.classList.toggle('opm-btn--primary', state.relativeOn);
-      relBtn.setAttribute('aria-pressed', state.relativeOn ? 'true' : 'false');
-      relBtn.textContent = state.relativeOn ? 'REL On' : 'REL Off';
-    }
+    updateBatteryUi();
   }
 
   function bind() {
@@ -342,35 +344,306 @@
   }
 
   function applyLiveReading(reading) {
-    if (!reading) return;
-    if (!isFinite(reading.dBm)) {
+    /* Click-probe readings are ignored — docking is required */
+    if (!state.docked) return;
+    applyDockReading(reading, null);
+  }
+
+  function applyDockReading(reading, device) {
+    state.lastReading = reading || null;
+    state.docked = !!(device && device.docked) || !!(reading && reading.docked);
+    if (device && device.docked === false) state.docked = false;
+    if (reading && reading.note === 'NO CABLE') state.docked = false;
+    if (reading && reading.label === 'UNCONNECTED') state.docked = false;
+
+    if (!state.docked) {
+      state.powerDbm = NaN;
       state.liveFromBench = false;
-      state.liveLabel = reading.note || reading.label || '';
+      state.liveLabel = 'UNCONNECTED';
+      syncUnitInput();
       render();
+      refreshStatusBar();
       return;
     }
-    state.unit = 'dbm';
-    state.powerDbm = Number(reading.dBm);
-    state.liveFromBench = true;
-    state.liveLabel = reading.label || (reading.probe && reading.probe.label) || 'Bench probe';
+
+    if (reading && isFinite(reading.dBm) && reading.source) {
+      state.powerDbm = Number(reading.dBm);
+      state.liveFromBench = true;
+      state.liveLabel = reading.label || 'OLP-38 dock';
+      if (state.batteryPct > 5) state.batteryPct = Math.max(5, state.batteryPct - 0.12);
+    } else {
+      state.powerDbm = NaN;
+      state.liveFromBench = true;
+      state.liveLabel = (reading && reading.label) || 'SIGNAL LOW';
+    }
     syncUnitInput();
     render();
+    refreshStatusBar();
+  }
+
+  function formatPathNode(key) {
+    if (!key) return '';
+    var parts = String(key).split(':');
+    var kind = parts[0];
+    if (kind === 'olt') {
+      var slot = parts[1] || '?';
+      var port = parts[2] || '?';
+      return 'OLT LT' + (Number(slot) < 10 ? '0' : '') + slot + '/P' + port;
+    }
+    if (kind === 'spl') {
+      var ratio = '';
+      if (global.FtthLab && typeof FtthLab.getOpticalSplitters === 'function') {
+        var list = FtthLab.getOpticalSplitters() || [];
+        var i;
+        for (i = 0; i < list.length; i++) {
+          if (list[i].id === parts[1]) {
+            ratio = list[i].type ? ' ' + String(list[i].type).replace('x', '×') : '';
+            break;
+          }
+        }
+      }
+      var portId = parts.slice(2).join(':') || '';
+      return 'Splitter' + ratio + (portId ? ' · ' + portId : '');
+    }
+    if (kind === 'cpl') return 'Coupler ' + (parts[2] || '');
+    if (kind === 'pcord') return 'Patch';
+    if (kind === 'pigtail') return parts[2] === 'tail' ? 'Pigtail fiber' : 'Pigtail';
+    if (kind === 'vfl') return 'VFL';
+    if (kind === 'opm') return 'OLP-38';
+    return key;
+  }
+
+  function formatPathChain(path) {
+    if (!path || !path.length) return '';
+    var labels = [];
+    var prev = '';
+    var i;
+    for (i = 0; i < path.length; i++) {
+      var label = formatPathNode(path[i]);
+      var short = label.replace(/\s·\s.*/,'');
+      if (short === prev && labels.length) continue;
+      /* Collapse consecutive Patch hops */
+      if (short === 'Patch' && prev === 'Patch') continue;
+      labels.push(label);
+      prev = short;
+    }
+    if (state.liveFromBench) labels.push('OLP-38');
+    return labels.join(' → ');
+  }
+
+  function showToast(msg) {
+    var el = $('opm-bar-toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('is-show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      el.classList.remove('is-show');
+    }, 2200);
+  }
+
+  function loadSnapshots() {
+    try {
+      var raw = global.localStorage && localStorage.getItem(SNAP_KEY);
+      state.snapshots = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(state.snapshots)) state.snapshots = [];
+    } catch (err) {
+      state.snapshots = [];
+    }
+  }
+
+  function saveSnapshots() {
+    try {
+      if (global.localStorage) {
+        localStorage.setItem(SNAP_KEY, JSON.stringify(state.snapshots.slice(-40)));
+      }
+    } catch (err) { /* ignore */ }
+  }
+
+  function updateBatteryUi() {
+    var pct = Math.round(state.batteryPct);
+    var fill = $('opm-bar-batt-fill');
+    var label = $('opm-bar-batt-pct');
+    var wrap = $('opm-bar-battery');
+    if (fill) fill.style.width = pct + '%';
+    if (label) label.textContent = pct + '%';
+    if (wrap) {
+      wrap.dataset.level = pct <= 20 ? 'low' : pct <= 45 ? 'mid' : 'ok';
+      wrap.title = 'Simulated OPM battery · ' + pct + '%';
+    }
+  }
+
+  function refreshStatusBar() {
+    var pathEl = $('opm-bar-path');
+    var lossEl = $('opm-bar-loss');
+    var alertEl = $('opm-bar-alert');
+    var alertText = $('opm-bar-alert-text');
+    var snapCount = $('opm-bar-snap-count');
+
+    var tele = { lossDb: 0, mismatches: 0 };
+    if (global.FtthLab && typeof FtthLab.getNetworkTelemetry === 'function') {
+      tele = FtthLab.getNetworkTelemetry() || tele;
+    } else if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
+      tele.lossDb = FtthLab.refreshPowerBudget() || 0;
+    }
+
+    var pathStr = '';
+    var pathLoss = null;
+    if (state.lastReading && state.lastReading.path && state.lastReading.path.length) {
+      pathStr = formatPathChain(state.lastReading.path);
+      if (isFinite(state.lastReading.lossDb)) pathLoss = state.lastReading.lossDb;
+    }
+    if (!pathStr) {
+      if (tele.lossDb > 0) pathStr = 'Linked topology · probe a port for chain';
+      else pathStr = 'No active optical path';
+    }
+
+    if (pathEl) {
+      if (!state.docked) pathEl.textContent = 'UNCONNECTED · dock SC into OLP-38';
+      else pathEl.textContent = pathStr;
+    }
+
+    var lossShow = pathLoss != null ? pathLoss : tele.lossDb;
+    if (lossEl) {
+      lossEl.textContent = lossShow > 0 || pathLoss != null
+        ? Number(lossShow).toFixed(2) + ' dB'
+        : '— dB';
+    }
+
+    if (alertEl && alertText) {
+      if (tele.mismatches > 0) {
+        alertEl.classList.add('is-active');
+        alertEl.classList.toggle('is-critical', tele.mismatches >= 2);
+        alertText.textContent =
+          tele.mismatches + ' APC/UPC mismatch' + (tele.mismatches > 1 ? 'es' : '');
+      } else {
+        alertEl.classList.remove('is-active', 'is-critical');
+        alertText.textContent = 'Mating OK';
+      }
+    }
+
+    if (snapCount) snapCount.textContent = '(' + state.snapshots.length + ')';
+    updateBatteryUi();
+  }
+
+  function takeSnapshot() {
+    var entry = {
+      t: new Date().toISOString(),
+      dBm: isFinite(state.powerDbm) ? Math.round(state.powerDbm * 100) / 100 : null,
+      wavelength: state.wavelength,
+      standard: state.standard,
+      label: state.liveLabel || 'manual',
+      path: state.lastReading && state.lastReading.path
+        ? formatPathChain(state.lastReading.path)
+        : '',
+      lossDb: state.lastReading && isFinite(state.lastReading.lossDb)
+        ? state.lastReading.lossDb
+        : null,
+    };
+    state.snapshots.push(entry);
+    saveSnapshots();
+    refreshStatusBar();
+    var msg = entry.dBm != null
+      ? 'Logged ' + (entry.dBm >= 0 ? '+' : '') + entry.dBm.toFixed(2) + ' dBm'
+      : 'Snapshot saved';
+    showToast(msg);
+  }
+
+  function clearWorkspace() {
+    if (!global.confirm('Clear the fiber bench workspace? Unsaved layout will be lost.')) {
+      return;
+    }
+    try {
+      global.sessionStorage && sessionStorage.setItem('opm_bench_cleared', '1');
+    } catch (err) { /* ignore */ }
+    global.location.reload();
+  }
+
+  function bindStatusBar() {
+    var snapBtn = $('opm-btn-snapshot') || $('opm-btn-snapshot-bar');
+    var snapBar = $('opm-btn-snapshot-bar');
+    var clearBtn = $('opm-btn-clear-ws');
+    if (snapBtn) snapBtn.addEventListener('click', takeSnapshot);
+    if (snapBar && snapBar !== snapBtn) snapBar.addEventListener('click', takeSnapshot);
+    if (clearBtn) clearBtn.addEventListener('click', clearWorkspace);
+
+    var modeBtn = $('opm-btn-mode');
+    if (modeBtn) {
+      modeBtn.addEventListener('click', function () {
+        state.unit = state.unit === 'dbm' ? 'mw' : 'dbm';
+        syncUnitInput();
+        render();
+      });
+    }
+
+    var waveCycle = document.querySelector('[data-opm-wave-cycle]');
+    if (waveCycle) {
+      waveCycle.addEventListener('click', function () {
+        var order = [1310, 1490, 1550];
+        var ix = order.indexOf(state.wavelength);
+        state.wavelength = order[(ix + 1) % order.length];
+        render();
+      });
+    }
+
+    var stdCycle = document.querySelector('[data-opm-std-cycle]');
+    if (stdCycle) {
+      stdCycle.addEventListener('click', function () {
+        state.standard = state.standard === 'gpon' ? 'epon' : 'gpon';
+        render();
+      });
+    }
+
+    var started = Date.now();
+    setInterval(function () {
+      if (state.batteryPct > 8) {
+        state.batteryPct = Math.max(8, state.batteryPct - 0.08);
+        updateBatteryUi();
+      }
+      var timer = $('viavi-timer');
+      if (timer) {
+        var sec = Math.floor((Date.now() - started) / 1000);
+        var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+        var ss = String(sec % 60).padStart(2, '0');
+        timer.textContent = mm + ':' + ss;
+      }
+    }, 45000);
+
+    setInterval(function () {
+      var timer = $('viavi-timer');
+      if (!timer) return;
+      var sec = Math.floor((Date.now() - started) / 1000);
+      var mm = String(Math.floor(sec / 60)).padStart(2, '0');
+      var ss = String(sec % 60).padStart(2, '0');
+      timer.textContent = mm + ':' + ss;
+    }, 1000);
+
+    refreshStatusBar();
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    loadSnapshots();
     bind();
+    bindStatusBar();
     syncUnitInput();
     render();
+    refreshStatusBar();
   });
 
   global.PowerMeterTrainer = {
     applyLiveReading: applyLiveReading,
+    applyDockReading: applyDockReading,
+    refreshStatusBar: refreshStatusBar,
+    takeSnapshot: takeSnapshot,
     getState: function () {
       return {
         powerDbm: state.powerDbm,
         wavelength: state.wavelength,
         standard: state.standard,
         liveFromBench: state.liveFromBench,
+        docked: state.docked,
+        batteryPct: state.batteryPct,
+        snapshots: state.snapshots.length,
       };
     },
   };

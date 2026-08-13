@@ -205,6 +205,7 @@
     if (target.closest('.lab-pigtail')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;
+    if (target.closest('.lab-opm') || target.closest('.lab-opm-port')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
   }
@@ -783,6 +784,9 @@
     if (att.owner === 'vfl') {
       return 'vfl:' + att.vflId;
     }
+    if (att.owner === 'opm') {
+      return 'opm:' + att.opmId;
+    }
     return null;
   }
 
@@ -1129,6 +1133,23 @@
     showAlert: showAlert,
     setBudget: setBudget,
     refreshPowerBudget: refreshPowerBudget,
+    getNetworkTelemetry: function () {
+      var loss = 0;
+      var mismatches = 0;
+      Object.keys(state.tools).forEach(function (id) {
+        var tool = state.tools[id];
+        if (tool && typeof tool.getNetworkLossDb === 'function') {
+          try { loss += Number(tool.getNetworkLossDb()) || 0; } catch (err) { /* ignore */ }
+        }
+        if (tool && typeof tool.getMismatchCount === 'function') {
+          try { mismatches += Number(tool.getMismatchCount()) || 0; } catch (err2) { /* ignore */ }
+        }
+      });
+      return {
+        lossDb: Math.round(loss * 100) / 100,
+        mismatches: mismatches,
+      };
+    },
     notifyLayoutChange: function (payload) {
       notifyTools('onLayoutChange', payload);
       refreshOpmDisplay();
@@ -1164,7 +1185,14 @@
     probeOpticalAt: probeOpticalAt,
     measureOpticalAtKey: measureOpticalAtKey,
     registerOpmRefresh: function (fn) {
-      opmRefreshHook = typeof fn === 'function' ? fn : null;
+      if (typeof fn !== 'function') return;
+      var prev = opmRefreshHook;
+      opmRefreshHook = function () {
+        if (typeof prev === 'function') {
+          try { prev(); } catch (err) { /* ignore */ }
+        }
+        try { fn(); } catch (err2) { /* ignore */ }
+      };
     },
     OPM_NOISE_DBM: OPM_NOISE_DBM,
     /**

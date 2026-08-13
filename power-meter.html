@@ -32,93 +32,93 @@
     </header>
 
     <main class="opm-main opm-main--bench">
-      <section class="opm-panel opm-panel--console" aria-label="Power meter console">
-        <div class="opm-device" aria-label="Optical power meter LCD">
-          <div class="opm-device__brand">
-            <strong>OPM</strong>
-            <span id="opm-live-badge" class="opm-live-badge" hidden>LIVE</span>
+      <section class="opm-panel opm-panel--console" aria-label="Viavi OLP-38">
+        <div class="viavi" id="viavi-trainer" data-docked="0">
+          <div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>
+          <div class="viavi__bumper viavi__bumper--tr" aria-hidden="true"></div>
+          <div class="viavi__bumper viavi__bumper--bl" aria-hidden="true"></div>
+          <div class="viavi__bumper viavi__bumper--br" aria-hidden="true"></div>
+
+          <div class="viavi__dock" title="SC optical adapter — dock on the bench OLP-38">
+            <span class="viavi__adapter-base" aria-hidden="true"></span>
+            <span class="viavi__adapter-knurl" aria-hidden="true"></span>
+            <span class="viavi__adapter-bore" aria-hidden="true"></span>
           </div>
-          <div class="opm-lcd" aria-live="polite">
-            <div class="opm-lcd__row">
-              <span class="opm-lcd__value" id="opm-lcd-value">-18.50</span>
-              <span class="opm-lcd__unit" id="opm-lcd-unit">dBm</span>
+
+          <div class="viavi__face">
+            <div class="viavi__badge">VIAVI</div>
+            <div class="viavi__lcd" aria-live="polite">
+              <div class="viavi__lcd-top">
+                <span>Broadband / Expert</span>
+                <span class="viavi__lcd-batt" id="opm-bar-batt-mini">▮▮▮</span>
+                <span id="viavi-timer">00:00</span>
+              </div>
+              <div class="viavi__lcd-main is-idle" id="viavi-lcd-main">
+                <span class="viavi__lcd-value" id="opm-lcd-value">UNCONNECTED</span>
+                <span class="viavi__lcd-unit" id="opm-lcd-unit" hidden></span>
+              </div>
+              <div class="viavi__lcd-soft">
+                <span id="opm-lcd-lambda">1490 nm</span>
+                <span>Abs&gt;Ref</span>
+                <span id="viavi-unit-soft">dBm</span>
+              </div>
             </div>
-            <div class="opm-lcd__meta">
-              <span id="opm-lcd-lambda">λ 1490 nm</span>
-              <span id="opm-lcd-mw">0.0141 mW</span>
+
+            <div class="viavi__keys">
+              <button type="button" class="viavi__key" data-opm-wave-cycle title="Wavelength"></button>
+              <button type="button" class="viavi__key" data-opm-std-cycle title="Standard"></button>
+              <button type="button" class="viavi__key" id="opm-btn-ref" title="Set REF"></button>
+              <button type="button" class="viavi__key viavi__key--mode" id="opm-btn-mode" title="MODE">MODE</button>
+              <button type="button" class="viavi__key viavi__key--save" id="opm-btn-snapshot" title="SAVE">SAVE</button>
+              <button type="button" class="viavi__key viavi__key--pwr" id="opm-btn-pwr" title="Power" aria-label="Power">⏻</button>
             </div>
-            <div class="opm-lcd__rel" id="opm-lcd-rel" hidden></div>
+            <div class="viavi__model">OLP-38</div>
           </div>
         </div>
 
-        <div class="opm-controls">
-          <div class="opm-field opm-field--row">
-            <div class="opm-seg" role="group" aria-label="Wavelength">
-              <button type="button" class="opm-seg__btn" data-opm-wave="1310">1310</button>
-              <button type="button" class="opm-seg__btn is-active" data-opm-wave="1490">1490</button>
-              <button type="button" class="opm-seg__btn" data-opm-wave="1550">1550</button>
-            </div>
-            <div class="opm-seg" role="group" aria-label="PON standard">
-              <button type="button" class="opm-seg__btn is-active" data-opm-std="gpon">GPON</button>
-              <button type="button" class="opm-seg__btn" data-opm-std="epon">EPON</button>
-            </div>
-          </div>
+        <p class="viavi-hint">Place OLP-38 on the bench → drag an <strong>SC</strong> Patch Cord / Pigtail into the metal adapter. Screen stays <em>UNCONNECTED</em> until docked.</p>
 
-          <div class="opm-input-row">
-            <input
-              class="opm-input"
-              id="opm-power-input"
-              type="number"
-              inputmode="decimal"
-              step="0.01"
-              value="-18.5"
-              aria-label="Optical power"
-            />
-            <div class="opm-unit-toggle" role="group" aria-label="Unit">
-              <button type="button" data-opm-unit="dbm" class="is-active">dBm</button>
-              <button type="button" data-opm-unit="mw">mW</button>
+        <div class="opm-summary" id="opm-verdict" data-status="idle" hidden>
+          <span class="opm-verdict__badge" id="opm-verdict-badge">IDLE</span>
+          <div class="opm-summary__metrics">
+            <div class="opm-summary__cell">
+              <span>Loss</span>
+              <strong id="opm-stat-loss">—</strong>
+            </div>
+            <div class="opm-summary__cell">
+              <span>mW</span>
+              <strong id="opm-stat-mw">—</strong>
             </div>
           </div>
+          <p class="opm-summary__hint" id="opm-verdict-title">Dock SC cable</p>
+        </div>
 
-          <div class="opm-actions">
-            <button type="button" class="opm-btn opm-btn--primary" id="opm-btn-ref">Set REF</button>
-            <button type="button" class="opm-btn" id="opm-btn-rel" aria-pressed="false">REL Off</button>
-            <button type="button" class="opm-btn" id="opm-btn-clear-ref">Clear</button>
-          </div>
-
-          <div class="opm-summary" id="opm-verdict" data-status="pass">
-            <span class="opm-verdict__badge" id="opm-verdict-badge">PASS</span>
-            <div class="opm-summary__metrics">
-              <div class="opm-summary__cell">
-                <span>Loss</span>
-                <strong id="opm-stat-loss">—</strong>
-              </div>
-              <div class="opm-summary__cell">
-                <span>mW</span>
-                <strong id="opm-stat-mw">0.014 mW</strong>
-              </div>
-            </div>
-            <p class="opm-summary__hint" id="opm-verdict-title">In window</p>
-          </div>
-
-          <div class="opm-meter" aria-hidden="true">
-            <div class="opm-meter__bar">
-              <div class="opm-meter__needle" id="opm-meter-needle" style="left:55%"></div>
-            </div>
-          </div>
-
-          <div class="opm-chips" aria-label="Thresholds">
-            <span class="opm-chip opm-chip--pass">PASS <strong id="opm-th-pass">−27…−8</strong></span>
-            <span class="opm-chip opm-chip--warn">WARN <strong id="opm-th-warn">−28…−27</strong></span>
-            <span class="opm-chip opm-chip--fail">FAIL <strong id="opm-th-fail">&lt;−28 / &gt;−8</strong></span>
-          </div>
+        <!-- Hidden controls kept for JS API compatibility -->
+        <div class="opm-hidden-api" hidden>
+          <input id="opm-power-input" type="number" value="" />
+          <button type="button" data-opm-unit="dbm" class="is-active"></button>
+          <button type="button" data-opm-unit="mw"></button>
+          <button type="button" data-opm-wave="1310"></button>
+          <button type="button" data-opm-wave="1490" class="is-active"></button>
+          <button type="button" data-opm-wave="1550"></button>
+          <button type="button" data-opm-std="gpon" class="is-active"></button>
+          <button type="button" data-opm-std="epon"></button>
+          <button type="button" id="opm-btn-rel"></button>
+          <button type="button" id="opm-btn-clear-ref"></button>
+          <span id="opm-live-badge" hidden></span>
+          <span id="opm-lcd-mw"></span>
+          <span id="opm-lcd-rel" hidden></span>
+          <span id="opm-th-pass"></span>
+          <span id="opm-th-warn"></span>
+          <span id="opm-th-fail"></span>
+          <span id="opm-meter-needle"></span>
         </div>
       </section>
 
       <section class="opm-panel opm-panel--bench" aria-label="Fiber bench">
         <div class="opm-bench-head">
           <h2 class="opm-panel__title" id="opm-bench-title">Bench</h2>
-          <p class="opm-bench-tip">SFP → patch / splitter → OPM probe a port</p>
+          <p class="opm-bench-tip">SFP → patch → dock SC into OLP-38 metal port</p>
           <div class="opm-bench-toolbar" role="toolbar" aria-label="Bench tools">
             <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-undo" data-lab-undo title="Undo (Ctrl+Z)" aria-label="Undo" disabled>↩️</button>
             <button type="button" class="lab-toggle-btn lab-icon-btn" id="lab-btn-redo" data-lab-redo title="Redo (Ctrl+Y)" aria-label="Redo" disabled>↪️</button>
@@ -179,13 +179,47 @@
                 <div id="lab-inspector-detail" class="lab-inspector__detail" hidden></div>
               </aside>
             </main>
-            <footer class="lab-footer opm-bench__footer">
+            <footer class="lab-footer opm-bench__footer" hidden>
               <span id="lab-status">Bench ready</span>
             </footer>
           </div>
         </div>
       </section>
     </main>
+
+    <footer class="smart-status-bar opm-smart-bar" id="opm-smart-bar" role="status" aria-live="polite">
+      <div class="smart-status-bar__cluster smart-status-bar__cluster--grow">
+        <span class="smart-status-bar__label">Path</span>
+        <span class="smart-status-bar__path" id="opm-bar-path">No active optical path</span>
+      </div>
+      <div class="smart-status-bar__cluster">
+        <span class="smart-status-bar__metric" title="Cumulative attenuation on active / linked topology">
+          <span class="smart-status-bar__label">Loss</span>
+          <strong id="opm-bar-loss">— dB</strong>
+        </span>
+        <span class="smart-status-bar__alert" id="opm-bar-alert" aria-live="assertive">
+          <span aria-hidden="true">⚠</span>
+          <span id="opm-bar-alert-text">Mating OK</span>
+        </span>
+      </div>
+      <div class="smart-status-bar__cluster">
+        <div class="smart-status-bar__battery" id="opm-bar-battery" data-level="ok" title="Simulated OPM battery">
+          <span class="smart-status-bar__batt-shell" aria-hidden="true">
+            <span class="smart-status-bar__batt-fill" id="opm-bar-batt-fill" style="width:92%"></span>
+          </span>
+          <span id="opm-bar-batt-pct">92%</span>
+        </div>
+        <div class="smart-status-bar__actions">
+          <button type="button" class="smart-status-bar__btn" id="opm-btn-snapshot-bar" title="Log current dBm reading">
+            Snapshot <span id="opm-bar-snap-count">(0)</span>
+          </button>
+          <button type="button" class="smart-status-bar__btn smart-status-bar__btn--danger" id="opm-btn-clear-ws" title="Clear bench workspace">
+            Clear WS
+          </button>
+        </div>
+      </div>
+    </footer>
+    <div class="smart-status-bar__toast" id="opm-bar-toast" role="status" aria-live="polite"></div>
   </div>
 
   <script src="js/power-meter.js"></script>
@@ -211,14 +245,31 @@
           }
           return reading;
         };
+        var prevNotify = FtthLab.notifyLayoutChange;
+        FtthLab.notifyLayoutChange = function (payload) {
+          if (typeof prevNotify === 'function') prevNotify.call(FtthLab, payload);
+          if (window.PowerMeterTrainer && PowerMeterTrainer.refreshStatusBar) {
+            PowerMeterTrainer.refreshStatusBar();
+          }
+        };
+        if (typeof FtthLab.registerOpmRefresh === 'function') {
+          FtthLab.registerOpmRefresh(function () {
+            if (window.PowerMeterTrainer && PowerMeterTrainer.refreshStatusBar) {
+              PowerMeterTrainer.refreshStatusBar();
+            }
+          });
+        }
         if (typeof FtthLab.centerWorldInView === 'function') {
           setTimeout(function () { FtthLab.centerWorldInView(); }, 80);
         }
         setTimeout(function () {
           var btn = document.querySelector('#lab-opm-tree [data-lab-tool="opm"]');
           if (btn) btn.click();
+          if (window.PowerMeterTrainer && PowerMeterTrainer.refreshStatusBar) {
+            PowerMeterTrainer.refreshStatusBar();
+          }
         }, 220);
-        if (FtthLab.setStatus) FtthLab.setStatus('SFP → patch → probe a port');
+        if (FtthLab.setStatus) FtthLab.setStatus('Dock SC Patch/Pigtail into OLP-38 adapter');
         return true;
       }
       if (!hook()) {
