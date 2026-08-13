@@ -1195,6 +1195,87 @@
     showAlert: showAlert,
     setBudget: setBudget,
     refreshPowerBudget: refreshPowerBudget,
+    /** Clamp uniform node scale used by OPM / VFL / splitter resize. */
+    clampNodeScale: function (s, minS, maxS) {
+      var lo = minS != null ? minS : 0.55;
+      var hi = maxS != null ? maxS : 1.85;
+      var n = Number(s);
+      if (!isFinite(n)) return 1;
+      if (n < lo) return lo;
+      if (n > hi) return hi;
+      return Math.round(n * 100) / 100;
+    },
+    /** SE corner resize grip markup for selected/hovered workspace nodes. */
+    resizeHandleHtml: function () {
+      return (
+        '<span class="lab-resize-handle lab-resize-handle--se" data-lab-resize="se" ' +
+        'title="Resize" role="presentation" aria-hidden="true"></span>'
+      );
+    },
+    /** Apply uniform CSS scale (top-left origin) without destroying node markup. */
+    applyNodeScale: function (el, scale) {
+      if (!el) return 1;
+      var s = api.clampNodeScale(scale);
+      el.style.transformOrigin = '0 0';
+      el.style.transform = 'translateZ(0) scale(' + s + ')';
+      el.setAttribute('data-lab-scale', String(s));
+      return s;
+    },
+    /**
+     * Bind SE-corner uniform resize. opts:
+     *   getScale / setScale(number), onLive(), onCommit(), min, max, baseSize (px diagonal driver)
+     */
+    bindUniformNodeResize: function (root, opts) {
+      if (!root || !opts) return;
+      opts = opts || {};
+      root.querySelectorAll('[data-lab-resize]').forEach(function (handle) {
+        if (handle.dataset.labResizeBound === '1') return;
+        handle.dataset.labResizeBound = '1';
+        handle.addEventListener('pointerdown', function (e) {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          e.stopPropagation();
+          if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+          var startX = e.clientX;
+          var startY = e.clientY;
+          var startScale = api.clampNodeScale(
+            typeof opts.getScale === 'function' ? opts.getScale() : 1,
+            opts.min,
+            opts.max
+          );
+          var base = opts.baseSize != null ? opts.baseSize : 220;
+          var zoom = state.zoom2d || 1;
+          var moved = false;
+          root.classList.add('is-resizing');
+          document.body.classList.add('lab-node-resizing');
+
+          function onMove(ev) {
+            var dx = (ev.clientX - startX) / zoom;
+            var dy = (ev.clientY - startY) / zoom;
+            var delta = Math.max(dx, dy);
+            var next = api.clampNodeScale(startScale + delta / base, opts.min, opts.max);
+            if (Math.abs(next - startScale) < 0.001 && !moved) return;
+            moved = true;
+            if (typeof opts.setScale === 'function') opts.setScale(next);
+            api.applyNodeScale(root, next);
+            if (typeof opts.onLive === 'function') opts.onLive(next);
+          }
+
+          function onUp() {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            window.removeEventListener('pointercancel', onUp);
+            root.classList.remove('is-resizing');
+            document.body.classList.remove('lab-node-resizing');
+            if (moved && typeof opts.onCommit === 'function') opts.onCommit();
+          }
+
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+          window.addEventListener('pointercancel', onUp);
+        });
+      });
+    },
     getNetworkTelemetry: function () {
       var loss = 0;
       var mismatches = 0;

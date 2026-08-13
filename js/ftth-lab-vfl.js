@@ -223,6 +223,7 @@
       x: pos.x,
       y: pos.y,
       mode: 'OFF',
+      scale: 1,
       plugged: null,
     };
     devices.push(item);
@@ -690,9 +691,19 @@
     var plugged = d.plugged ? ' is-plugged' : '';
     var laserOn = mode !== 'OFF';
     var switchPos = switchTopPct(mode);
+    var scale = Number(d.scale);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    if (global.FtthLab && typeof FtthLab.clampNodeScale === 'function') {
+      scale = FtthLab.clampNodeScale(scale);
+    }
+    var handleHtml = (global.FtthLab && typeof FtthLab.resizeHandleHtml === 'function')
+      ? FtthLab.resizeHandleHtml()
+      : '<span class="lab-resize-handle lab-resize-handle--se" data-lab-resize="se" aria-hidden="true"></span>';
     return (
       '<div class="lab-vfl' + selected + modeClass + plugged + '" data-vfl-node="' + d.id + '" ' +
-      'style="left:' + Math.round(d.x) + 'px;top:' + Math.round(d.y) + 'px" ' +
+      'data-lab-scale="' + scale + '" ' +
+      'style="left:' + Math.round(d.x) + 'px;top:' + Math.round(d.y) +
+      'px;transform-origin:0 0;transform:translateZ(0) scale(' + scale + ')" ' +
       'title="Visual Fault Locator · 10 mW · 650 nm">' +
       '<div class="lab-vfl__head" aria-hidden="true">' +
       '<svg class="lab-vfl__flanges" viewBox="0 0 28 18" width="28" height="18" focusable="false">' +
@@ -747,6 +758,7 @@
         ? '<span class="lab-vfl__beam' + (mode === 'GLINT' ? ' is-glint' : '') +
           '" aria-hidden="true"></span>'
         : '') +
+      handleHtml +
       '</div>'
     );
   }
@@ -763,8 +775,35 @@
 
   function bindLayerEvents(host) {
     host.querySelectorAll('[data-vfl-node]').forEach(function (node) {
+      var id = node.getAttribute('data-vfl-node');
+      var d = findDevice(id);
+      if (d && global.FtthLab && typeof FtthLab.bindUniformNodeResize === 'function') {
+        FtthLab.bindUniformNodeResize(node, {
+          baseSize: 78,
+          min: 0.6,
+          max: 2.2,
+          getScale: function () {
+            var s = Number(d.scale);
+            return isFinite(s) && s > 0 ? s : 1;
+          },
+          setScale: function (s) { d.scale = s; },
+          onLive: function () {
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'vfl', live: true, vflId: id });
+            }
+          },
+          onCommit: function () {
+            pushHistory();
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'vfl', vflId: id });
+            }
+            setStatus('VFL resized · ' + Math.round((Number(d.scale) || 1) * 100) + '%');
+          },
+        });
+      }
       node.addEventListener('click', function (e) {
         if (e.target.closest('[data-vfl-port]')) return;
+        if (e.target.closest('[data-lab-resize]')) return;
         if (e.target.closest(
           '[data-vfl-switch], [data-vfl-set-mode], [data-vfl-switch-track]'
         )) return;
@@ -867,7 +906,7 @@
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
         if (e.target.closest(
-          '[data-vfl-switch], [data-vfl-set-mode], [data-vfl-switch-track], .lab-vfl__slider'
+          '[data-vfl-switch], [data-vfl-set-mode], [data-vfl-switch-track], .lab-vfl__slider, [data-lab-resize]'
         )) return;
         e.preventDefault();
         e.stopPropagation();

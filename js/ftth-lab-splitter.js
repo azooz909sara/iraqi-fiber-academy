@@ -278,6 +278,7 @@
       y: pos.y,
       inputs: ports.inputs,
       outputs: ports.outputs,
+      scale: 1,
     };
     splitters.push(item);
     selectSplitter(item.id);
@@ -877,7 +878,12 @@
 
       html +=
         '<div class="lab-cas-cassette' + selected + '" data-spl-node="' + s.id + '" ' +
-        'style="left:' + Math.round(s.x) + 'px;top:' + Math.round(s.y) + 'px">' +
+        'data-lab-scale="' + (Number(s.scale) > 0 ? Number(s.scale) : 1) + '" ' +
+        'style="left:' + Math.round(s.x) + 'px;top:' + Math.round(s.y) +
+        'px;transform-origin:0 0;transform:translateZ(0) scale(' +
+        (global.FtthLab && FtthLab.clampNodeScale
+          ? FtthLab.clampNodeScale(Number(s.scale) > 0 ? s.scale : 1)
+          : (Number(s.scale) > 0 ? s.scale : 1)) + ')">' +
         '<div class="lab-cas-flange lab-cas-flange--l" aria-hidden="true">' +
         '<span class="lab-cas-screw"></span><span class="lab-cas-screw"></span>' +
         '</div>' +
@@ -906,6 +912,9 @@
         '<div class="lab-cas-flange lab-cas-flange--r" aria-hidden="true">' +
         '<span class="lab-cas-screw"></span><span class="lab-cas-screw"></span>' +
         '</div>' +
+        ((global.FtthLab && typeof FtthLab.resizeHandleHtml === 'function')
+          ? FtthLab.resizeHandleHtml()
+          : '<span class="lab-resize-handle lab-resize-handle--se" data-lab-resize="se" aria-hidden="true"></span>') +
         '</div>';
     });
 
@@ -915,9 +924,39 @@
   }
 
   function bindLayerEvents(host) {
+    host.querySelectorAll('[data-spl-node]').forEach(function (node) {
+      var id = node.getAttribute('data-spl-node');
+      var s = findSplitter(id);
+      if (s && global.FtthLab && typeof FtthLab.bindUniformNodeResize === 'function') {
+        FtthLab.bindUniformNodeResize(node, {
+          baseSize: 280,
+          min: 0.55,
+          max: 1.75,
+          getScale: function () {
+            var n = Number(s.scale);
+            return isFinite(n) && n > 0 ? n : 1;
+          },
+          setScale: function (v) { s.scale = v; },
+          onLive: function () {
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'splitter', live: true });
+            }
+          },
+          onCommit: function () {
+            pushHistory();
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'splitter' });
+            }
+            setStatus('Splitter resized · ' + Math.round((Number(s.scale) || 1) * 100) + '%');
+          },
+        });
+      }
+    });
+
     host.querySelectorAll('[data-spl-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
+        if (e.target.closest('[data-lab-resize]')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-spl-drag');
@@ -961,7 +1000,7 @@
 
     host.querySelectorAll('[data-spl-node]').forEach(function (node) {
       node.addEventListener('click', function (e) {
-        if (e.target.closest('.lab-cas-port, [data-spl-dustcap]')) return;
+        if (e.target.closest('.lab-cas-port, [data-spl-dustcap], [data-lab-resize]')) return;
         selectSplitter(node.getAttribute('data-spl-node'));
       });
     });

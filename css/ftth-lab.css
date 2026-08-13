@@ -456,6 +456,12 @@ body {
   text-rendering: geometricPrecision;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+}
+
+.lab-vfl:not([data-lab-scale]),
+.lab-cas-cassette:not([data-lab-scale]),
+.lab-cpl,
+.lab-fx-chassis-frame {
   transform: translateZ(0);
 }
 
@@ -586,6 +592,59 @@ body {
 .lab-fx-power,
 .lab-fx-fan {
   cursor: grab;
+}
+
+/* ── Uniform node resize (OPM / VFL / PLC splitter) ── */
+.lab-resize-handle {
+  position: absolute;
+  z-index: 40;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  border: 1.5px solid rgba(226, 232, 240, 0.95);
+  background:
+    linear-gradient(135deg, transparent 45%, rgba(148, 163, 184, 0.95) 46%, rgba(148, 163, 184, 0.95) 54%, transparent 55%),
+    linear-gradient(135deg, transparent 62%, rgba(148, 163, 184, 0.75) 63%, rgba(148, 163, 184, 0.75) 72%, transparent 73%),
+    rgba(15, 23, 42, 0.72);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.lab-resize-handle--se {
+  right: -5px;
+  bottom: -5px;
+  cursor: nwse-resize;
+}
+
+.lab-opm.is-selected > .lab-resize-handle,
+.lab-opm:hover > .lab-resize-handle,
+.lab-vfl.is-selected > .lab-resize-handle,
+.lab-vfl:hover > .lab-resize-handle,
+.lab-cas-cassette.is-selected > .lab-resize-handle,
+.lab-cas-cassette:hover > .lab-resize-handle,
+.lab-opm.is-resizing > .lab-resize-handle,
+.lab-vfl.is-resizing > .lab-resize-handle,
+.lab-cas-cassette.is-resizing > .lab-resize-handle {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+body.lab-node-resizing {
+  cursor: nwse-resize !important;
+  user-select: none !important;
+}
+
+body.lab-node-resizing .lab-2d-stage {
+  cursor: nwse-resize !important;
+}
+
+.lab-opm.is-resizing,
+.lab-vfl.is-resizing,
+.lab-cas-cassette.is-resizing {
+  z-index: 60;
 }
 
 /* Invisible natural-edge resize hit zones (no chrome, labels, or blue boxes) */
@@ -1198,6 +1257,7 @@ body {
   min-width: 280px;
   max-width: 520px;
   pointer-events: auto;
+  overflow: visible;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.4));
 }
 
@@ -2568,8 +2628,8 @@ body.lab-pigtail-dragging {
   pointer-events: auto;
   user-select: none;
   touch-action: none;
+  overflow: visible;
   z-index: 6;
-  /* Keep integer layout box; layer already promoted via translateZ(0) above */
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
 }
@@ -3191,6 +3251,7 @@ body.lab-vfl-dragging {
 .lab-opm--viavi {
   position: absolute;
   width: 220px;
+  overflow: visible;
   z-index: 49;
   filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.45));
 }

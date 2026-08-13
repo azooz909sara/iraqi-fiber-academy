@@ -293,6 +293,22 @@
     return layer;
   }
 
+  function nodeScale(d) {
+    if (!d) return 1;
+    var s = Number(d.scale);
+    if (!isFinite(s) || s <= 0) return 1;
+    if (global.FtthLab && typeof FtthLab.clampNodeScale === 'function') {
+      return FtthLab.clampNodeScale(s);
+    }
+    return s;
+  }
+
+  function resizeHandleHtml() {
+    return (global.FtthLab && typeof FtthLab.resizeHandleHtml === 'function')
+      ? FtthLab.resizeHandleHtml()
+      : '<span class="lab-resize-handle lab-resize-handle--se" data-lab-resize="se" aria-hidden="true"></span>';
+  }
+
   function softUnitLabel(mode) {
     return mode === 'mw' ? 'Pow. [W]' : 'dBm';
   }
@@ -416,9 +432,11 @@
       var dockedAttr = d.docked ? '1' : '0';
       var mismatchAttr = d.dockMismatch ? '1' : '0';
       var warnAttr = warn ? '1' : '0';
+      var scale = nodeScale(d);
       html +=
         '<div class="lab-opm lab-opm--viavi' + sel + (d.docked ? ' is-docked' : '') +
-        '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
+        '" data-opm-node="' + d.id + '" data-lab-scale="' + scale + '" style="left:' + d.x +
+        'px;top:' + d.y + 'px;transform-origin:0 0;transform:translateZ(0) scale(' + scale + ')">' +
         '<div class="viavi" data-docked="' + dockedAttr +
         '" data-mismatch="' + mismatchAttr + '" data-warning="' + warnAttr + '">' +
         '<div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>' +
@@ -443,7 +461,9 @@
         '<button type="button" class="viavi__key viavi__key--pwr" data-opm-pwr title="Power" aria-label="Power">⏻</button>' +
         '</div>' +
         '<div class="viavi__model">OLP-38</div>' +
-        '</div></div></div>';
+        '</div></div>' +
+        resizeHandleHtml() +
+        '</div>';
     });
     host.innerHTML = html;
     bindLayerEvents(host);
@@ -453,11 +473,38 @@
   }
 
   function bindLayerEvents(host) {
+    host.querySelectorAll('[data-opm-node]').forEach(function (node) {
+      var id = node.getAttribute('data-opm-node');
+      var d = findDevice(id);
+      if (!d) return;
+      if (global.FtthLab && typeof FtthLab.bindUniformNodeResize === 'function') {
+        FtthLab.bindUniformNodeResize(node, {
+          baseSize: OPM_W,
+          min: 0.55,
+          max: 1.85,
+          getScale: function () { return nodeScale(d); },
+          setScale: function (s) { d.scale = s; },
+          onLive: function () {
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'opm', live: true, opmId: id });
+            }
+          },
+          onCommit: function () {
+            pushHistory();
+            if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+              FtthLab.notifyLayoutChange({ source: 'opm', opmId: id });
+            }
+            setStatus('OLP-38 resized · ' + Math.round(nodeScale(d) * 100) + '%');
+          },
+        });
+      }
+    });
+
     host.querySelectorAll('[data-opm-drag]').forEach(function (grip) {
       grip.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
         if (isOpmKeyTarget(e)) return;
-        if (closestEl(e.target, '.lab-opm-port, .viavi__lcd')) return;
+        if (closestEl(e.target, '.lab-opm-port, .viavi__lcd, [data-lab-resize]')) return;
         e.preventDefault();
         e.stopPropagation();
         var id = grip.getAttribute('data-opm-drag');
@@ -509,6 +556,7 @@
       x: pos.x,
       y: pos.y,
       docked: false,
+      scale: 1,
       lastReading: {
         dBm: null,
         lossDb: null,
