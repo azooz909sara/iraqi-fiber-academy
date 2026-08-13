@@ -80,7 +80,7 @@
     if (!el) {
       var d = findDevice(opmId);
       if (!d) return null;
-      return { x: d.x + OPM_W / 2, y: d.y + 18, rot: 0 };
+      return { x: d.x + OPM_W / 2, y: d.y + 12, rot: 0 };
     }
     var bore = el.querySelector('.lab-opm__adapter-knurl') || el;
     var r = bore.getBoundingClientRect();
@@ -110,13 +110,32 @@
     var pcords = graph.pcords || [];
     for (i = 0; i < pcords.length; i++) {
       var c = pcords[i];
-      if (c.sideA && c.sideA.owner === 'opm' && c.sideA.opmId === opmId) return true;
-      if (c.sideB && c.sideB.owner === 'opm' && c.sideB.opmId === opmId) return true;
+      if (c.sideA && c.sideA.attached && c.sideA.attached.owner === 'opm' && c.sideA.attached.opmId === opmId) return true;
+      if (c.sideB && c.sideB.attached && c.sideB.attached.owner === 'opm' && c.sideB.attached.opmId === opmId) return true;
     }
     var pigtails = graph.pigtails || [];
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (p.connector && p.connector.owner === 'opm' && p.connector.opmId === opmId) return true;
+      if (p.connector && p.connector.attached && p.connector.attached.owner === 'opm' && p.connector.attached.opmId === opmId) return true;
+    }
+    return false;
+  }
+
+  function isDockMismatch(opmId) {
+    var graph = global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function'
+      ? FtthLab.getFiberLaserGraph()
+      : { pcords: [], pigtails: [] };
+    var i;
+    var pcords = graph.pcords || [];
+    for (i = 0; i < pcords.length; i++) {
+      var c = pcords[i];
+      if (c.sideA && c.sideA.attached && c.sideA.attached.owner === 'opm' && c.sideA.attached.opmId === opmId && c.sideA.mismatch) return true;
+      if (c.sideB && c.sideB.attached && c.sideB.attached.owner === 'opm' && c.sideB.attached.opmId === opmId && c.sideB.mismatch) return true;
+    }
+    var pigtails = graph.pigtails || [];
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (p.connector && p.connector.attached && p.connector.attached.owner === 'opm' && p.connector.attached.opmId === opmId && p.connector.mismatch) return true;
     }
     return false;
   }
@@ -125,6 +144,7 @@
     devices.forEach(function (d) {
       var occupied = isDockOccupied(d.id);
       d.docked = occupied;
+      d.dockMismatch = occupied && isDockMismatch(d.id);
       if (!occupied) {
         d.lastReading = {
           dBm: null,
@@ -139,6 +159,7 @@
         var reading = measureAtDock(d.id);
         if (reading && reading.source && isFinite(reading.dBm)) {
           d.lastReading = reading;
+          d.lastReading.mismatch = d.dockMismatch;
         } else {
           d.lastReading = {
             dBm: reading && reading.dBm,
@@ -148,6 +169,7 @@
             path: (reading && reading.path) || [],
             note: (reading && reading.note) || 'No optical path to OLT',
             docked: true,
+            mismatch: d.dockMismatch,
           };
         }
       }
@@ -226,6 +248,9 @@
     devices.forEach(function (d) {
       var sel = selection.kind === 'opm' && selection.id === d.id ? ' is-selected' : '';
       var docked = d.docked ? ' is-docked' : '';
+      var mismatch = d.dockMismatch ? ' is-mismatch' : '';
+      var warn = d.docked && d.lastReading && !d.lastReading.source ? ' is-warning' : '';
+      var portCls = 'lab-opm-port' + (d.docked ? ' is-occupied' : '') + mismatch + warn;
       html +=
         '<div class="lab-opm lab-opm--viavi' + sel + docked +
         '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
@@ -233,13 +258,13 @@
         '<div class="lab-opm__bumper lab-opm__bumper--tr" aria-hidden="true"></div>' +
         '<div class="lab-opm__bumper lab-opm__bumper--bl" aria-hidden="true"></div>' +
         '<div class="lab-opm__bumper lab-opm__bumper--br" aria-hidden="true"></div>' +
-        '<div class="lab-opm-port' + (d.docked ? ' is-occupied' : '') +
+        '<div class="lab-opm__body" data-opm-drag="' + d.id + '">' +
+        '<div class="' + portCls +
         '" data-opm-port="' + d.id + '" data-opm-connector="SC" title="SC optical adapter · dock patch/pigtail here">' +
         '<span class="lab-opm__adapter-base" aria-hidden="true"></span>' +
         '<span class="lab-opm__adapter-knurl" aria-hidden="true"></span>' +
         '<span class="lab-opm__adapter-bore" aria-hidden="true"></span>' +
         '</div>' +
-        '<div class="lab-opm__body" data-opm-drag="' + d.id + '">' +
         '<div class="lab-opm__badge">VIAVI</div>' +
         screenMarkup(d) +
         '<div class="lab-opm__keypad">' +

@@ -161,7 +161,11 @@
         lcdUnit.textContent = '';
       }
       if (lcdMain) lcdMain.classList.add('is-idle');
-      if (trainer) trainer.setAttribute('data-docked', '0');
+      if (trainer) {
+        trainer.setAttribute('data-docked', '0');
+        trainer.setAttribute('data-mismatch', '0');
+        trainer.setAttribute('data-warning', '0');
+      }
     } else if (!isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
       if (lcdVal) lcdVal.textContent = 'SIGNAL LOW';
       if (lcdUnit) {
@@ -169,7 +173,11 @@
         lcdUnit.textContent = '';
       }
       if (lcdMain) lcdMain.classList.remove('is-idle');
-      if (trainer) trainer.setAttribute('data-docked', '1');
+      if (trainer) {
+        trainer.setAttribute('data-docked', '1');
+        trainer.setAttribute('data-mismatch', state.lastReading && state.lastReading.mismatch ? '1' : '0');
+        trainer.setAttribute('data-warning', '1');
+      }
     } else if (state.unit === 'mw') {
       if (lcdVal) lcdVal.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
       if (lcdUnit) {
@@ -177,7 +185,11 @@
         lcdUnit.textContent = '';
       }
       if (lcdMain) lcdMain.classList.remove('is-idle');
-      if (trainer) trainer.setAttribute('data-docked', '1');
+      if (trainer) {
+        trainer.setAttribute('data-docked', '1');
+        trainer.setAttribute('data-mismatch', state.lastReading && state.lastReading.mismatch ? '1' : '0');
+        trainer.setAttribute('data-warning', verdict.status === 'warning' ? '1' : '0');
+      }
     } else {
       if (lcdVal) lcdVal.textContent = formatDbm(dbm);
       if (lcdUnit) {
@@ -185,7 +197,11 @@
         lcdUnit.textContent = 'dBm';
       }
       if (lcdMain) lcdMain.classList.remove('is-idle');
-      if (trainer) trainer.setAttribute('data-docked', '1');
+      if (trainer) {
+        trainer.setAttribute('data-docked', '1');
+        trainer.setAttribute('data-mismatch', state.lastReading && state.lastReading.mismatch ? '1' : '0');
+        trainer.setAttribute('data-warning', verdict.status === 'warning' ? '1' : '0');
+      }
     }
 
     if (lcdLambda) lcdLambda.textContent = state.wavelength + ' nm';
