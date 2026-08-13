@@ -885,9 +885,39 @@
     PATCH_CORD_DEFAULT_ROT_B: 90,
     PATCH_CORD_DEFAULT_SAG_SLACK: 1.18,
     /**
-     * Continuous gravitational fiber curve (screen Y+ down).
-     * Patch-cord mount replaces this with the true cosh sampler; until then
-     * a parabolic hang keeps Free Draw / drag from ever drawing a straight chord.
+     * Elastic rubber-band sag (screen y+ down). Depth scales with tip span;
+     * excess lengthPx (Meter Mode / locked length) deepens the belly.
+     */
+    elasticFiberSagPx: function (chordPx, lengthPx) {
+      var chord = Math.max(1, Number(chordPx) || 1);
+      var sag = Math.min(160, Math.max(14, chord * 0.28));
+      var L = Number(lengthPx);
+      if (isFinite(L) && L > chord) {
+        var excess = L - chord;
+        sag = Math.max(
+          sag,
+          Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.55
+        );
+      }
+      return Math.max(16, Math.min(160, sag));
+    },
+    /**
+     * Midpoint belly for elastic fiber curves (screen y+ down).
+     */
+    elasticFiberBelly: function (p0, p3, lengthPx) {
+      if (!p0 || !p3) return { x: 0, y: 0 };
+      var dx = p3.x - p0.x;
+      var dy = p3.y - p0.y;
+      var chord = Math.sqrt(dx * dx + dy * dy) || 1;
+      var sag = api.elasticFiberSagPx(chord, lengthPx);
+      return {
+        x: (p0.x + p3.x) * 0.5,
+        y: (p0.y + p3.y) * 0.5 + sag,
+      };
+    },
+    /**
+     * Sample an elastic hang between two tips (parabolic through gravity belly).
+     * Used by pigtails / fallbacks before patch-cord overrides samplers.
      */
     CATENARY_DEFAULT_SLACK: 1.12,
     sampleFiberCatenary: function (p0, p3, length, count) {
@@ -898,9 +928,7 @@
       var chord = Math.sqrt(dx * dx + dy * dy) || 1;
       var slack = api.CATENARY_DEFAULT_SLACK || 1.12;
       var L = Math.max(length || chord * slack, chord * 1.0002);
-      var excess = Math.max(0, L - chord);
-      var sag = Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.45;
-      if (sag < 6) sag = Math.min(40, chord * 0.15);
+      var sag = api.elasticFiberSagPx(chord, L);
       var pts = [];
       var i;
       for (i = 0; i < count; i++) {
@@ -915,8 +943,7 @@
       return pts;
     },
     fiberCatenarySagDepth: function (dist) {
-      var d = Math.max(1, Number(dist) || 1);
-      return Math.min(120, Math.max(10, d * 0.14));
+      return api.elasticFiberSagPx(dist, dist * (api.CATENARY_DEFAULT_SLACK || 1.12));
     },
     fiberCatenaryLengthForSag: function (p0, p3, targetSag) {
       if (!p0 || !p3) return 1;

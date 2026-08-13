@@ -1366,11 +1366,15 @@
     var t = bootOutDir(getEndRotation(cord, end));
     var u = unitVec(t.x, t.y);
     var otherTip = end === 'A' ? bootAnchor(cord, 'B') : bootAnchor(cord, 'A');
+    var otherDir = bootOutDir(getEndRotation(cord, end === 'A' ? 'B' : 'A'));
+    var uOther = unitVec(otherDir.x, otherDir.y);
+    var parallel = bootsParallelSameWay(u, uOther);
     var outD = adaptiveBootStubLength(
       u,
       tip,
       otherTip,
-      Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB)
+      Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB),
+      parallel
     );
     var midD = outD * 0.45;
     return [
@@ -1388,12 +1392,40 @@
     return (bootDir.x * dx + bootDir.y * dy) / len;
   }
 
+  /** Same-direction boots: dot(tA, tB) ≈ +1 (both exit parallel). */
+  function bootsParallelSameWay(tA, tB) {
+    return tA.x * tB.x + tA.y * tB.y > 0.65;
+  }
+
+  /**
+   * Tip→tip chord that never falls back to a fake vertical when tips coincide.
+   * Prefer average boot axis (lateral) then screen-down.
+   */
+  function safeTipChord(tipA, tipB, tA, tB) {
+    var dx = tipB.x - tipA.x;
+    var dy = tipB.y - tipA.y;
+    if (dx * dx + dy * dy > 4) return unitVec(dx, dy);
+    var sx = (tA.x + tB.x) * 0.5;
+    var sy = (tA.y + tB.y) * 0.5;
+    if (sx * sx + sy * sy > 1e-6) return unitVec(sx, sy);
+    return { x: 1, y: 0 };
+  }
+
+  /** Unit vector in the downward hemisphere, perpendicular to `along` (screen y+ down). */
+  function hangPerp(along) {
+    var p = unitVec(-along.y, along.x);
+    if (p.y < 0) p = { x: -p.x, y: -p.y };
+    if (p.x * p.x + p.y * p.y < 1e-8) p = { x: 0, y: 1 };
+    return p;
+  }
+
   /**
    * Strain-relief stub length along boot axis.
    * Full length when facing the peer; shortened when reversed/sideways so
    * stubs do not cross or collapse the mid-span chord.
+   * Parallel same-way boots use short stubs (avoid past-end hairpins).
    */
-  function adaptiveBootStubLength(bootDir, tip, otherTip, baseStub) {
+  function adaptiveBootStubLength(bootDir, tip, otherTip, baseStub, parallelSame) {
     var span = dist2(tip.x, tip.y, otherTip.x, otherTip.y) || 1;
     var face = bootFacesToward(bootDir, tip, otherTip);
     var scale;
@@ -1403,51 +1435,129 @@
     if (global.FtthLab && typeof FtthLab.adaptiveFiberStubScale === 'function') {
       scale = FtthLab.adaptiveFiberStubScale(face);
     }
+    if (parallelSame) scale = Math.min(scale, 0.42);
     var len = baseStub * scale;
     var cap = Math.max(BOOT_EXIT_STUB * 0.75, span * 0.28);
-    return Math.max(BOOT_EXIT_STUB * 0.55, Math.min(len, cap));
+    if (parallelSame) cap = Math.min(cap, Math.max(BOOT_EXIT_STUB, span * 0.16));
+    return Math.max(BOOT_EXIT_STUB * 0.45, Math.min(len, cap));
   }
 
   /**
-   * Extra cable length (fraction of tip span) when boots face away / reverse —
-   * gives the catenary room for a natural U-turn hang instead of a kink.
+   * Extra cable length (fraction of tip span) when boots face away / reverse /
+   * run parallel — room for a natural hang or lateral service loop.
    */
   function opposingOrientationSlackFraction(tA, tB, tipA, tipB) {
     var faceA = bootFacesToward(tA, tipA, tipB);
     var faceB = bootFacesToward(tB, tipB, tipA);
     if (global.FtthLab && typeof FtthLab.opposingFiberSlackFraction === 'function') {
-      return FtthLab.opposingFiberSlackFraction(faceA, faceB);
+      var base = FtthLab.opposingFiberSlackFraction(faceA, faceB);
+      if (bootsParallelSameWay(tA, tB)) base += 0.18;
+      return base;
     }
     var away = 0;
     if (faceA < 0.25) away += (0.25 - faceA) * 0.22;
     if (faceB < 0.25) away += (0.25 - faceB) * 0.22;
+    if (bootsParallelSameWay(tA, tB)) away += 0.18;
     return away;
   }
 
-  /** Pull mid-span anchors apart along the tip chord when stubs would cross. */
-  function stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3) {
+  /**
+   * Place mid-span catenary anchors from boot stubs.
+   * Parallel same-way: hang anchors under the tip chord (lateral loop) so the
+   * far stub never extends past B and forces a hairpin backtrack.
+   * Overlap: open a minimum-width downward service loop (no fake vertical axis).
+   */
+  function resolveOrientedCatenaryAnchors(tipA, tipB, tA, tB, stubA, stubB) {
+    var span = dist2(tipA.x, tipA.y, tipB.x, tipB.y);
+    var chord = safeTipChord(tipA, tipB, tA, tB);
+    var parallel = bootsParallelSameWay(tA, tB);
+    var overlapped = span < 18;
+    var down = hangPerp(chord);
+    var drop = Math.min(52, Math.max(22, (overlapped ? 40 : span * 0.2) + (parallel ? 10 : 0)));
+
+    var p0 = {
+      x: tipA.x + tA.x * stubA,
+      y: tipA.y + tA.y * stubA,
+    };
+    var p3 = {
+      x: tipB.x + tB.x * stubB,
+      y: tipB.y + tB.y * stubB,
+    };
+
+    if (overlapped) {
+      var halfW = Math.max(32, Math.max(stubA, stubB) * 1.4);
+      var cx = (tipA.x + tipB.x) * 0.5;
+      var cy = (tipA.y + tipB.y) * 0.5;
+      p0 = {
+        x: cx - chord.x * halfW + down.x * drop,
+        y: cy - chord.y * halfW + down.y * drop,
+      };
+      p3 = {
+        x: cx + chord.x * halfW + down.x * drop,
+        y: cy + chord.y * halfW + down.y * drop,
+      };
+      return { p0: p0, p3: p3, collapsed: true, parallel: parallel, overlapped: true };
+    }
+
+    if (parallel) {
+      /* Lateral service loop under both tips — short axial lead then drop */
+      var along = Math.min(Math.max(span * 0.18, 12), span * 0.35);
+      var lead = Math.min(stubA, BOOT_EXIT_STUB);
+      var leadB = Math.min(stubB, BOOT_EXIT_STUB);
+      p0 = {
+        x: tipA.x + tA.x * lead + chord.x * along * 0.35 + down.x * drop,
+        y: tipA.y + tA.y * lead + chord.y * along * 0.35 + down.y * drop,
+      };
+      p3 = {
+        x: tipB.x + tB.x * leadB - chord.x * along * 0.35 + down.x * drop,
+        y: tipB.y + tB.y * leadB - chord.y * along * 0.35 + down.y * drop,
+      };
+      /* Keep mid chord open and progressing tipA→tipB */
+      var midLen = dist2(p0.x, p0.y, p3.x, p3.y);
+      var progress = (p3.x - p0.x) * chord.x + (p3.y - p0.y) * chord.y;
+      if (midLen < Math.max(24, span * 0.25) || progress < span * 0.15) {
+        p0 = {
+          x: tipA.x + chord.x * (span * 0.12) + down.x * drop,
+          y: tipA.y + chord.y * (span * 0.12) + down.y * drop,
+        };
+        p3 = {
+          x: tipB.x - chord.x * (span * 0.12) + down.x * drop,
+          y: tipB.y - chord.y * (span * 0.12) + down.y * drop,
+        };
+      }
+      return { p0: p0, p3: p3, collapsed: true, parallel: true, overlapped: false };
+    }
+
+    return stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3, chord);
+  }
+
+  /** Pull mid-span anchors apart along a safe tip chord when stubs would cross. */
+  function stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3, chordOpt) {
     var span = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
-    var chord = unitVec(tipB.x - tipA.x, tipB.y - tipA.y);
+    var chord = chordOpt || safeTipChord(tipA, tipB, tA, tB);
     var midLen = dist2(p0.x, p0.y, p3.x, p3.y);
     var progress = (p3.x - p0.x) * chord.x + (p3.y - p0.y) * chord.y;
     var collapsed = midLen < Math.max(14, span * 0.18) || progress < span * 0.12;
     if (!collapsed) {
-      return { p0: p0, p3: p3, collapsed: false };
+      return { p0: p0, p3: p3, collapsed: false, parallel: false, overlapped: false };
     }
+    var down = hangPerp(chord);
     var drop = Math.min(36, Math.max(10, span * 0.16));
     var along = Math.min(STRAIN_RELIEF_PX, span * 0.22);
     var n0 = {
-      x: tipA.x + chord.x * along + tA.x * (BOOT_EXIT_STUB * 0.7),
-      y: tipA.y + chord.y * along + tA.y * (BOOT_EXIT_STUB * 0.7) + drop * 0.35,
+      x: tipA.x + chord.x * along + tA.x * (BOOT_EXIT_STUB * 0.55) + down.x * drop * 0.45,
+      y: tipA.y + chord.y * along + tA.y * (BOOT_EXIT_STUB * 0.55) + down.y * drop * 0.45,
     };
     var n3 = {
-      x: tipB.x - chord.x * along + tB.x * (BOOT_EXIT_STUB * 0.7),
-      y: tipB.y - chord.y * along + tB.y * (BOOT_EXIT_STUB * 0.7) + drop * 0.35,
+      x: tipB.x - chord.x * along + tB.x * (BOOT_EXIT_STUB * 0.55) + down.x * drop * 0.45,
+      y: tipB.y - chord.y * along + tB.y * (BOOT_EXIT_STUB * 0.55) + down.y * drop * 0.45,
     };
     return {
       p0: { x: p0.x * 0.25 + n0.x * 0.75, y: p0.y * 0.25 + n0.y * 0.75 },
       p3: { x: p3.x * 0.25 + n3.x * 0.75, y: p3.y * 0.25 + n3.y * 0.75 },
       collapsed: true,
+      parallel: false,
+      overlapped: false,
     };
   }
 
@@ -1464,8 +1574,8 @@
       return { inTan: { x: 1, y: 0 }, outTan: { x: 1, y: 0 } };
     }
     var a = mid[0];
-    var b = mid[1];
-    var c = mid[mid.length - 2];
+    var b = mid[Math.min(2, mid.length - 1)];
+    var c = mid[Math.max(0, mid.length - 3)];
     var d = mid[mid.length - 1];
     return {
       inTan: unitVec(b.x - a.x, b.y - a.y),
@@ -1473,11 +1583,33 @@
     };
   }
 
-  /** Boot-tangent blend weight: strong when facing peer, soft when reversed. */
-  function bootTangentBlendWeight(face) {
+  /**
+   * Boot-tangent blend weight. Parallel / fighting tangents defer to the
+   * catenary so cubic handles do not form S-cusps at the anchors.
+   */
+  function bootTangentBlendWeight(face, opts) {
+    opts = opts || {};
+    if (opts.parallel || opts.overlapped) {
+      return Math.max(0.12, Math.min(0.38, 0.22 + Math.max(0, face) * 0.2));
+    }
     if (face >= 0.4) return 0.92;
     if (face >= 0) return 0.55 + face * 0.7;
     return Math.max(0.18, 0.45 + face * 0.3);
+  }
+
+  /**
+   * Soften an end tangent when it fights the natural catenary direction
+   * (dot < 0) — prevents forced anti-chord handles on parallel layouts.
+   */
+  function reconcileEndTangent(desired, natural, preferBoot) {
+    var nat = natural || desired;
+    var des = desired || nat;
+    var d = des.x * nat.x + des.y * nat.y;
+    if (d >= 0.15) {
+      return blendUnitTan(des, nat, preferBoot);
+    }
+    /* Fighting: keep mostly natural, tiny boot influence for soft join */
+    return blendUnitTan(nat, des, 0.82);
   }
 
   /** True if a sample sits inside/near a connector body (would pierce housing if used). */
@@ -1536,7 +1668,9 @@
 
   /**
    * Fit y = y0 + a·cosh((x − x0)/a) through two endpoints with cable length L.
-   * Coordinates are physics-frame (Y positive UP). Returns null if degenerate.
+   * Coordinates are physics-frame (Y positive UP).
+   * Near-vertical spans (|Δx| tiny) return a flag so the sampler can use a
+   * chord-parameterized hang instead of a fake 0.75px x-nudge.
    */
   function fitCatenaryParamsYUp(x1, y1, x2, y2, length) {
     var h = x2 - x1;
@@ -1544,12 +1678,16 @@
     var chord = Math.sqrt(h * h + v * v) || 1;
     var L = Math.max(length, chord * 1.0002);
     var absH = Math.abs(h);
-    if (absH < 0.75) {
-      /* Degenerate horizontal span — slight nudge so cosh is defined */
-      h = h >= 0 ? 0.75 : -0.75;
-      absH = 0.75;
-      x2 = x1 + h;
-      L = Math.max(L, Math.sqrt(h * h + v * v) * 1.0002);
+    if (absH < 8) {
+      return {
+        a: Math.max(chord * 0.35, 1),
+        x0: 0.5 * (x1 + x2),
+        y0: Math.min(y1, y2) - Math.max(chord * 0.2, 8),
+        L: L,
+        x1: x1,
+        x2: x2,
+        degenerateX: true,
+      };
     }
     var span = Math.sqrt(L * L - v * v);
     if (!isFinite(span) || span < absH) {
@@ -1564,7 +1702,7 @@
     if (!isFinite(x0)) x0 = 0.5 * (x1 + x2);
     var y0 = y1 - a * Math.cosh((x1 - x0) / a);
     if (!isFinite(y0)) y0 = Math.min(y1, y2) - a;
-    return { a: a, x0: x0, y0: y0, L: L, x1: x1, x2: x2 };
+    return { a: a, x0: x0, y0: y0, L: L, x1: x1, x2: x2, degenerateX: false };
   }
 
   /** Evaluate physics-frame catenary Y_up at horizontal x. */
@@ -1573,18 +1711,52 @@
   }
 
   /**
-   * Sample a true catenary between screen-space points (y+ down).
-   * y_screen = −Y_up, with Y_up = y0 + a cosh((x−x0)/a).
+   * Chord-parameterized downward hang for near-vertical / tiny-Δx spans.
+   * Avoids the old fake horizontal cosh nudge that created parallel folds.
+   */
+  function sampleParametricHang(p0, p3, length, count) {
+    count = Math.max(2, count || CATENARY_SAMPLES);
+    var dx = p3.x - p0.x;
+    var dy = p3.y - p0.y;
+    var chord = Math.sqrt(dx * dx + dy * dy) || 1;
+    var L = Math.max(length || chord * CATENARY_DEFAULT_SLACK, chord * 1.0002);
+    var excess = Math.max(0, L - chord);
+    var sag = Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.55;
+    if (sag < 10) sag = Math.min(56, Math.max(14, chord * 0.38 + excess * 0.35));
+    var pts = [];
+    var i;
+    for (i = 0; i < count; i++) {
+      var t = count === 1 ? 0.5 : i / (count - 1);
+      var drop = 4 * sag * t * (1 - t);
+      pts.push({
+        x: p0.x + dx * t,
+        y: p0.y + dy * t + drop,
+      });
+    }
+    pts[0] = { x: p0.x, y: p0.y };
+    pts[count - 1] = { x: p3.x, y: p3.y };
+    return enforceDownwardSag(pts);
+  }
+
+  /**
+   * Sample a hanging span between screen-space points (y+ down).
+   * Uses true cosh when |Δx| is healthy; otherwise a parametric hang.
    */
   function sampleTrueCatenary(p0, p3, length, count) {
     count = Math.max(2, count || CATENARY_SAMPLES);
+    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
+    var L = Math.max(length || chord * CATENARY_DEFAULT_SLACK, chord * 1.0002);
+    if (Math.abs(p3.x - p0.x) < 8) {
+      return sampleParametricHang(p0, p3, L, count);
+    }
     var x1 = p0.x;
     var x2 = p3.x;
     var y1up = -p0.y;
     var y2up = -p3.y;
-    var chord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
-    var L = Math.max(length || chord * CATENARY_DEFAULT_SLACK, chord * 1.0002);
     var params = fitCatenaryParamsYUp(x1, y1up, x2, y2up, L);
+    if (params.degenerateX) {
+      return sampleParametricHang(p0, p3, L, count);
+    }
     /* a must stay positive so cosh hangs down in Y-up (= +Y sag on screen) */
     if (!(params.a > 0)) params.a = Math.abs(params.a) || 1;
     var pts = [];
@@ -2842,85 +3014,140 @@
     );
   }
 
-  /**
-   * Universal render path: orientation-aware stubs + downward catenary.
-   * Entry/exit tangents follow each connector's boot facing; opposing /
-   * reversed headings get shortened stubs, extra sag slack, and blended
-   * tangents so the cable never collapses into a sharp S or inverted kink.
-   */
-  function buildContinuousCatenaryPath(cord) {
-    var tipA = bootAnchor(cord, 'A');
-    var tipB = bootAnchor(cord, 'B');
-    var dirA = bootOutDir(getEndRotation(cord, 'A'));
-    var dirB = bootOutDir(getEndRotation(cord, 'B'));
-    var tA = unitVec(dirA.x, dirA.y);
-    var tB = unitVec(dirB.x, dirB.y);
-
-    var baseStub = Math.max(STRAIN_RELIEF_PX, BOOT_EXIT_STUB);
-    var stubA = adaptiveBootStubLength(tA, tipA, tipB, baseStub);
-    var stubB = adaptiveBootStubLength(tB, tipB, tipA, baseStub);
-    var p0 = {
-      x: tipA.x + tA.x * stubA,
-      y: tipA.y + tA.y * stubA,
-    };
-    var p3 = {
-      x: tipB.x + tB.x * stubB,
-      y: tipB.y + tB.y * stubB,
-    };
-    var stab = stabilizeCatenaryAnchors(tipA, tipB, tA, tB, p0, p3);
-    p0 = stab.p0;
-    p3 = stab.p3;
-
-    var tipSpan = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
-    var midChord = dist2(p0.x, p0.y, p3.x, p3.y) || 1;
-    var L = resolveRenderCableLength(cord, p0, p3);
-    L += tipSpan * opposingOrientationSlackFraction(tA, tB, tipA, tipB);
-    if (stab.collapsed) {
-      L = Math.max(L, midChord * 1.24);
-    }
-    L = Math.max(L, midChord * 1.0002);
-
-    var mid = sampleTrueCatenary(p0, p3, L, CATENARY_SAMPLES);
-    var nat = naturalCatenaryTangents(mid);
-    var faceA = bootFacesToward(tA, tipA, tipB);
-    var faceB = bootFacesToward(tB, tipB, tipA);
-    var uA = blendUnitTan(tA, nat.inTan, bootTangentBlendWeight(faceA));
-    /* Travel arrives at p3 heading into boot B ⇒ −bootOut */
-    var intoB = unitVec(-tB.x, -tB.y);
-    var uB = blendUnitTan(intoB, nat.outTan, bootTangentBlendWeight(faceB));
-
-    var softJoin = stab.collapsed || faceA < 0.15 || faceB < 0.15;
-    if (softJoin) {
-      var hA = Math.max(4, stubA / 3);
-      var hB = Math.max(4, stubB / 3);
-      return (
-        'M ' + tipA.x + ' ' + tipA.y +
-        ' C ' + (tipA.x + tA.x * hA) + ' ' + (tipA.y + tA.y * hA) + ', ' +
-        (p0.x - uA.x * hA) + ' ' + (p0.y - uA.y * hA) + ', ' +
-        p0.x + ' ' + p0.y +
-        catmullRomCubicCommands(mid, { inTan: uA, outTan: uB }) +
-        ' C ' + (p3.x + uB.x * hB) + ' ' + (p3.y + uB.y * hB) + ', ' +
-        (tipB.x + tB.x * hB) + ' ' + (tipB.y + tB.y * hB) + ', ' +
-        tipB.x + ' ' + tipB.y
-      );
-    }
-
+  function svgCubic(c1, c2, p) {
     return (
-      'M ' + tipA.x + ' ' + tipA.y +
-      ' L ' + p0.x + ' ' + p0.y +
-      catmullRomCubicCommands(mid, { inTan: uA, outTan: uB }) +
-      ' L ' + tipB.x + ' ' + tipB.y
+      ' C ' + c1.x + ' ' + c1.y + ', ' +
+      c2.x + ' ' + c2.y + ', ' +
+      p.x + ' ' + p.y
     );
   }
 
-  /** Public render entry — always continuous gravitational catenary. */
-  function cordCablePath(cord) {
-    return buildContinuousCatenaryPath(cord);
+  /** Cubic Hermite segment as SVG C (unit tangents × handle lengths). */
+  function hermiteSvg(p0, t0, h0, p1, t1, h1) {
+    return svgCubic(
+      { x: p0.x + t0.x * h0, y: p0.y + t0.y * h0 },
+      { x: p1.x - t1.x * h1, y: p1.y - t1.y * h1 },
+      p1
+    );
   }
 
-  /** @deprecated alias — kept for call sites; always continuous catenary. */
+  /**
+   * Effective cable length for elastic sag (fixed meters / route / default slack).
+   */
+  function resolveElasticLengthPx(cord, tipA, tipB) {
+    var chord = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
+    if (typeof cord.fixedLength === 'number' && cord.fixedLength > 0) {
+      return Math.max(cord.fixedLength, chord * 1.0002);
+    }
+    if (isMeterMode(cord) && typeof cord.lengthMeters === 'number') {
+      return Math.max(metersToWorldPx(cord.lengthMeters), chord * 1.0002);
+    }
+    var rope = ropePhysics[cord.id];
+    if (rope && rope.particles && rope.particles.length >= 2) {
+      var rlen = 0;
+      var ri;
+      for (ri = 1; ri < rope.particles.length; ri++) {
+        rlen += dist2(
+          rope.particles[ri - 1].x, rope.particles[ri - 1].y,
+          rope.particles[ri].x, rope.particles[ri].y
+        );
+      }
+      if (rlen > chord * 1.001) return Math.max(rlen, chord * 1.0002);
+    }
+    var route = ensureRoute(cord);
+    if (route.length >= 2) {
+      var poly = [{ x: tipA.x, y: tipA.y }].concat(route).concat([{ x: tipB.x, y: tipB.y }]);
+      return Math.max(polylineLength(poly), chord * CATENARY_DEFAULT_SLACK);
+    }
+    return chord * CATENARY_DEFAULT_SLACK;
+  }
+
+  /**
+   * Downward belly depth (screen y+). Scales with tip span; excess length
+   * (Meter Mode / fixedLength) deepens the hang like a rubber band.
+   */
+  function computeElasticSagPx(chord, lengthPx) {
+    if (global.FtthLab && typeof FtthLab.elasticFiberSagPx === 'function') {
+      return FtthLab.elasticFiberSagPx(chord, lengthPx);
+    }
+    chord = Math.max(1, chord);
+    var sag = Math.min(
+      GRAVITY_SAG_MAX,
+      Math.max(GRAVITY_SAG_MIN * 0.55, chord * GRAVITY_SAG_RATIO)
+    );
+    var L = Number(lengthPx);
+    if (isFinite(L) && L > chord) {
+      var excess = L - chord;
+      sag = Math.max(
+        sag,
+        Math.sqrt(Math.max(0, excess * chord * 0.5)) * 0.55
+      );
+    }
+    return Math.max(16, Math.min(GRAVITY_SAG_MAX, sag));
+  }
+
+  /**
+   * Fully elastic gravity-biased Bezier path: tipA → belly → tipB.
+   * No rigid axial stubs, no x-parameterized cosh. The belly is always the
+   * midpoint offset downward in Y, so the cable hangs under any orientation,
+   * overlap, or parallel boot layout. Boot exits blend lightly into the curve.
+   */
+  function buildElasticBezierPath(cord) {
+    var tipA = bootAnchor(cord, 'A');
+    var tipB = bootAnchor(cord, 'B');
+    var dA = bootOutDir(getEndRotation(cord, 'A'));
+    var dB = bootOutDir(getEndRotation(cord, 'B'));
+    var tA = unitVec(dA.x, dA.y);
+    var tB = unitVec(dB.x, dB.y);
+
+    var chord = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
+    var L = resolveElasticLengthPx(cord, tipA, tipB);
+    var sag = computeElasticSagPx(chord, L);
+
+    var belly = {
+      x: (tipA.x + tipB.x) * 0.5,
+      y: (tipA.y + tipB.y) * 0.5 + sag,
+    };
+
+    /* Leave A / arrive B: mostly toward the belly, light boot influence (no kinks) */
+    var toBellyA = unitVec(belly.x - tipA.x, belly.y - tipA.y);
+    var fromBellyB = unitVec(tipB.x - belly.x, tipB.y - belly.y);
+    var leaveA = blendUnitTan(toBellyA, tA, 0.28);
+    var arriveB = blendUnitTan(fromBellyB, unitVec(-tB.x, -tB.y), 0.28);
+
+    /* Elastic band tangent across the belly follows the tip chord */
+    var along = unitVec(tipB.x - tipA.x, tipB.y - tipA.y);
+    if (along.x * along.x + along.y * along.y < 1e-8) {
+      along = { x: 1, y: 0 };
+    }
+
+    var lenA = dist2(tipA.x, tipA.y, belly.x, belly.y) || 1;
+    var lenB = dist2(belly.x, belly.y, tipB.x, tipB.y) || 1;
+    var hA0 = Math.max(14, Math.min(lenA * 0.42, chord * 0.35 + 18));
+    var hA1 = Math.max(14, Math.min(lenA * 0.36, chord * 0.32 + 16));
+    var hB0 = Math.max(14, Math.min(lenB * 0.36, chord * 0.32 + 16));
+    var hB1 = Math.max(14, Math.min(lenB * 0.42, chord * 0.35 + 18));
+
+    return (
+      'M ' + tipA.x + ' ' + tipA.y +
+      hermiteSvg(tipA, leaveA, hA0, belly, along, hA1) +
+      hermiteSvg(belly, along, hB0, tipB, arriveB, hB1)
+    );
+  }
+
+  /** Public render entry — elastic gravity Bezier (no rigid stubs / cosh solver). */
+  function buildContinuousCatenaryPath(cord) {
+    return buildElasticBezierPath(cord);
+  }
+
+  /** Public render entry — always continuous gravitational cable. */
+  function cordCablePath(cord) {
+    return buildElasticBezierPath(cord);
+  }
+
+  /** @deprecated alias — elastic Bezier. */
   function gravityBezierPath(cord) {
-    return buildContinuousCatenaryPath(cord);
+    return buildElasticBezierPath(cord);
   }
 
   function endStyle(cord, end) {
