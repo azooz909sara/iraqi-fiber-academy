@@ -843,7 +843,7 @@ body.lab-node-resizing .lab-2d-stage {
   --fx-port-tilt: -18deg;
   --fx-mod-len: calc(42px * var(--fx-scale, 1));
   --fx-mod-thick: calc(9px * var(--fx-scale, 1));
-  --fx-mod-span: calc(22px * var(--fx-scale, 1));
+  --fx-mod-span: calc(24px * var(--fx-scale, 1));
   position: relative;
   flex: 1;
   width: 100%;
@@ -880,49 +880,119 @@ body.lab-node-resizing .lab-2d-stage {
   cursor: pointer;
 }
 
-.lab-fx-port__body {
+/* Empty cage recess in the board — the seat an SFP slides into */
+.lab-fx-port__rail {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 76%;
+  height: 100%;
+  transform: translateY(-50%);
+  border-radius: calc(1px * var(--fx-scale, 1));
+  background: linear-gradient(180deg, #313a48 0%, #0b1120 60%, #161d29 100%);
+  border: 1px solid #39424f;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+/* Huawei GPON-OLT module, seated on the slot axis with the nose protruding */
+.lab-fx-sfp {
+  position: absolute;
+  left: 6%;
+  top: 50%;
+  width: 94%;
+  height: 100%;
+  transform: translateY(-50%);
+}
+
+.lab-fx-sfp__shell {
   position: absolute;
   inset: 0;
   border-radius: calc(1px * var(--fx-scale, 1));
   background:
-    repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.35) 0 1px,
-      rgba(15, 23, 42, 0.08) 1px 3px
-    ),
-    linear-gradient(180deg, #f4f6f8 0%, #d8dde3 45%, #aab2bc 100%);
-  border: 1px solid #7f8894;
+    linear-gradient(
+      180deg,
+      #fdfdfe 0%,
+      #e7eaee 22%,
+      #c3cad2 55%,
+      #9aa3af 85%,
+      #b6bdc6 100%
+    );
+  border: 1px solid #78818d;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.25),
-    0 1px 2px rgba(15, 23, 42, 0.35);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.3),
+    0 1px 2px rgba(15, 23, 42, 0.4);
 }
 
-/* Bail latch at the tail end of the module */
-.lab-fx-port__bail {
+/* Printed label band on the rear half of the casing */
+.lab-fx-sfp__label {
   position: absolute;
-  left: calc(2px * var(--fx-scale, 1));
+  left: 5%;
+  top: 18%;
+  width: 34%;
+  height: 64%;
+  border-radius: 1px;
+  background: linear-gradient(180deg, #fbfcfd, #e3e7ec);
+  box-shadow: inset 0 0 0 1px rgba(120, 129, 141, 0.55);
+}
+
+/* Stamped side ridges / crimp notches ahead of the label */
+.lab-fx-sfp__ridges {
+  position: absolute;
+  left: 44%;
+  top: 0;
+  width: 26%;
+  height: 100%;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.9) 0 1px,
+    rgba(71, 85, 105, 0.55) 1px 2px,
+    rgba(203, 213, 225, 0.15) 2px 4px
+  );
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.7),
+    inset -1px 0 0 rgba(71, 85, 105, 0.5);
+}
+
+/* Front release bail — arms straddle the casing, polish-coloured handle */
+.lab-fx-sfp__bail {
+  position: absolute;
+  left: 72%;
   top: 50%;
-  width: calc(9px * var(--fx-scale, 1));
-  height: calc(3px * var(--fx-scale, 1));
+  width: 8%;
+  height: 124%;
   transform: translateY(-50%);
   border-radius: 1px;
-  background: linear-gradient(180deg, #cbd5e1, #94a3b8);
-  box-shadow: inset 0 0 0 1px rgba(71, 85, 105, 0.7);
+  background: linear-gradient(180deg, #93c5fd, #1d4ed8 55%, #1e3a8a);
+  box-shadow:
+    inset 0 0 0 1px rgba(15, 23, 42, 0.55),
+    0 0 2px rgba(15, 23, 42, 0.4);
 }
 
-/* Docking mouth — jumper anchors resolve to the centre of this element */
+/* Optical bore at the nose — jumper anchors resolve to this centre */
 .lab-fx-port__cage {
   position: absolute;
   right: 0;
   top: 50%;
-  width: calc(9px * var(--fx-scale, 1));
+  width: 16%;
   height: 100%;
   transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 0 calc(1px * var(--fx-scale, 1)) calc(1px * var(--fx-scale, 1)) 0;
-  background: linear-gradient(180deg, #1f2937, #0b1120);
+  background: linear-gradient(180deg, #232c3a, #05070d);
   border: 1px solid #4b5563;
-  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3);
+}
+
+/* Ferrule receptacle inside the bore */
+.lab-fx-port__cage i {
+  width: 55%;
+  height: 45%;
+  border-radius: 1px;
+  background: #cbd5e1;
+  box-shadow: 0 0 2px rgba(226, 232, 240, 0.8);
 }
 
 .lab-fx-port__num {
@@ -953,41 +1023,32 @@ body.lab-node-resizing .lab-2d-stage {
   box-shadow: 0 0 3px #22c55e;
 }
 
-/* Empty cage: recessed slot in the board, no module body */
-.lab-fx-port.is-empty .lab-fx-port__body {
-  background: linear-gradient(180deg, #4b5563, #111827);
-  border-color: #374151;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.65);
+/* APC modules carry the green bail; UPC keeps the factory blue */
+.lab-fx-port.is-apc .lab-fx-sfp__bail {
+  background: linear-gradient(180deg, #86efac, #15803d 55%, #14532d);
 }
 
-.lab-fx-port.is-empty .lab-fx-port__bail {
-  display: none;
+.lab-fx-port.is-apc .lab-fx-port__cage i {
+  background: #bbf7d0;
 }
 
-.lab-fx-port.is-empty .lab-fx-port__cage {
-  background: #05070d;
+/* Seat-in cue: the module slides down the slot axis once, on insert */
+.lab-fx-port.is-seating .lab-fx-sfp {
+  animation: labFxSfpSeat 260ms cubic-bezier(0.22, 1.2, 0.36, 1) 1;
 }
 
-.lab-fx-port.is-active .lab-fx-port__cage {
-  background: linear-gradient(180deg, #38bdf8, #0284c7);
-  border-color: #0ea5e9;
-}
-
-.lab-fx-port.is-upc.is-active .lab-fx-port__cage {
-  background: linear-gradient(180deg, #60a5fa, #1d4ed8);
-  border-color: #93c5fd;
-}
-
-.lab-fx-port.is-apc.is-active .lab-fx-port__cage {
-  background: linear-gradient(180deg, #4ade80, #15803d);
-  border-color: #86efac;
+@keyframes labFxSfpSeat {
+  0% { transform: translate(26%, -50%); opacity: 0.35; }
+  70% { transform: translate(-2%, -50%); opacity: 1; }
+  100% { transform: translate(0, -50%); opacity: 1; }
 }
 
 .lab-fx-port.is-selected {
   z-index: 40;
 }
 
-.lab-fx-port.is-selected .lab-fx-port__body {
+.lab-fx-port.is-selected .lab-fx-sfp__shell,
+.lab-fx-port.is-selected.is-empty .lab-fx-port__rail {
   outline: 1px solid #fbbf24;
   outline-offset: 1px;
 }
@@ -1001,18 +1062,22 @@ body.lab-node-resizing .lab-2d-stage {
 }
 
 .lab-fx-port.is-plug-target,
-.lab-fx-port.is-plug-click {
+.lab-fx-port.is-plug-click,
+.lab-fx-port.is-plug-reject {
   z-index: 41;
 }
 
-.lab-fx-port.is-drop-target .lab-fx-port__body {
+.lab-fx-port.is-drop-target .lab-fx-port__rail {
   outline: 1px dashed #0ea5e9;
   outline-offset: 1px;
   background: #0c4a6e;
 }
 
-.lab-fx-port.is-drop-target .lab-fx-port__cage {
-  background: #075985;
+/* Jumper aimed at a bare cage — hierarchy says insert an SFP first */
+.lab-fx-port.is-plug-reject .lab-fx-port__rail {
+  outline: 1.5px solid #f87171;
+  outline-offset: 1px;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
 }
 
 .lab-fx-card__name {

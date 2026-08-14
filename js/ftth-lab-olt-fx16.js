@@ -56,6 +56,8 @@
   var armedToolbox = null;
 
   var portWiring = {};
+  /** Port id that just received a module — plays the seat-in animation once. */
+  var justSeated = null;
   var dragState = null;
   var cardSeq = 0;
   var sfpSeq = 0;
@@ -449,6 +451,7 @@
     if (!mod) return false;
     sfpInventory = sfpInventory.filter(function (m) { return m.id !== sfpId; });
     sfpMap[slot][port] = mod;
+    justSeated = portId(slot, port);
     if (portWiring[portId(slot, port)]) {
       portWiring[portId(slot, port)].hasSfp = true;
       if (!portWiring[portId(slot, port)].polish) {
@@ -1023,9 +1026,27 @@
    */
   var PORT_TILT_DEG = -18;
 
+  /** Slot seat angle — an inserted SFP adopts exactly this rotation. */
+  function portTiltDeg(slot, port) {
+    return PORT_TILT_DEG;
+  }
+
   /** Ferrule points back down the module axis; 0° = ferrule up. */
   function portConnectorRot(tiltDeg) {
     return tiltDeg - 90;
+  }
+
+  /** Huawei GPON-OLT module: casing, ridge bands, label, bail latch, bore. */
+  function sfpAssetHtml() {
+    return (
+      '<span class="lab-fx-sfp">' +
+      '<span class="lab-fx-sfp__shell"></span>' +
+      '<span class="lab-fx-sfp__label"></span>' +
+      '<span class="lab-fx-sfp__ridges"></span>' +
+      '<span class="lab-fx-sfp__bail"></span>' +
+      '<span class="lab-fx-port__cage"><i></i></span>' +
+      '</span>'
+    );
   }
 
   function fgltFaceHtml(slot) {
@@ -1035,17 +1056,19 @@
       var id = portId(slot, p);
       var polish = (portWiring[id] && portWiring[id].polish) || 'UPC';
       var polishClass = filled ? (polish === 'APC' ? ' is-apc' : ' is-upc') : '';
+      var tilt = portTiltDeg(slot, p);
+      var seating = filled && justSeated === id ? ' is-seating' : '';
       ports +=
         '<button type="button" class="lab-fx-port' + (filled ? ' is-active' : ' is-empty') +
-        polishClass + '" style="--fx-i:' + (p - 1) + '" ' +
+        polishClass + seating + '" ' +
+        'style="--fx-i:' + (p - 1) + ';--fx-port-tilt:' + tilt + 'deg" ' +
         'data-lab-sfp="' + p + '" data-lab-slot="' + slot + '" data-lab-port-id="' + id + '" ' +
-        'data-lab-port-tilt="' + PORT_TILT_DEG + '" ' +
-        'data-lab-port-rot="' + portConnectorRot(PORT_TILT_DEG) + '" ' +
+        'data-lab-port-tilt="' + tilt + '" ' +
+        'data-lab-port-rot="' + portConnectorRot(tilt) + '" ' +
         'data-lab-drop="sfp" title="Port ' + p + (filled ? ' · SFP · ' + polish : ' · empty') + '">' +
         '<span class="lab-fx-port__module">' +
-        '<span class="lab-fx-port__body"></span>' +
-        '<span class="lab-fx-port__bail"></span>' +
-        '<span class="lab-fx-port__cage"></span>' +
+        '<span class="lab-fx-port__rail"></span>' +
+        (filled ? sfpAssetHtml() : '') +
         '</span>' +
         '<span class="lab-fx-port__num">' + p + '</span>' +
         '<span class="lab-fx-port__led' + (filled ? ' is-on' : '') + '"></span>' +
@@ -1126,6 +1149,7 @@
       '</div></div>';
 
     host.appendChild(el2d);
+    justSeated = null;
     applyChassisLayout();
     bind2dEvents();
     bindChassisMove();
@@ -1557,13 +1581,16 @@
   }
 
   /**
-   * Dock anchor for jumpers: world centre of the angled cage mouth plus the
-   * seat axis, so a connector lands square in the module instead of upright.
+   * Dock anchor for jumpers: world centre of the seated SFP's optical bore
+   * plus the seat axis, so a connector lands square in the module.
+   * Null while the cage is empty — jumpers dock to the module, not the slot.
    */
   function getPortWorld(slot, port) {
+    if (!hasSfp(slot, port)) return null;
     var el = portElement(slot, port);
     if (!el) return null;
-    var cage = el.querySelector('.lab-fx-port__cage') || el;
+    var cage = el.querySelector('.lab-fx-port__cage');
+    if (!cage) return null;
     var rect = cage.getBoundingClientRect();
     if (!rect.width && !rect.height) return null;
     var cx = rect.left + rect.width / 2;
