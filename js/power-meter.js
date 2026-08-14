@@ -79,14 +79,18 @@
     return 10 * Math.log10(mw);
   }
 
+  function isFiniteNumber(value) {
+    return typeof value === 'number' && isFinite(value);
+  }
+
   function formatDbm(dbm) {
-    if (!isFinite(dbm)) return '——.—';
+    if (!isFiniteNumber(dbm)) return '——.—';
     var sign = dbm >= 0 ? '+' : '';
     return sign + dbm.toFixed(2);
   }
 
   function formatMw(mw) {
-    if (!isFinite(mw) || mw <= 0) return '——.—';
+    if (!isFiniteNumber(mw) || mw <= 0) return '——.—';
     if (mw >= 1) return mw.toFixed(3);
     if (mw >= 0.001) return (mw * 1000).toFixed(3) + ' µ';
     return (mw * 1e6).toFixed(2) + ' n';
@@ -145,6 +149,21 @@
     } else {
       state.powerDbm = mwToDbm(raw);
     }
+  }
+
+  /**
+   * Canvas OLP-38 / OLS-35 nodes render their own LCD text (they mirror the
+   * OLS display mode), so the trainer panel must not overwrite theirs.
+   */
+  function isBenchNode(el) {
+    return !!(el && el.closest && el.closest('.lab-opm, .lab-ols'));
+  }
+
+  function setTrainerText(selector, text) {
+    document.querySelectorAll(selector).forEach(function (el) {
+      if (isBenchNode(el)) return;
+      el.textContent = text;
+    });
   }
 
   function render() {
@@ -211,9 +230,7 @@
     }
 
     if (lcdLambda) lcdLambda.textContent = state.wavelength + ' nm';
-    document.querySelectorAll('.viavi__lambda-chip').forEach(function (el) {
-      el.textContent = state.wavelength + ' nm';
-    });
+    setTrainerText('.viavi__lambda-chip', state.wavelength + ' nm');
     var lcdHint = $('opm-lcd-lambda-hint');
     if (lcdHint) lcdHint.textContent = WAVELENGTH_HINT[state.wavelength] || '';
     if (softUnit) softUnit.textContent = state.unit === 'mw' ? 'Pow. [W]' : 'dBm';
@@ -224,7 +241,7 @@
     var lossStat = $('opm-stat-loss');
     if (convMw) convMw.textContent = isFinite(mw) ? formatMw(mw) + (mw >= 1 ? ' mW' : 'W') : '—';
     if (lossStat) {
-      if (state.lastReading && isFinite(state.lastReading.lossDb)) {
+      if (state.lastReading && isFiniteNumber(state.lastReading.lossDb)) {
         lossStat.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
       } else if (state.referenceDbm != null && isFinite(dbm)) {
         var loss = state.referenceDbm - dbm;
@@ -351,7 +368,7 @@
 
     var lossEl = $('opm-props-loss');
     if (lossEl) {
-      if (state.lastReading && isFinite(state.lastReading.lossDb)) {
+      if (state.lastReading && isFiniteNumber(state.lastReading.lossDb)) {
         lossEl.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
       } else if (state.referenceDbm != null && isFinite(dbm)) {
         lossEl.textContent = Math.abs(state.referenceDbm - dbm).toFixed(2) + ' dB';
@@ -391,16 +408,11 @@
   }
 
   function renderLambdaCycle() {
-    document.querySelectorAll('.viavi__lambda-chip').forEach(function (el) {
-      el.textContent = state.wavelength + ' nm';
-    });
+    setTrainerText('.viavi__lambda-chip', state.wavelength + ' nm');
   }
 
   function renderLcdSoftBar() {
-    var unitLabel = state.unit === 'mw' ? 'Pow. [W]' : 'dBm';
-    document.querySelectorAll('.viavi__soft-unit').forEach(function (el) {
-      el.textContent = unitLabel;
-    });
+    setTrainerText('.viavi__soft-unit', state.unit === 'mw' ? 'Pow. [W]' : 'dBm');
     renderLambdaCycle();
   }
 

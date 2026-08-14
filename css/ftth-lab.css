@@ -4037,6 +4037,110 @@ body.lab-vfl-dragging {
   border-radius: 0 1px 1px 0;
 }
 
+/* ── OLS-35 laser hazard mark — visible only while emitting ── */
+.lab-ols--viavi .ols__hazard {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: #000;
+  animation: ols-hazard-blink 1.1s steps(1, end) infinite;
+}
+
+.lab-ols--viavi .ols__hazard svg {
+  display: block;
+  shape-rendering: crispEdges;
+}
+
+@keyframes ols-hazard-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.15;
+  }
+}
+
+/* ── OLP-38 mirrored OLS states (single / auto / multi) ── */
+.lab-opm .opm__lcd-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-start;
+  padding: 0 3px 2px;
+  flex-shrink: 0;
+}
+
+.lab-opm .opm__meta-left {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #111;
+}
+
+.lab-opm .opm__lcd-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 3px 4px;
+}
+
+.lab-opm .opm__lcd-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 5px;
+}
+
+.lab-opm .opm__row-wl {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Arial, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #000;
+}
+
+.lab-opm .opm__row-val {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #000;
+}
+
+.lab-opm .opm__batt {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  color: #222;
+}
+
+.lab-opm .opm__batt-body {
+  display: block;
+  width: 11px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  padding: 0.5px;
+  box-sizing: border-box;
+}
+
+.lab-opm .opm__batt-fill {
+  display: block;
+  width: 70%;
+  height: 100%;
+  background: currentColor;
+}
+
+.lab-opm .opm__batt-nip {
+  display: block;
+  width: 1.5px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+}
+
 .lab-ols--viavi.is-laser-on .viavi__port.is-emitting .lab-ols__adapter-slot {
   box-shadow:
     0 0 10px rgba(248, 113, 113, 0.9),

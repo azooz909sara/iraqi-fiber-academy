@@ -959,58 +959,44 @@
     return adj;
   }
 
-  function measureOpticalAtKey(probeKey) {
-    if (!probeKey) {
-      return {
-        dBm: null,
-        lossDb: null,
-        source: null,
-        label: 'No probe target',
-        path: [],
-      };
-    }
-    var adj = buildOpticalAdjacency();
+  function round2(n) {
+    return Math.round(n * 100) / 100;
+  }
+
+  /**
+   * Per-source optical readings at a probe key. One entry per reachable TX
+   * source (OLT SFP or OLS-35 wavelength), so multi-λ sources yield one
+   * reading each.
+   */
+  function collectOpticalSourceReadings(probeKey) {
     var sources = typeof api.getOltTxSources === 'function'
       ? api.getOltTxSources()
       : [];
     if (typeof api.getOlsTxSources === 'function') {
       sources = sources.concat(api.getOlsTxSources() || []);
     }
-    if (!sources.length) {
-      return {
-        dBm: OPM_NOISE_DBM,
-        lossDb: null,
-        source: null,
-        label: probeKey,
-        path: [],
-        note: 'No TX source (OLT SFP or OLS-35 laser ON + docked fiber)',
-      };
-    }
+    var result = { sources: sources, readings: [] };
+    if (!sources.length) return result;
 
-    var wavelengthNm = getOpmWavelengthNm();
-    var best = null;
+    var adj = buildOpticalAdjacency();
+    var probeWavelengthNm = getOpmWavelengthNm();
     var si;
     for (si = 0; si < sources.length; si++) {
       var src = sources[si];
       if (!adj[src.key]) continue;
       /* OLS emits at its calibrated λ — skip OLT SFP wavelength mismatch penalty */
-      var wlPenalty = (src.kind === 'ols') ? 0 : oltWavelengthPenaltyDb(wavelengthNm);
+      var wlPenalty = (src.kind === 'ols') ? 0 : oltWavelengthPenaltyDb(probeWavelengthNm);
       var queue = [{ key: src.key, loss: 0, path: [src.key] }];
       var visited = {};
       visited[src.key] = 0;
       var qi = 0;
+      var bestForSrc = null;
       while (qi < queue.length) {
         var cur = queue[qi++];
         if (cur.key === probeKey) {
-          var cand = {
-            dBm: src.txDbm - cur.loss - wlPenalty,
-            lossDb: cur.loss + wlPenalty,
-            source: src,
-            label: probeKey,
-            path: cur.path.slice(),
-            wavelengthNm: src.wavelengthNm || wavelengthNm,
-          };
-          if (!best || cand.dBm > best.dBm) best = cand;
+          if (!bestForSrc || cur.loss < bestForSrc.loss) {
+            bestForSrc = { loss: cur.loss, path: cur.path.slice() };
+          }
           continue;
         }
         var edges = adj[cur.key] || [];
@@ -1027,8 +1013,52 @@
           });
         }
       }
+      if (!bestForSrc) continue;
+      result.readings.push({
+        dBm: round2(src.txDbm - bestForSrc.loss - wlPenalty),
+        lossDb: round2(bestForSrc.loss + wlPenalty),
+        source: src,
+        label: probeKey,
+        path: bestForSrc.path,
+        wavelengthNm: src.wavelengthNm || probeWavelengthNm,
+      });
+    }
+    return result;
+  }
+
+  /** All reachable source readings (strongest first) — used for multi-λ displays. */
+  function measureOpticalSourcesAtKey(probeKey) {
+    if (!probeKey) return [];
+    var readings = collectOpticalSourceReadings(probeKey).readings;
+    return readings.sort(function (a, b) { return b.dBm - a.dBm; });
+  }
+
+  function measureOpticalAtKey(probeKey) {
+    if (!probeKey) {
+      return {
+        dBm: null,
+        lossDb: null,
+        source: null,
+        label: 'No probe target',
+        path: [],
+      };
+    }
+    var collected = collectOpticalSourceReadings(probeKey);
+    if (!collected.sources.length) {
+      return {
+        dBm: OPM_NOISE_DBM,
+        lossDb: null,
+        source: null,
+        label: probeKey,
+        path: [],
+        note: 'No TX source (OLT SFP or OLS-35 laser ON + docked fiber)',
+      };
     }
 
+    var best = null;
+    collected.readings.forEach(function (r) {
+      if (!best || r.dBm > best.dBm) best = r;
+    });
     if (!best) {
       return {
         dBm: OPM_NOISE_DBM,
@@ -1039,9 +1069,8 @@
         note: 'No optical path to active TX source',
       };
     }
-    best.dBm = Math.round(best.dBm * 100) / 100;
-    best.lossDb = Math.round(best.lossDb * 100) / 100;
-    if (!best.wavelengthNm) best.wavelengthNm = wavelengthNm;
+    best.allReadings = collected.readings.slice();
+    if (!best.wavelengthNm) best.wavelengthNm = getOpmWavelengthNm();
     return best;
   }
 
@@ -1336,6 +1365,7 @@
     hitTestLabPort: null,
     probeOpticalAt: probeOpticalAt,
     measureOpticalAtKey: measureOpticalAtKey,
+    measureOpticalSourcesAtKey: measureOpticalSourcesAtKey,
     getOpmWavelength: getOpmWavelengthNm,
     setOpmWavelength: setOpmWavelength,
     fiberSpanLossDb: fiberSpanLossDb,

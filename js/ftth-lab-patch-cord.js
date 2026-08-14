@@ -820,6 +820,7 @@
           port: side.attached.port || null,
           slot: side.attached.slot != null ? side.attached.slot : null,
           oltPort: side.attached.oltPort != null ? side.attached.oltPort : null,
+          mismatch: !!side.mismatch,
         };
       }
       return {

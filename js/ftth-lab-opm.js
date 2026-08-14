@@ -185,6 +185,60 @@
     return reading;
   }
 
+  /** All reachable TX readings at this dock (one per source wavelength). */
+  function sourcesAtDock(opmId) {
+    if (!global.FtthLab || typeof FtthLab.measureOpticalSourcesAtKey !== 'function') {
+      return [];
+    }
+    return FtthLab.measureOpticalSourcesAtKey('opm:' + opmId) || [];
+  }
+
+  /**
+   * OLP-38 mirrors the driving OLS-35 display mode (single / auto / multi).
+   * Returns null when the strongest source is not an OLS-35.
+   */
+  function olsMirrorState(d) {
+    var r = d && d.lastReading;
+    var src = r && r.source;
+    if (!src || src.kind !== 'ols') return null;
+    var mode = src.displayMode || 'single';
+    var rows = [];
+    if (mode === 'multi') {
+      var seen = {};
+      (d.lastSources || []).forEach(function (item) {
+        if (!item.source || item.source.kind !== 'ols') return;
+        if (item.source.olsId !== src.olsId) return;
+        var wl = item.wavelengthNm;
+        if (wl == null || seen[wl]) return;
+        seen[wl] = true;
+        rows.push({
+          wavelengthNm: wl,
+          dBm: isFinite(item.source.txDbm) ? item.source.txDbm : item.dBm,
+        });
+      });
+      rows.sort(function (a, b) { return a.wavelengthNm - b.wavelengthNm; });
+    }
+    return {
+      mode: mode,
+      modeLabel: src.modeLabel || 'Single-λ',
+      modulation: src.modulation || 'CW',
+      wavelengthNm: src.wavelengthNm || resolveWavelengthNm(),
+      outputDbm: isFinite(src.txDbm) ? src.txDbm : r.dBm,
+      rows: rows,
+    };
+  }
+
+  /** Fiber graph snapshots expose attachments directly; live models wrap them. */
+  function endpointAttachment(side) {
+    if (!side) return null;
+    return side.attached || side;
+  }
+
+  function endpointIsOpm(side, opmId) {
+    var att = endpointAttachment(side);
+    return !!(att && att.owner === 'opm' && att.opmId === opmId);
+  }
+
   function isDockOccupied(opmId) {
     var graph = global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function'
       ? FtthLab.getFiberLaserGraph()
@@ -193,13 +247,12 @@
     var pcords = graph.pcords || [];
     for (i = 0; i < pcords.length; i++) {
       var c = pcords[i];
-      if (c.sideA && c.sideA.attached && c.sideA.attached.owner === 'opm' && c.sideA.attached.opmId === opmId) return true;
-      if (c.sideB && c.sideB.attached && c.sideB.attached.owner === 'opm' && c.sideB.attached.opmId === opmId) return true;
+      if (endpointIsOpm(c.sideA, opmId) || endpointIsOpm(c.sideB, opmId)) return true;
     }
     var pigtails = graph.pigtails || [];
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (p.connector && p.connector.attached && p.connector.attached.owner === 'opm' && p.connector.attached.opmId === opmId) return true;
+      if (endpointIsOpm(p.connector, opmId)) return true;
     }
     return false;
   }
@@ -212,13 +265,13 @@
     var pcords = graph.pcords || [];
     for (i = 0; i < pcords.length; i++) {
       var c = pcords[i];
-      if (c.sideA && c.sideA.attached && c.sideA.attached.owner === 'opm' && c.sideA.attached.opmId === opmId && c.sideA.mismatch) return true;
-      if (c.sideB && c.sideB.attached && c.sideB.attached.owner === 'opm' && c.sideB.attached.opmId === opmId && c.sideB.mismatch) return true;
+      if (endpointIsOpm(c.sideA, opmId) && c.sideA.mismatch) return true;
+      if (endpointIsOpm(c.sideB, opmId) && c.sideB.mismatch) return true;
     }
     var pigtails = graph.pigtails || [];
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (p.connector && p.connector.attached && p.connector.attached.owner === 'opm' && p.connector.attached.opmId === opmId && p.connector.mismatch) return true;
+      if (endpointIsOpm(p.connector, opmId) && p.connector.mismatch) return true;
     }
     return false;
   }
@@ -229,6 +282,8 @@
       d.docked = occupied;
       d.dockMismatch = occupied && isDockMismatch(d.id);
       if (!occupied) {
+        d.carrierActive = false;
+        d.lastSources = [];
         d.lastReading = {
           dBm: null,
           lossDb: null,
@@ -239,11 +294,14 @@
           docked: false,
         };
       } else {
+        d.lastSources = sourcesAtDock(d.id);
         var reading = measureAtDock(d.id);
         if (reading && reading.source && isFinite(reading.dBm)) {
           d.lastReading = reading;
           d.lastReading.mismatch = d.dockMismatch;
+          d.carrierActive = reading.source.kind === 'ols';
         } else {
+          d.carrierActive = false;
           d.lastReading = {
             dBm: reading && reading.dBm,
             lossDb: reading && reading.lossDb,
@@ -297,28 +355,13 @@
     return layer;
   }
 
+  /** Softkey advertises the unit it switches to, as on the real OLP-38. */
   function softUnitLabel(mode) {
-    return mode === 'mw' ? 'Pow. [W]' : 'dBm';
+    return mode === 'mw' ? 'Pow. [dBm]' : 'Pow. [W]';
   }
 
-  function screenMarkup(d) {
-    var r = d.lastReading;
-    var main;
-    var unit = '';
-    var mode = resolveUnitMode();
-    var idle = !d.docked || !r || !isFinite(r.dBm) || !r.source;
-    if (idle) {
-      main = 'SIGNAL LOW';
-    } else if (mode === 'mw') {
-      main = formatMw(r.dBm) || '——.—';
-    } else {
-      main = formatDbm(r.dBm);
-      unit = 'dBm';
-    }
-    var wl = resolveWavelengthNm();
-    var softUnit = softUnitLabel(mode);
+  function lcdHeaderMarkup() {
     return (
-      '<div class="viavi__lcd" aria-live="polite">' +
       '<div class="viavi__lcd-top">' +
       '<span class="viavi__lcd-mode">Broadband / Expert</span>' +
       '<span class="viavi__lcd-clock" aria-label="Session timer">' +
@@ -327,17 +370,105 @@
       '<path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' +
       '</svg>' +
       '<span class="viavi__lcd-clock-val">00:00</span>' +
+      '<span class="opm__batt" title="Battery" aria-hidden="true">' +
+      '<span class="opm__batt-body"><span class="opm__batt-fill"></span></span>' +
+      '<span class="opm__batt-nip"></span>' +
       '</span>' +
-      '</div>' +
+      '</span>' +
+      '</div>'
+    );
+  }
+
+  /** Received power text for the active unit mode. */
+  function readingText(dBm, unitMode2) {
+    if (dBm == null || !isFinite(dBm)) return '——.—';
+    if (unitMode2 === 'mw') return formatMw(dBm) || '——.—';
+    return formatDbm(dBm);
+  }
+
+  function softKeysMarkup(leftLabel, softUnit) {
+    return (
+      '<div class="viavi__lcd-soft">' +
+      '<span class="viavi__soft-key viavi__lambda-chip">' + leftLabel + '</span>' +
+      '<span class="viavi__soft-key viavi__soft-ref">Abs&gt;Ref</span>' +
+      '<span class="viavi__soft-key viavi__soft-unit">' + softUnit + '</span>' +
+      '</div>'
+    );
+  }
+
+  function screenMarkup(d) {
+    var r = d.lastReading;
+    var unitMode2 = resolveUnitMode();
+    var idle = !d.docked || !r || !isFinite(r.dBm) || !r.source;
+    var wl = resolveWavelengthNm();
+    var softUnit = softUnitLabel(unitMode2);
+    var mirror = idle ? null : olsMirrorState(d);
+
+    /* Multi-λ mirror: one row per wavelength with its own received value */
+    if (mirror && mirror.mode === 'multi' && mirror.rows.length) {
+      var rowsHtml = mirror.rows.map(function (row) {
+        return (
+          '<div class="opm__lcd-row">' +
+          '<span class="opm__row-wl">' + row.wavelengthNm + ' nm</span>' +
+          '<span class="opm__row-val">' + readingText(row.dBm, unitMode2) + '</span>' +
+          '</div>'
+        );
+      }).join('');
+      return (
+        '<div class="viavi__lcd opm__lcd opm__lcd--multi" aria-live="polite">' +
+        lcdHeaderMarkup() +
+        '<div class="opm__lcd-stack">' + rowsHtml + '</div>' +
+        softKeysMarkup('Multi-λ', softUnit) +
+        '</div>'
+      );
+    }
+
+    var shownDbm = mirror ? mirror.outputDbm : (r && r.dBm);
+    var main = idle ? 'SIGNAL LOW' : readingText(shownDbm, unitMode2);
+    var unit = (!idle && unitMode2 !== 'mw') ? 'dBm' : '';
+
+    /* Auto-λ mirror: wavelength printed under the power value */
+    if (mirror && mirror.mode === 'auto') {
+      return (
+        '<div class="viavi__lcd opm__lcd opm__lcd--auto" aria-live="polite">' +
+        lcdHeaderMarkup() +
+        '<div class="viavi__lcd-main is-live">' +
+        '<span class="viavi__lcd-value">' + main + '</span>' +
+        (unit ? '<span class="viavi__lcd-unit">' + unit + '</span>' : '') +
+        '</div>' +
+        '<div class="opm__lcd-meta"><span class="opm__meta-left">' +
+        mirror.wavelengthNm + ' nm</span></div>' +
+        softKeysMarkup('Auto-λ', softUnit) +
+        '</div>'
+      );
+    }
+
+    /* Single-λ mirror: CW / tone label under the power value */
+    if (mirror && mirror.mode === 'single') {
+      var modTxt = mirror.modulation === 'CW'
+        ? 'CW'
+        : String(mirror.modulation) + ' Hz';
+      return (
+        '<div class="viavi__lcd opm__lcd opm__lcd--single" aria-live="polite">' +
+        lcdHeaderMarkup() +
+        '<div class="viavi__lcd-main is-live">' +
+        '<span class="viavi__lcd-value">' + main + '</span>' +
+        (unit ? '<span class="viavi__lcd-unit">' + unit + '</span>' : '') +
+        '</div>' +
+        '<div class="opm__lcd-meta"><span class="opm__meta-left">' + modTxt + '</span></div>' +
+        softKeysMarkup(mirror.wavelengthNm + ' nm', softUnit) +
+        '</div>'
+      );
+    }
+
+    return (
+      '<div class="viavi__lcd opm__lcd" aria-live="polite">' +
+      lcdHeaderMarkup() +
       '<div class="viavi__lcd-main' + (idle ? ' is-idle' : ' is-live') + '">' +
       '<span class="viavi__lcd-value">' + main + '</span>' +
       (unit ? '<span class="viavi__lcd-unit">' + unit + '</span>' : '') +
       '</div>' +
-      '<div class="viavi__lcd-soft">' +
-      '<span class="viavi__soft-key viavi__lambda-chip">' + wl + ' nm</span>' +
-      '<span class="viavi__soft-key viavi__soft-ref">Abs&gt;Ref</span>' +
-      '<span class="viavi__soft-key viavi__soft-unit">' + softUnit + '</span>' +
-      '</div>' +
+      softKeysMarkup(wl + ' nm', softUnit) +
       '</div>'
     );
   }
@@ -416,13 +547,15 @@
       var sel = selection.kind === 'opm' && selection.id === d.id ? ' is-selected' : '';
       var mismatch = d.dockMismatch ? ' is-mismatch' : '';
       var warn = d.docked && d.lastReading && !d.lastReading.source ? ' is-warning' : '';
+      var carrier = d.carrierActive ? ' is-carrier-active' : '';
       var portCls = 'viavi__port lab-opm-port' + (d.docked ? ' is-occupied' : '') + mismatch + warn;
       var dockedAttr = d.docked ? '1' : '0';
       var mismatchAttr = d.dockMismatch ? '1' : '0';
       var warnAttr = warn ? '1' : '0';
       html +=
         '<div class="lab-opm lab-opm--viavi lab-opm--fixed' + sel + (d.docked ? ' is-docked' : '') +
-        '" data-opm-node="' + d.id + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
+        carrier + '" data-opm-node="' + d.id + '" data-carrier-active="' +
+        (d.carrierActive ? '1' : '0') + '" style="left:' + d.x + 'px;top:' + d.y + 'px">' +
         '<div class="viavi" data-docked="' + dockedAttr +
         '" data-mismatch="' + mismatchAttr + '" data-warning="' + warnAttr + '">' +
         '<div class="viavi__bumper viavi__bumper--tl" aria-hidden="true"></div>' +
@@ -513,6 +646,7 @@
       x: pos.x,
       y: pos.y,
       docked: false,
+      lastSources: [],
       lastReading: {
         dBm: null,
         lossDb: null,
@@ -654,6 +788,11 @@
       (r && isFinite(r.dBm) ? formatDbm(r.dBm) + ' dBm' : (r && r.label === 'UNCONNECTED' ? 'SIGNAL LOW' : (r && r.label) || 'SIGNAL LOW')) +
       '</strong></div>' +
       '<div><span>λ</span><strong>' + resolveWavelengthNm() + ' nm</strong></div>' +
+      (function () {
+        var m = olsMirrorState(d);
+        if (!m) return '';
+        return '<div><span>TX link</span><strong>OLS-35 · ' + m.modeLabel + '</strong></div>';
+      })() +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id + '">Remove OLP-38</button>' +
       '</div>';
@@ -747,6 +886,7 @@
             x: d.x,
             y: d.y,
             docked: !!d.docked,
+            carrierActive: !!d.carrierActive,
             reading: d.lastReading,
           };
         });
