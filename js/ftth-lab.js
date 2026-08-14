@@ -775,6 +775,29 @@
   var opmRefreshHook = null;
   var opmWavelengthNm = 1490;
 
+  /**
+   * Convert logarithmic optical power to linear milliwatts.
+   * P(mW) = 10 ^ (P(dBm) / 10)
+   */
+  function dbmToMilliwatts(dBm) {
+    var value = Number(dBm);
+    if (!isFinite(value)) return null;
+    return Math.pow(10, value / 10);
+  }
+
+  /**
+   * mW display text. The OLP-38 supports only dBm and mW, so weak readings
+   * keep the mW unit (extra decimals / exponent) instead of switching to µW.
+   */
+  function formatMilliwatts(mw) {
+    var v = Number(mw);
+    if (!isFinite(v) || v <= 0) return null;
+    if (v >= 1000) return v.toFixed(1) + ' mW';
+    if (v >= 1) return v.toFixed(3) + ' mW';
+    if (v >= 0.001) return v.toFixed(4) + ' mW';
+    return v.toExponential(2) + ' mW';
+  }
+
   /** SM fiber attenuation (dB/km) at common OPM test wavelengths */
   var FIBER_ATTENUATION_DB_KM = {
     850: 3.0,
@@ -861,7 +884,9 @@
   /** Photocurrent (amps) produced by P dBm of light at λ_light. */
   function photodiodeCurrentA(dBm, wavelengthNm) {
     if (dBm == null || !isFinite(dBm)) return null;
-    var watts = Math.pow(10, dBm / 10) / 1000;
+    var milliWatts = dbmToMilliwatts(dBm);
+    if (milliWatts == null) return null;
+    var watts = milliWatts / 1000;
     return photodiodeResponsivity(wavelengthNm) * watts;
   }
 
@@ -1427,6 +1452,8 @@
     photodiodeCurrentA: photodiodeCurrentA,
     responsivityErrorDb: responsivityErrorDb,
     calibratedReadingDbm: calibratedReadingDbm,
+    dbmToMilliwatts: dbmToMilliwatts,
+    formatMilliwatts: formatMilliwatts,
     getOpmWavelength: getOpmWavelengthNm,
     setOpmWavelength: setOpmWavelength,
     fiberSpanLossDb: fiberSpanLossDb,

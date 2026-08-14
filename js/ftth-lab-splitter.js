@@ -6,14 +6,15 @@
   'use strict';
 
   var SPLITTER_SPECS = {
-    '1x4':  { ratio: '1×4',  ins: 1, outs: 4,  lossDb: 7.7 },
-    '1x8':  { ratio: '1×8',  ins: 1, outs: 8,  lossDb: 10.9 },
-    '1x16': { ratio: '1×16', outs: 16, ins: 1, lossDb: 14.2 },
-    '1x64': { ratio: '1×64', ins: 1, outs: 64, lossDb: 21.4 },
-    '2x4':  { ratio: '2×4',  ins: 2, outs: 4,  lossDb: 7.7 },
+    '1x4':  { ratio: '1×4',  ins: 1, outs: 4,  lossDb: 7.3 },
+    '1x8':  { ratio: '1×8',  ins: 1, outs: 8,  lossDb: 10.5 },
+    '1x16': { ratio: '1×16', ins: 1, outs: 16, lossDb: 13.8 },
+    '1x32': { ratio: '1×32', ins: 1, outs: 32, lossDb: 17.1 },
+    '1x64': { ratio: '1×64', ins: 1, outs: 64, lossDb: 21.0 },
+    '2x4':  { ratio: '2×4',  ins: 2, outs: 4,  lossDb: 7.3 },
   };
 
-  var RATIO_ORDER = ['1x4', '1x8', '1x16', '1x64', '2x4'];
+  var RATIO_ORDER = ['1x4', '1x8', '1x16', '1x32', '1x64', '2x4'];
 
   var MISMATCH_MSG =
     'Mismatched connector polish: UPC/APC connection causes high back reflection and signal loss.';
@@ -638,6 +639,10 @@
   }
 
   function updateBudgetHud() {
+    /* Ratio/port changes alter the live end-to-end path immediately. */
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
+    }
     if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
       FtthLab.refreshPowerBudget();
       return;
@@ -905,8 +910,8 @@
         '</div>' +
         '<div class="lab-cas-loss' + (linked ? '' : ' is-idle') + '">' +
         (linked
-          ? 'Total Signal Loss <strong>' + lossFor(s).toFixed(1) + ' dB</strong>'
-          : 'Rated loss ' + lossFor(s).toFixed(1) + ' dB') +
+          ? 'Insertion Loss <strong>' + lossFor(s).toFixed(1) + ' dB</strong>'
+          : 'Rated insertion loss ' + lossFor(s).toFixed(1) + ' dB') +
         '</div>' +
         '</div>' +
         '<div class="lab-cas-flange lab-cas-flange--r" aria-hidden="true">' +
@@ -1201,7 +1206,7 @@
       portConfigRows(s, s.outputs, 'out') +
       '</div>' +
       '<div class="lab-spl-sheet">' +
-      '<div><span>Rated loss</span><strong>' + lossFor(s).toFixed(1) + ' dB</strong></div>' +
+      '<div><span>Insertion loss</span><strong>' + lossFor(s).toFixed(1) + ' dB</strong></div>' +
       '<div><span>Layout</span><strong>' + s.inputs.length + ' × ' + s.outputs.length + '</strong></div>' +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-spl="' + s.id +

@@ -151,10 +151,16 @@
 
   function formatMw(dBm) {
     if (dBm == null || !isFinite(dBm)) return null;
-    var mw = Math.pow(10, dBm / 10);
+    var mw = global.FtthLab && typeof FtthLab.dbmToMilliwatts === 'function'
+      ? FtthLab.dbmToMilliwatts(dBm)
+      : Math.pow(10, dBm / 10);
+    if (mw == null || !isFinite(mw)) return null;
+    if (global.FtthLab && typeof FtthLab.formatMilliwatts === 'function') {
+      return FtthLab.formatMilliwatts(mw);
+    }
     if (mw >= 1) return mw.toFixed(3) + ' mW';
-    if (mw >= 0.001) return (mw * 1000).toFixed(2) + ' µW';
-    return (mw * 1e6).toFixed(1) + ' nW';
+    if (mw >= 0.001) return mw.toFixed(4) + ' mW';
+    return mw.toExponential(2) + ' mW';
   }
 
   function getPortWorld(opmId) {
@@ -213,13 +219,16 @@
         seen[wl] = true;
         rows.push({
           wavelengthNm: wl,
-          dBm: isFinite(item.source.txDbm) ? item.source.txDbm : item.dBm,
+          /* Use received path power, not raw OLS TX power. */
+          dBm: item.dBm,
+          lossDb: item.lossDb,
         });
       });
       rows.sort(function (a, b) { return a.wavelengthNm - b.wavelengthNm; });
     }
     var lightNm = src.wavelengthNm || resolveWavelengthNm();
-    var trueDbm = isFinite(src.txDbm) ? src.txDbm : r.dBm;
+    /* r.dBm already includes patch, fiber, splitter, and connector losses. */
+    var trueDbm = r.dBm;
     var calNm = resolveWavelengthNm();
     /* Single-λ reads through the operator-selected table; Auto/Multi self-tune */
     var calError = mode === 'single' ? calibrationErrorDb(lightNm, calNm) : 0;
@@ -230,6 +239,8 @@
       wavelengthNm: lightNm,
       calibrationNm: calNm,
       trueDbm: trueDbm,
+      txDbm: src.txDbm,
+      pathLossDb: r.lossDb,
       outputDbm: mode === 'single' ? calibratedDbm(trueDbm, lightNm) : trueDbm,
       calErrorDb: Math.round(calError * 100) / 100,
       calMismatch: mode === 'single' && Math.abs(calError) >= 0.01,

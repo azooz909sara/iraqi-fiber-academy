@@ -71,7 +71,12 @@
   }
 
   function dbmToMw(dbm) {
-    return Math.pow(10, dbm / 10);
+    if (global.FtthLab && typeof FtthLab.dbmToMilliwatts === 'function') {
+      return FtthLab.dbmToMilliwatts(dbm);
+    }
+    var value = Number(dbm);
+    if (!isFinite(value)) return NaN;
+    return Math.pow(10, value / 10);
   }
 
   function mwToDbm(mw) {
@@ -89,11 +94,16 @@
     return sign + dbm.toFixed(2);
   }
 
+  /** OLP-38 exposes dBm and mW only — never µW / nW. */
   function formatMw(mw) {
     if (!isFiniteNumber(mw) || mw <= 0) return '——.—';
-    if (mw >= 1) return mw.toFixed(3);
-    if (mw >= 0.001) return (mw * 1000).toFixed(3) + ' µ';
-    return (mw * 1e6).toFixed(2) + ' n';
+    if (global.FtthLab && typeof FtthLab.formatMilliwatts === 'function') {
+      return FtthLab.formatMilliwatts(mw) || '——.—';
+    }
+    if (mw >= 1000) return mw.toFixed(1) + ' mW';
+    if (mw >= 1) return mw.toFixed(3) + ' mW';
+    if (mw >= 0.001) return mw.toFixed(4) + ' mW';
+    return mw.toExponential(2) + ' mW';
   }
 
   function evaluate(dbm, std) {
@@ -204,7 +214,7 @@
         trainer.setAttribute('data-warning', '1');
       }
     } else if (state.unit === 'mw') {
-      if (lcdVal) lcdVal.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+      if (lcdVal) lcdVal.textContent = formatMw(mw);
       if (lcdUnit) {
         lcdUnit.hidden = true;
         lcdUnit.textContent = '';
@@ -239,7 +249,7 @@
 
     var convMw = $('opm-stat-mw');
     var lossStat = $('opm-stat-loss');
-    if (convMw) convMw.textContent = isFinite(mw) ? formatMw(mw) + (mw >= 1 ? ' mW' : 'W') : '—';
+    if (convMw) convMw.textContent = isFinite(mw) ? formatMw(mw) : '—';
     if (lossStat) {
       if (state.lastReading && isFiniteNumber(state.lastReading.lossDb)) {
         lossStat.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
@@ -349,7 +359,7 @@
       else if (!isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
         dbmEl.textContent = 'SIGNAL LOW';
       } else if (state.unit === 'mw') {
-        dbmEl.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+        dbmEl.textContent = formatMw(mw);
       } else {
         dbmEl.textContent = formatDbm(dbm) + ' dBm';
       }
@@ -362,7 +372,7 @@
       } else if (state.unit === 'mw') {
         mwEl.textContent = formatDbm(dbm) + ' dBm';
       } else {
-        mwEl.textContent = formatMw(mw) + (mw >= 1 ? ' mW' : 'W');
+        mwEl.textContent = formatMw(mw);
       }
     }
 
