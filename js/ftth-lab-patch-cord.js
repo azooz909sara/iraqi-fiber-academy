@@ -377,8 +377,12 @@
     var otherEnd = oppositeEnd(end);
     /* Coupler faces are horizontal; OLT/splitter/VFL/OPM/OLS stay vertical (0° / 180°) */
     var lockedRot = resolveUprightPlugRotation(hit, cord, end);
+    var oltSeatRot = oltPortSeatRotation(hit);
     if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) {
       lockedRot = 180;
+    } else if (oltSeatRot != null) {
+      /* Angled SFP tier keeps its own seat axis instead of snapping upright */
+      lockedRot = oltSeatRot;
     } else if (!(hit && (hit.owner === 'coupler'))) {
       lockedRot = lockedRot === 180 || lockedRot === -180 ? 180 : 0;
     }
@@ -1402,6 +1406,15 @@
    * Top-mounted test gear (VFL / OLP-38 / OLS-35): always 180° so ferrule seats
    * downward into the adapter and the yellow cable exits straight up.
    */
+  /** Angled OLT SFP tier: the seat axis is baked into the port element. */
+  function oltPortSeatRotation(hit) {
+    var el = hit && hit.el;
+    var node = el && el.closest ? el.closest('.lab-fx-port') : null;
+    if (!node) return null;
+    var v = Number(node.getAttribute('data-lab-port-rot'));
+    return isFinite(v) ? v : null;
+  }
+
   function portAlignedRotation(hit) {
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' ? -90 : 90;
@@ -1413,6 +1426,8 @@
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
       return 180;
     }
+    var oltRot = oltPortSeatRotation(hit);
+    if (oltRot != null) return oltRot;
     /* OLT / default: upright ferrule-up seat */
     return 0;
   }
@@ -1530,6 +1545,8 @@
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
     /* OPM / VFL / OLS: cable always exits upward — ignore approach vector */
     if (isTopTestPort(hit)) return 180;
+    /* Angled SFP cages seat along the module axis — never flip to upright */
+    if (oltPortSeatRotation(hit) != null) return portAlignedRotation(hit);
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var p = getEndWorld(cord, end);

@@ -1015,7 +1015,18 @@
     });
   }
 
-  /* ─── 2D faceplate with square ports ─── */
+  /* ─── 2D faceplate · top-down angled SFP tier ─── */
+
+  /**
+   * LC-GP16 seats its 16 cages on a slanted tier, so the modules read as a
+   * side-by-side diagonal cascade when the board is viewed from above.
+   */
+  var PORT_TILT_DEG = -18;
+
+  /** Ferrule points back down the module axis; 0° = ferrule up. */
+  function portConnectorRot(tiltDeg) {
+    return tiltDeg - 90;
+  }
 
   function fgltFaceHtml(slot) {
     var ports = '';
@@ -1026,10 +1037,16 @@
       var polishClass = filled ? (polish === 'APC' ? ' is-apc' : ' is-upc') : '';
       ports +=
         '<button type="button" class="lab-fx-port' + (filled ? ' is-active' : ' is-empty') +
-        polishClass + '" ' +
+        polishClass + '" style="--fx-i:' + (p - 1) + '" ' +
         'data-lab-sfp="' + p + '" data-lab-slot="' + slot + '" data-lab-port-id="' + id + '" ' +
+        'data-lab-port-tilt="' + PORT_TILT_DEG + '" ' +
+        'data-lab-port-rot="' + portConnectorRot(PORT_TILT_DEG) + '" ' +
         'data-lab-drop="sfp" title="Port ' + p + (filled ? ' · SFP · ' + polish : ' · empty') + '">' +
+        '<span class="lab-fx-port__module">' +
+        '<span class="lab-fx-port__body"></span>' +
+        '<span class="lab-fx-port__bail"></span>' +
         '<span class="lab-fx-port__cage"></span>' +
+        '</span>' +
         '<span class="lab-fx-port__num">' + p + '</span>' +
         '<span class="lab-fx-port__led' + (filled ? ' is-on' : '') + '"></span>' +
         '</button>';
@@ -1510,6 +1527,7 @@
     setStatus('Blank workspace · scroll to zoom · تراجع / تقدم خطوة · drag FX-16 to begin');
 
     if (global.FtthLab) {
+      FtthLab.getOltPortWorld = getPortWorld;
       FtthLab.getOltTxSources = function () {
         var out = [];
         var s;
@@ -1530,6 +1548,38 @@
         return out;
       };
     }
+  }
+
+  function portElement(slot, port) {
+    return document.querySelector(
+      '.lab-fx-port[data-lab-slot="' + slot + '"][data-lab-sfp="' + port + '"]'
+    );
+  }
+
+  /**
+   * Dock anchor for jumpers: world centre of the angled cage mouth plus the
+   * seat axis, so a connector lands square in the module instead of upright.
+   */
+  function getPortWorld(slot, port) {
+    var el = portElement(slot, port);
+    if (!el) return null;
+    var cage = el.querySelector('.lab-fx-port__cage') || el;
+    var rect = cage.getBoundingClientRect();
+    if (!rect.width && !rect.height) return null;
+    var cx = rect.left + rect.width / 2;
+    var cy = rect.top + rect.height / 2;
+    var pt = (global.FtthLab && typeof FtthLab.clientToWorld2d === 'function')
+      ? FtthLab.clientToWorld2d(cx, cy)
+      : { x: cx, y: cy };
+    var rot = Number(el.getAttribute('data-lab-port-rot'));
+    var tilt = Number(el.getAttribute('data-lab-port-tilt'));
+    return {
+      x: pt.x,
+      y: pt.y,
+      rot: isFinite(rot) ? rot : portConnectorRot(PORT_TILT_DEG),
+      tilt: isFinite(tilt) ? tilt : PORT_TILT_DEG,
+      el: el,
+    };
   }
 
   function getPortWiring(portOrId) {
@@ -1574,6 +1624,7 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     getPortWiring: getPortWiring,
+    getPortWorld: getPortWorld,
     getPickables: getPickables,
     installCard: installCard,
     ejectCard: ejectCard,

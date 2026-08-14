@@ -147,6 +147,15 @@
     return Math.atan2(dx, -dy) * 180 / Math.PI;
   }
 
+  /** Angled OLT SFP tier: the seat axis is baked into the port element. */
+  function oltPortSeatRotation(hit) {
+    var el = hit && hit.el;
+    var node = el && el.closest ? el.closest('.lab-fx-port') : null;
+    if (!node) return null;
+    var v = Number(node.getAttribute('data-lab-port-rot'));
+    return isFinite(v) ? v : null;
+  }
+
   function portAlignedRotation(hit) {
     if (hit && hit.owner === 'coupler') {
       return hit.port === 'B' || hit.port === 'b' ? -90 : 90;
@@ -158,6 +167,8 @@
         (hit.el && hit.el.classList && hit.el.classList.contains('lab-cas-port')))) {
       return 180;
     }
+    var oltRot = oltPortSeatRotation(hit);
+    if (oltRot != null) return oltRot;
     return 0;
   }
 
@@ -165,6 +176,8 @@
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
     /* OPM / VFL / OLS top adapters: always ferrule-down / cable-up */
     if (hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols')) return 180;
+    /* Angled SFP cages seat along the module axis — never flip to upright */
+    if (oltPortSeatRotation(hit) != null) return portAlignedRotation(hit);
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
     var dY = (hit && typeof hit.wy === 'number') ? (hit.wy - p.ay) : 0;

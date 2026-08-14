@@ -838,61 +838,114 @@ body.lab-node-resizing .lab-2d-stage {
   margin-bottom: 0.1rem;
 }
 
+/* Top-down angled SFP tier — 16 modules cascade side by side (LC-GP16) */
 .lab-fx-card__ports {
+  --fx-port-tilt: -18deg;
+  --fx-mod-len: calc(42px * var(--fx-scale, 1));
+  --fx-mod-thick: calc(9px * var(--fx-scale, 1));
+  --fx-mod-span: calc(22px * var(--fx-scale, 1));
+  position: relative;
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  align-items: center;
   width: 100%;
-  gap: 2px;
-  padding: 0.1rem 0;
+  min-height: var(--fx-mod-span);
+  padding: 0;
   overflow: hidden;
 }
 
+/* Row band per port — pitch follows the card height, so it tracks --fx-scale */
 .lab-fx-port {
-  position: relative;
-  flex: 0 0 auto;
-  width: 100%;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  grid-template-rows: auto auto;
-  align-items: center;
-  justify-items: center;
-  gap: 0 2px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--fx-i, 0) * (100% - var(--fx-mod-span)) / 15);
+  height: var(--fx-mod-span);
+  display: block;
   padding: 0;
   border: none;
   background: transparent;
+  /* Only the angled module body takes clicks — neighbouring rows never steal */
+  pointer-events: none;
+  z-index: calc(var(--fx-i, 0) + 1);
+}
+
+.lab-fx-port__module {
+  position: absolute;
+  top: 50%;
+  left: 52%;
+  width: var(--fx-mod-len);
+  height: var(--fx-mod-thick);
+  transform: translate(-50%, -50%) rotate(var(--fx-port-tilt, -18deg));
+  transform-origin: 50% 50%;
+  pointer-events: auto;
   cursor: pointer;
 }
 
-.lab-fx-port__cage {
-  grid-column: 1;
-  grid-row: 1 / span 2;
-  width: calc(11px * var(--fx-scale, 1));
-  height: calc(11px * var(--fx-scale, 1));
+.lab-fx-port__body {
+  position: absolute;
+  inset: 0;
+  border-radius: calc(1px * var(--fx-scale, 1));
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.35) 0 1px,
+      rgba(15, 23, 42, 0.08) 1px 3px
+    ),
+    linear-gradient(180deg, #f4f6f8 0%, #d8dde3 45%, #aab2bc 100%);
+  border: 1px solid #7f8894;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.25),
+    0 1px 2px rgba(15, 23, 42, 0.35);
+}
+
+/* Bail latch at the tail end of the module */
+.lab-fx-port__bail {
+  position: absolute;
+  left: calc(2px * var(--fx-scale, 1));
+  top: 50%;
+  width: calc(9px * var(--fx-scale, 1));
+  height: calc(3px * var(--fx-scale, 1));
+  transform: translateY(-50%);
   border-radius: 1px;
-  background: #0f172a;
-  border: 1px solid #475569;
-  box-shadow: inset 0 0 0 1px #1e293b;
+  background: linear-gradient(180deg, #cbd5e1, #94a3b8);
+  box-shadow: inset 0 0 0 1px rgba(71, 85, 105, 0.7);
+}
+
+/* Docking mouth — jumper anchors resolve to the centre of this element */
+.lab-fx-port__cage {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: calc(9px * var(--fx-scale, 1));
+  height: 100%;
+  transform: translateY(-50%);
+  border-radius: 0 calc(1px * var(--fx-scale, 1)) calc(1px * var(--fx-scale, 1)) 0;
+  background: linear-gradient(180deg, #1f2937, #0b1120);
+  border: 1px solid #4b5563;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
 }
 
 .lab-fx-port__num {
-  grid-column: 2;
-  grid-row: 1;
-  font-size: calc(0.4rem * var(--fx-scale, 1));
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: calc(0.36rem * var(--fx-scale, 1));
   font-weight: 800;
   color: #334155;
   line-height: 1;
+  pointer-events: none;
 }
 
 .lab-fx-port__led {
-  grid-column: 2;
-  grid-row: 2;
+  position: absolute;
+  right: 0;
+  bottom: calc(2px * var(--fx-scale, 1));
   width: 3px;
   height: 3px;
   border-radius: 50%;
   background: #94a3b8;
+  pointer-events: none;
 }
 
 .lab-fx-port__led.is-on {
@@ -900,32 +953,65 @@ body.lab-node-resizing .lab-2d-stage {
   box-shadow: 0 0 3px #22c55e;
 }
 
+/* Empty cage: recessed slot in the board, no module body */
+.lab-fx-port.is-empty .lab-fx-port__body {
+  background: linear-gradient(180deg, #4b5563, #111827);
+  border-color: #374151;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+.lab-fx-port.is-empty .lab-fx-port__bail {
+  display: none;
+}
+
 .lab-fx-port.is-empty .lab-fx-port__cage {
-  background: #111827;
+  background: #05070d;
 }
 
 .lab-fx-port.is-active .lab-fx-port__cage {
-  background: linear-gradient(145deg, #38bdf8, #0284c7);
+  background: linear-gradient(180deg, #38bdf8, #0284c7);
   border-color: #0ea5e9;
 }
 
 .lab-fx-port.is-upc.is-active .lab-fx-port__cage {
-  background: linear-gradient(145deg, #60a5fa, #1d4ed8);
+  background: linear-gradient(180deg, #60a5fa, #1d4ed8);
   border-color: #93c5fd;
 }
 
 .lab-fx-port.is-apc.is-active .lab-fx-port__cage {
-  background: linear-gradient(145deg, #4ade80, #15803d);
+  background: linear-gradient(180deg, #4ade80, #15803d);
   border-color: #86efac;
+}
+
+.lab-fx-port.is-selected {
+  z-index: 40;
+}
+
+.lab-fx-port.is-selected .lab-fx-port__body {
+  outline: 1px solid #fbbf24;
+  outline-offset: 1px;
 }
 
 .lab-fx-port.is-selected .lab-fx-port__cage {
   box-shadow: 0 0 0 1px #fbbf24;
 }
 
-.lab-fx-port.is-drop-target .lab-fx-port__cage {
+.lab-fx-port.is-drop-target {
+  z-index: 39;
+}
+
+.lab-fx-port.is-plug-target,
+.lab-fx-port.is-plug-click {
+  z-index: 41;
+}
+
+.lab-fx-port.is-drop-target .lab-fx-port__body {
   outline: 1px dashed #0ea5e9;
   outline-offset: 1px;
+  background: #0c4a6e;
+}
+
+.lab-fx-port.is-drop-target .lab-fx-port__cage {
   background: #075985;
 }
 
