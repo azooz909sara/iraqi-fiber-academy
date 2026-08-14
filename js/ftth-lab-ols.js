@@ -231,10 +231,11 @@
     return layer;
   }
 
-  /** Pixel-style triangular laser hazard mark — only while emitting. */
-  function hazardIconSvg() {
+  /** Pixel-style triangular laser hazard mark — sits beside the λ readout. */
+  function hazardIconSvg(variant) {
     return (
-      '<span class="ols__hazard" role="img" aria-label="Laser radiation active">' +
+      '<span class="ols__hazard' + (variant ? ' ols__hazard--' + variant : '') +
+      '" role="img" aria-label="Laser radiation active">' +
       '<svg viewBox="0 0 16 14" width="13" height="12" aria-hidden="true">' +
       '<path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="miter" ' +
       'd="M8 1.2L15 13H1L8 1.2z"/>' +
@@ -245,11 +246,10 @@
     );
   }
 
-  function lcdHeader(modeLabel, laserOn) {
+  function lcdHeader(modeLabel) {
     return (
       '<div class="viavi__lcd-top ols__lcd-top">' +
-      '<span class="viavi__lcd-mode">' + modeLabel +
-      (laserOn ? hazardIconSvg() : '') + '</span>' +
+      '<span class="viavi__lcd-mode">' + modeLabel + '</span>' +
       '<span class="viavi__lcd-clock" aria-label="Session timer">' +
       '<svg class="viavi__lcd-clock-icon" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
       '<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
@@ -273,6 +273,9 @@
     var cfg = configuredDbm(d);
     var pwrTxt = formatCfgDbm(cfg);
     var wlTxt = d.wavelength + ' nm';
+    /* Hazard mark rides next to the λ readout while the laser emits */
+    var hazard = d.laserOn ? hazardIconSvg() : '';
+    var hazardStack = d.laserOn ? hazardIconSvg('stack') : '';
     var inner = '';
     var soft = '';
 
@@ -280,11 +283,13 @@
       inner =
         '<div class="ols__lcd-stack" aria-label="Multi-λ wavelengths">' +
         '<div class="ols__lcd-row">' +
-        '<span class="ols__wl ols__wl--stack">1310 nm</span>' +
+        '<span class="ols__wl-group"><span class="ols__wl ols__wl--stack">1310 nm</span>' +
+        hazardStack + '</span>' +
         '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
         '</div>' +
         '<div class="ols__lcd-row">' +
-        '<span class="ols__wl ols__wl--stack">1550 nm</span>' +
+        '<span class="ols__wl-group"><span class="ols__wl ols__wl--stack">1550 nm</span>' +
+        hazardStack + '</span>' +
         '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
         '</div>' +
         '</div>';
@@ -296,7 +301,7 @@
     } else if (mode === 'auto') {
       inner =
         '<div class="viavi__lcd-main ols__lcd-main">' +
-        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' +
+        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' + hazard +
         '</div>' +
         '<div class="ols__lcd-meta ols__lcd-meta--auto">' +
         '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
@@ -309,7 +314,7 @@
     } else {
       inner =
         '<div class="viavi__lcd-main ols__lcd-main">' +
-        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' +
+        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' + hazard +
         '</div>' +
         '<div class="ols__lcd-meta">' +
         '<span class="ols__mod-txt">' + modLabel(d.modulation) + '</span>' +
@@ -326,7 +331,7 @@
       '<div class="viavi__lcd ols__lcd ols__lcd--' + mode +
       (d.laserOn ? ' is-emitting' : '') +
       '" data-ols-mode="' + mode + '" aria-live="polite">' +
-      lcdHeader(displayModeLabel(mode), !!d.laserOn) +
+      lcdHeader(displayModeLabel(mode)) +
       inner +
       soft +
       '</div>'
