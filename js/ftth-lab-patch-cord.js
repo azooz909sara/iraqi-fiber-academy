@@ -363,6 +363,9 @@
   }
 
   function attachEnd(cord, end, hit) {
+    if (hit && hit.owner === 'ols') {
+      hit = enrichOlsHitDeepSeat(hit) || hit;
+    }
     var side = cord[endKey(end)];
     var mismatch = !polishMatch(side.polish, hit.polish);
     if (hit.owner === 'vfl') mismatch = false;
@@ -587,9 +590,11 @@
           }
           return null;
         }
-        var olsKnurl = node.querySelector('.viavi__adapter-knurl, .lab-ols__adapter-knurl') || node;
-        var rS = olsKnurl.getBoundingClientRect();
-        var cS = clientToWorld(rS.left + rS.width / 2, rS.top + rS.height * 0.35);
+        var olsSlot = node.querySelector(
+          '.lab-ols__adapter-slot, .lab-ols__adapter-knurl, .viavi__adapter-knurl'
+        ) || node;
+        var rS = olsSlot.getBoundingClientRect();
+        var cS = clientToWorld(rS.left + rS.width / 2, rS.top + Math.max(1, rS.height * 0.2));
         return {
           owner: 'ols',
           olsId: olsId,
@@ -1270,6 +1275,10 @@
   var HEADING_MAX_TILT_DEG = 90;
   var UNPLUG_PULL_PX = 36;
   var PLUG_SNAP_PX = 22;
+  /** OLS-35 magnetic capture (screen px) — larger than generic port snap */
+  var OLS_MAGNET_SNAP_PX = 56;
+  /** Auto-click lock once magnetically seated */
+  var OLS_MAGNET_LOCK_PX = 30;
   /** Base gravity sag (px); also scaled by end-to-end distance */
   var GRAVITY_OFFSET = 100;
   var GRAVITY_SAG_RATIO = 0.28;
@@ -1412,10 +1421,113 @@
     return !!(hit && (hit.owner === 'vfl' || hit.owner === 'opm' || hit.owner === 'ols'));
   }
 
+  function olsMagnetRadius() {
+    if (global.FtthLab && typeof FtthLab.getOlsMagnetSnapPx === 'function') {
+      var n = Number(FtthLab.getOlsMagnetSnapPx());
+      if (isFinite(n) && n > 0) return n;
+    }
+    return OLS_MAGNET_SNAP_PX;
+  }
+
+  function plugSnapRadiusFor(hit) {
+    if (hit && hit.owner === 'ols') return olsMagnetRadius();
+    return PLUG_SNAP_PX;
+  }
+
+  /** Refresh OLS hit to deep-seat metallic adapter center (ferrule flush inside). */
+  function enrichOlsHitDeepSeat(hit) {
+    if (!hit || hit.owner !== 'ols' || !hit.olsId) return hit;
+    if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
+      var pw = FtthLab.getOlsPortWorld(hit.olsId);
+      if (pw) {
+        hit.wx = pw.x;
+        hit.wy = pw.y;
+        hit.rot = 180;
+        hit.deepSeat = true;
+      }
+    }
+    return hit;
+  }
+
+  function olsPortScreenCenter(el) {
+    if (!el) return null;
+    var slot = el.querySelector('.lab-ols__adapter-slot, .lab-ols__sc-block') || el;
+    var r = slot.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height * 0.25 };
+  }
+
+  /**
+   * Magnetic OLS capture — proximity to metallic port even when cursor
+   * is not directly over the hit-test element.
+   */
+  function findNearestOlsHit(clientX, clientY, maxPx) {
+    maxPx = maxPx != null ? maxPx : olsMagnetRadius();
+    var nodes = document.querySelectorAll('.lab-ols-port[data-ols-port]');
+    var best = null;
+    var bestD = maxPx;
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var c = olsPortScreenCenter(node);
+      if (!c) continue;
+      var d = dist2(clientX, clientY, c.x, c.y);
+      if (d <= bestD) {
+        bestD = d;
+        var olsId = node.getAttribute('data-ols-port');
+        best = {
+          owner: 'ols',
+          olsId: olsId,
+          polish: 'UPC',
+          connectorType: 'SC',
+          label: 'Viavi OLS-35 · SC adapter',
+          el: node,
+          screenDist: d,
+        };
+        enrichOlsHitDeepSeat(best);
+      }
+    }
+    return best;
+  }
+
+  function resolvePlugHit(clientX, clientY) {
+    var hit = hitTestPort(clientX, clientY);
+    if (hit && hit.owner === 'ols') {
+      enrichOlsHitDeepSeat(hit);
+      var c = olsPortScreenCenter(hit.el);
+      if (c) hit.screenDist = dist2(clientX, clientY, c.x, c.y);
+      return hit;
+    }
+    var ols = findNearestOlsHit(clientX, clientY);
+    if (ols) return ols;
+    return hit;
+  }
+
+  /**
+   * While dragging: pull connector into OLS deep seat + force vertical (180°).
+   * Returns 'lock' when inside auto-click radius, 'pull' when in magnet zone, else null.
+   */
+  function applyOlsMagneticPull(cord, end, hit, clientX, clientY) {
+    if (!hit || hit.owner !== 'ols' || !cord) return null;
+    enrichOlsHitDeepSeat(hit);
+    var c = olsPortScreenCenter(hit.el);
+    var d = hit.screenDist != null
+      ? hit.screenDist
+      : (c ? dist2(clientX, clientY, c.x, c.y) : 9999);
+    var magnet = olsMagnetRadius();
+    if (d > magnet) return null;
+    if (hit.el) hit.el.classList.add('is-plug-target');
+    var side = cord[endKey(end)];
+    side.liveRot = 180;
+    seatEndAtPort(cord, end, hit.wx, hit.wy);
+    updateFiberPath(cord);
+    if (d <= OLS_MAGNET_LOCK_PX) return 'lock';
+    return 'pull';
+  }
+
   /** Vertical ports: pick 0° or 180°. Coupler: keep horizontal face axis. */
   function resolveUprightPlugRotation(hit, cord, end) {
     if (hit && hit.owner === 'coupler') return portAlignedRotation(hit);
-    /* OPM / VFL: cable always exits upward — ignore approach vector */
+    /* OPM / VFL / OLS: cable always exits upward — ignore approach vector */
     if (isTopTestPort(hit)) return 180;
     var base = portAlignedRotation(hit);
     var alt = base === 0 ? 180 : 0;
@@ -3624,8 +3736,46 @@
           updateFiberPath(c);
 
           clearHighlights();
-          var hit = hitTestPort(ev.clientX, ev.clientY);
-          if (hit && hit.el) {
+          var hit = resolvePlugHit(ev.clientX, ev.clientY);
+          if (hit && hit.owner === 'ols') {
+            var mag = applyOlsMagneticPull(c, end, hit, ev.clientX, ev.clientY);
+            if (mag === 'lock' && !c[endKey(end)].attached) {
+              /* Instant magnetic click — deep seat + vertical lock */
+              attachEnd(c, end, hit);
+              if (c[endKey(otherEnd)].attached && !spanFitsFixedLength(c)) {
+                detachEnd(c, end);
+                c.relocating = typeof c.fixedLength === 'number';
+                setEndWorld(c, end, mouse.x, mouse.y);
+                clampFreeEndToFixedLength(c, end);
+                rebuildFixedLengthCatenary(c);
+              } else {
+                pluggedNow = true;
+                flashPort(hit.el);
+                if (c[endKey(otherEnd)].attached) {
+                  if (!c.pathLocked && typeof c.fixedLength !== 'number' && !c.relocating) {
+                    var seatTipM = bootExitStub(c, end);
+                    appendRoutePoint(c, seatTipM.x, seatTipM.y);
+                    smoothDrawnRoute(c);
+                  }
+                  lockDrawnPath(c);
+                  endLinkSession({ silent: true });
+                }
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
+                btn.classList.remove('is-dragging', 'is-tension', 'is-unplugging');
+                document.body.classList.remove('lab-pcord-plugging');
+                clearHighlights();
+                endDragState = null;
+                rebuildLayer();
+                updateInspector();
+                pushHistory();
+                refreshBudget();
+                setStatus('OLS-35 · magnetic dock · SC seated vertical');
+                return;
+              }
+            }
+          } else if (hit && hit.el) {
             var br = hit.el.getBoundingClientRect();
             var dScreen = dist2(
               ev.clientX, ev.clientY,
@@ -3633,7 +3783,6 @@
             );
             if (dScreen <= PLUG_SNAP_PX * 1.6) {
               hit.el.classList.add('is-plug-target');
-              /* Preview upward cable exit before snap — no inverted flip at dock */
               if (isTopTestPort(hit) && !c[endKey(end)].attached) {
                 c[endKey(end)].liveRot = 180;
               }
@@ -3649,21 +3798,29 @@
           document.body.classList.remove('lab-pcord-plugging');
           clearHighlights();
 
-          var hit = hitTestPort(ev.clientX, ev.clientY);
+          var hit = resolvePlugHit(ev.clientX, ev.clientY);
           var mouse = clientToWorld(ev.clientX, ev.clientY);
 
           if (wasAttached && !released) {
             syncAttachedPositions(c);
             setStatus('Side ' + end + ' still locked · pull farther to unplug');
           } else if (hit) {
-            var snapEl = hit.el.querySelector('.lab-fx-port__cage') ||
-              hit.el.querySelector('i') || hit.el;
-            var rect = snapEl.getBoundingClientRect();
-            var dScreen = dist2(
-              ev.clientX, ev.clientY,
-              rect.left + rect.width / 2, rect.top + rect.height / 2
+            var snapR = plugSnapRadiusFor(hit);
+            var snapEl = hit.el && (
+              hit.el.querySelector('.lab-ols__adapter-slot, .lab-ols__sc-block, .lab-fx-port__cage') ||
+              hit.el.querySelector('i') || hit.el
             );
-            if (dScreen <= PLUG_SNAP_PX * 1.75) {
+            var rect = snapEl
+              ? snapEl.getBoundingClientRect()
+              : { left: ev.clientX, top: ev.clientY, width: 0, height: 0 };
+            var dScreen = hit.screenDist != null
+              ? hit.screenDist
+              : dist2(
+                ev.clientX, ev.clientY,
+                rect.left + rect.width / 2, rect.top + rect.height / 2
+              );
+            var snapMul = hit.owner === 'ols' ? 1 : 1.75;
+            if (dScreen <= snapR * snapMul) {
               attachEnd(c, end, hit);
               /* Reject ports beyond the locked cable reach */
               if (c[endKey(otherEnd)].attached && !spanFitsFixedLength(c)) {
@@ -3691,6 +3848,8 @@
                     'Patch connected · length ' + Math.round(c.fixedLength) +
                     'px · true catenary'
                   );
+                } else if (hit.owner === 'ols') {
+                  setStatus('OLS-35 · SC docked vertical · deep seat');
                 }
               }
             } else {

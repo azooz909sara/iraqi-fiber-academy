@@ -15,6 +15,7 @@
 
   var WAVELENGTH_ORDER = [1310, 1550];
   var MOD_ORDER = ['CW', '270', '330', '1000', '2000'];
+  var DISPLAY_MODE_ORDER = ['single', 'auto', 'multi'];
   var CW_DBM = -3;
   var MOD_DBM = -6;
 
@@ -72,9 +73,34 @@
     };
   }
 
+  function normalizeDisplayMode(d) {
+    if (!d) return 'single';
+    if (d.displayMode === 'auto' || d.displayMode === 'multi' || d.displayMode === 'single') {
+      return d.displayMode;
+    }
+    return d.autoLambda ? 'auto' : 'single';
+  }
+
+  function displayModeLabel(mode) {
+    if (mode === 'auto') return 'Auto-λ';
+    if (mode === 'multi') return 'Multi-λ';
+    return 'Single-λ';
+  }
+
+  /** Configured output for the current LCD / TX mode (does not imply laser ON). */
+  function configuredDbm(d) {
+    var mode = normalizeDisplayMode(d);
+    if (mode === 'auto' || mode === 'multi') return MOD_DBM;
+    return d.modulation === 'CW' ? CW_DBM : MOD_DBM;
+  }
+
+  function formatCfgDbm(n) {
+    return (n >= 0 ? '+' : '') + String(n) + ' dBm';
+  }
+
   function outputDbm(d) {
     if (!d || !d.poweredOn || !d.laserOn) return null;
-    return d.modulation === 'CW' ? CW_DBM : MOD_DBM;
+    return configuredDbm(d);
   }
 
   function modLabel(mod) {
@@ -94,12 +120,42 @@
     if (!el) {
       var d = findDevice(olsId);
       if (!d) return null;
-      return { x: d.x + OLS_W / 2, y: d.y + Math.round(12 * OLS_FIT), rot: 180 };
+      /* Deep seat estimate: into metallic housing below top edge */
+      return {
+        x: d.x + OLS_W / 2,
+        y: d.y + Math.round(14 * OLS_FIT),
+        rot: 180,
+        magnetPx: 56,
+        deepSeat: true,
+      };
     }
-    var knurl = el.querySelector('.viavi__adapter-knurl, .lab-ols__adapter-knurl') || el;
-    var r = knurl.getBoundingClientRect();
-    var pt = clientToWorld(r.left + r.width / 2, r.top + r.height * 0.35);
-    return { x: pt.x, y: pt.y, rot: 180 };
+    /*
+     * Deep vertical dock: ferrule tip seats into the metallic SC block
+     * (below the open crown slot) so the blue housing sits flush inside.
+     */
+    var block = el.querySelector('.lab-ols__sc-block');
+    var slot = el.querySelector(
+      '.lab-ols__adapter-slot, .lab-ols__adapter-knurl, .viavi__adapter-knurl'
+    );
+    var target = block || slot || el;
+    var r = target.getBoundingClientRect();
+    var cx = r.left + r.width / 2;
+    var cy = block
+      ? r.top + Math.max(6, Math.min(12, r.height * 0.3))
+      : r.top + Math.max(2, r.height * 0.35);
+    var pt = clientToWorld(cx, cy);
+    return {
+      x: pt.x,
+      y: pt.y,
+      rot: 180,
+      magnetPx: 56,
+      deepSeat: true,
+    };
+  }
+
+  /** Screen-pixel magnetic capture radius for OLS-35 docking. */
+  function getMagnetSnapPx() {
+    return 56;
   }
 
   function sideIsOls(side, olsId) {
@@ -144,14 +200,18 @@
       if (!d.poweredOn || !d.laserOn) return;
       var tx = outputDbm(d);
       if (tx == null) return;
-      out.push({
-        key: 'ols:' + d.id,
-        kind: 'ols',
-        txDbm: tx,
-        wavelengthNm: d.wavelength,
-        modulation: d.modulation,
-        label: 'OLS-35 · ' + d.wavelength + ' nm · ' + modLabel(d.modulation),
-        olsId: d.id,
+      var mode = normalizeDisplayMode(d);
+      var waves = mode === 'multi' ? WAVELENGTH_ORDER.slice() : [d.wavelength];
+      waves.forEach(function (wl) {
+        out.push({
+          key: 'ols:' + d.id,
+          kind: 'ols',
+          txDbm: tx,
+          wavelengthNm: wl,
+          modulation: mode === 'single' ? d.modulation : 'CW',
+          label: 'OLS-35 · ' + displayModeLabel(mode) + ' · ' + wl + ' nm',
+          olsId: d.id,
+        });
       });
     });
     return out;
@@ -169,37 +229,88 @@
     return layer;
   }
 
-  function screenMarkup(d) {
-    if (!d.poweredOn) {
-      return '<div class="viavi__lcd ols__lcd ols__lcd--off" aria-live="polite"></div>';
-    }
-    var power = outputDbm(d);
-    var powerTxt = d.laserOn && power != null
-      ? (power >= 0 ? '+' : '') + power.toFixed(2) + ' dBm'
-      : 'LASER OFF';
-    var band = d.autoLambda ? 'Auto-λ' : 'Single-λ';
-    var clock = formatClock();
+  function lcdHeader(modeLabel) {
     return (
-      '<div class="viavi__lcd ols__lcd" aria-live="polite">' +
-      '<div class="viavi__lcd-top">' +
-      '<span class="viavi__lcd-mode">' + band + '</span>' +
+      '<div class="viavi__lcd-top ols__lcd-top">' +
+      '<span class="viavi__lcd-mode">' + modeLabel + '</span>' +
       '<span class="viavi__lcd-clock" aria-label="Session timer">' +
       '<svg class="viavi__lcd-clock-icon" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">' +
       '<circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.2"/>' +
       '<path d="M8 4.5V8l2.5 1.5" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>' +
       '</svg>' +
-      '<span class="viavi__lcd-clock-val">' + clock + '</span>' +
-      '<span class="ols__batt" aria-hidden="true">▮▮▮</span>' +
+      '<span class="viavi__lcd-clock-val">' + formatClock() + '</span>' +
+      '<span class="ols__batt" title="Battery" aria-hidden="true">' +
+      '<span class="ols__batt-body"><span class="ols__batt-fill"></span></span>' +
+      '<span class="ols__batt-nip"></span>' +
       '</span>' +
-      '</div>' +
-      '<div class="viavi__lcd-main' + (d.laserOn ? ' is-live' : ' is-idle') + '">' +
-      '<span class="viavi__lcd-value ols__wl">' + d.wavelength + ' nm</span>' +
-      '</div>' +
-      '<div class="viavi__lcd-soft ols__lcd-soft">' +
-      '<span class="viavi__soft-key">' + powerTxt + '</span>' +
-      '<span class="viavi__soft-key">' + modLabel(d.modulation) + '</span>' +
-      '<span class="viavi__soft-key">' + (d.laserOn ? 'TX ON' : 'TX OFF') + '</span>' +
-      '</div>' +
+      '</span>' +
+      '</div>'
+    );
+  }
+
+  function screenMarkup(d) {
+    if (!d.poweredOn) {
+      return '<div class="viavi__lcd ols__lcd ols__lcd--off" aria-live="polite"></div>';
+    }
+    var mode = normalizeDisplayMode(d);
+    var cfg = configuredDbm(d);
+    var pwrTxt = formatCfgDbm(cfg);
+    var wlTxt = d.wavelength + ' nm';
+    var inner = '';
+    var soft = '';
+
+    if (mode === 'multi') {
+      inner =
+        '<div class="ols__lcd-stack" aria-label="Multi-λ wavelengths">' +
+        '<div class="ols__lcd-row">' +
+        '<span class="ols__wl ols__wl--stack">1310 nm</span>' +
+        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '</div>' +
+        '<div class="ols__lcd-row">' +
+        '<span class="ols__wl ols__wl--stack">1550 nm</span>' +
+        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '</div>' +
+        '</div>';
+      soft =
+        '<div class="viavi__lcd-soft ols__lcd-soft ols__lcd-soft--multi">' +
+        '<span class="viavi__soft-key is-active">1310 nm</span>' +
+        '<span class="viavi__soft-key is-active">1550 nm</span>' +
+        '</div>';
+    } else if (mode === 'auto') {
+      inner =
+        '<div class="viavi__lcd-main ols__lcd-main">' +
+        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' +
+        '</div>' +
+        '<div class="ols__lcd-meta ols__lcd-meta--auto">' +
+        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '</div>';
+      soft =
+        '<div class="viavi__lcd-soft ols__lcd-soft ols__lcd-soft--auto">' +
+        '<span class="viavi__soft-key is-active">' + wlTxt + '</span>' +
+        '<span class="viavi__soft-key ols__soft-empty" aria-hidden="true"></span>' +
+        '</div>';
+    } else {
+      inner =
+        '<div class="viavi__lcd-main ols__lcd-main">' +
+        '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' +
+        '</div>' +
+        '<div class="ols__lcd-meta">' +
+        '<span class="ols__mod-txt">' + modLabel(d.modulation) + '</span>' +
+        '<span class="ols__pwr-txt">' + pwrTxt + '</span>' +
+        '</div>';
+      soft =
+        '<div class="viavi__lcd-soft ols__lcd-soft ols__lcd-soft--single">' +
+        '<span class="viavi__soft-key is-active">' + wlTxt + '</span>' +
+        '<span class="viavi__soft-key is-active">' + modLabel(d.modulation) + '</span>' +
+        '</div>';
+    }
+
+    return (
+      '<div class="viavi__lcd ols__lcd ols__lcd--' + mode + '" data-ols-mode="' + mode +
+      '" aria-live="polite">' +
+      lcdHeader(displayModeLabel(mode)) +
+      inner +
+      soft +
       '</div>'
     );
   }
@@ -254,13 +365,22 @@
       : 'OLS-35 laser OFF');
   }
 
-  function toggleAutoLambda(d) {
+  function cycleDisplayMode(d) {
     if (!d.poweredOn) return;
-    d.autoLambda = !d.autoLambda;
+    var cur = normalizeDisplayMode(d);
+    var ix = DISPLAY_MODE_ORDER.indexOf(cur);
+    if (ix < 0) ix = 0;
+    d.displayMode = DISPLAY_MODE_ORDER[(ix + 1) % DISPLAY_MODE_ORDER.length];
+    d.autoLambda = d.displayMode === 'auto';
+    if (d.displayMode === 'single' && (cur === 'auto' || cur === 'multi')) {
+      d.modulation = 'CW';
+    }
     rebuildLayer();
     updateInspector();
     pushHistory();
-    setStatus('OLS-35 · ' + (d.autoLambda ? 'Auto-λ' : 'Single-λ'));
+    /* MODE is configuration-only — never enable laser TX */
+    if (d.laserOn) notifyOptical();
+    setStatus('OLS-35 · ' + displayModeLabel(d.displayMode) + ' (display only)');
   }
 
   function togglePower(d) {
@@ -309,7 +429,7 @@
       return;
     }
     if (btn.hasAttribute('data-ols-mode')) {
-      toggleAutoLambda(d);
+      cycleDisplayMode(d);
     }
   }
 
@@ -385,7 +505,7 @@
       '<button type="button" class="viavi__key ols__key ols__key--soft ols__key--hz" ' +
       'data-ols-hz title="Modulation / Hz" aria-label="Cycle modulation frequency">HZ</button>' +
       '<button type="button" class="viavi__key ols__key ols__key--large ols__key--mode" ' +
-      'data-ols-mode title="MODE — Single-λ / Auto-λ" aria-label="Mode settings">' +
+      'data-ols-mode title="MODE — Single-λ → Auto-λ → Multi-λ" aria-label="Cycle display mode">' +
       '<span class="ols__key-stack">' + gearIconSvg() + '<span class="ols__key-label">MODE</span></span>' +
       '</button>' +
       '<button type="button" class="viavi__key ols__key ols__key--large ols__key--laser' + laserOn + '" ' +
@@ -411,7 +531,8 @@
       var laser = d.laserOn ? ' is-laser-on' : '';
       var powered = d.poweredOn ? ' is-powered' : ' is-powered-off';
       var docked = d.docked ? ' is-docked' : '';
-      var portCls = 'viavi__port lab-ols-port' + (d.docked ? ' is-occupied' : '') +
+      var portCls = 'viavi__port lab-ols-port lab-ols-port--metal' +
+        (d.docked ? ' is-occupied' : '') +
         (d.laserOn ? ' is-emitting' : '');
       html +=
         '<div class="lab-ols lab-ols--viavi lab-ols--fixed' + sel + laser + powered + docked +
@@ -425,10 +546,25 @@
         '<div class="viavi__bumper viavi__bumper--br" aria-hidden="true"></div>' +
         '<div class="viavi__face" data-ols-drag="' + d.id + '">' +
         '<div class="' + portCls +
-        '" data-ols-port="' + d.id + '" data-ols-connector="SC" title="SC optical adapter · dock patch/pigtail here">' +
-        '<span class="viavi__adapter-base" aria-hidden="true"></span>' +
-        '<span class="viavi__adapter-knurl lab-ols__adapter-knurl" aria-hidden="true"></span>' +
-        '<span class="viavi__adapter-bore" aria-hidden="true"></span>' +
+        '" data-ols-port="' + d.id + '" data-ols-connector="SC" title="SC metallic adapter · dock patch/pigtail vertically into top slot">' +
+        '<span class="lab-ols__well" aria-hidden="true"></span>' +
+        '<span class="lab-ols__sc" aria-hidden="true">' +
+        '<span class="lab-ols__sc-block">' +
+        '<span class="lab-ols__sc-crown">' +
+        '<span class="lab-ols__adapter-slot lab-ols__adapter-knurl" data-ols-dock-slot="1"></span>' +
+        '</span>' +
+        '<span class="lab-ols__sc-face"></span>' +
+        '<span class="lab-ols__sc-side"></span>' +
+        '<span class="lab-ols__sc-notch"></span>' +
+        '</span>' +
+        '<span class="lab-ols__sc-flange">' +
+        '<span class="lab-ols__sc-step"></span>' +
+        '<span class="lab-ols__sc-plate">' +
+        '<i class="lab-ols__sc-screw lab-ols__sc-screw--l"></i>' +
+        '<i class="lab-ols__sc-screw lab-ols__sc-screw--r"></i>' +
+        '</span>' +
+        '</span>' +
+        '</span>' +
         '</div>' +
         '<div class="viavi__badge">VIAVI</div>' +
         screenMarkup(d) +
@@ -500,6 +636,7 @@
       modulation: 'CW',
       laserOn: false,
       poweredOn: true,
+      displayMode: 'single',
       autoLambda: false,
       docked: false,
     };
@@ -623,6 +760,7 @@
     card.hidden = true;
     detail.hidden = false;
     var pwr = outputDbm(d);
+    var mode = normalizeDisplayMode(d);
     detail.innerHTML =
       '<div class="lab-inspector__card">' +
       '<h2>Viavi OLS-35</h2>' +
@@ -630,8 +768,11 @@
       '<div class="lab-spl-sheet">' +
       '<div><span>Power</span><strong>' + (d.poweredOn ? 'ON' : 'OFF') + '</strong></div>' +
       '<div><span>Laser</span><strong>' + (d.laserOn ? 'ON' : 'OFF') + '</strong></div>' +
-      '<div><span>λ</span><strong>' + d.wavelength + ' nm</strong></div>' +
-      '<div><span>Hz</span><strong>' + modLabel(d.modulation) + '</strong></div>' +
+      '<div><span>Display</span><strong>' + displayModeLabel(mode) + '</strong></div>' +
+      '<div><span>λ</span><strong>' +
+      (mode === 'multi' ? '1310 / 1550 nm' : d.wavelength + ' nm') + '</strong></div>' +
+      '<div><span>Hz</span><strong>' +
+      (mode === 'single' ? modLabel(d.modulation) : '—') + '</strong></div>' +
       '<div><span>Output</span><strong>' +
       (pwr != null ? pwr.toFixed(2) + ' dBm' : '—') + '</strong></div>' +
       '<div><span>Dock</span><strong>' + (d.docked ? 'Occupied' : 'Open') + '</strong></div>' +
@@ -720,6 +861,7 @@
 
     if (global.FtthLab) {
       FtthLab.getOlsPortWorld = getPortWorld;
+      FtthLab.getOlsMagnetSnapPx = getMagnetSnapPx;
       FtthLab.getOlsTxSources = getOlsTxSources;
       FtthLab.refreshOlsDocks = refreshDockState;
       FtthLab.getOlsDevices = function () {
@@ -730,6 +872,7 @@
             y: d.y,
             wavelength: d.wavelength,
             modulation: d.modulation,
+            displayMode: normalizeDisplayMode(d),
             laserOn: !!d.laserOn,
             poweredOn: d.poweredOn !== false,
             docked: !!d.docked,

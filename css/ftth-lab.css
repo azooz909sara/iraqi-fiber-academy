@@ -3754,8 +3754,15 @@ body.lab-vfl-dragging {
   cursor: crosshair;
 }
 
-.lab-ols--viavi .viavi__adapter-knurl,
-.lab-ols--viavi .viavi__adapter-bore {
+/* Hide generic OLP-style knurl/bore on OLS — replaced by metallic SC housing */
+.lab-ols--viavi .lab-ols-port--metal > .viavi__adapter-base,
+.lab-ols--viavi .lab-ols-port--metal > .viavi__adapter-knurl,
+.lab-ols--viavi .lab-ols-port--metal > .viavi__adapter-bore {
+  display: none !important;
+}
+
+.lab-ols--viavi .lab-ols__sc,
+.lab-ols--viavi .lab-ols__adapter-slot {
   pointer-events: auto;
 }
 
@@ -3909,36 +3916,142 @@ body.lab-vfl-dragging {
   opacity: 0.55;
 }
 
-.lab-ols--viavi.is-laser-on .viavi__port.is-emitting .viavi__adapter-bore {
+.lab-ols--viavi .ols__lcd {
+  min-height: 108px;
+  gap: 2px;
+}
+
+.lab-ols--viavi .ols__lcd-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 0 0;
+}
+
+.lab-ols--viavi .ols__lcd .ols__wl {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Arial, sans-serif;
+  font-size: 1.28rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #000;
+  line-height: 1.05;
+}
+
+.lab-ols--viavi .ols__lcd-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px 2px;
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #111;
+  flex-shrink: 0;
+}
+
+.lab-ols--viavi .ols__lcd-meta--auto {
+  justify-content: flex-end;
+}
+
+.lab-ols--viavi .ols__mod-txt,
+.lab-ols--viavi .ols__pwr-txt {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.lab-ols--viavi .ols__lcd-stack {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 2px 1px 3px;
+}
+
+.lab-ols--viavi .ols__lcd-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.lab-ols--viavi .ols__wl--stack {
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.lab-ols--viavi .ols__lcd-soft {
+  display: grid;
+  gap: 3px;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.lab-ols--viavi .ols__lcd-soft--single,
+.lab-ols--viavi .ols__lcd-soft--multi {
+  grid-template-columns: 1fr 1fr;
+}
+
+.lab-ols--viavi .ols__lcd-soft--auto {
+  grid-template-columns: 1fr 1fr;
+}
+
+.lab-ols--viavi .ols__soft-empty {
+  visibility: hidden;
+  border-color: transparent;
+  background: transparent;
+}
+
+.lab-ols--viavi .ols__lcd-soft .viavi__soft-key.is-active {
+  font-weight: 800;
+}
+
+.lab-ols--viavi .ols__batt {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 3px;
+  gap: 0;
+}
+
+.lab-ols--viavi .ols__batt-body {
+  display: block;
+  width: 11px;
+  height: 6px;
+  border: 1px solid currentColor;
+  border-radius: 1px;
+  padding: 0.5px;
+  box-sizing: border-box;
+}
+
+.lab-ols--viavi .ols__batt-fill {
+  display: block;
+  width: 70%;
+  height: 100%;
+  background: currentColor;
+}
+
+.lab-ols--viavi .ols__batt-nip {
+  display: block;
+  width: 1.5px;
+  height: 3px;
+  background: currentColor;
+  border-radius: 0 1px 1px 0;
+}
+
+.lab-ols--viavi.is-laser-on .viavi__port.is-emitting .lab-ols__adapter-slot {
   box-shadow:
-    0 0 12px rgba(248, 113, 113, 0.85),
+    0 0 10px rgba(248, 113, 113, 0.9),
     0 0 4px rgba(251, 191, 36, 0.55),
-    inset 0 0 2px rgba(0, 0, 0, 0.35);
+    inset 0 0 3px rgba(0, 0, 0, 0.55);
 }
 
-.ols__lcd .ols__wl {
-  font-size: 1.35rem;
-  letter-spacing: 0.02em;
-}
-
-.ols__lcd .ols__batt {
-  margin-left: 4px;
-  font-size: 0.55rem;
-  letter-spacing: -0.08em;
-  opacity: 0.85;
-}
-
-.ols__lcd-soft {
-  grid-template-columns: repeat(3, 1fr);
-}
-
-.lab-ols-port {
+/* ── OLS-35 metallic square SC adapter (top port only) ── */
+.lab-ols-port.lab-ols-port--metal {
   position: absolute;
-  top: -18px;
+  top: -28px;
   left: 50%;
   transform: translateX(-50%);
-  width: 48px;
-  height: 34px;
+  width: 54px;
+  height: 46px;
   z-index: 6;
   background: transparent;
   border: none;
@@ -3947,20 +4060,207 @@ body.lab-vfl-dragging {
   pointer-events: auto;
 }
 
-.lab-ols-port.is-plug-target .viavi__adapter-knurl,
-.lab-ols-port.is-plug-target .viavi__adapter-bore {
+.lab-ols-port--metal .lab-ols__well {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 52px;
+  height: 20px;
+  border-radius: 3px 3px 2px 2px;
+  background: linear-gradient(180deg, #0a0a0a 0%, #1a1a1a 55%, #111 100%);
   box-shadow:
-    0 0 10px rgba(251, 191, 36, 0.8),
-    0 0 4px rgba(251, 191, 36, 0.45),
-    inset 0 0 2px rgba(0, 0, 0, 0.35);
+    inset 0 2px 4px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(75, 0, 130, 0.35);
+  pointer-events: none;
 }
 
-.lab-ols-port.is-plug-click .viavi__adapter-knurl,
-.lab-ols-port.is-plug-click .viavi__adapter-bore {
+.lab-ols-port--metal .lab-ols__sc {
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 40px;
+  display: block;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
+}
+
+.lab-ols-port--metal .lab-ols__sc-block {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 28px;
+  border-radius: 1px;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.07) 0 1px,
+      transparent 1px 2px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.06) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(100deg, #eceff3 0%, #b8c0c8 28%, #9aa3ad 52%, #d5dbe3 78%, #8e97a1 100%);
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.45),
+    inset -1px 0 0 rgba(30, 41, 59, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.lab-ols-port--metal .lab-ols__sc-crown {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 7px;
+  background: linear-gradient(180deg, #f3f4f6 0%, #a8b0b8 100%);
+  box-shadow: inset 0 -1px 0 rgba(15, 23, 42, 0.25);
+}
+
+.lab-ols-port--metal .lab-ols__adapter-slot {
+  position: absolute;
+  left: 50%;
+  top: 1px;
+  transform: translateX(-50%);
+  width: 8px;
+  height: 5px;
+  border-radius: 0.5px;
+  background: #0b0f14;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.9),
+    0 0 0 0.5px rgba(148, 163, 184, 0.35);
+  pointer-events: auto;
+}
+
+.lab-ols-port--metal .lab-ols__sc-face {
+  position: absolute;
+  inset: 7px 0 0 0;
+  background:
+    repeating-linear-gradient(
+      -18deg,
+      rgba(255, 255, 255, 0.05) 0 1px,
+      transparent 1px 3px
+    ),
+    linear-gradient(180deg, #c5ccd4 0%, #9aa3ad 45%, #7d8691 100%);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.lab-ols-port--metal .lab-ols__sc-side {
+  position: absolute;
+  top: 7px;
+  right: -3px;
+  width: 4px;
+  bottom: 0;
+  background: linear-gradient(180deg, #d1d5db 0%, #6b7280 100%);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.25);
+  pointer-events: none;
+}
+
+.lab-ols-port--metal .lab-ols__sc-notch {
+  position: absolute;
+  top: 14px;
+  right: -1px;
+  width: 5px;
+  height: 3px;
+  background: #4b5563;
+  box-shadow: inset 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.lab-ols-port--metal .lab-ols__sc-flange {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.lab-ols-port--metal .lab-ols__sc-step {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+  width: 22px;
+  height: 4px;
+  border-radius: 0.5px;
+  background: linear-gradient(180deg, #d1d5db, #8b949e);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 1px 1px rgba(0, 0, 0, 0.25);
+}
+
+.lab-ols-port--metal .lab-ols__sc-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  border-radius: 0.5px;
+  background: linear-gradient(180deg, #c0c7d0, #7a848f);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.lab-ols-port--metal .lab-ols__sc-screw {
+  position: absolute;
+  bottom: 1px;
+  width: 3.5px;
+  height: 3.5px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, #9ca3af, #374151 70%, #111827);
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.55);
+}
+
+.lab-ols-port--metal .lab-ols__sc-screw--l { left: 2px; }
+.lab-ols-port--metal .lab-ols__sc-screw--r { right: 2px; }
+
+.lab-ols-port--metal.is-plug-target .lab-ols__adapter-slot,
+.lab-ols-port.is-plug-target .lab-ols__adapter-slot {
+  box-shadow:
+    0 0 10px rgba(251, 191, 36, 0.9),
+    0 0 4px rgba(251, 191, 36, 0.5),
+    inset 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+.lab-ols-port--metal.is-plug-target .lab-ols__sc-block {
+  filter: drop-shadow(0 0 6px rgba(251, 191, 36, 0.55));
+  transition: filter 0.08s ease;
+}
+
+.lab-ols-port--metal.is-plug-click .lab-ols__adapter-slot,
+.lab-ols-port.is-plug-click .lab-ols__adapter-slot {
   box-shadow:
     0 0 14px rgba(251, 191, 36, 0.95),
     0 0 6px rgba(248, 113, 113, 0.55),
-    inset 0 0 2px rgba(0, 0, 0, 0.35);
+    inset 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+.lab-ols-port--metal.is-plug-click .lab-ols__sc {
+  animation: ols-magnet-click 0.22s ease-out;
+}
+
+@keyframes ols-magnet-click {
+  0% { transform: translateX(-50%) scale(1); }
+  40% { transform: translateX(-50%) scale(0.92); }
+  100% { transform: translateX(-50%) scale(1); }
+}
+
+.lab-ols-port--metal.is-occupied .lab-ols__adapter-slot {
+  background: #111827;
+  box-shadow:
+    inset 0 1px 3px rgba(0, 0, 0, 0.95),
+    0 0 4px rgba(148, 163, 184, 0.25);
 }
 
 .lab-tool__mark--ols {
