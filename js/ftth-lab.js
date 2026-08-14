@@ -826,6 +826,63 @@
     return p != null ? p : 2;
   }
 
+  /**
+   * OLP-38 photodiode responsivity R(λ) in A/W (InGaAs detector head).
+   * The meter senses photocurrent I = R(λ_light) · P, then divides by the
+   * responsivity of the λ the operator selected: P_shown = I / R(λ_set).
+   */
+  var PD_RESPONSIVITY_AW = [
+    { nm: 850, r: 0.32 },
+    { nm: 980, r: 0.55 },
+    { nm: 1310, r: 0.85 },
+    { nm: 1490, r: 0.92 },
+    { nm: 1550, r: 0.95 },
+    { nm: 1625, r: 0.88 },
+  ];
+
+  function photodiodeResponsivity(wavelengthNm) {
+    var x = Number(wavelengthNm);
+    var table = PD_RESPONSIVITY_AW;
+    if (!isFinite(x)) return table[3].r;
+    if (x <= table[0].nm) return table[0].r;
+    var last = table[table.length - 1];
+    if (x >= last.nm) return last.r;
+    var i;
+    for (i = 1; i < table.length; i++) {
+      var hi = table[i];
+      if (x > hi.nm) continue;
+      var lo = table[i - 1];
+      var t = (x - lo.nm) / (hi.nm - lo.nm);
+      return lo.r + (hi.r - lo.r) * t;
+    }
+    return last.r;
+  }
+
+  /** Photocurrent (amps) produced by P dBm of light at λ_light. */
+  function photodiodeCurrentA(dBm, wavelengthNm) {
+    if (dBm == null || !isFinite(dBm)) return null;
+    var watts = Math.pow(10, dBm / 10) / 1000;
+    return photodiodeResponsivity(wavelengthNm) * watts;
+  }
+
+  /**
+   * Calibration error (dB) from reading λ_light with the R(λ_set) table.
+   * Zero when the meter λ matches the incoming λ.
+   */
+  function responsivityErrorDb(lightNm, calibrationNm) {
+    var rLight = photodiodeResponsivity(lightNm);
+    var rCal = photodiodeResponsivity(calibrationNm);
+    if (!(rLight > 0) || !(rCal > 0)) return 0;
+    return 10 * Math.log10(rLight / rCal);
+  }
+
+  /** Power the meter prints: I / R(λ_set), expressed back in dBm. */
+  function calibratedReadingDbm(trueDbm, lightNm, calibrationNm) {
+    if (trueDbm == null || !isFinite(trueDbm)) return trueDbm;
+    var shown = trueDbm + responsivityErrorDb(lightNm, calibrationNm);
+    return Math.round(shown * 100) / 100;
+  }
+
   function portKeyFromAtt(att) {
     if (!att || !att.owner) return null;
     if (att.owner === 'olt') {
@@ -1366,6 +1423,10 @@
     probeOpticalAt: probeOpticalAt,
     measureOpticalAtKey: measureOpticalAtKey,
     measureOpticalSourcesAtKey: measureOpticalSourcesAtKey,
+    photodiodeResponsivity: photodiodeResponsivity,
+    photodiodeCurrentA: photodiodeCurrentA,
+    responsivityErrorDb: responsivityErrorDb,
+    calibratedReadingDbm: calibratedReadingDbm,
     getOpmWavelength: getOpmWavelengthNm,
     setOpmWavelength: setOpmWavelength,
     fiberSpanLossDb: fiberSpanLossDb,

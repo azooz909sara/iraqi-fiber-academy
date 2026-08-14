@@ -4066,7 +4066,8 @@ body.lab-vfl-dragging {
 .lab-opm .opm__lcd-meta {
   display: flex;
   align-items: baseline;
-  justify-content: flex-start;
+  justify-content: space-between;
+  gap: 4px;
   padding: 0 3px 2px;
   flex-shrink: 0;
 }
@@ -4107,6 +4108,31 @@ body.lab-vfl-dragging {
   font-size: 0.82rem;
   font-weight: 700;
   color: #000;
+}
+
+/* λ calibration mismatch — wrong responsivity table in use */
+.lab-opm .opm__cal-warn {
+  font-family: "Arial Narrow", "Helvetica Neue Condensed", Arial, sans-serif;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: #111;
+  border: 1px solid #111;
+  border-radius: 1px;
+  padding: 0 2px;
+  line-height: 1.25;
+  animation: opm-cal-blink 1.3s steps(1, end) infinite;
+}
+
+@keyframes opm-cal-blink {
+  0%,
+  65% {
+    opacity: 1;
+  }
+  66%,
+  100% {
+    opacity: 0.2;
+  }
 }
 
 .lab-opm .opm__batt {

@@ -218,14 +218,63 @@
       });
       rows.sort(function (a, b) { return a.wavelengthNm - b.wavelengthNm; });
     }
+    var lightNm = src.wavelengthNm || resolveWavelengthNm();
+    var trueDbm = isFinite(src.txDbm) ? src.txDbm : r.dBm;
+    var calNm = resolveWavelengthNm();
+    /* Single-λ reads through the operator-selected table; Auto/Multi self-tune */
+    var calError = mode === 'single' ? calibrationErrorDb(lightNm, calNm) : 0;
     return {
       mode: mode,
       modeLabel: src.modeLabel || 'Single-λ',
       modulation: src.modulation || 'CW',
-      wavelengthNm: src.wavelengthNm || resolveWavelengthNm(),
-      outputDbm: isFinite(src.txDbm) ? src.txDbm : r.dBm,
+      wavelengthNm: lightNm,
+      calibrationNm: calNm,
+      trueDbm: trueDbm,
+      outputDbm: mode === 'single' ? calibratedDbm(trueDbm, lightNm) : trueDbm,
+      calErrorDb: Math.round(calError * 100) / 100,
+      calMismatch: mode === 'single' && Math.abs(calError) >= 0.01,
+      photocurrentA: photocurrentA(trueDbm, lightNm),
       rows: rows,
     };
+  }
+
+  /* ── Photodiode calibration (I = R(λ)·P, shown P = I / R(λ_set)) ── */
+
+  function responsivityAt(nm) {
+    if (global.FtthLab && typeof FtthLab.photodiodeResponsivity === 'function') {
+      return FtthLab.photodiodeResponsivity(nm);
+    }
+    return 1;
+  }
+
+  function calibrationErrorDb(lightNm, calNm) {
+    if (global.FtthLab && typeof FtthLab.responsivityErrorDb === 'function') {
+      return FtthLab.responsivityErrorDb(lightNm, calNm);
+    }
+    return 0;
+  }
+
+  /** Value the meter prints for light at lightNm while calibrated to its own λ. */
+  function calibratedDbm(trueDbm, lightNm) {
+    if (trueDbm == null || !isFinite(trueDbm)) return trueDbm;
+    if (global.FtthLab && typeof FtthLab.calibratedReadingDbm === 'function') {
+      return FtthLab.calibratedReadingDbm(trueDbm, lightNm, resolveWavelengthNm());
+    }
+    return trueDbm;
+  }
+
+  function photocurrentA(trueDbm, lightNm) {
+    if (global.FtthLab && typeof FtthLab.photodiodeCurrentA === 'function') {
+      return FtthLab.photodiodeCurrentA(trueDbm, lightNm);
+    }
+    return null;
+  }
+
+  function formatCurrent(amps) {
+    if (amps == null || !isFinite(amps)) return '—';
+    if (amps >= 1e-3) return (amps * 1e3).toFixed(3) + ' mA';
+    if (amps >= 1e-6) return (amps * 1e6).toFixed(2) + ' µA';
+    return (amps * 1e9).toFixed(1) + ' nA';
   }
 
   /** Fiber graph snapshots expose attachments directly; live models wrap them. */
@@ -448,15 +497,22 @@
       var modTxt = mirror.modulation === 'CW'
         ? 'CW'
         : String(mirror.modulation) + ' Hz';
+      var calWarn = mirror.calMismatch
+        ? '<span class="opm__cal-warn" title="λ calibration mismatch · ' +
+          mirror.wavelengthNm + ' nm light read on the ' + mirror.calibrationNm +
+          ' nm table">CAL</span>'
+        : '';
       return (
-        '<div class="viavi__lcd opm__lcd opm__lcd--single" aria-live="polite">' +
+        '<div class="viavi__lcd opm__lcd opm__lcd--single' +
+        (mirror.calMismatch ? ' is-cal-error' : '') + '" aria-live="polite">' +
         lcdHeaderMarkup() +
         '<div class="viavi__lcd-main is-live">' +
         '<span class="viavi__lcd-value">' + main + '</span>' +
         (unit ? '<span class="viavi__lcd-unit">' + unit + '</span>' : '') +
         '</div>' +
-        '<div class="opm__lcd-meta"><span class="opm__meta-left">' + modTxt + '</span></div>' +
-        softKeysMarkup(mirror.wavelengthNm + ' nm', softUnit) +
+        '<div class="opm__lcd-meta"><span class="opm__meta-left">' + modTxt + '</span>' +
+        calWarn + '</div>' +
+        softKeysMarkup(mirror.calibrationNm + ' nm', softUnit) +
         '</div>'
       );
     }
@@ -788,10 +844,22 @@
       (r && isFinite(r.dBm) ? formatDbm(r.dBm) + ' dBm' : (r && r.label === 'UNCONNECTED' ? 'SIGNAL LOW' : (r && r.label) || 'SIGNAL LOW')) +
       '</strong></div>' +
       '<div><span>λ</span><strong>' + resolveWavelengthNm() + ' nm</strong></div>' +
+      '<div><span>R(λ)</span><strong>' +
+      responsivityAt(resolveWavelengthNm()).toFixed(2) + ' A/W</strong></div>' +
       (function () {
         var m = olsMirrorState(d);
         if (!m) return '';
-        return '<div><span>TX link</span><strong>OLS-35 · ' + m.modeLabel + '</strong></div>';
+        var rows =
+          '<div><span>TX link</span><strong>OLS-35 · ' + m.modeLabel + '</strong></div>' +
+          '<div><span>Photocurrent</span><strong>' + formatCurrent(m.photocurrentA) +
+          '</strong></div>';
+        if (m.calMismatch) {
+          rows +=
+            '<div><span>Cal error</span><strong>' +
+            (m.calErrorDb >= 0 ? '+' : '') + m.calErrorDb.toFixed(2) + ' dB · ' +
+            m.wavelengthNm + ' nm light on ' + m.calibrationNm + ' nm table</strong></div>';
+        }
+        return rows;
       })() +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id + '">Remove OLP-38</button>' +
