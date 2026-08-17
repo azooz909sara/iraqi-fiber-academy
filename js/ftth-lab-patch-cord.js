@@ -153,6 +153,7 @@
           ? normalizeLengthMeters(pxToMeters(c.fixedLength))
           : 3;
       }
+      if (!c.spoolWrap || typeof c.spoolWrap !== 'object') c.spoolWrap = {};
     });
     rebuildLayer();
     updateInspector();
@@ -280,6 +281,7 @@
       lengthMode: 'free', /* 'free' | 'meter' */
       lengthMeters: 3, /* Meter Mode target length */
       relocating: false, /* true while moving a plugged end to a new port */
+      spoolWrap: {}, /* { [spoolId]: { side: 1|-1 } } locked wrap orientation */
     };
     applyDefaultFreeSpawnPose(cord, pos.x, pos.y);
     cords.push(cord);
@@ -1158,6 +1160,7 @@
       lengthMode: 'free',
       lengthMeters: 3,
       relocating: false,
+      spoolWrap: {},
     };
     cords.push(cord);
     attachEnd(cord, 'A', hit);
@@ -2984,6 +2987,7 @@
     for (var it = 0; it < 3; it++) {
       solveRopeConstraints(rope, true);
     }
+    collideRopeWithSpools(rope);
   }
 
   function solveRopeConstraints(rope, protectGrab) {
@@ -3043,6 +3047,7 @@
     for (var it = 0; it < PHYS_STRUCT_ITERS; it++) {
       solveRopeConstraints(rope, false);
     }
+    collideRopeWithSpools(rope);
   }
 
   function ropeEnergy(rope) {
@@ -3512,12 +3517,306 @@
 
   /** Public render entry — elastic gravity Bezier (no rigid stubs / cosh solver). */
   function buildContinuousCatenaryPath(cord) {
-    return buildElasticBezierPath(cord);
+    return cordCablePath(cord);
   }
 
-  /** Public render entry — always continuous gravitational cable. */
+  var SPOOL_HERMITE_SAMPLES = 60;
+
+  function listSpoolObstacles() {
+    if (!global.FtthLab || typeof FtthLab.listFiberSpools !== 'function') return [];
+    var list = FtthLab.listFiberSpools() || [];
+    var out = [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var c = FtthLab.fiberSpoolCenter && FtthLab.fiberSpoolCenter(list[i]);
+      if (!c) continue;
+      out.push({ id: list[i].id, x: c.x, y: c.y, r: c.r });
+    }
+    return out;
+  }
+
+  function pushPointOutOfSpools(p, obs) {
+    var q = { x: p.x, y: p.y };
+    var iter;
+    var i;
+    for (iter = 0; iter < 4; iter++) {
+      var moved = false;
+      for (i = 0; i < obs.length; i++) {
+        var s = obs[i];
+        var dx = q.x - s.x;
+        var dy = q.y - s.y;
+        var d = Math.sqrt(dx * dx + dy * dy);
+        if (d >= s.r) continue;
+        if (d < 1e-6) {
+          q.x = s.x + s.r;
+          q.y = s.y;
+        } else {
+          q.x = s.x + (dx / d) * s.r;
+          q.y = s.y + (dy / d) * s.r;
+        }
+        moved = true;
+      }
+      if (!moved) break;
+    }
+    return q;
+  }
+
+  function collideRopeWithSpools(rope) {
+    if (!rope || !rope.particles) return;
+    var obs = listSpoolObstacles();
+    if (!obs.length) return;
+    var i;
+    for (i = 1; i < rope.particles.length - 1; i++) {
+      var q = pushPointOutOfSpools(rope.particles[i], obs);
+      rope.particles[i].x = q.x;
+      rope.particles[i].y = q.y;
+    }
+  }
+
+  function sampleCubicBezier(p0, c1, c2, p1, n) {
+    var pts = [];
+    var i;
+    for (i = 0; i <= n; i++) {
+      var t = i / n;
+      var u = 1 - t;
+      pts.push({
+        x: u * u * u * p0.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * p1.x,
+        y: u * u * u * p0.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * p1.y
+      });
+    }
+    return pts;
+  }
+
+  /** Dense samples of the native Hermite jacket (does not mutate Bezier construction). */
+  function sampleElasticHermitePoints(cord, count) {
+    var tipA = bootAnchor(cord, 'A');
+    var tipB = bootAnchor(cord, 'B');
+    var dA = bootOutDir(getEndRotation(cord, 'A'));
+    var dB = bootOutDir(getEndRotation(cord, 'B'));
+    var tA = unitVec(dA.x, dA.y);
+    var tB = unitVec(dB.x, dB.y);
+    var chord = dist2(tipA.x, tipA.y, tipB.x, tipB.y) || 1;
+    var L = resolveElasticLengthPx(cord, tipA, tipB);
+    var sag = computeElasticSagPx(chord, L);
+    var belly = {
+      x: (tipA.x + tipB.x) * 0.5,
+      y: (tipA.y + tipB.y) * 0.5 + sag
+    };
+    var toBellyA = unitVec(belly.x - tipA.x, belly.y - tipA.y);
+    var fromBellyB = unitVec(tipB.x - belly.x, tipB.y - belly.y);
+    var leaveA = blendUnitTan(toBellyA, tA, 0.28);
+    var arriveB = blendUnitTan(fromBellyB, unitVec(-tB.x, -tB.y), 0.28);
+    var along = unitVec(tipB.x - tipA.x, tipB.y - tipA.y);
+    if (along.x * along.x + along.y * along.y < 1e-8) along = { x: 1, y: 0 };
+    var lenA = dist2(tipA.x, tipA.y, belly.x, belly.y) || 1;
+    var lenB = dist2(belly.x, belly.y, tipB.x, tipB.y) || 1;
+    var hA0 = Math.max(14, Math.min(lenA * 0.42, chord * 0.35 + 18));
+    var hA1 = Math.max(14, Math.min(lenA * 0.36, chord * 0.32 + 16));
+    var hB0 = Math.max(14, Math.min(lenB * 0.36, chord * 0.32 + 16));
+    var hB1 = Math.max(14, Math.min(lenB * 0.42, chord * 0.35 + 18));
+    var c1a = { x: tipA.x + leaveA.x * hA0, y: tipA.y + leaveA.y * hA0 };
+    var c2a = { x: belly.x - along.x * hA1, y: belly.y - along.y * hA1 };
+    var c1b = { x: belly.x + along.x * hB0, y: belly.y + along.y * hB0 };
+    var c2b = { x: tipB.x - arriveB.x * hB1, y: tipB.y - arriveB.y * hB1 };
+    var half = Math.max(8, Math.round((count || SPOOL_HERMITE_SAMPLES) / 2));
+    var a = sampleCubicBezier(tipA, c1a, c2a, belly, half);
+    var b = sampleCubicBezier(belly, c1b, c2b, tipB, half);
+    return a.concat(b.slice(1));
+  }
+
+  function wrapAngleDelta(a0, a1) {
+    var d = a1 - a0;
+    while (d > Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  function wrapSweepLocked(angIn, angOut, side) {
+    var da = wrapAngleDelta(angIn, angOut);
+    if (Math.abs(da) < 0.05) return da;
+    if (side > 0 && da < 0) da += Math.PI * 2;
+    if (side < 0 && da > 0) da -= Math.PI * 2;
+    return da;
+  }
+
+  function polarOnSpool(s, ang) {
+    return { x: s.x + s.r * Math.cos(ang), y: s.y + s.r * Math.sin(ang) };
+  }
+
+  function closestOnSeg(ax, ay, bx, by, px, py) {
+    var abx = bx - ax;
+    var aby = by - ay;
+    var den = abx * abx + aby * aby;
+    var t = den < 1e-10 ? 0 : ((px - ax) * abx + (py - ay) * aby) / den;
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return { x: ax + abx * t, y: ay + aby * t, t: t };
+  }
+
+  function segmentCutsSpool(a, b, s) {
+    var hit = closestOnSeg(a.x, a.y, b.x, b.y, s.x, s.y);
+    return Math.hypot(hit.x - s.x, hit.y - s.y) < s.r;
+  }
+
+  function inferWrapSide(pts, i0, i1, s) {
+    var bestI = i0;
+    var bestD = 1e9;
+    var i;
+    for (i = i0; i <= i1; i++) {
+      var d = Math.hypot(pts[i].x - s.x, pts[i].y - s.y);
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    var p = pts[bestI];
+    var prev = pts[Math.max(i0, bestI - 1)];
+    var next = pts[Math.min(i1, bestI + 1)];
+    var tx = next.x - prev.x;
+    var ty = next.y - prev.y;
+    var rx = s.x - p.x;
+    var ry = s.y - p.y;
+    var cross = tx * ry - ty * rx;
+    return cross >= 0 ? 1 : -1;
+  }
+
+  function ensureSpoolWrapSide(cord, spoolId, inferred) {
+    if (!cord.spoolWrap || typeof cord.spoolWrap !== 'object') cord.spoolWrap = {};
+    var prev = cord.spoolWrap[spoolId];
+    if (prev && (prev.side === 1 || prev.side === -1)) return prev.side;
+    cord.spoolWrap[spoolId] = { side: inferred };
+    return inferred;
+  }
+
+  function sampleLockedArc(s, angIn, sweep) {
+    var abs = Math.abs(sweep);
+    var steps = Math.max(6, Math.ceil(abs / 0.12));
+    var out = [];
+    var i;
+    for (i = 0; i <= steps; i++) {
+      out.push(polarOnSpool(s, angIn + sweep * (i / steps)));
+    }
+    return out;
+  }
+
+  function pickTangentAng(px, py, cx, cy, r, ccw) {
+    var dx = px - cx;
+    var dy = py - cy;
+    var d = Math.hypot(dx, dy) || 1;
+    var base = Math.atan2(dy, dx);
+    if (d <= r + 0.6) return base;
+    var phi = Math.acos(Math.max(-1, Math.min(1, r / d)));
+    return ccw ? base + phi : base - phi;
+  }
+
+  function tautHang(a, b, obs) {
+    var chord = dist2(a.x, a.y, b.x, b.y);
+    if (chord < 4) return [a, b];
+    var sag = Math.min(12, chord * 0.04);
+    var n = Math.max(3, Math.min(7, Math.ceil(chord / 36)));
+    var out = [a];
+    var i;
+    for (i = 1; i < n; i++) {
+      var t = i / n;
+      var p = {
+        x: a.x + (b.x - a.x) * t,
+        y: a.y + (b.y - a.y) * t + sag * 4 * t * (1 - t)
+      };
+      out.push(pushPointOutOfSpools(p, obs));
+    }
+    out.push(b);
+    return out;
+  }
+
+  /**
+   * Persistent wrap: locked rim from B-side entry to A-side exit tangent.
+   * Contact is not dropped when the unconstrained Hermite misses the disk.
+   */
+  function splicePersistentWrap(pts, s, wrap, obs) {
+    if (!pts || pts.length < 2) return pts;
+    var A = pts[0];
+    var B = pts[pts.length - 1];
+    var side = wrap.side;
+    var angA = pickTangentAng(A.x, A.y, s.x, s.y, s.r, side > 0);
+    var angB = typeof wrap.angB === 'number'
+      ? wrap.angB
+      : pickTangentAng(B.x, B.y, s.x, s.y, s.r, side < 0);
+    wrap.angB = angB;
+    var sweep = wrapSweepLocked(angA, angB, side);
+    if (Math.abs(sweep) < 0.18) {
+      sweep = side >= 0 ? 0.18 : -0.18;
+    }
+    var tA = polarOnSpool(s, angA);
+    var tB = polarOnSpool(s, angB);
+    var arc = sampleLockedArc(s, angA, sweep);
+    var hangA = tautHang(A, tA, obs);
+    var hangB = tautHang(tB, B, obs);
+    return hangA.concat(arc.slice(1, -1)).concat(hangB);
+  }
+
+  function hermiteHitsSpool(pts, s) {
+    var i;
+    for (i = 0; i < pts.length; i++) {
+      if (Math.hypot(pts[i].x - s.x, pts[i].y - s.y) < s.r) return { first: i, last: i };
+      if (i > 0 && segmentCutsSpool(pts[i - 1], pts[i], s)) {
+        return { first: i - 1, last: i };
+      }
+    }
+    var bestI = 0;
+    var bestD = 1e9;
+    for (i = 0; i < pts.length; i++) {
+      var d = Math.hypot(pts[i].x - s.x, pts[i].y - s.y);
+      if (d < bestD) {
+        bestD = d;
+        bestI = i;
+      }
+    }
+    return { first: bestI, last: bestI, miss: true, dist: bestD };
+  }
+
+  function deflectHermiteSamplesBySpools(pts, cord) {
+    var obs = listSpoolObstacles();
+    if (!obs.length || !pts || !pts.length) return pts;
+    if (!cord.spoolWrap || typeof cord.spoolWrap !== 'object') cord.spoolWrap = {};
+    var visits = [];
+    var j;
+    for (j = 0; j < obs.length; j++) {
+      var s = obs[j];
+      var hit = hermiteHitsSpool(pts, s);
+      var locked = cord.spoolWrap[s.id];
+      if (hit.miss && !locked) continue;
+      if (!locked && !hit.miss) {
+        var inferred = inferWrapSide(pts, hit.first, Math.max(hit.first, hit.last), s);
+        ensureSpoolWrapSide(cord, s.id, inferred);
+        locked = cord.spoolWrap[s.id];
+      }
+      if (!locked) continue;
+      visits.push({ spool: s, t: hit.first, wrap: locked });
+    }
+    visits.sort(function (a, b) { return a.t - b.t; });
+    var out = pts;
+    for (j = 0; j < visits.length; j++) {
+      out = splicePersistentWrap(out, visits[j].spool, visits[j].wrap, obs);
+    }
+    return out;
+  }
+
+  /**
+   * Native Hermite jacket, then sample-deflect around every spool, then Catmull-Rom.
+   * Unchanged Bezier when no spools are placed.
+   */
   function cordCablePath(cord) {
-    return buildElasticBezierPath(cord);
+    var obs = listSpoolObstacles();
+    if (!obs.length) return buildElasticBezierPath(cord);
+    var pts = deflectHermiteSamplesBySpools(
+      sampleElasticHermitePoints(cord, SPOOL_HERMITE_SAMPLES),
+      cord
+    );
+    if (!pts || pts.length < 2) return buildElasticBezierPath(cord);
+    if (!cord.spoolWrap || !Object.keys(cord.spoolWrap).length) {
+      return buildElasticBezierPath(cord);
+    }
+    return 'M ' + pts[0].x + ' ' + pts[0].y + catmullRomCubicCommands(pts);
   }
 
   /** @deprecated alias — elastic Bezier. */
@@ -4256,6 +4555,10 @@
    */
   function onLayoutChange(payload) {
     if (!layer) return;
+    if (payload && payload.source === 'spool') {
+      cords.forEach(function (c) { updateFiberPath(c); });
+      if (payload.live) return;
+    }
     var onlyCoupler = payload && payload.source === 'coupler' ? payload.couplerId : null;
     var onlyVfl = payload && payload.source === 'vfl' ? payload.vflId : null;
 
