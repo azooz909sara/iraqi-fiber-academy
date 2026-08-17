@@ -281,7 +281,7 @@
       lengthMode: 'free', /* 'free' | 'meter' */
       lengthMeters: 3, /* Meter Mode target length */
       relocating: false, /* true while moving a plugged end to a new port */
-      spoolWrap: {}, /* { [spoolId]: { side: 1|-1 } } locked wrap orientation */
+      spoolWrap: {}, /* { [spoolId]: { side, totalAngle, lastAngle } } unwrapped coil */
     };
     applyDefaultFreeSpawnPose(cord, pos.x, pos.y);
     cords.push(cord);
@@ -3684,19 +3684,131 @@
     if (!cord.spoolWrap || typeof cord.spoolWrap !== 'object') cord.spoolWrap = {};
     var prev = cord.spoolWrap[spoolId];
     if (prev && (prev.side === 1 || prev.side === -1)) return prev.side;
-    cord.spoolWrap[spoolId] = { side: inferred };
+    cord.spoolWrap[spoolId] = {
+      side: inferred,
+      totalAngle: 0,
+      lastAngle: null,
+      totalAngleSeeded: false
+    };
     return inferred;
   }
 
-  function sampleLockedArc(s, angIn, sweep) {
+  /** Integrate connector polar angle around each locked spool. Never wrap totalAngle. */
+  function integrateSpoolWrapOnDrag(cord, wx, wy) {
+    if (!cord || !cord.spoolWrap) return;
+    var obs = listSpoolObstacles();
+    var i;
+    for (i = 0; i < obs.length; i++) {
+      var s = obs[i];
+      var w = cord.spoolWrap[s.id];
+      if (!w) continue;
+      var ang = Math.atan2(wy - s.y, wx - s.x);
+      if (typeof w.lastAngle !== 'number') {
+        w.lastAngle = ang;
+        continue;
+      }
+      var dTheta = wrapAngleDelta(w.lastAngle, ang);
+      w.totalAngle = (typeof w.totalAngle === 'number' ? w.totalAngle : 0) + dTheta;
+      w.lastAngle = ang;
+    }
+  }
+
+  /**
+   * Principal tangent arc plus extra full turns from unwrapped totalAngle.
+   * Stored totalAngle stays in R; only the step dTheta is a principal delta.
+   */
+  function unwrappedCoilSweep(wrap, angIn, angOut, side) {
+    var principal = wrapSweepLocked(angIn, angOut, side);
+    if (Math.abs(principal) < 0.18) {
+      principal = side >= 0 ? 0.18 : -0.18;
+    }
+    if (!wrap.totalAngleSeeded) {
+      wrap.totalAngle = principal;
+      wrap.totalAngleSeeded = true;
+    }
+    var twoPi = Math.PI * 2;
+    var extra = Math.round((wrap.totalAngle - principal) / twoPi);
+    return principal + extra * twoPi;
+  }
+
+  var COIL_DTHETA = 0.1;
+  var COIL_LAYER_PX = 2;
+
+  /** Archimedes stack: r = s.r + turnIndex * 2px, sampled at ~0.1 rad. */
+  function sampleArchimedeanCoil(s, angIn, sweep) {
     var abs = Math.abs(sweep);
-    var steps = Math.max(6, Math.ceil(abs / 0.12));
+    var steps = Math.max(8, Math.ceil(abs / COIL_DTHETA));
+    var twoPi = Math.PI * 2;
     var out = [];
     var i;
     for (i = 0; i <= steps; i++) {
-      out.push(polarOnSpool(s, angIn + sweep * (i / steps)));
+      var t = i / steps;
+      var ang = angIn + sweep * t;
+      var turnIndex = Math.floor((abs * t + 1e-9) / twoPi);
+      var r = s.r + turnIndex * COIL_LAYER_PX;
+      out.push({
+        x: s.x + r * Math.cos(ang),
+        y: s.y + r * Math.sin(ang),
+        onDrum: true
+      });
     }
     return out;
+  }
+
+  function localSpanAroundSpool(pts, s) {
+    var n = pts.length;
+    var closest = 0;
+    var bestD = 1e9;
+    var i;
+    for (i = 0; i < n; i++) {
+      var d = Math.hypot(pts[i].x - s.x, pts[i].y - s.y);
+      if (d < bestD) {
+        bestD = d;
+        closest = i;
+      }
+    }
+    var margin = s.r + 32;
+    var i0 = closest;
+    while (i0 > 0 && Math.hypot(pts[i0].x - s.x, pts[i0].y - s.y) < margin) i0 -= 1;
+    var i1 = closest;
+    while (i1 < n - 1 && Math.hypot(pts[i1].x - s.x, pts[i1].y - s.y) < margin) i1 += 1;
+    return { i0: i0, i1: i1, dist: bestD };
+  }
+
+  /** Free-lead cubics + polyline coil so Catmull handles never cross the drum. */
+  function jacketPathFromWrapPts(pts) {
+    if (!pts || pts.length < 2) return '';
+    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var hang = [];
+    var i;
+
+    function flushHang() {
+      if (hang.length < 2) {
+        hang = [];
+        return;
+      }
+      if (hang.length === 2) {
+        d += ' L ' + hang[1].x + ' ' + hang[1].y;
+      } else {
+        d += catmullRomCubicCommands(hang);
+      }
+      hang = [];
+    }
+
+    for (i = 1; i < pts.length; i++) {
+      var prev = pts[i - 1];
+      var cur = pts[i];
+      if (prev.onDrum && cur.onDrum) {
+        if (hang.length >= 2) flushHang();
+        hang = [];
+        d += ' L ' + cur.x + ' ' + cur.y;
+      } else {
+        if (!hang.length) hang.push(prev);
+        hang.push(cur);
+      }
+    }
+    if (hang.length >= 2) flushHang();
+    return d;
   }
 
   function pickTangentAng(px, py, cx, cy, r, ccw) {
@@ -3729,29 +3841,36 @@
   }
 
   /**
-   * Persistent wrap: locked rim from B-side entry to A-side exit tangent.
-   * Contact is not dropped when the unconstrained Hermite misses the disk.
+   * Local coil on the drum (Archimedes) plus tautHang leads only.
+   * Extra revolutions come from unwrapped wrap.totalAngle, not atan2 folding.
    */
   function splicePersistentWrap(pts, s, wrap, obs) {
     if (!pts || pts.length < 2) return pts;
-    var A = pts[0];
-    var B = pts[pts.length - 1];
+    var span = localSpanAroundSpool(pts, s);
+    if (span.i0 === span.i1 && span.dist > s.r + 8) {
+      span.i0 = 0;
+      span.i1 = pts.length - 1;
+    }
+    var P0 = pts[span.i0];
+    var P1 = pts[span.i1];
     var side = wrap.side;
-    var angA = pickTangentAng(A.x, A.y, s.x, s.y, s.r, side > 0);
+    var angA = pickTangentAng(P0.x, P0.y, s.x, s.y, s.r, side > 0);
     var angB = typeof wrap.angB === 'number'
       ? wrap.angB
-      : pickTangentAng(B.x, B.y, s.x, s.y, s.r, side < 0);
+      : pickTangentAng(P1.x, P1.y, s.x, s.y, s.r, side < 0);
     wrap.angB = angB;
-    var sweep = wrapSweepLocked(angA, angB, side);
-    if (Math.abs(sweep) < 0.18) {
-      sweep = side >= 0 ? 0.18 : -0.18;
-    }
-    var tA = polarOnSpool(s, angA);
-    var tB = polarOnSpool(s, angB);
-    var arc = sampleLockedArc(s, angA, sweep);
-    var hangA = tautHang(A, tA, obs);
-    var hangB = tautHang(tB, B, obs);
-    return hangA.concat(arc.slice(1, -1)).concat(hangB);
+    var sweep = unwrappedCoilSweep(wrap, angB, angA, side);
+    var coilInnerToOuter = sampleArchimedeanCoil(s, angB, sweep);
+    if (coilInnerToOuter.length < 2) return pts;
+    var coil = coilInnerToOuter.slice().reverse();
+    var tOuter = coil[0];
+    var tInner = coil[coil.length - 1];
+    var hangA = tautHang(P0, tOuter, obs);
+    var hangB = tautHang(tInner, P1, obs);
+    var mid = hangA.concat(coil.slice(1, -1)).concat(hangB);
+    var head = pts.slice(0, span.i0);
+    var tail = pts.slice(span.i1 + 1);
+    return head.concat(mid).concat(tail);
   }
 
   function hermiteHitsSpool(pts, s) {
@@ -3816,7 +3935,7 @@
     if (!cord.spoolWrap || !Object.keys(cord.spoolWrap).length) {
       return buildElasticBezierPath(cord);
     }
-    return 'M ' + pts[0].x + ' ' + pts[0].y + catmullRomCubicCommands(pts);
+    return jacketPathFromWrapPts(pts);
   }
 
   /** @deprecated alias — elastic Bezier. */
@@ -4146,6 +4265,7 @@
           }
 
           setEndWorld(c, end, mouse.x, mouse.y);
+          integrateSpoolWrapOnDrag(c, mouse.x, mouse.y);
 
           if (c.relocating && typeof c.fixedLength === 'number' &&
               c[endKey(otherEnd)].attached) {
