@@ -34,9 +34,11 @@
     return document.getElementById(id);
   }
 
-  function setStatus(msg) {
+  function setStatus(msg, force) {
     var el = $('lab-status');
-    if (el) el.textContent = msg || '';
+    if (!el) return;
+    if (!force && selectionOwner === 'opm') return;
+    el.textContent = msg || '';
   }
 
   /* ─── Public tool registry (plug-and-play) ─── */
@@ -398,7 +400,7 @@
     claimToolboxTool(null);
     selectionOwner = null;
     resetInspectorIdle();
-    setStatus('Selection cleared');
+    setStatus('Selection cleared', true);
   }
 
   function deleteSelected() {
@@ -406,7 +408,7 @@
         typeof state.tools[selectionOwner].deleteSelected === 'function') {
       try {
         if (state.tools[selectionOwner].deleteSelected()) {
-          setStatus('Deleted');
+          setStatus('Deleted', true);
           return true;
         }
       } catch (err) {
@@ -419,7 +421,7 @@
       if (tool && typeof tool.deleteSelected === 'function') {
         try {
           if (tool.deleteSelected()) {
-            setStatus('Deleted');
+            setStatus('Deleted', true);
             return true;
           }
         } catch (err) {
@@ -771,9 +773,11 @@
   var OPM_NOISE_DBM = -70;
   var COUPLER_PASS_LOSS_DB = 0.2;
   var PIGTAIL_CONN_LOSS_DB = 0.2;
-  var PIGTAIL_MISMATCH_DB = 0.75;
+  var PIGTAIL_MISMATCH_DB = 3.0;
+  var MATCHED_CONNECTOR_DB = 0.2;
+  var FUSION_SPLICE_DB = 0.10;
   var opmRefreshHook = null;
-  var opmWavelengthNm = 1490;
+  var opmWavelengthNm = 1310;
 
   /**
    * Convert logarithmic optical power to linear milliwatts.
@@ -947,13 +951,216 @@
     return portKeyFromAtt(hit);
   }
 
-  function addUndirectedEdge(adj, a, b, lossDb) {
+  function emptyLossParts() {
+    return {
+      splitter: 0,
+      splice: 0,
+      connector: 0,
+      coupler: 0,
+      fiber: 0,
+      bend: 0,
+      mismatch: 0,
+    };
+  }
+
+  function cloneLossParts(p) {
+    p = p || emptyLossParts();
+    return {
+      splitter: p.splitter || 0,
+      splice: p.splice || 0,
+      connector: p.connector || 0,
+      coupler: p.coupler || 0,
+      fiber: p.fiber || 0,
+      bend: p.bend || 0,
+      mismatch: p.mismatch || 0,
+    };
+  }
+
+  function sumLossParts(base, extra) {
+    var o = cloneLossParts(base);
+    extra = extra || emptyLossParts();
+    o.splitter += extra.splitter || 0;
+    o.splice += extra.splice || 0;
+    o.connector += extra.connector || 0;
+    o.coupler += extra.coupler || 0;
+    o.fiber += extra.fiber || 0;
+    o.bend += extra.bend || 0;
+    o.mismatch += extra.mismatch || 0;
+    return o;
+  }
+
+  function totalLossParts(p) {
+    p = p || emptyLossParts();
+    return (p.splitter || 0) + (p.splice || 0) + (p.connector || 0) +
+      (p.coupler || 0) + (p.fiber || 0) + (p.bend || 0) + (p.mismatch || 0);
+  }
+
+  function round2(n) {
+    return Math.round(n * 100) / 100;
+  }
+
+  function scaleLossParts(p, s) {
+    p = cloneLossParts(p);
+    p.splitter *= s;
+    p.splice *= s;
+    p.connector *= s;
+    p.coupler *= s;
+    p.fiber *= s;
+    p.bend *= s;
+    p.mismatch *= s;
+    return p;
+  }
+
+  function polishKind(side) {
+    if (!side) return 'UPC';
+    var p = String(side.polish || '').toUpperCase();
+    return p === 'APC' ? 'APC' : 'UPC';
+  }
+
+  function plcRatioLabel(type) {
+    var t = String(type || '');
+    var m = /^(\d+)x(\d+)$/i.exec(t);
+    if (m) return m[1] + ':' + m[2] + ' PLC';
+    return t ? t + ' PLC' : 'PLC';
+  }
+
+  function pcordLossParts(c, wavelengthNm) {
+    var parts = emptyLossParts();
+    var ka = portKeyFromAtt(c.sideA);
+    var kb = portKeyFromAtt(c.sideB);
+    if (ka && kb) parts.connector = MATCHED_CONNECTOR_DB * 2;
+    if (c.sideA && c.sideA.mismatch) parts.mismatch += PIGTAIL_MISMATCH_DB;
+    if (c.sideB && c.sideB.mismatch) parts.mismatch += PIGTAIL_MISMATCH_DB;
+    parts.fiber = fiberSpanLossDb(c.fiberLengthM, wavelengthNm);
+    if (c.bendJigId && global.FtthLab && typeof FtthLab.macroBendLossForJig === 'function') {
+      parts.bend = Math.max(0, Number(FtthLab.macroBendLossForJig(c.bendJigId)) || 0);
+    }
+    return parts;
+  }
+
+  function keyKind(k) {
+    if (!k) return '';
+    if (k.indexOf('spl:') === 0) return 'spl';
+    if (k.indexOf('cpl:') === 0) return 'cpl';
+    if (k.indexOf('pigtail:') === 0) return 'pigtail';
+    return '';
+  }
+
+  function splitterIdFromKey(k) {
+    var m = /^spl:([^:]+):/.exec(k || '');
+    return m ? m[1] : null;
+  }
+
+  function pigtailIdFromKey(k) {
+    var m = /^pigtail:([^:]+):/.exec(k || '');
+    return m ? m[1] : null;
+  }
+
+  function buildLossBreakdown(parts, path, graph, wavelengthNm) {
+    parts = cloneLossParts(parts);
+    path = path || [];
+    graph = graph || { pcords: [], pigtails: [] };
+    var pcords = graph.pcords || [];
+    var pigtails = graph.pigtails || [];
+    var splitters = (typeof api.getOpticalSplitters === 'function')
+      ? (api.getOpticalSplitters() || [])
+      : [];
+    var connCount = 0;
+    var polishN = { UPC: 0, APC: 0 };
+    var fiberM = 0;
+    var couplerN = 0;
+    var spliceN = 0;
+    var mismatchN = 0;
+    var splitterNotes = [];
+    var seenSpl = {};
+    var seenPig = {};
+    var i;
+    var j;
+
+    for (i = 0; i < path.length - 1; i++) {
+      var a = path[i];
+      var b = path[i + 1];
+      if (keyKind(a) === 'cpl' && keyKind(b) === 'cpl') couplerN += 1;
+      if (keyKind(a) === 'spl' && keyKind(b) === 'spl') {
+        var sid = splitterIdFromKey(a) || splitterIdFromKey(b);
+        if (sid && !seenSpl[sid]) {
+          seenSpl[sid] = true;
+          var spec = null;
+          for (j = 0; j < splitters.length; j++) {
+            if (splitters[j].id === sid) { spec = splitters[j]; break; }
+          }
+          splitterNotes.push(plcRatioLabel(spec && spec.type));
+        }
+      }
+      for (j = 0; j < pcords.length; j++) {
+        var c = pcords[j];
+        var ka = portKeyFromAtt(c.sideA);
+        var kb = portKeyFromAtt(c.sideB);
+        if (!((ka === a && kb === b) || (ka === b && kb === a))) continue;
+        if (ka) {
+          connCount += 1;
+          polishN[polishKind(c.sideA)] += 1;
+          if (c.sideA.mismatch) mismatchN += 1;
+        }
+        if (kb) {
+          connCount += 1;
+          polishN[polishKind(c.sideB)] += 1;
+          if (c.sideB.mismatch) mismatchN += 1;
+        }
+        fiberM += Number(c.fiberLengthM) || 0;
+      }
+      for (j = 0; j < pigtails.length; j++) {
+        var p = pigtails[j];
+        var pid = pigtailIdFromKey(a) || pigtailIdFromKey(b);
+        if (pid && p.id === pid) {
+          if (seenPig[p.id]) continue;
+          seenPig[p.id] = true;
+          fiberM += Number(p.fiberLengthM) || 0;
+          if (p.tail && p.tail.spliceId) spliceN += 1;
+          if (p.connector) {
+            connCount += 1;
+            polishN[p.connector.polish === 'APC' ? 'APC' : 'UPC'] += 1;
+            if (p.connector.mismatch) mismatchN += 1;
+          }
+        }
+      }
+    }
+
+    var polishBits = [];
+    if (polishN.UPC) polishBits.push(polishN.UPC + '× SC/UPC');
+    if (polishN.APC) polishBits.push(polishN.APC + '× SC/APC');
+    return {
+      splitterDb: round2(parts.splitter),
+      spliceDb: round2(parts.splice),
+      connectorDb: round2(parts.connector),
+      couplerDb: round2(parts.coupler),
+      fiberDb: round2(parts.fiber),
+      bendDb: round2(parts.bend),
+      mismatchDb: round2(parts.mismatch),
+      totalDb: round2(totalLossParts(parts)),
+      splitterNote: splitterNotes.length ? splitterNotes.join(' + ') : '',
+      spliceCount: spliceN,
+      spliceEachDb: FUSION_SPLICE_DB,
+      connectorNote: connCount
+        ? polishBits.join(' + ') || (connCount + '× connector')
+        : '',
+      couplerCount: couplerN,
+      mismatchCount: mismatchN,
+      mismatchEachDb: PIGTAIL_MISMATCH_DB,
+      fiberLengthM: round2(fiberM),
+      wavelengthNm: wavelengthNm,
+    };
+  }
+
+  function addUndirectedEdge(adj, a, b, lossDb, parts) {
     if (!a || !b) return;
     lossDb = Math.max(0, Number(lossDb) || 0);
+    parts = cloneLossParts(parts);
+    if (totalLossParts(parts) < 1e-9 && lossDb > 0) parts.connector = lossDb;
     if (!adj[a]) adj[a] = [];
     if (!adj[b]) adj[b] = [];
-    adj[a].push({ to: b, loss: lossDb });
-    adj[b].push({ to: a, loss: lossDb });
+    adj[a].push({ to: b, loss: lossDb, parts: parts });
+    adj[b].push({ to: a, loss: lossDb, parts: parts });
   }
 
   function buildOpticalAdjacency() {
@@ -972,17 +1179,16 @@
       var c = pcords[i];
       var ka = portKeyFromAtt(c.sideA);
       var kb = portKeyFromAtt(c.sideB);
-      var loss = Number(c.lossDb);
-      if (!isFinite(loss)) loss = 0.4;
-      var fiberLoss = fiberSpanLossDb(c.fiberLengthM, wavelengthNm);
+      var parts = pcordLossParts(c, wavelengthNm);
+      var loss = totalLossParts(parts);
       if (ka && kb) {
-        addUndirectedEdge(adj, ka, kb, loss + fiberLoss);
+        addUndirectedEdge(adj, ka, kb, loss, parts);
       }
       if (ka && c.freeB) {
-        addUndirectedEdge(adj, ka, 'pcord:' + c.id + ':B', (loss + fiberLoss) * 0.5);
+        addUndirectedEdge(adj, ka, 'pcord:' + c.id + ':B', loss * 0.5, scaleLossParts(parts, 0.5));
       }
       if (kb && c.freeA) {
-        addUndirectedEdge(adj, kb, 'pcord:' + c.id + ':A', (loss + fiberLoss) * 0.5);
+        addUndirectedEdge(adj, kb, 'pcord:' + c.id + ':A', loss * 0.5, scaleLossParts(parts, 0.5));
       }
       if (!ka && c.freeA) {
         adj['pcord:' + c.id + ':A'] = adj['pcord:' + c.id + ':A'] || [];
@@ -998,11 +1204,19 @@
       var tailKey = 'pigtail:' + p.id + ':tail';
       var ptLoss = PIGTAIL_CONN_LOSS_DB;
       var pigFiberLoss = fiberSpanLossDb(p.fiberLengthM, wavelengthNm);
+      var spliceLoss = (p.tail && p.tail.spliceId) ? FUSION_SPLICE_DB : 0;
+      var mismatchLoss = (p.connector && p.connector.mismatch) ? PIGTAIL_MISMATCH_DB : 0;
+      var pigParts = {
+        connector: ptLoss,
+        fiber: pigFiberLoss,
+        splice: spliceLoss,
+        mismatch: mismatchLoss,
+      };
       if (kc) {
-        addUndirectedEdge(adj, kc, tailKey, ptLoss + pigFiberLoss);
+        addUndirectedEdge(adj, kc, tailKey, totalLossParts(pigParts), pigParts);
       } else {
         adj['pigtail:' + p.id + ':conn'] = adj['pigtail:' + p.id + ':conn'] || [];
-        addUndirectedEdge(adj, 'pigtail:' + p.id + ':conn', tailKey, ptLoss);
+        addUndirectedEdge(adj, 'pigtail:' + p.id + ':conn', tailKey, totalLossParts(pigParts), pigParts);
       }
     }
 
@@ -1018,7 +1232,8 @@
               adj,
               'spl:' + sp.id + ':' + inPorts[j],
               'spl:' + sp.id + ':' + outPorts[k],
-              sp.lossDb || 10
+              sp.lossDb || 10,
+              { splitter: sp.lossDb || 10 }
             );
           }
         }
@@ -1049,16 +1264,13 @@
           adj,
           'cpl:' + cid + ':A',
           'cpl:' + cid + ':B',
-          passLoss
+          passLoss,
+          { coupler: passLoss }
         );
       });
     }
 
     return adj;
-  }
-
-  function round2(n) {
-    return Math.round(n * 100) / 100;
   }
 
   /**
@@ -1077,6 +1289,9 @@
     if (!sources.length) return result;
 
     var adj = buildOpticalAdjacency();
+    var graph = typeof api.getFiberLaserGraph === 'function'
+      ? api.getFiberLaserGraph()
+      : { pcords: [], pigtails: [] };
     var probeWavelengthNm = getOpmWavelengthNm();
     var si;
     for (si = 0; si < sources.length; si++) {
@@ -1086,7 +1301,12 @@
       var wlPenalty = (src.kind === 'ols')
         ? 0
         : oltWavelengthPenaltyDb(probeWavelengthNm, src.wavelengthNm);
-      var queue = [{ key: src.key, loss: 0, path: [src.key] }];
+      var queue = [{
+        key: src.key,
+        loss: 0,
+        path: [src.key],
+        parts: emptyLossParts(),
+      }];
       var visited = {};
       visited[src.key] = 0;
       var qi = 0;
@@ -1095,7 +1315,11 @@
         var cur = queue[qi++];
         if (cur.key === probeKey) {
           if (!bestForSrc || cur.loss < bestForSrc.loss) {
-            bestForSrc = { loss: cur.loss, path: cur.path.slice() };
+            bestForSrc = {
+              loss: cur.loss,
+              path: cur.path.slice(),
+              parts: cloneLossParts(cur.parts),
+            };
           }
           continue;
         }
@@ -1110,10 +1334,12 @@
             key: e.to,
             loss: nextLoss,
             path: cur.path.concat([e.to]),
+            parts: sumLossParts(cur.parts, e.parts),
           });
         }
       }
       if (!bestForSrc) continue;
+      var pathParts = cloneLossParts(bestForSrc.parts);
       result.readings.push({
         dBm: round2(src.txDbm - bestForSrc.loss - wlPenalty),
         lossDb: round2(bestForSrc.loss + wlPenalty),
@@ -1121,6 +1347,12 @@
         label: probeKey,
         path: bestForSrc.path,
         wavelengthNm: src.wavelengthNm || probeWavelengthNm,
+        lossBreakdown: buildLossBreakdown(
+          pathParts,
+          bestForSrc.path,
+          graph,
+          probeWavelengthNm
+        ),
       });
     }
     return result;

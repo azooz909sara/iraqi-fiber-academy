@@ -48,7 +48,7 @@
   };
 
   var state = {
-    wavelength: 1490,
+    wavelength: 1310,
     unit: 'dbm',
     powerDbm: NaN,
     referenceDbm: null,

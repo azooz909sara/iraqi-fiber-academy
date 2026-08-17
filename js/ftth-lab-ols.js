@@ -16,9 +16,13 @@
   var WAVELENGTH_ORDER = [1310, 1550];
   var MOD_ORDER = ['CW', '270', '330', '1000', '2000'];
   var DISPLAY_MODE_ORDER = ['single', 'auto', 'multi'];
-  var CW_DBM = -3;
-  var MOD_DBM = -6;
-  var TX_PRESETS = [3, 0, -3];
+  var MODE_TX_DBM = {
+    single: -3,
+    auto: -6,
+    multi: -6,
+  };
+  var TX_PRESETS = [3, 0, -3, -6];
+  var DEFAULT_TX_DBM = -3;
 
   var ctx = null;
   var layer = null;
@@ -83,27 +87,52 @@
   }
 
   function displayModeLabel(mode) {
-    if (mode === 'auto') return 'Auto-λ';
-    if (mode === 'multi') return 'Multi-λ';
-    return 'Single-λ';
+    if (mode === 'auto') return 'Auto';
+    if (mode === 'multi') return 'Multi';
+    return 'Single';
   }
 
-  /** Configured output for the current LCD / TX mode (does not imply laser ON). */
-  function configuredDbm(d) {
+  function modeTxDbm(mode) {
+    var n = MODE_TX_DBM[mode];
+    return n != null ? n : MODE_TX_DBM.single;
+  }
+
+  function applyModeTx(d) {
+    if (!d) return;
+    d.txDbm = modeTxDbm(normalizeDisplayMode(d));
+  }
+
+  function txCalDbm() {
+    return modeTxDbm('single');
+  }
+
+  /** Launch power for the active MODE (Single −3 dBm · Auto/Multi −6 dBm). */
+  function configuredDbm(d, wavelengthNm) {
     var preset = Number(d && d.txDbm);
     if (TX_PRESETS.indexOf(preset) >= 0) return preset;
-    var mode = normalizeDisplayMode(d);
-    if (mode === 'auto' || mode === 'multi') return MOD_DBM;
-    return d.modulation === 'CW' ? CW_DBM : MOD_DBM;
+    return modeTxDbm(normalizeDisplayMode(d));
   }
 
   function formatCfgDbm(n) {
     return (n >= 0 ? '+' : '') + String(n) + ' dBm';
   }
 
-  function outputDbm(d) {
+  function outputDbm(d, wavelengthNm) {
     if (!d || !d.poweredOn || !d.laserOn) return null;
-    return configuredDbm(d);
+    return configuredDbm(d, wavelengthNm);
+  }
+
+  /** Keep OLP-38 / trainer λ on the same calibrated band as this OLS. */
+  function syncLinkedOpmWavelength(nm) {
+    var wl = Number(nm);
+    if (!isFinite(wl)) return;
+    if (global.PowerMeterTrainer && typeof PowerMeterTrainer.setWavelength === 'function') {
+      PowerMeterTrainer.setWavelength(wl);
+      return;
+    }
+    if (global.FtthLab && typeof FtthLab.setOpmWavelength === 'function') {
+      FtthLab.setOpmWavelength(wl);
+    }
   }
 
   function modLabel(mod) {
@@ -201,11 +230,11 @@
     var out = [];
     devices.forEach(function (d) {
       if (!d.poweredOn || !d.laserOn) return;
-      var tx = outputDbm(d);
-      if (tx == null) return;
       var mode = normalizeDisplayMode(d);
       var waves = mode === 'multi' ? WAVELENGTH_ORDER.slice() : [d.wavelength];
       waves.forEach(function (wl) {
+        var tx = outputDbm(d, wl);
+        if (tx == null) return;
         out.push({
           key: 'ols:' + d.id,
           kind: 'ols',
@@ -273,7 +302,7 @@
       return '<div class="viavi__lcd ols__lcd ols__lcd--off" aria-live="polite"></div>';
     }
     var mode = normalizeDisplayMode(d);
-    var cfg = configuredDbm(d);
+    var cfg = configuredDbm(d, d.wavelength);
     var pwrTxt = formatCfgDbm(cfg);
     var wlTxt = d.wavelength + ' nm';
     /* Hazard mark rides next to the λ readout while the laser emits */
@@ -288,12 +317,12 @@
         '<div class="ols__lcd-row">' +
         '<span class="ols__wl-group"><span class="ols__wl ols__wl--stack">1310 nm</span>' +
         hazardStack + '</span>' +
-        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '<span class="ols__pwr-txt">' + formatCfgDbm(configuredDbm(d, 1310)) + '</span>' +
         '</div>' +
         '<div class="ols__lcd-row">' +
         '<span class="ols__wl-group"><span class="ols__wl ols__wl--stack">1550 nm</span>' +
         hazardStack + '</span>' +
-        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '<span class="ols__pwr-txt">' + formatCfgDbm(configuredDbm(d, 1550)) + '</span>' +
         '</div>' +
         '</div>';
       soft =
@@ -307,7 +336,7 @@
         '<span class="viavi__lcd-value ols__wl">' + wlTxt + '</span>' + hazard +
         '</div>' +
         '<div class="ols__lcd-meta ols__lcd-meta--auto">' +
-        '<span class="ols__pwr-txt">' + formatCfgDbm(MOD_DBM) + '</span>' +
+        '<span class="ols__pwr-txt">' + pwrTxt + '</span>' +
         '</div>';
       soft =
         '<div class="viavi__lcd-soft ols__lcd-soft ols__lcd-soft--auto">' +
@@ -356,11 +385,15 @@
     var ix = WAVELENGTH_ORDER.indexOf(d.wavelength);
     if (ix < 0) ix = 0;
     d.wavelength = WAVELENGTH_ORDER[(ix + 1) % WAVELENGTH_ORDER.length];
+    if (normalizeDisplayMode(d) !== 'multi') {
+      syncLinkedOpmWavelength(d.wavelength);
+    }
     rebuildLayer();
     updateInspector();
     pushHistory();
     notifyOptical();
-    setStatus('OLS-35 · λ ' + d.wavelength + ' nm');
+    setStatus('OLS-35 · λ ' + d.wavelength + ' nm · ' +
+      formatCfgDbm(configuredDbm(d, d.wavelength)));
   }
 
   function cycleModulation(d) {
@@ -373,7 +406,7 @@
     pushHistory();
     notifyOptical();
     setStatus('OLS-35 · ' + modLabel(d.modulation) + ' · ' +
-      (d.modulation === 'CW' ? CW_DBM : MOD_DBM) + ' dBm');
+      formatCfgDbm(configuredDbm(d, d.wavelength)));
   }
 
   function toggleLaser(d) {
@@ -387,7 +420,8 @@
     pushHistory();
     notifyOptical();
     setStatus(d.laserOn
-      ? 'OLS-35 laser ON · ' + d.wavelength + ' nm · ' + (outputDbm(d)) + ' dBm'
+      ? 'OLS-35 laser ON · ' + d.wavelength + ' nm · ' +
+        formatCfgDbm(outputDbm(d, d.wavelength))
       : 'OLS-35 laser OFF');
   }
 
@@ -401,12 +435,13 @@
     if (d.displayMode === 'single' && (cur === 'auto' || cur === 'multi')) {
       d.modulation = 'CW';
     }
+    applyModeTx(d);
     rebuildLayer();
     updateInspector();
     pushHistory();
-    /* MODE is configuration-only — never enables laser TX, but keeps OLP in sync */
     notifyOptical();
-    setStatus('OLS-35 · ' + displayModeLabel(d.displayMode) + ' (display only)');
+    setStatus('OLS-35 · ' + displayModeLabel(d.displayMode) + ' · ' +
+      formatCfgDbm(configuredDbm(d, d.wavelength)));
   }
 
   function togglePower(d) {
@@ -545,7 +580,7 @@
       '<button type="button" class="viavi__key ols__key ols__key--soft ols__key--hz" ' +
       'data-ols-hz title="Modulation / Hz" aria-label="Cycle modulation frequency">HZ</button>' +
       '<button type="button" class="viavi__key ols__key ols__key--large ols__key--mode" ' +
-      'data-ols-mode title="MODE — Single-λ → Auto-λ → Multi-λ" aria-label="Cycle display mode">' +
+      'data-ols-mode title="MODE — Single (−3 dBm) → Auto (−6 dBm) → Multi (−6 dBm)" aria-label="Cycle mode and TX power">' +
       '<span class="ols__key-stack">' + gearIconSvg() + '<span class="ols__key-label">MODE</span></span>' +
       '</button>' +
       '<button type="button" class="viavi__key ols__key ols__key--large ols__key--laser' + laserOn + '" ' +
@@ -679,13 +714,14 @@
       displayMode: 'single',
       autoLambda: false,
       docked: false,
-      txDbm: 0,
+      txDbm: DEFAULT_TX_DBM,
     };
     devices.push(d);
+    syncLinkedOpmWavelength(d.wavelength);
     selectOls(d.id);
     rebuildLayer();
     pushHistory();
-    setStatus('OLS-35 / OPL placed · dock SC fiber · set λ and TX (0 / +3 dBm) · laser ON');
+    setStatus('OLS-35 / OPL placed · Single · TX −3 dBm · dock SC fiber · laser ON');
     return d;
   }
 
@@ -922,6 +958,7 @@
       FtthLab.getOlsPortWorld = getPortWorld;
       FtthLab.getOlsMagnetSnapPx = getMagnetSnapPx;
       FtthLab.getOlsTxSources = getOlsTxSources;
+      FtthLab.getOplTxCalDbm = txCalDbm;
       FtthLab.refreshOlsDocks = refreshDockState;
       FtthLab.getOlsDevices = function () {
         return devices.map(function (d) {
@@ -935,7 +972,7 @@
             laserOn: !!d.laserOn,
             poweredOn: d.poweredOn !== false,
             docked: !!d.docked,
-            txDbm: outputDbm(d),
+            txDbm: outputDbm(d, d.wavelength),
           };
         });
       };

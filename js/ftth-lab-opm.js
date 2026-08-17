@@ -23,7 +23,7 @@
   var history = [];
   var historyIndex = -1;
   var historyLocked = false;
-  var wavelengthNm = 1490;
+  var wavelengthNm = 1310;
   var unitMode = 'dbm'; /* dbm | mw */
 
   var WAVELENGTH_ORDER = [850, 980, 1310, 1490, 1550, 1625];
@@ -78,7 +78,7 @@
       return;
     }
     var ix = WAVELENGTH_ORDER.indexOf(resolveWavelengthNm());
-    if (ix < 0) ix = WAVELENGTH_ORDER.indexOf(1490);
+    if (ix < 0) ix = WAVELENGTH_ORDER.indexOf(1310);
     wavelengthNm = WAVELENGTH_ORDER[(ix + 1) % WAVELENGTH_ORDER.length];
     if (global.FtthLab && typeof FtthLab.setOpmWavelength === 'function') {
       FtthLab.setOpmWavelength(wavelengthNm);
@@ -729,7 +729,7 @@
     rebuildLayer();
     pushHistory();
     lastBroadcast();
-    setStatus('Viavi OLP-38 placed · dock an SC Patch Cord or Pigtail into the top adapter');
+    publishOpmPowerEquation();
     return d;
   }
 
@@ -826,6 +826,134 @@
     });
   }
 
+  function formatSignedDbm(n) {
+    if (n == null || !isFinite(n)) return '—';
+    return (n >= 0 ? '+' : '') + Number(n).toFixed(2) + ' dBm';
+  }
+
+  function formatLossDb(db) {
+    var n = Number(db);
+    if (!isFinite(n)) return '—';
+    return n.toFixed(2) + ' dB';
+  }
+
+  function powerEquationText(d) {
+    var r = d && d.lastReading;
+    if (!d || !d.docked || !r || !r.source || !isFinite(r.dBm)) {
+      return 'OLP-38 · no optical path · SIGNAL LOW';
+    }
+    var tx = Number(r.source.txDbm);
+    var b = r.lossBreakdown;
+    var total = b && isFinite(b.totalDb) ? Number(b.totalDb) : Number(r.lossDb);
+    var rx = isFinite(tx) && isFinite(total)
+      ? Math.round((tx - total) * 100) / 100
+      : Number(r.dBm);
+    var parts = [];
+    parts.push('[' + (isFinite(tx) ? (tx >= 0 ? '+' : '') + tx.toFixed(2) : '—') +
+      ' dBm (TX)]');
+    function sub(db, label) {
+      var n = Number(db);
+      if (!isFinite(n) || Math.abs(n) < 0.005) return;
+      parts.push('[' + n.toFixed(2) + ' dB (' + label + ')]');
+    }
+    if (b) {
+      sub(b.splitterDb, 'Splitters');
+      sub(b.spliceDb, 'Splices');
+      sub(b.connectorDb, 'Connectors');
+      sub(b.couplerDb, 'Couplers');
+      sub(b.fiberDb, 'Fiber');
+      sub(b.bendDb, 'Bend');
+      sub(b.mismatchDb, 'Mismatch');
+    } else if (isFinite(r.lossDb)) {
+      sub(r.lossDb, 'Loss');
+    }
+    return parts.join(' − ') + ' = ' +
+      (rx >= 0 ? '+' : '') + rx.toFixed(2) + ' dBm (OLP-38)';
+  }
+
+  function publishOpmPowerEquation() {
+    if (selection.kind !== 'opm' || !selection.id) return false;
+    var d = findDevice(selection.id);
+    if (!d) return false;
+    if (global.FtthLab && typeof FtthLab.setStatus === 'function') {
+      FtthLab.setStatus(powerEquationText(d), true);
+    }
+    return true;
+  }
+
+  function lossItemRow(label, db, note, extraClass) {
+    var n = Number(db);
+    if (!isFinite(n) || Math.abs(n) < 0.005) return '';
+    extraClass = extraClass || '';
+    return (
+      '<div class="lab-loss-row' + (extraClass ? ' ' + extraClass : '') + '">' +
+      '<div class="lab-loss-row__head">' +
+      '<span class="lab-loss-row__label">' + label + '</span>' +
+      '<strong class="lab-loss-row__val">' + formatLossDb(n) + '</strong>' +
+      '</div>' +
+      (note
+        ? '<p class="lab-loss-row__note">' + note + '</p>'
+        : '') +
+      '</div>'
+    );
+  }
+
+  function summaryRow(label, valueHtml, extraClass) {
+    return (
+      '<div class="lab-loss-row ' + extraClass + '">' +
+      '<div class="lab-loss-row__head">' +
+      '<span class="lab-loss-row__label">' + label + '</span>' +
+      '<strong class="lab-loss-row__val">' + valueHtml + '</strong>' +
+      '</div></div>'
+    );
+  }
+
+  function lossBreakdownMarkup(reading) {
+    var b = reading && reading.lossBreakdown;
+    if (!b || !reading || !reading.source || !isFinite(reading.dBm)) return '';
+    var tx = Number(reading.source.txDbm);
+    var opmNm = resolveWavelengthNm();
+    var total = Number(b.totalDb);
+    if (!isFinite(total)) total = Number(reading.lossDb);
+    var rx = isFinite(tx) && isFinite(total) ? Math.round((tx - total) * 100) / 100 : reading.dBm;
+    var spliceN = b.spliceCount || 0;
+    if (!spliceN && b.spliceDb >= 0.005) {
+      spliceN = Math.max(1, Math.round(b.spliceDb / (b.spliceEachDb || 0.1)));
+    }
+    var mismatchN = b.mismatchCount || 0;
+    if (!mismatchN && b.mismatchDb >= 0.005) {
+      mismatchN = Math.max(1, Math.round(b.mismatchDb / (b.mismatchEachDb || 3)));
+    }
+    var splitterNote = b.splitterNote
+      ? b.splitterNote + (b.splitterNote.indexOf('PLC') >= 0 ? '' : ' PLC')
+      : '';
+    var spliceNote = spliceN
+      ? spliceN + '× fusion @ ' + Number(b.spliceEachDb || 0.1).toFixed(2) + ' dB'
+      : '';
+    var couplerNote = b.couplerCount ? b.couplerCount + '× adapter · 0.20 dB each' : '';
+    var fiberNote = (b.fiberLengthM >= 0.01)
+      ? Number(b.fiberLengthM).toFixed(2) + ' m @ ' + opmNm + ' nm'
+      : opmNm + ' nm';
+    var mismatchNote = mismatchN
+      ? mismatchN + '× APC ↔ UPC · ≥ ' + Number(b.mismatchEachDb || 3).toFixed(1) + ' dB'
+      : '';
+    return (
+      '<p class="lab-inspector__label">Optical Path Loss</p>' +
+      '<div class="lab-spl-sheet lab-spl-sheet--loss">' +
+      summaryRow('Ptx', isFinite(tx) ? formatSignedDbm(tx) : '—', 'is-ptx') +
+      lossItemRow('PLC Splitters', b.splitterDb, splitterNote) +
+      lossItemRow('Fusion Splices', b.spliceDb, spliceNote) +
+      lossItemRow('Connectors', b.connectorDb, b.connectorNote) +
+      lossItemRow('Couplers', b.couplerDb, couplerNote) +
+      lossItemRow('Fiber Cable', b.fiberDb, fiberNote) +
+      lossItemRow('Macro-Bend', b.bendDb, b.bendDb >= 0.005 ? 'Macro-Bend Tester' : '') +
+      lossItemRow('Mismatched Penalty', b.mismatchDb, mismatchNote) +
+      summaryRow('Total Link Loss', formatLossDb(total), 'is-total') +
+      summaryRow('Final Power (Reading)', formatSignedDbm(rx), 'is-reading') +
+      '</div>'
+    );
+  }
+
   function updateInspector() {
     var card = document.getElementById('lab-inspector-card');
     var detail = document.getElementById('lab-inspector-detail');
@@ -873,6 +1001,7 @@
         return rows;
       })() +
       '</div>' +
+      lossBreakdownMarkup(r) +
       '<button type="button" class="lab-eject-btn" data-remove-opm="' + d.id + '">Remove OLP-38</button>' +
       '</div>';
     var rm = detail.querySelector('[data-remove-opm]');
@@ -884,6 +1013,7 @@
         }
       });
     }
+    publishOpmPowerEquation();
   }
 
   function pushHistory() {
@@ -958,6 +1088,7 @@
     if (global.FtthLab) {
       FtthLab.getOpmPortWorld = getPortWorld;
       FtthLab.refreshOpmDocks = refreshDockReadings;
+      FtthLab.publishOpmPowerEquation = publishOpmPowerEquation;
       FtthLab.getOpmDevices = function () {
         return devices.map(function (d) {
           return {

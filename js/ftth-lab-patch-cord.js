@@ -14,7 +14,7 @@
     'Connector polish mismatch (SC/APC ↔ SC/PC): high back reflection expected. ' +
     'Connection allowed — extra insertion loss applied to the power budget.';
 
-  var MISMATCH_PENALTY_DB = 0.75; /* per mismatched end */
+  var MISMATCH_PENALTY_DB = 3.0; /* APC ↔ UPC per mismatched end */
   var MATCHED_CONNECTOR_DB = 0.2; /* typical mated pair insertion */
 
   var ctx = null;
@@ -858,6 +858,9 @@
   function refreshBudget() {
     if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
       FtthLab.refreshPowerBudget();
+      if (typeof FtthLab.publishOpmPowerEquation === 'function') {
+        FtthLab.publishOpmPowerEquation();
+      }
       return;
     }
     var loss = getNetworkLossDb();
@@ -883,6 +886,7 @@
           slot: side.attached.slot != null ? side.attached.slot : null,
           oltPort: side.attached.oltPort != null ? side.attached.oltPort : null,
           mismatch: !!side.mismatch,
+          polish: side.polish === 'APC' ? 'APC' : 'UPC',
         };
       }
       return {
@@ -891,6 +895,7 @@
         sideB: sideSnap(c.sideB),
         lossDb: cordLossDb(c),
         fiberLengthM: cordFiberLengthM(c),
+        bendJigId: c.bendJigId || null,
         freeA: !c.sideA.attached,
         freeB: !c.sideB.attached,
       };

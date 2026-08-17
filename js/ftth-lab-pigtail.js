@@ -9,7 +9,7 @@
   var MISMATCH_MSG =
     'Connector polish mismatch (SC/APC ↔ SC/PC): high back reflection expected. ' +
     'Connection allowed — extra insertion loss applied to the power budget.';
-  var MISMATCH_PENALTY_DB = 0.75;
+  var MISMATCH_PENALTY_DB = 3.0;
   var MATCHED_CONNECTOR_DB = 0.2;
 
   var END_W = 14;
@@ -1418,6 +1418,8 @@
               port: p.connector.attached.port || null,
               slot: p.connector.attached.slot != null ? p.connector.attached.slot : null,
               oltPort: p.connector.attached.oltPort != null ? p.connector.attached.oltPort : null,
+              mismatch: !!p.connector.mismatch,
+              polish: p.polish === 'APC' ? 'APC' : 'UPC',
             }
           : null,
         tail: p.tail.attached
