@@ -894,7 +894,7 @@ body.lab-node-resizing .lab-2d-stage {
   box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7);
 }
 
-/* Huawei GPON-OLT module, seated on the slot axis with the nose protruding */
+/* Huawei GPON-OLT module — smooth metal body, nose port + bail only */
 .lab-fx-sfp {
   position: absolute;
   left: 6%;
@@ -907,67 +907,53 @@ body.lab-node-resizing .lab-2d-stage {
 .lab-fx-sfp__shell {
   position: absolute;
   inset: 0;
-  border-radius: calc(1px * var(--fx-scale, 1));
+  border-radius: calc(1.5px * var(--fx-scale, 1));
   background:
     linear-gradient(
       180deg,
-      #fdfdfe 0%,
-      #e7eaee 22%,
-      #c3cad2 55%,
-      #9aa3af 85%,
-      #b6bdc6 100%
+      #f4f6f8 0%,
+      #d8dde3 38%,
+      #b7bec7 72%,
+      #9aa3ae 100%
     );
-  border: 1px solid #78818d;
+  border: 1px solid #6b7380;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.85),
-    inset 0 -1px 0 rgba(15, 23, 42, 0.3),
-    0 1px 2px rgba(15, 23, 42, 0.4);
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.22),
+    0 1px 2px rgba(15, 23, 42, 0.35);
 }
 
-/* Printed label band on the rear half of the casing */
-.lab-fx-sfp__label {
-  position: absolute;
-  left: 5%;
-  top: 18%;
-  width: 34%;
-  height: 64%;
-  border-radius: 1px;
-  background: linear-gradient(180deg, #fbfcfd, #e3e7ec);
-  box-shadow: inset 0 0 0 1px rgba(120, 129, 141, 0.55);
-}
+/* Printed label plate removed — solid metal body only */
 
-/* Stamped side ridges / crimp notches ahead of the label */
-.lab-fx-sfp__ridges {
-  position: absolute;
-  left: 44%;
-  top: 0;
-  width: 26%;
-  height: 100%;
-  background: repeating-linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.9) 0 1px,
-    rgba(71, 85, 105, 0.55) 1px 2px,
-    rgba(203, 213, 225, 0.15) 2px 4px
-  );
-  box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, 0.7),
-    inset -1px 0 0 rgba(71, 85, 105, 0.5);
-}
-
-/* Front release bail — arms straddle the casing, polish-coloured handle */
+/* Front release bail — latch straddles the casing ahead of the optical bore */
 .lab-fx-sfp__bail {
   position: absolute;
-  left: 72%;
+  left: 70%;
   top: 50%;
-  width: 8%;
-  height: 124%;
+  width: 9%;
+  height: 128%;
   transform: translateY(-50%);
   border-radius: 1px;
   background: linear-gradient(180deg, #93c5fd, #1d4ed8 55%, #1e3a8a);
   box-shadow:
     inset 0 0 0 1px rgba(15, 23, 42, 0.55),
     0 0 2px rgba(15, 23, 42, 0.4);
+  pointer-events: none;
 }
+
+.lab-fx-sfp__bail::before,
+.lab-fx-sfp__bail::after {
+  content: '';
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  height: 18%;
+  background: inherit;
+  box-shadow: inherit;
+}
+
+.lab-fx-sfp__bail::before { top: -12%; }
+.lab-fx-sfp__bail::after { bottom: -12%; }
 
 /* Optical bore at the nose — jumper anchors resolve to this centre */
 .lab-fx-port__cage {
@@ -978,21 +964,114 @@ body.lab-node-resizing .lab-2d-stage {
   height: 100%;
   transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 10%;
+  padding: 6% 0;
+  box-sizing: border-box;
   border-radius: 0 calc(1px * var(--fx-scale, 1)) calc(1px * var(--fx-scale, 1)) 0;
   background: linear-gradient(180deg, #232c3a, #05070d);
   border: 1px solid #4b5563;
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.3);
 }
 
-/* Ferrule receptacle inside the bore */
+/* Dual LC/SC ferrule receptacles */
 .lab-fx-port__cage i {
-  width: 55%;
-  height: 45%;
+  width: 58%;
+  height: 28%;
+  flex: 0 0 28%;
   border-radius: 1px;
   background: #cbd5e1;
   box-shadow: 0 0 2px rgba(226, 232, 240, 0.8);
+}
+
+/* Empty FGLT-D cage dust plug (restored when SFP is ejected) */
+.lab-fx-cage-dust {
+  position: absolute;
+  right: 4%;
+  top: 50%;
+  width: 22%;
+  height: 118%;
+  transform: translateY(-50%);
+  border-radius: 1px 2px 2px 1px;
+  border: 1px solid #0a0a0a;
+  background: linear-gradient(180deg, #3f3f46 0%, #18181b 50%, #09090b 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Rubber dust plug over the optical port */
+.lab-fx-sfp__dust {
+  position: absolute;
+  right: -2%;
+  top: 50%;
+  width: 20%;
+  height: 118%;
+  transform: translateY(-50%);
+  border-radius: 1px 2px 2px 1px;
+  border: 1px solid #0a0a0a;
+  background:
+    linear-gradient(180deg, #3a3a3a 0%, #161616 45%, #070707 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -2px 3px rgba(0, 0, 0, 0.7),
+    0 1px 2px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  z-index: 6;
+  pointer-events: auto;
+}
+
+.lab-fx-sfp__dust::before {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 22%;
+  top: 22%;
+  height: 18%;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.lab-fx-sfp__dust::after {
+  content: '';
+  position: absolute;
+  right: 12%;
+  top: 50%;
+  width: 28%;
+  height: 42%;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #52525b, #09090b 70%);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.75);
+}
+
+.lab-fx-sfp__dust.is-stowed {
+  right: auto;
+  left: 48%;
+  width: 10%;
+  height: 90%;
+  opacity: 0.88;
+  border-radius: 1px;
+}
+
+.lab-fx-sfp__dust.is-stowed::after {
+  width: 36%;
+  height: 30%;
+  right: 18%;
+}
+
+.lab-fx-sfp__dust.is-hidden,
+.lab-fx-port.is-patched .lab-fx-sfp__dust {
+  display: none;
+  pointer-events: none;
+}
+
+.lab-fx-port.is-capped .lab-fx-port__cage i {
+  opacity: 0.28;
 }
 
 .lab-fx-port__num {
@@ -1314,6 +1393,56 @@ body.lab-node-resizing .lab-2d-stage {
   border-color: rgba(251, 191, 36, 0.45);
   background: rgba(251, 191, 36, 0.1);
   color: var(--lab-amber);
+}
+
+.lab-sfp-profile {
+  width: 100%;
+  margin-bottom: 0.45rem;
+  padding: 0.4rem 0.45rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.lab-sfp-spec {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.55rem;
+  margin: 0 0 0.55rem;
+  font-size: 0.62rem;
+  color: #94a3b8;
+}
+
+.lab-sfp-tx {
+  display: grid;
+  grid-template-columns: 1fr 4.2rem;
+  gap: 0.4rem;
+  align-items: center;
+  margin-bottom: 0.2rem;
+}
+
+.lab-sfp-tx input[type="range"] {
+  width: 100%;
+  accent-color: #38bdf8;
+}
+
+.lab-sfp-tx input[type="number"] {
+  width: 100%;
+  padding: 0.28rem 0.3rem;
+  border-radius: 0.3rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.75);
+  color: #e2e8f0;
+  font-size: 0.7rem;
+}
+
+.lab-sfp-tx-bounds {
+  margin: 0 0 0.55rem;
+  font-size: 0.6rem;
+  color: #64748b;
 }
 
 .lab-hint-line {

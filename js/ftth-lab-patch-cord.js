@@ -297,7 +297,16 @@
   function removeCord(id) {
     if (linkSession && linkSession.cordId === id) endLinkSession({ silent: true });
     clearRopePhysics(id);
+    var doomed = findCord(id);
+    var oltHits = [];
+    if (doomed) {
+      ['A', 'B'].forEach(function (end) {
+        var att = doomed[endKey(end)] && doomed[endKey(end)].attached;
+        if (att && att.owner === 'olt') oltHits.push(att);
+      });
+    }
     cords = cords.filter(function (c) { return c.id !== id; });
+    oltHits.forEach(notifyOltSfpPatch);
     if (selection.cordId === id) selection = { kind: 'none', cordId: null };
     rebuildLayer();
     updateInspector();
@@ -362,7 +371,35 @@
     });
   }
 
+  function isPatchOnOltPort(slot, port) {
+    slot = parseInt(slot, 10);
+    port = parseInt(port, 10);
+    var i;
+    var c;
+    var att;
+    for (i = 0; i < cords.length; i++) {
+      c = cords[i];
+      att = c.sideA && c.sideA.attached;
+      if (att && att.owner === 'olt' && att.slot === slot && att.oltPort === port) return true;
+      att = c.sideB && c.sideB.attached;
+      if (att && att.owner === 'olt' && att.slot === slot && att.oltPort === port) return true;
+    }
+    return false;
+  }
+
+  function notifyOltSfpPatch(hitOrAtt) {
+    if (!hitOrAtt || hitOrAtt.owner !== 'olt') return;
+    var api = global.FtthLabOltFx16;
+    if (api && typeof api.syncSfpPatchState === 'function') {
+      api.syncSfpPatchState(hitOrAtt.slot, hitOrAtt.oltPort);
+    }
+  }
+
   function attachEnd(cord, end, hit) {
+    if (!canDockHit(hit)) {
+      setStatus('Insert an SFP before docking a patch cord');
+      return;
+    }
     if (hit && hit.owner === 'ols') {
       hit = enrichOlsHitDeepSeat(hit) || hit;
     }
@@ -428,12 +465,14 @@
     if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
       FtthLab.notifyLayoutChange({ source: 'patch-cord', opm: true, ols: true });
     }
+    notifyOltSfpPatch(hit);
   }
 
   function detachEnd(cord, end) {
     var side = cord[endKey(end)];
     var other = oppositeEnd(end);
     var otherAttached = !!(cord[endKey(other)] && cord[endKey(other)].attached);
+    var prevAtt = side.attached;
     /* Capture span length before unlock so relocate cannot grow the cable */
     if (typeof cord.fixedLength !== 'number' && (cord.pathLocked || otherAttached)) {
       var measured = measureCableSpanLength(cord);
@@ -454,6 +493,7 @@
     if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
       FtthLab.refreshOlsDocks();
     }
+    notifyOltSfpPatch(prevAtt);
   }
 
   function clearDrawnPath(cord) {
@@ -490,6 +530,7 @@
           owner: 'olt',
           slot: slot,
           oltPort: port,
+          hasSfp: true,
           polish: polish,
           label: 'LT' + (slot < 10 ? '0' : '') + slot + '/P' + port,
           wx: center.x,
@@ -1089,6 +1130,14 @@
    */
   function startLinkFromPort(hit) {
     if (!hit || typeof hit.wx !== 'number') return false;
+    if (!canDockHit(hit)) {
+      setStatus('Insert an SFP before docking a patch cord');
+      if (hit.el) {
+        hit.el.classList.add('is-plug-reject');
+        setTimeout(function () { hit.el.classList.remove('is-plug-reject'); }, 420);
+      }
+      return false;
+    }
     if (linkSession) cancelLinkSession();
 
     seq += 1;
@@ -1280,6 +1329,8 @@
   var HEADING_MAX_TILT_DEG = 90;
   var UNPLUG_PULL_PX = 36;
   var PLUG_SNAP_PX = 22;
+  /** Generous magnetic capture around the SFP optical aperture */
+  var SFP_SNAP_PX = 56;
   /** OLS-35 magnetic capture (screen px) — larger than generic port snap */
   var OLS_MAGNET_SNAP_PX = 56;
   /** Auto-click lock once magnetically seated */
@@ -1447,6 +1498,7 @@
 
   function plugSnapRadiusFor(hit) {
     if (hit && hit.owner === 'ols') return olsMagnetRadius();
+    if (hit && hit.owner === 'olt') return SFP_SNAP_PX;
     return PLUG_SNAP_PX;
   }
 
@@ -1505,6 +1557,58 @@
     return best;
   }
 
+  function oltApertureScreenCenter(el) {
+    if (!el) return null;
+    var face = el.querySelector('.lab-fx-port__cage') ||
+      el.querySelector('.lab-fx-port__rail') ||
+      el.querySelector('.lab-fx-port__module') || el;
+    var r = face.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  }
+
+  function findNearestOltHit(clientX, clientY, maxPx) {
+    maxPx = maxPx != null ? maxPx : SFP_SNAP_PX;
+    var nodes = document.querySelectorAll('.lab-fx-port[data-lab-slot][data-lab-sfp]');
+    var best = null;
+    var bestD = maxPx;
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var c = oltApertureScreenCenter(node);
+      if (!c) continue;
+      var d = dist2(clientX, clientY, c.x, c.y);
+      if (d > bestD) continue;
+      bestD = d;
+      var slot = parseInt(node.getAttribute('data-lab-slot'), 10);
+      var port = parseInt(node.getAttribute('data-lab-sfp'), 10);
+      var filled = node.classList.contains('is-active');
+      var polish = node.classList.contains('is-apc') ? 'APC' : 'UPC';
+      var center = clientToWorld(c.x, c.y);
+      best = {
+        owner: 'olt',
+        slot: slot,
+        oltPort: port,
+        hasSfp: filled,
+        reject: !filled,
+        polish: polish,
+        label: 'LT' + (slot < 10 ? '0' : '') + slot + '/P' + port,
+        wx: center.x,
+        wy: center.y,
+        el: node,
+        screenDist: d,
+      };
+    }
+    return best;
+  }
+
+  function canDockHit(hit) {
+    if (!hit) return false;
+    if (hit.owner !== 'olt') return true;
+    if (hit.reject || hit.hasSfp === false) return false;
+    if (hit.el && hit.el.classList && !hit.el.classList.contains('is-active')) return false;
+    return true;
+  }
+
   function resolvePlugHit(clientX, clientY) {
     var hit = hitTestPort(clientX, clientY);
     if (hit && hit.owner === 'ols') {
@@ -1515,6 +1619,8 @@
     }
     var ols = findNearestOlsHit(clientX, clientY);
     if (ols) return ols;
+    var olt = findNearestOltHit(clientX, clientY);
+    if (olt) return olt;
     return hit;
   }
 
@@ -3690,9 +3796,11 @@
 
         function clearHighlights() {
           document.querySelectorAll(
-            '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
+            '.lab-fx-port.is-plug-target, .lab-fx-port.is-plug-reject, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
             '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target'
-          ).forEach(function (n) { n.classList.remove('is-plug-target'); });
+          ).forEach(function (n) {
+            n.classList.remove('is-plug-target', 'is-plug-reject');
+          });
         }
 
         function onMove(ev) {
@@ -3794,15 +3902,24 @@
               }
             }
           } else if (hit && hit.el) {
+            var snapRLive = plugSnapRadiusFor(hit);
+            var ap = hit.owner === 'olt' ? oltApertureScreenCenter(hit.el) : null;
             var br = hit.el.getBoundingClientRect();
-            var dScreen = dist2(
-              ev.clientX, ev.clientY,
-              br.left + br.width / 2, br.top + br.height / 2
-            );
-            if (dScreen <= PLUG_SNAP_PX * 1.6) {
-              hit.el.classList.add('is-plug-target');
-              if (isTopTestPort(hit) && !c[endKey(end)].attached) {
-                c[endKey(end)].liveRot = 180;
+            var dScreen = hit.screenDist != null
+              ? hit.screenDist
+              : dist2(
+                ev.clientX, ev.clientY,
+                ap ? ap.x : br.left + br.width / 2,
+                ap ? ap.y : br.top + br.height / 2
+              );
+            if (dScreen <= snapRLive * 1.6) {
+              if (!canDockHit(hit)) {
+                hit.el.classList.add('is-plug-reject');
+              } else {
+                hit.el.classList.add('is-plug-target');
+                if (isTopTestPort(hit) && !c[endKey(end)].attached) {
+                  c[endKey(end)].liveRot = 180;
+                }
               }
             }
           }
@@ -3839,6 +3956,11 @@
               );
             var snapMul = hit.owner === 'ols' ? 1 : 1.75;
             if (dScreen <= snapR * snapMul) {
+              if (!canDockHit(hit)) {
+                if (hit.el) hit.el.classList.add('is-plug-reject');
+                setEndWorld(c, end, mouse.x, mouse.y);
+                setStatus('No SFP in cage · docking blocked');
+              } else {
               attachEnd(c, end, hit);
               /* Reject ports beyond the locked cable reach */
               if (c[endKey(otherEnd)].attached && !spanFitsFixedLength(c)) {
@@ -3869,6 +3991,7 @@
                 } else if (hit.owner === 'ols') {
                   setStatus('OLS-35 · SC docked vertical · deep seat');
                 }
+              }
               }
             } else {
               setEndWorld(c, end, mouse.x, mouse.y);
@@ -4256,6 +4379,27 @@
     }
   }
 
+  function detachPcordsFromOltPort(slot, port) {
+    slot = parseInt(slot, 10);
+    port = parseInt(port, 10);
+    var changed = false;
+    cords.forEach(function (c) {
+      ['A', 'B'].forEach(function (end) {
+        var side = c[endKey(end)];
+        var att = side.attached;
+        if (att && att.owner === 'olt' && att.slot === slot && att.oltPort === port) {
+          detachEnd(c, end);
+          changed = true;
+        }
+      });
+    });
+    if (changed) {
+      rebuildLayer();
+      updateInspector();
+      refreshBudget();
+    }
+  }
+
   function detachPcordsFromVfl(vflId, exceptCordId, exceptEnd) {
     cords.forEach(function (c) {
       ['A', 'B'].forEach(function (end) {
@@ -4379,6 +4523,8 @@
       FtthLab.CATENARY_DEFAULT_SLACK = CATENARY_DEFAULT_SLACK;
 
       FtthLab.hitTestLabPort = hitTestPort;
+      FtthLab.isPatchOnOltPort = isPatchOnOltPort;
+      FtthLab.detachPcordsFromOltPort = detachPcordsFromOltPort;
     }
   }
 
@@ -4402,6 +4548,7 @@
     getLaserGraphNodes: getLaserGraphNodes,
     applyLaserGlow: applyLaserGlow,
     translateForVfl: translateForVfl,
+    detachPcordsFromOltPort: detachPcordsFromOltPort,
   };
 
   function tryRegister() {

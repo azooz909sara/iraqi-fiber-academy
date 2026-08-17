@@ -844,9 +844,20 @@
     return km * fiberAttenuationDbPerKm(wavelengthNm);
   }
 
-  function oltWavelengthPenaltyDb(wavelengthNm) {
-    var p = OLT_WAVELENGTH_PENALTY_DB[wavelengthNm];
-    return p != null ? p : 2;
+  function oltWavelengthPenaltyDb(probeNm, sourceNm) {
+    var probe = Number(probeNm);
+    var src = Number(sourceNm);
+    if (!isFinite(src)) src = 1490;
+    if (isFinite(probe) && probe === src) return 0;
+    if (src === 1490 && OLT_WAVELENGTH_PENALTY_DB[probe] != null) {
+      return OLT_WAVELENGTH_PENALTY_DB[probe];
+    }
+    if (!isFinite(probe)) return 2;
+    var d = Math.abs(probe - src);
+    if (d < 20) return 0.4;
+    if (d < 80) return 1.5;
+    if (d < 250) return 4;
+    return 10;
   }
 
   /**
@@ -1067,7 +1078,9 @@
       var src = sources[si];
       if (!adj[src.key]) continue;
       /* OLS emits at its calibrated λ — skip OLT SFP wavelength mismatch penalty */
-      var wlPenalty = (src.kind === 'ols') ? 0 : oltWavelengthPenaltyDb(probeWavelengthNm);
+      var wlPenalty = (src.kind === 'ols')
+        ? 0
+        : oltWavelengthPenaltyDb(probeWavelengthNm, src.wavelengthNm);
       var queue = [{ key: src.key, loss: 0, path: [src.key] }];
       var visited = {};
       visited[src.key] = 0;

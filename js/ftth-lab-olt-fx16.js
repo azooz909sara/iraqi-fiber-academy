@@ -8,6 +8,43 @@
   var SLOT_COUNT = 16;
   var PORT_COUNT = 16;
 
+  var SFP_PROFILES = {
+    'huawei-ssx1t1ltb': {
+      id: 'huawei-ssx1t1ltb',
+      name: 'Huawei SSX1T1LTB (GPON Class B+)',
+      shortName: 'GPON B+',
+      txNm: 1490,
+      rxNm: 1310,
+      txMin: 1.5,
+      txMax: 5.0,
+      txDefault: 3.0,
+      sensitivity: -28
+    },
+    'gpon-cplus': {
+      id: 'gpon-cplus',
+      name: 'GPON OLT Class C+',
+      shortName: 'GPON C+',
+      txNm: 1490,
+      rxNm: 1310,
+      txMin: 3.0,
+      txMax: 7.0,
+      txDefault: 5.0,
+      sensitivity: -32
+    },
+    'xgs-pon-n1n2': {
+      id: 'xgs-pon-n1n2',
+      name: 'XGS-PON N1/N2',
+      shortName: 'XGS-PON',
+      txNm: 1577,
+      rxNm: 1270,
+      txMin: 4.0,
+      txMax: 9.0,
+      txDefault: 5.5,
+      sensitivity: -28
+    }
+  };
+  var SFP_PROFILE_DEFAULT = 'huawei-ssx1t1ltb';
+
   var ctx = null;
   var el2d = null;
   var group3d = null;
@@ -129,6 +166,11 @@
     chassisY = typeof snap.chassisY === 'number' ? snap.chassisY : defaultChassisPos().y;
     installed = cloneJson(snap.installed) || {};
     sfpMap = cloneJson(snap.sfpMap) || {};
+    Object.keys(sfpMap).forEach(function (sk) {
+      Object.keys(sfpMap[sk] || {}).forEach(function (pk) {
+        normalizeSfpModule(sfpMap[sk][pk]);
+      });
+    });
     cardSeq = snap.cardSeq || 0;
     sfpSeq = snap.sfpSeq || 0;
     cardInventory = [];
@@ -236,11 +278,75 @@
     return card.id;
   }
 
-  function takeNextSfp() {
+  function getSfpProfile(id) {
+    return SFP_PROFILES[id] || SFP_PROFILES[SFP_PROFILE_DEFAULT];
+  }
+
+  function clampSfpTx(profile, value) {
+    var n = Number(value);
+    if (!isFinite(n)) n = profile.txDefault;
+    n = Math.min(profile.txMax, Math.max(profile.txMin, n));
+    return Math.round(n * 10) / 10;
+  }
+
+  function normalizeSfpModule(mod) {
+    if (!mod) return mod;
+    var spec = getSfpProfile(mod.profileId);
+    mod.profileId = spec.id;
+    mod.model = spec.name;
+    if (mod.dustCap === undefined) mod.dustCap = true;
+    mod.txDbm = clampSfpTx(spec, mod.txDbm != null ? mod.txDbm : spec.txDefault);
+    return mod;
+  }
+
+  function takeNextSfp(profileId) {
     sfpSeq += 1;
-    var mod = { id: 'sfp-' + sfpSeq, model: 'GPON-SFP' };
+    var mod = normalizeSfpModule({
+      id: 'sfp-' + sfpSeq,
+      profileId: profileId || SFP_PROFILE_DEFAULT,
+      dustCap: true
+    });
     sfpInventory.push(mod);
     return mod.id;
+  }
+
+  function refreshOpticalOutputs() {
+    if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
+      FtthLab.refreshPowerBudget();
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOpmDocks === 'function') {
+      FtthLab.refreshOpmDocks();
+    }
+  }
+
+  function setSfpProfile(slot, port, profileId) {
+    var mod = sfpModule(slot, port);
+    if (!mod) return;
+    var spec = getSfpProfile(profileId);
+    mod.profileId = spec.id;
+    mod.model = spec.name;
+    mod.txDbm = clampSfpTx(spec, spec.txDefault);
+    updateInspector();
+    refreshOpticalOutputs();
+    setStatus(spec.shortName + ' · TX ' + spec.txNm + ' nm · ' + fmtDbm(mod.txDbm));
+  }
+
+  function setSfpTxPower(slot, port, value, opts) {
+    opts = opts || {};
+    var mod = sfpModule(slot, port);
+    if (!mod) return;
+    var spec = getSfpProfile(mod.profileId);
+    mod.txDbm = clampSfpTx(spec, value);
+    refreshOpticalOutputs();
+    if (!opts.silent) setStatus('SFP TX · ' + fmtDbm(mod.txDbm));
+    return mod.txDbm;
+  }
+
+  function fmtDbm(n) {
+    var v = Number(n);
+    if (!isFinite(v)) return '—';
+    var s = v >= 0 ? '+' + v.toFixed(1) : v.toFixed(1);
+    return s + ' dBm';
   }
 
   function portId(slot, port) {
@@ -305,6 +411,74 @@
 
   function hasSfp(slot, port) {
     return !!(sfpMap[slot] && sfpMap[slot][port]);
+  }
+
+  function sfpModule(slot, port) {
+    return (sfpMap[slot] && sfpMap[slot][port]) || null;
+  }
+
+  /** Factory rubber dust plug — on until the user pops it or a jumper seats. */
+  function sfpHasDustCap(slot, port) {
+    var mod = sfpModule(slot, port);
+    return !!(mod && mod.dustCap !== false);
+  }
+
+  function isSfpPatched(slot, port) {
+    if (global.FtthLab && typeof FtthLab.isPatchOnOltPort === 'function') {
+      return !!FtthLab.isPatchOnOltPort(slot, port);
+    }
+    var w = portWiring[portId(slot, port)];
+    return !!(w && w.connected);
+  }
+
+  function applySfpDustDom(slot, port) {
+    var el = portElement(slot, port);
+    if (!el) return;
+    var patched = isSfpPatched(slot, port);
+    var capped = sfpHasDustCap(slot, port) && !patched;
+    el.classList.toggle('is-capped', capped);
+    el.classList.toggle('is-patched', patched);
+    var cap = el.querySelector('[data-lab-sfp-dust]');
+    if (!cap) return;
+    cap.classList.toggle('is-stowed', !capped && !patched);
+    cap.classList.toggle('is-hidden', patched);
+    cap.title = patched
+      ? 'Dust cover hidden · patch seated'
+      : (capped ? 'Dust cover · click to remove' : 'Dust cover stowed · click to refit');
+  }
+
+  function toggleSfpDustCap(slot, port) {
+    var mod = sfpModule(slot, port);
+    if (!mod) return;
+    if (isSfpPatched(slot, port)) {
+      setStatus('Unplug the patch cord before refitting the SFP dust cover');
+      return;
+    }
+    mod.dustCap = !sfpHasDustCap(slot, port);
+    applySfpDustDom(slot, port);
+    setStatus(
+      mod.dustCap
+        ? 'SFP dust cover fitted on Port ' + port
+        : 'SFP dust cover removed from Port ' + port
+    );
+  }
+
+  /** Patch-cord hook: hide the dust cover the moment a jumper seats. */
+  function syncSfpPatchState(slot, port) {
+    var mod = sfpModule(slot, port);
+    if (!mod) return;
+    var patched = isSfpPatched(slot, port);
+    if (patched) mod.dustCap = false;
+    else mod.dustCap = true;
+    var w = portWiring[portId(slot, port)];
+    if (w) w.connected = patched;
+    applySfpDustDom(slot, port);
+  }
+
+  function detachPatchesFromOltPort(slot, port) {
+    if (global.FtthLab && typeof FtthLab.detachPcordsFromOltPort === 'function') {
+      FtthLab.detachPcordsFromOltPort(slot, port);
+    }
   }
 
   /* ─── Chassis place / remove ─── */
@@ -415,6 +589,9 @@
   function ejectCard(slot) {
     slot = parseInt(slot, 10);
     if (!installed[slot]) return false;
+    for (var p = 1; p <= PORT_COUNT; p++) {
+      detachPatchesFromOltPort(slot, p);
+    }
     delete installed[slot];
     clearSlotWiring(slot);
     rebuildViews();
@@ -450,6 +627,8 @@
     }
     if (!mod) return false;
     sfpInventory = sfpInventory.filter(function (m) { return m.id !== sfpId; });
+    normalizeSfpModule(mod);
+    mod.dustCap = true;
     sfpMap[slot][port] = mod;
     justSeated = portId(slot, port);
     if (portWiring[portId(slot, port)]) {
@@ -461,6 +640,7 @@
     rebuildViews();
     selectPort(slot, port);
     pushHistory();
+    refreshOpticalOutputs();
     setStatus('SFP seated in LT' + pad2(slot) + ' · Port ' + port + ' · jumper-ready');
     return true;
   }
@@ -469,12 +649,17 @@
     slot = parseInt(slot, 10);
     port = parseInt(port, 10);
     if (!sfpMap[slot] || !sfpMap[slot][port]) return false;
+    detachPatchesFromOltPort(slot, port);
     delete sfpMap[slot][port];
-    if (portWiring[portId(slot, port)]) portWiring[portId(slot, port)].hasSfp = false;
+    if (portWiring[portId(slot, port)]) {
+      portWiring[portId(slot, port)].hasSfp = false;
+      portWiring[portId(slot, port)].connected = false;
+    }
     rebuildViews();
     selectPort(slot, port);
     pushHistory();
-    setStatus('SFP removed from Port ' + port);
+    refreshOpticalOutputs();
+    setStatus('SFP ejected from Port ' + port + ' · cage dust cap restored');
     return true;
   }
 
@@ -875,9 +1060,10 @@
       body = '16 SFP cages · drop modules into empty ports.';
     } else if (selection.kind === 'port') {
       var active = hasSfp(selection.slot, selection.port);
-      title = 'Port ' + selection.port + (active ? ' · SFP Active' : ' · Empty');
+      var spec = active ? getSfpProfile(sfpModule(selection.slot, selection.port).profileId) : null;
+      title = 'Port ' + selection.port + (active ? ' · ' + spec.shortName : ' · Empty');
       body = 'LT' + pad2(selection.slot) + ' · ' + portId(selection.slot, selection.port) +
-        (active ? ' · jumper-ready' : ' · insert an SFP');
+        (active ? ' · TX ' + spec.txNm + ' nm' : ' · insert an SFP');
     }
 
     card.innerHTML = '<h2>' + title + '</h2><p>' + body + '</p>';
@@ -888,9 +1074,50 @@
       var activePort = hasSfp(selection.slot, selection.port);
       var w = portWiring[portId(selection.slot, selection.port)] || {};
       var polish = w.polish || 'UPC';
+      var mod = activePort ? sfpModule(selection.slot, selection.port) : null;
+      if (mod) normalizeSfpModule(mod);
+      var spec = mod ? getSfpProfile(mod.profileId) : null;
+      var profileOpts = '';
+      Object.keys(SFP_PROFILES).forEach(function (pid) {
+        var pr = SFP_PROFILES[pid];
+        profileOpts +=
+          '<option value="' + pr.id + '"' +
+          (spec && spec.id === pr.id ? ' selected' : '') + '>' +
+          pr.name + '</option>';
+      });
+      var sfpControls = '';
+      if (activePort && spec) {
+        sfpControls =
+          '<p class="lab-inspector__label">SFP model</p>' +
+          '<select class="lab-sfp-profile" data-sfp-profile="1">' + profileOpts + '</select>' +
+          '<div class="lab-sfp-spec">' +
+          '<span>TX ' + spec.txNm + ' nm</span>' +
+          '<span>RX ' + spec.rxNm + ' nm</span>' +
+          '<span>Sens ' + spec.sensitivity + ' dBm</span>' +
+          '</div>' +
+          '<p class="lab-inspector__label">TX power <strong data-sfp-tx-val>' +
+          fmtDbm(mod.txDbm) + '</strong></p>' +
+          '<div class="lab-sfp-tx">' +
+          '<input type="range" data-sfp-tx-range min="' + spec.txMin + '" max="' + spec.txMax +
+          '" step="0.1" value="' + mod.txDbm + '" aria-label="SFP TX power">' +
+          '<input type="number" data-sfp-tx-num min="' + spec.txMin + '" max="' + spec.txMax +
+          '" step="0.1" value="' + mod.txDbm.toFixed(1) + '" aria-label="SFP TX dBm">' +
+          '</div>' +
+          '<p class="lab-sfp-tx-bounds">' + fmtDbm(spec.txMin) + ' – ' + fmtDbm(spec.txMax) + '</p>' +
+          '<p class="lab-inspector__label">SFP polish</p>' +
+          '<div class="lab-polish-toggle" role="group">' +
+          '<button type="button" class="lab-polish-btn is-upc' +
+          (polish === 'UPC' ? ' is-active' : '') +
+          '" data-set-olt-polish="UPC">UPC · Blue</button>' +
+          '<button type="button" class="lab-polish-btn is-apc' +
+          (polish === 'APC' ? ' is-active' : '') +
+          '" data-set-olt-polish="APC">APC · Green</button>' +
+          '</div>' +
+          '<button type="button" class="lab-eject-btn" data-lab-eject-sfp="1">Eject SFP</button>';
+      }
       detail.innerHTML =
         '<div class="lab-port-sheet">' +
-        '<div><span>Status</span><strong>' + (activePort ? 'Active (SFP in)' : 'Empty') + '</strong></div>' +
+        '<div><span>Status</span><strong>' + (activePort ? 'SFP seated' : 'Empty cage') + '</strong></div>' +
         '<div><span>Port</span><strong>' + selection.port + ' / 16</strong></div>' +
         '<div><span>Port ID</span><strong>' + portId(selection.slot, selection.port) + '</strong></div>' +
         (activePort
@@ -898,17 +1125,9 @@
           : '') +
         '</div>' +
         (activePort
-          ? '<p class="lab-inspector__label">SFP polish</p>' +
-            '<div class="lab-polish-toggle" role="group">' +
-            '<button type="button" class="lab-polish-btn is-upc' +
-            (polish === 'UPC' ? ' is-active' : '') +
-            '" data-set-olt-polish="UPC">UPC · Blue</button>' +
-            '<button type="button" class="lab-polish-btn is-apc' +
-            (polish === 'APC' ? ' is-active' : '') +
-            '" data-set-olt-polish="APC">APC · Green</button>' +
-            '</div>' +
-            '<button type="button" class="lab-eject-btn" data-lab-eject-sfp="1">Remove SFP</button>'
-          : '<button type="button" class="lab-install-btn" data-lab-install-sfp="1">Insert SFP into Port ' + selection.port + '</button>');
+          ? sfpControls
+          : '<button type="button" class="lab-install-btn" data-lab-install-sfp="1">Insert SFP into Port ' +
+            selection.port + '</button>');
       detail.hidden = false;
       detail.querySelectorAll('[data-set-olt-polish]').forEach(function (btn) {
         btn.addEventListener('click', function () {
@@ -920,6 +1139,35 @@
           setStatus('OLT port polish → ' + portWiring[pid].polish);
         });
       });
+      var profileEl = detail.querySelector('[data-sfp-profile]');
+      if (profileEl) {
+        profileEl.addEventListener('change', function () {
+          setSfpProfile(selection.slot, selection.port, profileEl.value);
+          pushHistory();
+        });
+      }
+      var rangeEl = detail.querySelector('[data-sfp-tx-range]');
+      var numEl = detail.querySelector('[data-sfp-tx-num]');
+      var valEl = detail.querySelector('[data-sfp-tx-val]');
+      function syncTxUi(v) {
+        if (rangeEl) rangeEl.value = String(v);
+        if (numEl) numEl.value = v.toFixed(1);
+        if (valEl) valEl.textContent = fmtDbm(v);
+      }
+      function onTxInput(raw, commit) {
+        var next = setSfpTxPower(selection.slot, selection.port, raw, { silent: !commit });
+        if (next == null) return;
+        syncTxUi(next);
+        if (commit) pushHistory();
+      }
+      if (rangeEl) {
+        rangeEl.addEventListener('input', function () { onTxInput(rangeEl.value, false); });
+        rangeEl.addEventListener('change', function () { onTxInput(rangeEl.value, true); });
+      }
+      if (numEl) {
+        numEl.addEventListener('input', function () { onTxInput(numEl.value, false); });
+        numEl.addEventListener('change', function () { onTxInput(numEl.value, true); });
+      }
       var ej = detail.querySelector('[data-lab-eject-sfp]');
       if (ej) ej.addEventListener('click', function () {
         ejectSfp(selection.slot, selection.port);
@@ -1036,15 +1284,23 @@
     return tiltDeg - 90;
   }
 
-  /** Huawei GPON-OLT module: casing, ridge bands, label, bail latch, bore. */
-  function sfpAssetHtml() {
+  /** Smooth metallic SFP: body, front optical bore, bail latch, dust cover. */
+  function sfpAssetHtml(opts) {
+    opts = opts || {};
+    var patched = !!opts.patched;
+    var capped = !!opts.capped && !patched;
+    var dustClass = patched ? ' is-hidden' : (capped ? '' : ' is-stowed');
+    var dustTitle = patched
+      ? 'Dust cover hidden · patch seated'
+      : (capped ? 'Dust cover · click to remove' : 'Dust cover stowed · click to refit');
     return (
       '<span class="lab-fx-sfp">' +
       '<span class="lab-fx-sfp__shell"></span>' +
-      '<span class="lab-fx-sfp__label"></span>' +
-      '<span class="lab-fx-sfp__ridges"></span>' +
       '<span class="lab-fx-sfp__bail"></span>' +
-      '<span class="lab-fx-port__cage"><i></i></span>' +
+      '<span class="lab-fx-port__cage"><i></i><i></i></span>' +
+      '<span class="lab-fx-sfp__dust' + dustClass + '" ' +
+      'data-lab-sfp-dust="1" role="button" tabindex="0" title="' + dustTitle + '" ' +
+      'aria-label="SFP dust cover"></span>' +
       '</span>'
     );
   }
@@ -1058,9 +1314,13 @@
       var polishClass = filled ? (polish === 'APC' ? ' is-apc' : ' is-upc') : '';
       var tilt = portTiltDeg(slot, p);
       var seating = filled && justSeated === id ? ' is-seating' : '';
+      var patched = filled && isSfpPatched(slot, p);
+      var capped = filled && sfpHasDustCap(slot, p) && !patched;
+      var dustClass = capped ? ' is-capped' : '';
+      var patchedClass = patched ? ' is-patched' : '';
       ports +=
         '<button type="button" class="lab-fx-port' + (filled ? ' is-active' : ' is-empty') +
-        polishClass + seating + '" ' +
+        polishClass + seating + dustClass + patchedClass + '" ' +
         'style="--fx-i:' + (p - 1) + ';--fx-port-tilt:' + tilt + 'deg" ' +
         'data-lab-sfp="' + p + '" data-lab-slot="' + slot + '" data-lab-port-id="' + id + '" ' +
         'data-lab-port-tilt="' + tilt + '" ' +
@@ -1068,7 +1328,9 @@
         'data-lab-drop="sfp" title="Port ' + p + (filled ? ' · SFP · ' + polish : ' · empty') + '">' +
         '<span class="lab-fx-port__module">' +
         '<span class="lab-fx-port__rail"></span>' +
-        (filled ? sfpAssetHtml() : '') +
+        (filled
+          ? sfpAssetHtml({ capped: capped, patched: patched })
+          : '<span class="lab-fx-cage-dust" title="Cage dust cap" aria-hidden="true"></span>') +
         '</span>' +
         '<span class="lab-fx-port__num">' + p + '</span>' +
         '<span class="lab-fx-port__led' + (filled ? ' is-on' : '') + '"></span>' +
@@ -1343,6 +1605,11 @@
 
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
+        if (e.target.closest('[data-lab-sfp-dust]')) {
+          e.preventDefault();
+          toggleSfpDustCap(slot, port);
+          return;
+        }
         if (selection.kind === 'lib-sfp' && !hasSfp(slot, port)) {
           installSfp(selection.sfpId, slot, port);
         } else {
@@ -1560,12 +1827,19 @@
           if (!installed[s]) continue;
           for (p = 1; p <= PORT_COUNT; p++) {
             if (!hasSfp(s, p)) continue;
+            var srcMod = normalizeSfpModule(sfpModule(s, p));
+            var srcSpec = getSfpProfile(srcMod.profileId);
             out.push({
               key: 'olt:' + s + ':' + p,
-              txDbm: 2.5,
+              kind: 'olt',
+              txDbm: srcMod.txDbm,
+              wavelengthNm: srcSpec.txNm,
+              rxNm: srcSpec.rxNm,
+              sensitivity: srcSpec.sensitivity,
+              profileId: srcSpec.id,
               slot: s,
               port: p,
-              label: 'OLT LT' + (s < 10 ? '0' : '') + s + '/P' + p,
+              label: 'OLT LT' + (s < 10 ? '0' : '') + s + '/P' + p + ' · ' + srcSpec.shortName,
             });
           }
         }
@@ -1657,6 +1931,11 @@
     ejectCard: ejectCard,
     installSfp: installSfp,
     ejectSfp: ejectSfp,
+    toggleSfpDustCap: toggleSfpDustCap,
+    syncSfpPatchState: syncSfpPatchState,
+    setSfpProfile: setSfpProfile,
+    setSfpTxPower: setSfpTxPower,
+    getSfpProfiles: function () { return SFP_PROFILES; },
     selectPort: selectPort,
     selectCard: selectCard,
   };
