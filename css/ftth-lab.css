@@ -4981,3 +4981,15 @@ body.lab-pcord-winding .lab-pcord-fiber-hit {
   margin-top: 0.55rem;
   width: 100%;
 }
+
+.lab-jig-config .lab-eject-btn--secondary {
+  margin-top: 0.55rem;
+  background: rgba(15, 23, 42, 0.9);
+  border-color: rgba(125, 211, 252, 0.45);
+  color: #bae6fd;
+}
+
+.lab-jig-config .lab-eject-btn--secondary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

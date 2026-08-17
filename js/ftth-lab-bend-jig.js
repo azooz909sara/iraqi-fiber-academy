@@ -95,6 +95,8 @@
       p2: p2,
       entryPoint: p1,
       exitPoint: p2,
+      isCableDocked: !!j.isCableDocked,
+      dockedCordId: j.dockedCordId || null,
     };
   }
 
@@ -114,6 +116,10 @@
     if (!snap) return;
     historyLocked = true;
     jigs = snap.jigs || [];
+    jigs.forEach(function (j) {
+      if (typeof j.isCableDocked !== 'boolean') j.isCableDocked = false;
+      if (!j.dockedCordId) j.dockedCordId = null;
+    });
     seq = snap.seq || 0;
     selection = snap.selection || { kind: 'none', jigId: null };
     rebuildLayer();
@@ -173,6 +179,8 @@
       x: Math.round(pos.x - JIG_W / 2),
       y: Math.round(pos.y - JIG_H / 2),
       theta: 180,
+      isCableDocked: false,
+      dockedCordId: null,
     };
     jigs.push(j);
     selectJig(j.id);
@@ -183,8 +191,43 @@
     return j;
   }
 
+  function setCableDocked(jigId, cordId, docked) {
+    var j = findJig(jigId);
+    if (!j) return false;
+    var next = !!docked;
+    var nextId = next ? (cordId || j.dockedCordId || null) : null;
+    if (j.isCableDocked === next && j.dockedCordId === nextId) return false;
+    j.isCableDocked = next;
+    j.dockedCordId = nextId;
+    if (layer) {
+      var node = layer.querySelector('[data-jig-node="' + j.id + '"]');
+      if (node) {
+        node.title = 'Macro-Bend Tester · θ ' + clampTheta(j.theta) + '°';
+      }
+    }
+    if (selection.jigId === j.id) updateInspector();
+    return true;
+  }
+
+  function releaseDockedCable(jigId) {
+    var j = findJig(jigId);
+    if (!j) return;
+    var cordId = j.dockedCordId;
+    setCableDocked(jigId, null, false);
+    if (global.FtthLab && typeof FtthLab.releasePatchCordFromBendJig === 'function') {
+      FtthLab.releasePatchCordFromBendJig(cordId || null, jigId);
+    }
+    notifyJigs({ source: 'bend-jig', jigId: jigId, opm: true });
+    setStatus('Macro-Bend Tester · cable released');
+  }
+
   function removeJig(id) {
-    jigs = jigs.filter(function (j) { return j.id !== id; });
+    var j = findJig(id);
+    if (j && j.isCableDocked && global.FtthLab &&
+        typeof FtthLab.releasePatchCordFromBendJig === 'function') {
+      FtthLab.releasePatchCordFromBendJig(j.dockedCordId || null, id);
+    }
+    jigs = jigs.filter(function (item) { return item.id !== id; });
     if (selection.jigId === id) selection = { kind: 'none', jigId: null };
     rebuildLayer();
     updateInspector();
@@ -517,11 +560,14 @@
       '<label class="lab-spool-type-label" for="lab-jig-angle-num">θ</label>' +
       '<input id="lab-jig-angle-num" class="lab-spool-type-select" type="number" min="0" max="180" step="1" value="' + th + '">' +
       '<div class="lab-spl-sheet">' +
+      '<div><span>Cable</span><strong>' + (j.isCableDocked ? 'Docked' : 'Open') + '</strong></div>' +
       '<div><span>Macro-bend ΔLoss</span><strong id="lab-jig-loss-val">' + db.toFixed(2) + ' dB</strong></div>' +
       '<div><span>Regime</span><strong id="lab-jig-band">' + lossBandLabel(th) + '</strong></div>' +
-      '<div><span>Slot</span><strong>Seg 1 → pivot → Seg 2</strong></div>' +
+      '<div><span>Slot</span><strong>Entry → pivot → Exit</strong></div>' +
       '</div>' +
-      '<p class="lab-spool-hint">180° straight = 0 dB. Below 120° quadratic loss. Below 90° is a sharp kink (≥15 dB).</p>' +
+      '<p class="lab-spool-hint">180° straight = 0 dB. Below 120° quadratic loss. Below 90° is a sharp kink (≥15 dB). Docked cables stay locked until you press Remove Cable.</p>' +
+      '<button type="button" class="lab-eject-btn lab-eject-btn--secondary" data-undock-jig="' +
+      j.id + '"' + (j.isCableDocked ? '' : ' disabled') + '>Remove Cable</button>' +
       '<button type="button" class="lab-eject-btn" data-remove-jig="' + j.id + '">Remove Tester</button>' +
       '</div>';
 
@@ -539,6 +585,13 @@
     if (num) {
       num.addEventListener('change', function () {
         setBendAngle(j.id, num.value);
+      });
+    }
+    var undock = detail.querySelector('[data-undock-jig]');
+    if (undock) {
+      undock.addEventListener('click', function () {
+        releaseDockedCable(j.id);
+        pushHistory();
       });
     }
     var rm = detail.querySelector('[data-remove-jig]');
@@ -577,6 +630,8 @@
 
     if (global.FtthLab) {
       FtthLab.listBendJigSlots = listSlots;
+      FtthLab.setBendJigCableDocked = setCableDocked;
+      FtthLab.releaseBendJigCable = releaseDockedCable;
       FtthLab.macroBendLossDb = macroBendLossDb;
       FtthLab.macroBendLossForJig = function (id) {
         var j = findJig(id);

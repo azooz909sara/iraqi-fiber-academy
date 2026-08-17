@@ -163,6 +163,7 @@
       if (!c.contacts) c.contacts = [];
       if (typeof c.contactSeq !== 'number') c.contactSeq = 0;
       if (!c.bendJigId) c.bendJigId = null;
+      if (!c.bendJigIgnoreId) c.bendJigIgnoreId = null;
     });
     rebuildLayer();
     updateInspector();
@@ -4510,36 +4511,55 @@
     return Math.min(dChord1, dChordP, dChord2, dA1, dA2, dB1, dB2);
   }
 
+  function distToEntryPoint(a, b, slot) {
+    var entry = slot.entryPoint || slot.p1;
+    if (!entry) return Infinity;
+    return distPointToSeg(entry.x, entry.y, a.x, a.y, b.x, b.y);
+  }
+
   function pickLatchedBendJig(cord, jigs) {
     if (!cord || !jigs || !jigs.length) return null;
     var a = bootAnchor(cord, 'A');
     var b = bootAnchor(cord, 'B');
-    var latched = null;
     var i;
+
+    /* Hard lock: stay in the jig until Remove Cable. */
+    for (i = 0; i < jigs.length; i++) {
+      if (jigs[i].isCableDocked && jigs[i].dockedCordId === cord.id) {
+        return jigs[i];
+      }
+    }
     if (cord.bendJigId) {
       for (i = 0; i < jigs.length; i++) {
-        if (jigs[i].id === cord.bendJigId) {
-          latched = jigs[i];
-          break;
+        if (jigs[i].id === cord.bendJigId && jigs[i].isCableDocked) {
+          return jigs[i];
         }
       }
-      if (latched && chordDistToJigSlot(a, b, latched) > BEND_JIG_RELEASE_PX) {
-        latched = null;
+    }
+
+    var best = null;
+    var bestD = BEND_JIG_SNAP_PX;
+    for (i = 0; i < jigs.length; i++) {
+      var slot = jigs[i];
+      if (slot.isCableDocked && slot.dockedCordId && slot.dockedCordId !== cord.id) {
+        continue;
+      }
+      if (cord.bendJigIgnoreId && cord.bendJigIgnoreId === slot.id) {
+        var ignoreD = Math.min(chordDistToJigSlot(a, b, slot), distToEntryPoint(a, b, slot));
+        if (ignoreD >= BEND_JIG_SNAP_PX) cord.bendJigIgnoreId = null;
+        else continue;
+      }
+      var d = Math.min(chordDistToJigSlot(a, b, slot), distToEntryPoint(a, b, slot));
+      if (d < bestD) {
+        bestD = d;
+        best = slot;
       }
     }
-    if (!latched) {
-      var best = null;
-      var bestD = BEND_JIG_SNAP_PX;
-      for (i = 0; i < jigs.length; i++) {
-        var d = chordDistToJigSlot(a, b, jigs[i]);
-        if (d < bestD) {
-          bestD = d;
-          best = jigs[i];
-        }
-      }
-      latched = best;
+    if (best && global.FtthLab && typeof FtthLab.setBendJigCableDocked === 'function') {
+      cord.bendJigIgnoreId = null;
+      FtthLab.setBendJigCableDocked(best.id, cord.id, true);
     }
-    return latched;
+    return best;
   }
 
   /**
@@ -4781,6 +4801,10 @@
         var c = findCord(id);
         if (!c) return;
         selectCord(id);
+        if (c.bendJigId) {
+          setStatus('Cable docked in Macro-Bend Tester · use Remove Cable in properties to release');
+          return;
+        }
         var zoom = getZoom();
         var sx = e.clientX;
         var sy = e.clientY;
@@ -5635,6 +5659,22 @@
         translateForVfl(vflId, dx, dy, opts);
         if (typeof prevTranslate === 'function' && prevTranslate !== translateForVfl) {
           prevTranslate(vflId, dx, dy, opts);
+        }
+      };
+
+      FtthLab.releasePatchCordFromBendJig = function (cordId, jigId) {
+        var changed = false;
+        cords.forEach(function (c) {
+          if ((cordId && c.id === cordId) || (jigId && c.bendJigId === jigId)) {
+            c.bendJigId = null;
+            c.bendJigIgnoreId = jigId || c.bendJigIgnoreId || null;
+            changed = true;
+            updateFiberPath(c);
+          }
+        });
+        if (changed) {
+          rebuildLayer();
+          refreshBudget();
         }
       };
 
