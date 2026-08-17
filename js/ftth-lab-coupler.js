@@ -6,6 +6,8 @@
   'use strict';
 
   var COUPLER_LOSS_DB = 0.2;
+  var COUPLER_LOSS_MIN = 0.2;
+  var COUPLER_LOSS_MAX = 0.5;
   /* Patch-cord head 14×22; sideways plug → coupler height ≈ head width (+ rim) */
   var CPL_W = 40;
   var CPL_H = 18;
@@ -32,6 +34,17 @@
 
   function getZoom() {
     return (global.FtthLab && FtthLab.getZoom2d) ? FtthLab.getZoom2d() : 1;
+  }
+
+  function randomInsertionLoss() {
+    var n = COUPLER_LOSS_MIN + Math.random() * (COUPLER_LOSS_MAX - COUPLER_LOSS_MIN);
+    return Math.round(n * 100) / 100;
+  }
+
+  function couplerIl(c) {
+    var n = Number(c && c.lossDb);
+    if (isFinite(n) && n >= COUPLER_LOSS_MIN && n <= COUPLER_LOSS_MAX) return n;
+    return COUPLER_LOSS_DB;
   }
 
   function findCoupler(id) {
@@ -63,6 +76,10 @@
     if (!snap) return;
     historyLocked = true;
     couplers = snap.couplers || [];
+    couplers.forEach(function (c) {
+      if (typeof c.lossDb !== 'number') c.lossDb = COUPLER_LOSS_DB;
+      if (!c.polish) c.polish = 'APC';
+    });
     seq = snap.seq || 0;
     selection = snap.selection || { kind: 'none', couplerId: null };
     rebuildLayer();
@@ -114,15 +131,19 @@
       id: 'cpl-' + seq,
       x: pos.x,
       y: pos.y,
-      polish: normalizePolish(polish || 'UPC'),
+      polish: normalizePolish(polish || 'APC'),
+      lossDb: randomInsertionLoss(),
     };
     couplers.push(c);
     selectCoupler(c.id);
     rebuildLayer();
     pushHistory();
+    if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+      FtthLab.notifyLayoutChange({ source: 'coupler', couplerId: c.id, opm: true });
+    }
     setStatus(
       'SC Coupler placed · ' + displayPolish(c.polish) +
-      ' · switch type in the properties panel'
+      ' · IL ' + couplerIl(c).toFixed(2) + ' dB · Port 1 / Port 2'
     );
     return c;
   }
@@ -155,6 +176,9 @@
     updateInspector();
     if (global.FtthLab && typeof FtthLab.refreshCouplerPolish === 'function') {
       FtthLab.refreshCouplerPolish(id, polish);
+    }
+    if (global.FtthLab && typeof FtthLab.notifyLayoutChange === 'function') {
+      FtthLab.notifyLayoutChange({ source: 'coupler', couplerId: id, opm: true });
     }
     pushHistory();
     setStatus('SC Coupler → ' + displayPolish(polish));
@@ -208,8 +232,8 @@
       '" draggable="true" data-lab-tool="coupler" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--cpl" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>SC Coupler</strong>' +
-      '<span>Type in properties panel</span>' +
+      '<strong>SC/APC Coupler</strong>' +
+      '<span>Inline sleeve · 0.2–0.5 dB IL</span>' +
       '</span>' +
       '</button>' +
       '</div>';
@@ -512,8 +536,8 @@
 
     var isApc = normalizePolish(c.polish) === 'APC';
     card.innerHTML =
-      '<h2>SC Coupler</h2>' +
-      '<p>Both faces share one polish · match jumpers to this type.</p>';
+      '<h2>SC/APC Coupler</h2>' +
+      '<p>Dual-port mating sleeve · plug a patch cord into Port 1 and Port 2 to bridge the link.</p>';
 
     if (!detail) return;
     detail.hidden = false;
@@ -530,8 +554,8 @@
       '<div><span>Type</span><strong class="' +
       (isApc ? 'is-apc-text' : 'is-upc-text') + '">' + displayPolish(c.polish) +
       '</strong></div>' +
-      '<div><span>Faces</span><strong>A · B</strong></div>' +
-      '<div><span>IL</span><strong>~' + COUPLER_LOSS_DB.toFixed(1) + ' dB</strong></div>' +
+      '<div><span>Faces</span><strong>Port 1 · Port 2</strong></div>' +
+      '<div><span>IL</span><strong>' + couplerIl(c).toFixed(2) + ' dB</strong></div>' +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-cpl="' + c.id +
       '">Remove Coupler</button>' +
@@ -571,7 +595,14 @@
   }
 
   function getCouplerLossDb() {
-    return couplers.length * COUPLER_LOSS_DB;
+    var sum = 0;
+    couplers.forEach(function (c) { sum += couplerIl(c); });
+    return Math.round(sum * 100) / 100;
+  }
+
+  function getCouplerPassLossDb(id) {
+    var c = findCoupler(id);
+    return c ? couplerIl(c) : COUPLER_LOSS_DB;
   }
 
   function getCouplerPortWorld(id, port) {
@@ -645,6 +676,7 @@
 
     if (global.FtthLab) {
       FtthLab.getCouplerLoss = getCouplerLossDb;
+      FtthLab.getCouplerPassLossDb = getCouplerPassLossDb;
       FtthLab.getCouplerPortWorld = getCouplerPortWorld;
       FtthLab.getCouplerOppositePort = getCouplerOppositePort;
       FtthLab.isCouplerId = isCouplerId;

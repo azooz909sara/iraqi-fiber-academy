@@ -4838,3 +4838,80 @@ body.lab-pcord-winding,
 body.lab-pcord-winding .lab-pcord-fiber-hit {
   cursor: grabbing !important;
 }
+
+/* ─── Macro-Bend Tester ─── */
+
+.lab-tool__mark--jig {
+  width: 1.2rem;
+  height: 0.55rem;
+  border-radius: 0.1rem;
+  border: 1px solid #4b5a6c;
+  background: linear-gradient(180deg, #2b3645 0%, #1a2332 100%);
+  box-shadow: none;
+}
+
+.lab-tool--jig .lab-tool__copy strong {
+  color: #cbd5e1;
+}
+
+.lab-jig-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.lab-jig {
+  position: absolute;
+  z-index: 3;
+  width: 168px;
+  height: 112px;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  filter: none;
+}
+
+.lab-jig.is-dragging { cursor: grabbing; z-index: 12; }
+
+.lab-jig.is-selected {
+  filter: none;
+  outline: 1px solid #64748b;
+  outline-offset: 2px;
+}
+
+.lab-jig__art {
+  display: block;
+  overflow: visible;
+  filter: none;
+}
+
+.lab-jig__arm-dyn {
+  cursor: nwse-resize;
+  pointer-events: auto;
+}
+
+.lab-jig__theta {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
+  background: #151c27;
+  border: 1px solid #3d4b5c;
+  border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  text-shadow: none;
+  filter: none;
+  box-shadow: none;
+}
+
+.lab-jig-config .lab-eject-btn {
+  margin-top: 0.55rem;
+  width: 100%;
+}

@@ -1040,11 +1040,16 @@
         }
       });
       Object.keys(couplerIds).forEach(function (cid) {
+        var passLoss = COUPLER_PASS_LOSS_DB;
+        if (typeof api.getCouplerPassLossDb === 'function') {
+          var custom = Number(api.getCouplerPassLossDb(cid));
+          if (isFinite(custom) && custom >= 0) passLoss = custom;
+        }
         addUndirectedEdge(
           adj,
           'cpl:' + cid + ':A',
           'cpl:' + cid + ':B',
-          COUPLER_PASS_LOSS_DB
+          passLoss
         );
       });
     }

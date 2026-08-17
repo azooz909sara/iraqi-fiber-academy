@@ -97,6 +97,7 @@
       x: s.x + sz / 2,
       y: s.y + sz / 2,
       r: mmToPx(s.radiusMm),
+      rOuter: mmToPx(s.radiusMm) + mmToPx(FLANGE_MM),
       size: sz,
       type: type,
       rot: s.rot || 0,
@@ -780,6 +781,7 @@
       FtthLab.spoolBendLossDb = spoolBendLossDb;
       FtthLab.spoolSlackMeters = spoolSlackMeters;
       FtthLab.refreshSpoolInspector = updateInspector;
+      FtthLab.SPOOL_FLANGE_MM = FLANGE_MM;
       FtthLab.SPOOL_BEND_SAFE_MM = BEND_SAFE_MM;
     }
   }

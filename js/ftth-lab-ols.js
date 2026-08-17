@@ -18,6 +18,7 @@
   var DISPLAY_MODE_ORDER = ['single', 'auto', 'multi'];
   var CW_DBM = -3;
   var MOD_DBM = -6;
+  var TX_PRESETS = [3, 0, -3];
 
   var ctx = null;
   var layer = null;
@@ -89,6 +90,8 @@
 
   /** Configured output for the current LCD / TX mode (does not imply laser ON). */
   function configuredDbm(d) {
+    var preset = Number(d && d.txDbm);
+    if (TX_PRESETS.indexOf(preset) >= 0) return preset;
     var mode = normalizeDisplayMode(d);
     if (mode === 'auto' || mode === 'multi') return MOD_DBM;
     return d.modulation === 'CW' ? CW_DBM : MOD_DBM;
@@ -211,7 +214,7 @@
           modulation: mode === 'single' ? d.modulation : 'CW',
           displayMode: mode,
           modeLabel: displayModeLabel(mode),
-          label: 'OLS-35 · ' + displayModeLabel(mode) + ' · ' + wl + ' nm',
+          label: 'OPL · OLS-35 · ' + displayModeLabel(mode) + ' · ' + wl + ' nm',
           olsId: d.id,
         });
       });
@@ -426,6 +429,20 @@
     if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
       FtthLab.refreshPowerBudget();
     }
+  }
+
+  function setTxDbm(id, dbm) {
+    var d = findDevice(id);
+    if (!d) return;
+    var n = Number(dbm);
+    if (TX_PRESETS.indexOf(n) < 0) return;
+    if (d.txDbm === n) return;
+    d.txDbm = n;
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    notifyOptical();
+    setStatus('OPL TX · ' + formatCfgDbm(n));
   }
 
   function handleOlsKey(btn) {
@@ -662,12 +679,13 @@
       displayMode: 'single',
       autoLambda: false,
       docked: false,
+      txDbm: 0,
     };
     devices.push(d);
     selectOls(d.id);
     rebuildLayer();
     pushHistory();
-    setStatus('Viavi OLS-35 placed · dock SC fiber · ON/OFF enables laser TX');
+    setStatus('OLS-35 / OPL placed · dock SC fiber · set λ and TX (0 / +3 dBm) · laser ON');
     return d;
   }
 
@@ -707,8 +725,8 @@
       '" draggable="true" data-lab-tool="ols" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--ols" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>Viavi OLS-35</strong>' +
-      '<span>Laser source · SC dock</span>' +
+      '<strong>OLS-35 / OPL</strong>' +
+      '<span>Calibrated source · 1310 / 1550</span>' +
       '</span>' +
       '</button>' +
       '</div>';
@@ -782,12 +800,25 @@
     card.dataset.olsInspector = '1';
     card.hidden = true;
     detail.hidden = false;
+    var cfg = configuredDbm(d);
     var pwr = outputDbm(d);
     var mode = normalizeDisplayMode(d);
+    var txBtns = TX_PRESETS.map(function (n) {
+      var lab = (n >= 0 ? '+' : '') + n + ' dBm';
+      return (
+        '<button type="button" class="lab-polish-btn' +
+        (cfg === n ? ' is-active' : '') +
+        '" data-ols-tx="' + n + '">' + lab + '</button>'
+      );
+    }).join('');
     detail.innerHTML =
       '<div class="lab-inspector__card">' +
-      '<h2>Viavi OLS-35</h2>' +
-      '<p>Optical laser source · dock SC Patch/Pigtail · enable laser to inject light.</p>' +
+      '<h2>OLS-35 / OPL</h2>' +
+      '<p>Calibrated optical source · 1310 / 1550 nm · dock a patch cord, then enable laser.</p>' +
+      '<p class="lab-inspector__label">TX level</p>' +
+      '<div class="lab-polish-toggle" role="group" aria-label="Calibrated TX">' +
+      txBtns +
+      '</div>' +
       '<div class="lab-spl-sheet">' +
       '<div><span>Power</span><strong>' + (d.poweredOn ? 'ON' : 'OFF') + '</strong></div>' +
       '<div><span>Laser</span><strong>' + (d.laserOn ? 'ON' : 'OFF') + '</strong></div>' +
@@ -797,11 +828,16 @@
       '<div><span>Hz</span><strong>' +
       (mode === 'single' ? modLabel(d.modulation) : '—') + '</strong></div>' +
       '<div><span>Output</span><strong>' +
-      (pwr != null ? pwr.toFixed(2) + ' dBm' : '—') + '</strong></div>' +
+      (pwr != null ? pwr.toFixed(2) + ' dBm' : formatCfgDbm(cfg) + ' (armed)') + '</strong></div>' +
       '<div><span>Dock</span><strong>' + (d.docked ? 'Occupied' : 'Open') + '</strong></div>' +
       '</div>' +
       '<button type="button" class="lab-eject-btn" data-remove-ols="' + d.id + '">Remove OLS-35</button>' +
       '</div>';
+    detail.querySelectorAll('[data-ols-tx]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        setTxDbm(d.id, btn.getAttribute('data-ols-tx'));
+      });
+    });
     var rm = detail.querySelector('[data-remove-ols]');
     if (rm) {
       rm.addEventListener('click', function () {
