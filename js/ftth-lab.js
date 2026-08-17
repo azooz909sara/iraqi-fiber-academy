@@ -1323,6 +1323,13 @@
       if (!isFinite(n)) return 0;
       return n / 160;
     },
+    /** Visual millimetre scale for pin tools (fiber spools). Independent of Meter Mode px/m. */
+    getPxPerMm: function () { return 1.25; },
+    mmToWorldPx: function (mm) {
+      var n = Number(mm);
+      if (!isFinite(n)) return 0;
+      return n * 1.25;
+    },
     centerWorldInView: centerWorldInView,
     showAlert: showAlert,
     setBudget: setBudget,

@@ -4700,3 +4700,141 @@ body.lab-opm-probing .lab-canvas-2d,
 body.lab-opm-probing #lab-canvas-2d {
   cursor: default;
 }
+
+/* ─── Fiber management spools (pin tools) ─── */
+
+.lab-tool--spool .lab-tool__copy strong {
+  color: #e7e5e4;
+}
+
+.lab-tool__mark--spool {
+  width: 1.05rem;
+  height: 1.05rem;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #ffffff 0%, #e7e5e4 62%, #a8a29e 100%);
+  border: 1px solid #78716c;
+  box-shadow: none;
+}
+
+.lab-spool-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.lab-spool {
+  position: absolute;
+  z-index: 3;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transform-origin: 50% 50%;
+  box-sizing: border-box;
+  filter: none;
+  box-shadow: none;
+}
+
+.lab-spool.is-dragging { cursor: grabbing; z-index: 11; }
+
+.lab-spool.is-selected {
+  filter: none;
+}
+
+.lab-spool__body {
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
+.lab-spool__art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  filter: none;
+  box-shadow: none;
+}
+
+.lab-spool__select-box {
+  display: none;
+  position: absolute;
+  inset: -5px;
+  border: 1px dashed rgba(148, 163, 184, 0.9);
+  border-radius: 4px;
+  pointer-events: none;
+  box-shadow: none;
+  background: none;
+}
+
+.lab-spool.is-selected .lab-spool__select-box {
+  display: block;
+}
+
+.lab-spool-type-label {
+  display: block;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  margin: 0 0 0.2rem;
+}
+
+.lab-spool-type-select {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.55rem;
+  height: 2rem;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 0.35rem;
+  background: rgba(15, 23, 42, 0.85);
+  color: #f8fafc;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.lab-spool-radius {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.lab-spool-radius input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.lab-spool-radius strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lab-spool-rot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.lab-spool-hint {
+  margin: 0.45rem 0 0.2rem;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #94a3b8;
+}
+
+.lab-spool-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+}
+
+.lab-spool-actions .lab-eject-btn,
+.lab-spool-actions .lab-pcord-len-mode-btn {
+  flex: 1;
+}
+
+body.lab-pcord-winding,
+body.lab-pcord-winding .lab-pcord-fiber-hit {
+  cursor: grabbing !important;
+}
