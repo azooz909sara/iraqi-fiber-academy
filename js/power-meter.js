@@ -768,5 +768,57 @@
         snapshots: state.snapshots.length,
       };
     },
+    exportProjectState: function () {
+      return {
+        wavelength: state.wavelength,
+        unit: state.unit,
+        powerDbm: isFinite(state.powerDbm) ? state.powerDbm : null,
+        referenceDbm: state.referenceDbm,
+        relativeOn: !!state.relativeOn,
+        standard: state.standard,
+        liveFromBench: !!state.liveFromBench,
+        liveLabel: state.liveLabel || '',
+        docked: !!state.docked,
+        batteryPct: state.batteryPct,
+        lastReading: state.lastReading,
+      };
+    },
+    importProjectState: function (snap) {
+      if (!snap || typeof snap !== 'object') {
+        PowerMeterTrainer.resetProjectState();
+        return;
+      }
+      if (typeof snap.wavelength === 'number') state.wavelength = snap.wavelength;
+      if (snap.unit) state.unit = snap.unit;
+      state.powerDbm = snap.powerDbm == null ? NaN : Number(snap.powerDbm);
+      state.referenceDbm = snap.referenceDbm == null ? null : Number(snap.referenceDbm);
+      state.relativeOn = !!snap.relativeOn;
+      if (snap.standard) state.standard = snap.standard;
+      state.liveFromBench = !!snap.liveFromBench;
+      state.liveLabel = snap.liveLabel || '';
+      state.docked = !!snap.docked;
+      if (typeof snap.batteryPct === 'number') state.batteryPct = snap.batteryPct;
+      state.lastReading = snap.lastReading || null;
+      syncUnitInput();
+      syncWavelengthToBench();
+      render();
+      refreshStatusBar();
+    },
+    resetProjectState: function () {
+      state.wavelength = 1310;
+      state.unit = 'dbm';
+      state.powerDbm = NaN;
+      state.referenceDbm = null;
+      state.relativeOn = false;
+      state.standard = 'gpon';
+      state.liveFromBench = false;
+      state.liveLabel = '';
+      state.lastReading = null;
+      state.docked = false;
+      syncUnitInput();
+      syncWavelengthToBench();
+      render();
+      refreshStatusBar();
+    },
   };
 })(typeof window !== 'undefined' ? window : this);

@@ -1715,7 +1715,7 @@
     });
     return {
       version: 1,
-      kind: 'ifa-ftth-lab-project',
+      kind: isOpmWorkspacePage() ? 'ifa-opm-project' : 'ifa-ftth-lab-project',
       savedAt: new Date().toISOString(),
       zoom2d: state.zoom2d,
       pan2dX: state.pan2dX,
@@ -1742,7 +1742,9 @@
 
   function restoreProjectState(payload) {
     if (!payload || typeof payload !== 'object') return false;
-    if (payload.kind && payload.kind !== 'ifa-ftth-lab-project') return false;
+    if (payload.kind && payload.kind !== 'ifa-ftth-lab-project' && payload.kind !== 'ifa-opm-project') {
+      return false;
+    }
     var toolsPayload = payload.tools && typeof payload.tools === 'object' ? payload.tools : {};
     resetAllToolWorkspaces();
     var seen = {};

@@ -1,13 +1,17 @@
 /**
- * FTTH Lab project manager — landing screen, File menu, localStorage projects.
- * Storage key: ifa_ftth_lab_projects
+ * Workspace project manager — landing screen, File menu, localStorage projects.
+ * FTTH Lab key: ifa_ftth_lab_projects
+ * Optical Power Meter key: ifa_opm_projects
  */
 (function (global) {
   'use strict';
 
-  var STORAGE_KEY = 'ifa_ftth_lab_projects';
+  function createWorkspaceProjectManager(cfg) {
+  var STORAGE_KEY = cfg.storageKey;
   var MAX_RECENT = 20;
-  var KIND = 'ifa-ftth-lab-project';
+  var KIND = cfg.kind;
+  var IDS = cfg.ids;
+  var PAGE_CLASS = cfg.pageClass;
 
   var menuBound = false;
   var workspaceOpen = false;
@@ -54,7 +58,7 @@
   }
 
   function uid() {
-    return 'lab_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+    return (cfg.idPrefix || 'proj') + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
   }
 
   function formatSavedAt(iso) {
@@ -114,7 +118,7 @@
   }
 
   function updateSaveStatus(text) {
-    var el = $('lab-save-status');
+    var el = $(IDS.saveStatus);
     if (!el) return;
     el.textContent = text || '—';
     el.classList.add('save-status--flash');
@@ -122,7 +126,7 @@
   }
 
   function refreshProjectLabel() {
-    var el = $('lab-menu-project-name');
+    var el = $(IDS.projectName);
     if (!el) return;
     var name = lab() && lab().getCurrentProjectName ? lab().getCurrentProjectName() : null;
     el.textContent = name || 'Untitled Project';
@@ -130,10 +134,10 @@
   }
 
   function showToast(text) {
-    var old = $('lab-file-menu-toast');
+    var old = $(IDS.toast);
     if (old && old.parentNode) old.parentNode.removeChild(old);
     var t = document.createElement('div');
-    t.id = 'lab-file-menu-toast';
+    t.id = IDS.toast;
     t.className = 'file-menu-toast lab-file-menu-toast';
     t.setAttribute('role', 'status');
     t.textContent = text;
@@ -170,6 +174,9 @@
     if (!lab() || typeof lab().serializeProjectState !== 'function') return null;
     var payload = lab().serializeProjectState();
     payload.kind = KIND;
+    if (typeof cfg.exportExtras === 'function') {
+      try { payload.extras = cfg.exportExtras(); } catch (err) { /* ignore */ }
+    }
     return payload;
   }
 
@@ -229,6 +236,9 @@
       alert('Could not load project.');
       return false;
     }
+    if (typeof cfg.importExtras === 'function') {
+      try { cfg.importExtras(entry.payload.extras || null); } catch (err) { /* ignore */ }
+    }
     touchRecent(store, id);
     writeStore(store);
     if (lab().setCurrentProjectName) lab().setCurrentProjectName(entry.name);
@@ -262,6 +272,9 @@
   function fileNew() {
     if (workspaceOpen && !confirm('Create a new project? Unsaved changes will be lost.')) return;
     if (lab() && lab().clearWorkspace) lab().clearWorkspace();
+    if (typeof cfg.resetExtras === 'function') {
+      try { cfg.resetExtras(); } catch (err) { /* ignore */ }
+    }
     if (lab() && lab().setCurrentProjectId) lab().setCurrentProjectId(null);
     if (lab() && lab().setCurrentProjectName) lab().setCurrentProjectName(null);
     var store = readStore();
@@ -287,6 +300,9 @@
   function fileClose() {
     if (workspaceOpen && !confirm('Close the current project? Unsaved changes will be lost.')) return;
     if (lab() && lab().clearWorkspace) lab().clearWorkspace();
+    if (typeof cfg.resetExtras === 'function') {
+      try { cfg.resetExtras(); } catch (err) { /* ignore */ }
+    }
     if (lab() && lab().setCurrentProjectId) lab().setCurrentProjectId(null);
     if (lab() && lab().setCurrentProjectName) lab().setCurrentProjectName(null);
     var store = readStore();
@@ -301,8 +317,8 @@
 
   function setWorkspaceVisible(loaded) {
     workspaceOpen = !!loaded;
-    var startup = $('lab-startup-view');
-    var app = $('lab-app');
+    var startup = $(IDS.startup);
+    var app = $(IDS.workspace);
     if (startup) {
       startup.hidden = loaded;
       startup.classList.toggle('is-overlay', false);
@@ -313,7 +329,7 @@
       app.setAttribute('aria-hidden', loaded ? 'false' : 'true');
     }
     overlayMode = false;
-    var back = $('lab-startup-back');
+    var back = $(IDS.back);
     if (back) back.hidden = true;
     if (loaded && lab() && typeof lab().centerWorldInView === 'function' && !lab().getCurrentProjectId()) {
       try { lab().centerWorldInView(); } catch (err) { /* ignore */ }
@@ -321,14 +337,14 @@
   }
 
   function showLanding(asOverlay) {
-    var startup = $('lab-startup-view');
-    var app = $('lab-app');
+    var startup = $(IDS.startup);
+    var app = $(IDS.workspace);
     if (!startup) return;
     overlayMode = !!asOverlay;
     startup.hidden = false;
     startup.classList.toggle('is-overlay', overlayMode);
     startup.setAttribute('aria-hidden', 'false');
-    var back = $('lab-startup-back');
+    var back = $(IDS.back);
     if (back) back.hidden = !overlayMode;
     if (!overlayMode && app) {
       app.hidden = true;
@@ -339,7 +355,7 @@
   }
 
   function renderRecentLanding() {
-    var list = $('lab-startup-recent-list');
+    var list = $(IDS.recentList);
     if (!list) return;
     list.innerHTML = '';
     var recent = listRecent(MAX_RECENT);
@@ -392,7 +408,7 @@
   }
 
   function renderTemplates() {
-    var grid = $('lab-startup-templates-grid');
+    var grid = $(IDS.templates);
     if (!grid) return;
     grid.innerHTML = '';
     var card = document.createElement('button');
@@ -411,7 +427,7 @@
 
     var desc = document.createElement('span');
     desc.className = 'startup-view__template-desc';
-    desc.textContent = 'Blank canvas · OLT · Splitters · Jumpers · Test equipment';
+    desc.textContent = cfg.templateDesc || 'Blank canvas';
 
     card.appendChild(icon);
     card.appendChild(title);
@@ -421,7 +437,7 @@
   }
 
   function renderRecentMenuItems() {
-    var list = $('lab-file-menu-recent-list');
+    var list = $(IDS.recentMenu);
     if (!list) return;
     list.innerHTML = '';
     var recent = listRecent(8);
@@ -451,7 +467,7 @@
   }
 
   function closeAllMenus() {
-    document.querySelectorAll('#lab-app-menu-bar .app-menu-bar__item--open').forEach(function (item) {
+    document.querySelectorAll('#' + IDS.menuBar + ' .app-menu-bar__item--open').forEach(function (item) {
       item.classList.remove('app-menu-bar__item--open');
       var trigger = item.querySelector('.app-menu-bar__trigger');
       if (trigger) trigger.setAttribute('aria-expanded', 'false');
@@ -478,13 +494,13 @@
   }
 
   function settingsModalOpen() {
-    var modal = $('ftth-lab-settings-modal');
+    var modal = $(IDS.settingsModal);
     return !!(modal && !modal.hidden);
   }
 
   function handleFileShortcut(e) {
     if (!e || e.repeat || isEditableTarget(e) || settingsModalOpen()) return false;
-    if (!document.body.classList.contains('lab-page')) return false;
+    if (!document.body.classList.contains(PAGE_CLASS)) return false;
     var mod = e.ctrlKey || e.metaKey;
     if (!mod) return false;
     var key = (e.key || '').toLowerCase();
@@ -519,7 +535,7 @@
     if (menuBound) return;
     menuBound = true;
 
-    document.querySelectorAll('#lab-app-menu-bar [data-file-action]').forEach(function (btn) {
+    document.querySelectorAll('#' + IDS.menuBar + ' [data-file-action]').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
@@ -533,7 +549,7 @@
       });
     });
 
-    document.querySelectorAll('#lab-app-menu-bar .app-menu-bar__item[data-menu]').forEach(function (item) {
+    document.querySelectorAll('#' + IDS.menuBar + ' .app-menu-bar__item[data-menu]').forEach(function (item) {
       var trigger = item.querySelector('.app-menu-bar__trigger');
       if (!trigger || trigger.disabled) return;
       trigger.addEventListener('click', function (e) {
@@ -549,7 +565,7 @@
       handleFileShortcut(e);
     }, true);
 
-    var back = $('lab-startup-back');
+    var back = $(IDS.back);
     if (back) {
       back.addEventListener('click', function () {
         setWorkspaceVisible(true);
@@ -558,7 +574,7 @@
   }
 
   function init() {
-    if (!$('lab-startup-view') || !$('lab-app')) return;
+    if (!$(IDS.startup) || !$(IDS.workspace)) return;
     bindMenu();
     renderTemplates();
     renderRecentLanding();
@@ -568,13 +584,9 @@
     showLanding(false);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  init();
 
-  global.FtthLabProjectManager = {
+  return {
     fileNew: fileNew,
     fileOpen: fileOpen,
     fileSave: function () { return saveCurrent(true); },
@@ -584,4 +596,73 @@
     getRecentProjects: listRecent,
     STORAGE_KEY: STORAGE_KEY,
   };
+  }
+
+  function boot() {
+    if (document.getElementById('lab-startup-view')) {
+      global.FtthLabProjectManager = createWorkspaceProjectManager({
+        storageKey: 'ifa_ftth_lab_projects',
+        kind: 'ifa-ftth-lab-project',
+        idPrefix: 'lab',
+        pageClass: 'lab-page',
+        templateDesc: 'Blank canvas · OLT · Splitters · Jumpers · Test equipment',
+        ids: {
+          startup: 'lab-startup-view',
+          back: 'lab-startup-back',
+          recentList: 'lab-startup-recent-list',
+          templates: 'lab-startup-templates-grid',
+          workspace: 'lab-app',
+          menuBar: 'lab-app-menu-bar',
+          recentMenu: 'lab-file-menu-recent-list',
+          saveStatus: 'lab-save-status',
+          projectName: 'lab-menu-project-name',
+          settingsModal: 'ftth-lab-settings-modal',
+          toast: 'lab-file-menu-toast',
+        },
+      });
+    }
+    if (document.getElementById('opm-startup-view')) {
+      global.OpmProjectManager = createWorkspaceProjectManager({
+        storageKey: 'ifa_opm_projects',
+        kind: 'ifa-opm-project',
+        idPrefix: 'opm',
+        pageClass: 'opm-page',
+        templateDesc: 'Blank bench · OLS-35 · OLP-38 · Patch · Spool · Coupler',
+        ids: {
+          startup: 'opm-startup-view',
+          back: 'opm-startup-back',
+          recentList: 'opm-startup-recent-list',
+          templates: 'opm-startup-templates-grid',
+          workspace: 'opm-app',
+          menuBar: 'opm-app-menu-bar',
+          recentMenu: 'opm-file-menu-recent-list',
+          saveStatus: 'opm-save-status',
+          projectName: 'opm-menu-project-name',
+          settingsModal: 'opm-settings-modal',
+          toast: 'opm-file-menu-toast',
+        },
+        exportExtras: function () {
+          return global.PowerMeterTrainer && typeof PowerMeterTrainer.exportProjectState === 'function'
+            ? PowerMeterTrainer.exportProjectState()
+            : null;
+        },
+        importExtras: function (extras) {
+          if (global.PowerMeterTrainer && typeof PowerMeterTrainer.importProjectState === 'function') {
+            PowerMeterTrainer.importProjectState(extras);
+          }
+        },
+        resetExtras: function () {
+          if (global.PowerMeterTrainer && typeof PowerMeterTrainer.resetProjectState === 'function') {
+            PowerMeterTrainer.resetProjectState();
+          }
+        },
+      });
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 })(typeof window !== 'undefined' ? window : globalThis);

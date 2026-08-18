@@ -6,6 +6,7 @@
  * (localStorage key: ifa_ftth_lab_config).
  * Optical Power Meter toolbox config is independent: js/settings/OpmSettings.js
  * (localStorage key: ifa_opm_config).
+ * Optical Power Meter projects: ifa_opm_projects (never ifa_ftth_lab_projects).
  */
 (function (global) {
   'use strict';
