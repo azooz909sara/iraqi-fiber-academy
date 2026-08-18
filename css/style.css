@@ -832,7 +832,8 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   display: none;
 }
 
-.lab-page .anatomy-top-btn.admin-only-btn.is-admin-visible {
+.lab-page .anatomy-top-btn.admin-only-btn.is-admin-visible,
+.opm-page .anatomy-top-btn.admin-only-btn.is-admin-visible {
   display: inline-flex;
 }
 

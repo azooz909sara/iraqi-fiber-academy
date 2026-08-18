@@ -4,6 +4,8 @@
  *
  * FTTH Lab toolbox icon overrides live in js/settings/FtthLabSettings.js
  * (localStorage key: ifa_ftth_lab_config).
+ * Optical Power Meter toolbox config is independent: js/settings/OpmSettings.js
+ * (localStorage key: ifa_opm_config).
  */
 (function (global) {
   'use strict';

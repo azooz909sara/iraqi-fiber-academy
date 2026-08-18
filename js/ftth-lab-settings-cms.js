@@ -7,6 +7,39 @@
   var modalOpen = false;
   var activeTab = 'devices';
   var selectedSfpVariantId = null;
+  var cms = {
+    storeName: 'FtthLabSettings',
+    buttonId: 'ftth-lab-admin-settings-btn',
+    modalId: 'ftth-lab-settings-modal',
+    titleId: 'ftth-lab-settings-title',
+    bodyId: 'ftth-lab-settings-body',
+    statusId: 'ftth-lab-settings-status',
+    undoId: 'ftth-lab-settings-undo',
+    redoId: 'ftth-lab-settings-redo',
+    resetId: 'ftth-lab-settings-reset',
+    saveId: 'ftth-lab-settings-save',
+    title: 'إعدادات مختبر FTTH',
+    subtitle: 'Device names, specs, toolbox icons · <code>ifa_ftth_lab_config</code>',
+    resetConfirm: 'Reset all FTTH Lab device settings to factory defaults?',
+  };
+
+  function useOpmCms() {
+    cms = {
+      storeName: 'OpmSettings',
+      buttonId: 'opm-admin-settings-btn',
+      modalId: 'opm-settings-modal',
+      titleId: 'opm-settings-title',
+      bodyId: 'opm-settings-body',
+      statusId: 'opm-settings-status',
+      undoId: 'opm-settings-undo',
+      redoId: 'opm-settings-redo',
+      resetId: 'opm-settings-reset',
+      saveId: 'opm-settings-save',
+      title: 'إعدادات قياس القدرة البصرية',
+      subtitle: 'Device names, specs, toolbox icons · <code>ifa_opm_config</code>',
+      resetConfirm: 'Reset all Optical Power Meter device settings to factory defaults?',
+    };
+  }
 
   function $(id) { return document.getElementById(id); }
 
@@ -22,7 +55,7 @@
     return escapeHtml(value).replace(/'/g, '&#39;');
   }
 
-  function store() { return window.FtthLabSettings; }
+  function store() { return window[cms.storeName]; }
 
   function isAdminPreviewContext() {
     try {
@@ -38,7 +71,7 @@
   }
 
   function setStatus(msg, isError) {
-    var el = $('ftth-lab-settings-status');
+    var el = $(cms.statusId);
     if (!el) return;
     el.textContent = msg || '';
     el.classList.toggle('is-error', !!isError);
@@ -47,8 +80,8 @@
   function syncToolbar() {
     var s = store();
     if (!s) return;
-    var undo = $('ftth-lab-settings-undo');
-    var redo = $('ftth-lab-settings-redo');
+    var undo = $(cms.undoId);
+    var redo = $(cms.redoId);
     if (undo) undo.disabled = !s.canUndo();
     if (redo) redo.disabled = !s.canRedo();
   }
@@ -173,7 +206,7 @@
   }
 
   function renderPerformanceTab() {
-    var host = $('ftth-lab-settings-body');
+    var host = $(cms.bodyId);
     if (!host || !store()) return;
     var draft = store().getDraft();
     var html = '<section class="lab-settings-cms__section">' +
@@ -200,7 +233,7 @@
   }
 
   function renderDevicesTab() {
-    var host = $('ftth-lab-settings-body');
+    var host = $(cms.bodyId);
     if (!host || !store()) return;
     var draft = store().getDraft();
     var html = '';
@@ -226,6 +259,12 @@
                 '<span>' + escapeHtml(item.sublabel) + '</span>' +
               '</div>' +
               '<div class="lab-settings-cms__actions">' +
+                '<label class="lab-settings-cms__visibility">' +
+                  '<span>Visible</span>' +
+                  '<input type="checkbox" class="toggle-tool-visibility" ' +
+                    (item.visible !== false ? 'checked ' : '') +
+                    'data-lab-field="visible" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+                '</label>' +
                 '<label class="lab-settings-cms__upload">' +
                   'Upload icon' +
                   '<input type="file" accept="image/png, image/svg+xml, image/jpeg" ' +
@@ -264,27 +303,27 @@
   }
 
   function ensureModal() {
-    if ($('ftth-lab-settings-modal')) return;
+    if ($(cms.modalId)) return;
     var wrap = document.createElement('div');
-    wrap.id = 'ftth-lab-settings-modal';
+    wrap.id = cms.modalId;
     wrap.className = 'lab-settings-cms';
     wrap.hidden = true;
     wrap.setAttribute('role', 'dialog');
     wrap.setAttribute('aria-modal', 'true');
-    wrap.setAttribute('aria-labelledby', 'ftth-lab-settings-title');
+    wrap.setAttribute('aria-labelledby', cms.titleId);
     wrap.innerHTML =
       '<div class="lab-settings-cms__backdrop" data-lab-settings-close></div>' +
       '<div class="lab-settings-cms__panel">' +
         '<header class="lab-settings-cms__header">' +
           '<div>' +
-            '<h2 id="ftth-lab-settings-title">إعدادات مختبر FTTH</h2>' +
-            '<p>Device names, specs, toolbox icons · <code>ifa_ftth_lab_config</code></p>' +
+            '<h2 id="' + cms.titleId + '">' + cms.title + '</h2>' +
+            '<p>' + cms.subtitle + '</p>' +
           '</div>' +
           '<div class="lab-settings-cms__toolbar">' +
-            '<button type="button" class="lab-settings-cms__btn" id="ftth-lab-settings-undo" title="Ctrl+Z">Undo</button>' +
-            '<button type="button" class="lab-settings-cms__btn" id="ftth-lab-settings-redo" title="Ctrl+Y">Redo</button>' +
-            '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--warn" id="ftth-lab-settings-reset">Reset to Defaults</button>' +
-            '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--primary" id="ftth-lab-settings-save">Save Changes</button>' +
+            '<button type="button" class="lab-settings-cms__btn" id="' + cms.undoId + '" title="Ctrl+Z">Undo</button>' +
+            '<button type="button" class="lab-settings-cms__btn" id="' + cms.redoId + '" title="Ctrl+Y">Redo</button>' +
+            '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--warn" id="' + cms.resetId + '">Reset to Defaults</button>' +
+            '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--primary" id="' + cms.saveId + '">Save Changes</button>' +
             '<button type="button" class="lab-settings-cms__btn" data-lab-settings-close>إغلاق</button>' +
           '</div>' +
         '</header>' +
@@ -292,8 +331,8 @@
           '<button type="button" class="lab-settings-cms__tab is-active" data-lab-settings-tab="devices">Devices &amp; Icons</button>' +
           '<button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="performance">Performance Specs</button>' +
         '</nav>' +
-        '<div class="lab-settings-cms__body" id="ftth-lab-settings-body"></div>' +
-        '<p class="lab-settings-cms__status" id="ftth-lab-settings-status"></p>' +
+        '<div class="lab-settings-cms__body" id="' + cms.bodyId + '"></div>' +
+        '<p class="lab-settings-cms__status" id="' + cms.statusId + '"></p>' +
       '</div>';
     document.body.appendChild(wrap);
     bindModal(wrap);
@@ -345,7 +384,7 @@
   function commitField(toolKey, field, value) {
     if (!store() || !toolKey || !field) return;
     var patch = {};
-    patch[field] = value;
+    patch[field] = field === 'visible' ? !!value : value;
     store().updateItem(toolKey, patch, true);
   }
 
@@ -439,12 +478,15 @@
       }
 
       if (input.getAttribute('data-lab-field')) {
+        var fieldName = input.getAttribute('data-lab-field');
         commitField(
           input.getAttribute('data-tool-key'),
-          input.getAttribute('data-lab-field'),
-          input.value
+          fieldName,
+          fieldName === 'visible' ? input.checked : input.value
         );
-        setStatus('Updated · Save Changes to apply to workspace.');
+        setStatus(fieldName === 'visible'
+          ? 'Toolbox visibility updated · Save Changes to persist.'
+          : 'Updated · Save Changes to apply to workspace.');
         refresh();
         return;
       }
@@ -516,26 +558,26 @@
       refresh();
     });
 
-    $('ftth-lab-settings-undo').addEventListener('click', function () {
+    $(cms.undoId).addEventListener('click', function () {
       if (store().undo()) {
         setStatus('Undo');
         refresh();
       }
     });
-    $('ftth-lab-settings-redo').addEventListener('click', function () {
+    $(cms.redoId).addEventListener('click', function () {
       if (store().redo()) {
         setStatus('Redo');
         refresh();
       }
     });
-    $('ftth-lab-settings-reset').addEventListener('click', function () {
-      if (window.confirm('Reset all FTTH Lab device settings to factory defaults?')) {
+    $(cms.resetId).addEventListener('click', function () {
+      if (window.confirm(cms.resetConfirm)) {
         store().resetToDefaults();
         setStatus('Draft reset to factory defaults. Click Save Changes to apply.');
         refresh();
       }
     });
-    $('ftth-lab-settings-save').addEventListener('click', function () {
+    $(cms.saveId).addEventListener('click', function () {
       var ok = store().saveChanges();
       setStatus(ok ? 'Saved · toolbox and properties updated.' : 'Save failed (storage quota).', !ok);
       syncToolbar();
@@ -546,12 +588,12 @@
     if (!isAdminPreviewContext() || !store()) return;
     ensureModal();
     modalOpen = true;
-    var modal = $('ftth-lab-settings-modal');
+    var modal = $(cms.modalId);
     modal.hidden = false;
     activeTab = 'devices';
     selectedSfpVariantId = null;
     store().discardDraft();
-    var modalRoot = $('ftth-lab-settings-modal');
+    var modalRoot = $(cms.modalId);
     if (modalRoot) {
       modalRoot.querySelectorAll('[data-lab-settings-tab]').forEach(function (btn) {
         btn.classList.toggle('is-active', btn.getAttribute('data-lab-settings-tab') === activeTab);
@@ -563,9 +605,14 @@
 
   function closeModal() {
     modalOpen = false;
-    var modal = $('ftth-lab-settings-modal');
+    var modal = $(cms.modalId);
     if (modal) modal.hidden = true;
-    if (store()) store().discardDraft();
+    if (store()) {
+      store().discardDraft();
+      if (typeof store().applyToolboxPresentation === 'function') {
+        store().applyToolboxPresentation();
+      }
+    }
   }
 
   function onKey(e) {
@@ -594,7 +641,8 @@
   }
 
   function bind() {
-    var btn = $('ftth-lab-admin-settings-btn');
+    if ($('opm-admin-settings-btn')) useOpmCms();
+    var btn = $(cms.buttonId);
     if (btn) {
       btn.addEventListener('click', function (e) {
         e.preventDefault();
@@ -602,7 +650,10 @@
       });
     }
     window.addEventListener('keydown', onKey, true);
-    window.addEventListener('ifa:ftth-lab-draft-changed', function () {
+    var draftEvt = store() && store().EVENTS && store().EVENTS.draft
+      ? store().EVENTS.draft
+      : 'ifa:ftth-lab-draft-changed';
+    window.addEventListener(draftEvt, function () {
       if (modalOpen) refresh();
     });
   }

@@ -5,7 +5,6 @@
 (function (global) {
   'use strict';
 
-  var STORAGE_KEY = 'ifa_ftth_lab_config';
   var MAX_HISTORY = 60;
   var MAX_ICON_CHARS = 1800000;
 
@@ -286,6 +285,7 @@
       guideText: String(item.guideText || factory.guideText || item.sublabel || factory.sublabel || ''),
       markClass: String(item.markClass || factory.markClass || ''),
       icon: clipIcon(item.icon || ''),
+      visible: item.visible !== false,
       specs: normalizeSpecs(toolKey, item.specs, factory.specs),
     };
     if (PERFORMANCE_TOOL_KEYS.indexOf(toolKey) >= 0) {
@@ -338,20 +338,15 @@
     };
   }
 
-  function loadSaved() {
+  function loadSaved(storageKey, factoryConfig) {
     try {
-      var raw = global.localStorage.getItem(STORAGE_KEY);
-      if (!raw) return clone(FACTORY_DEFAULT_FTTH_LAB_CONFIG);
+      var raw = global.localStorage.getItem(storageKey);
+      if (!raw) return clone(factoryConfig);
       return normalizeConfig(JSON.parse(raw));
     } catch (err) {
-      return clone(FACTORY_DEFAULT_FTTH_LAB_CONFIG);
+      return clone(factoryConfig);
     }
   }
-
-  var saved = loadSaved();
-  var draft = clone(saved);
-  var historyStack = [clone(draft)];
-  var historyPointer = 0;
 
   function emit(name, detail) {
     try {
@@ -359,10 +354,10 @@
     } catch (err) { /* ignore */ }
   }
 
-  function persistSaved() {
+  function persistSaved(storageKey, data) {
     try {
-      global.localStorage.removeItem(STORAGE_KEY);
-      global.localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      global.localStorage.removeItem(storageKey);
+      global.localStorage.setItem(storageKey, JSON.stringify(data));
       return true;
     } catch (err) {
       return false;
@@ -409,7 +404,7 @@
   }
 
   function applyToolboxIcons(config) {
-    var iconMap = itemMapFromConfig(config || saved);
+    var iconMap = itemMapFromConfig(config || {});
     document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
       var key = btn.getAttribute('data-lab-tool');
       var item = iconMap[key];
@@ -420,7 +415,7 @@
   }
 
   function applyToolboxLabels(config) {
-    var labelMap = itemMapFromConfig(config || saved);
+    var labelMap = itemMapFromConfig(config || {});
     document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
       var key = btn.getAttribute('data-lab-tool');
       var item = labelMap[key];
@@ -432,14 +427,52 @@
     });
   }
 
+  function applyToolboxVisibility(config) {
+    var visMap = itemMapFromConfig(config || {});
+    document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
+      var key = btn.getAttribute('data-lab-tool');
+      var item = visMap[key];
+      var show = !item || item.visible !== false;
+      btn.hidden = !show;
+      btn.style.display = show ? '' : 'none';
+    });
+    document.querySelectorAll('.lab-rail .lab-rail__group').forEach(function (group) {
+      var tools = group.querySelectorAll('.lab-tool[data-lab-tool]');
+      if (!tools.length) return;
+      var any = false;
+      tools.forEach(function (btn) {
+        if (!btn.hidden && btn.style.display !== 'none') any = true;
+      });
+      group.hidden = !any;
+      group.style.display = any ? '' : 'none';
+    });
+  }
+
   function applyToolboxPresentation(config) {
     applyToolboxIcons(config);
     applyToolboxLabels(config);
+    applyToolboxVisibility(config);
   }
 
+  function createLabDeviceConfigStore(options) {
+    options = options || {};
+    var storageKey = options.storageKey || 'ifa_ftth_lab_config';
+    var eventPrefix = options.eventPrefix || 'ifa:ftth-lab';
+    var factoryConfig = options.factoryConfig
+      ? clone(options.factoryConfig)
+      : clone(FACTORY_DEFAULT_FTTH_LAB_CONFIG);
+    var savedEvt = eventPrefix + '-config-saved';
+    var draftEvt = eventPrefix + '-draft-changed';
+
+    var saved = loadSaved(storageKey, factoryConfig);
+    var draft = clone(saved);
+    var historyStack = [clone(draft)];
+    var historyPointer = 0;
+
   var Store = {
-    STORAGE_KEY: STORAGE_KEY,
-    FACTORY_DEFAULT_FTTH_LAB_CONFIG: FACTORY_DEFAULT_FTTH_LAB_CONFIG,
+    STORAGE_KEY: storageKey,
+    EVENTS: { saved: savedEvt, draft: draftEvt },
+    FACTORY_DEFAULT_FTTH_LAB_CONFIG: factoryConfig,
     DEFAULT_SPLITTER_LOSSES: DEFAULT_SPLITTER_LOSSES,
     MAX_ICON_CHARS: MAX_ICON_CHARS,
     parseTxLevels: parseTxLevels,
@@ -553,7 +586,8 @@
         if (historyStack.length > MAX_HISTORY) historyStack.shift();
         historyPointer = historyStack.length - 1;
       }
-      emit('ifa:ftth-lab-draft-changed', { draft: clone(draft) });
+      applyToolboxPresentation(draft);
+      emit(draftEvt, { draft: clone(draft) });
     },
 
     updateItem: function (toolKey, patch, recordHistory) {
@@ -591,7 +625,8 @@
       if (!Store.canUndo()) return false;
       historyPointer -= 1;
       draft = clone(historyStack[historyPointer]);
-      emit('ifa:ftth-lab-draft-changed', { draft: clone(draft) });
+      applyToolboxPresentation(draft);
+      emit(draftEvt, { draft: clone(draft) });
       return true;
     },
 
@@ -599,19 +634,20 @@
       if (!Store.canRedo()) return false;
       historyPointer += 1;
       draft = clone(historyStack[historyPointer]);
-      emit('ifa:ftth-lab-draft-changed', { draft: clone(draft) });
+      applyToolboxPresentation(draft);
+      emit(draftEvt, { draft: clone(draft) });
       return true;
     },
 
     resetToDefaults: function () {
-      Store.setDraft(clone(FACTORY_DEFAULT_FTTH_LAB_CONFIG), true);
+      Store.setDraft(clone(factoryConfig), true);
     },
 
     saveChanges: function () {
       saved = clone(draft);
-      var ok = persistSaved();
+      var ok = persistSaved(storageKey, saved);
       applyToolboxPresentation(saved);
-      emit('ifa:ftth-lab-config-saved', { config: clone(saved), ok: ok });
+      emit(savedEvt, { config: clone(saved), ok: ok });
       return ok;
     },
 
@@ -619,17 +655,27 @@
       draft = clone(saved);
       historyStack = [clone(draft)];
       historyPointer = 0;
-      emit('ifa:ftth-lab-draft-changed', { draft: clone(draft) });
+      applyToolboxPresentation(saved);
+      emit(draftEvt, { draft: clone(draft) });
     },
 
-    applyToolboxIcons: applyToolboxIcons,
-    applyToolboxLabels: applyToolboxLabels,
-    applyToolboxPresentation: applyToolboxPresentation,
+    applyToolboxIcons: function (config) { applyToolboxIcons(config || draft); },
+    applyToolboxLabels: function (config) { applyToolboxLabels(config || draft); },
+    applyToolboxVisibility: function (config) { applyToolboxVisibility(config || draft); },
+    applyToolboxPresentation: function (config) { applyToolboxPresentation(config || draft); },
     applyIconToMark: applyIconToMark,
     normalizeConfig: normalizeConfig,
     normalizeItem: normalizeItem,
   };
 
+    return Store;
+  }
+
   global.FACTORY_DEFAULT_FTTH_LAB_CONFIG = FACTORY_DEFAULT_FTTH_LAB_CONFIG;
-  global.FtthLabSettings = Store;
+  global.createLabDeviceConfigStore = createLabDeviceConfigStore;
+  global.FtthLabSettings = createLabDeviceConfigStore({
+    storageKey: 'ifa_ftth_lab_config',
+    eventPrefix: 'ifa:ftth-lab',
+    factoryConfig: FACTORY_DEFAULT_FTTH_LAB_CONFIG,
+  });
 })(typeof window !== 'undefined' ? window : globalThis);

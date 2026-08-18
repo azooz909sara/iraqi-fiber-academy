@@ -22,6 +22,9 @@
         </div>
       </a>
       <div class="opm-header__actions">
+        <button type="button" id="opm-admin-settings-btn" class="anatomy-top-btn admin-only-btn" style="display: none;" hidden>
+          <i class="icon-settings" aria-hidden="true"></i> الإعدادات
+        </button>
         <a class="opm-nav-link" href="index.html">Home</a>
         <a class="opm-nav-link" href="ftth-lab.html">FTTH Lab</a>
         <a class="opm-nav-link is-active" href="power-meter.html" aria-current="page">Power Meter</a>
@@ -38,7 +41,6 @@
           <section class="lab-rail__group">
             <h3 class="lab-rail__cat">Source</h3>
             <div id="lab-hw-tree" class="lab-hw-tree"></div>
-            <div id="lab-ols-tree" class="lab-hw-tree" aria-label="Optical Laser Source"></div>
           </section>
           <section class="lab-rail__group">
             <h3 class="lab-rail__cat">Split</h3>
@@ -56,8 +58,9 @@
             <div id="lab-coupler-tree" class="lab-hw-tree"></div>
           </section>
           <section class="lab-rail__group">
-            <h3 class="lab-rail__cat">Test</h3>
-            <div id="lab-opm-tree" class="lab-hw-tree"></div>
+            <h3 class="lab-rail__cat">TEST EQUIPMENT</h3>
+            <div id="lab-opm-tree" class="lab-hw-tree" aria-label="Optical Power Meter"></div>
+            <div id="lab-ols-tree" class="lab-hw-tree" aria-label="Optical Laser Source"></div>
           </section>
         </div>
       </aside>
@@ -104,51 +107,6 @@
 
       <aside class="opm-sidebar opm-sidebar--props lab-inspector" aria-label="Properties">
         <h2 class="lab-inspector__label">Properties</h2>
-
-        <section class="opm-props-telemetry" aria-label="Live telemetry">
-          <div class="opm-props-verdict" id="opm-props-verdict" data-status="idle">
-            <span class="opm-props-verdict__badge" id="opm-props-verdict-badge">IDLE</span>
-            <span class="opm-props-verdict__title" id="opm-props-verdict-title">Dock SC cable</span>
-          </div>
-          <dl class="opm-props-grid">
-            <div class="opm-props-row">
-              <dt id="opm-props-reading-label">Reading (dBm)</dt>
-              <dd id="opm-props-dbm">SIGNAL LOW</dd>
-            </div>
-            <div class="opm-props-row">
-              <dt id="opm-props-alt-label">mW</dt>
-              <dd id="opm-props-mw">—</dd>
-            </div>
-            <div class="opm-props-row">
-              <dt>Loss</dt>
-              <dd id="opm-props-loss">— dB</dd>
-            </div>
-            <div class="opm-props-row">
-              <dt>Wavelength</dt>
-              <dd id="opm-props-wavelength">1490 nm</dd>
-            </div>
-            <div class="opm-props-row opm-props-row--full">
-              <dt>λ band</dt>
-              <dd id="opm-props-lambda-hint" class="opm-props-hint">Downstream · OLT → ONU (GPON primary)</dd>
-            </div>
-            <div class="opm-props-row opm-props-row--full">
-              <dt>Path</dt>
-              <dd id="opm-props-path" class="opm-props-path">No active optical path</dd>
-            </div>
-            <div class="opm-props-row opm-props-row--full">
-              <dt>Alert</dt>
-              <dd id="opm-props-alert" class="opm-props-alert">Mating OK</dd>
-            </div>
-          </dl>
-          <div class="opm-props-actions">
-            <button type="button" class="opm-props-btn" id="opm-props-snapshot" title="Log current dBm reading">
-              Snapshot <span id="opm-props-snap-count">(0)</span>
-            </button>
-            <button type="button" class="opm-props-btn opm-props-btn--danger" id="opm-props-clear-ws" title="Clear bench workspace">
-              Clear WS
-            </button>
-          </div>
-        </section>
 
         <div class="lab-inspector__card" id="lab-inspector-card">
           <h2>No selection</h2>
@@ -232,6 +190,8 @@
     </div>
   </div>
 
+  <script src="js/settings/FtthLabSettings.js"></script>
+  <script src="js/settings/OpmSettings.js"></script>
   <script src="js/power-meter.js"></script>
   <script src="js/ftth-lab.js"></script>
   <script src="js/ftth-lab-olt-fx16.js"></script>
@@ -243,6 +203,7 @@
   <script src="js/ftth-lab-coupler.js"></script>
   <script src="js/ftth-lab-opm.js"></script>
   <script src="js/ftth-lab-ols.js"></script>
+  <script src="js/ftth-lab-settings-cms.js"></script>
   <script>
     (function bridgeOpmBench() {
       function hook() {

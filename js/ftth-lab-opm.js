@@ -5,6 +5,8 @@
 (function (global) {
   'use strict';
 
+  var TOOL_CATEGORY = 'TEST EQUIPMENT';
+
   /** Lab grid cell = 24px → master OLP-38 footprint = 5×7 cells (locked). */
   var OPM_GRID = 24;
   var OPM_W = 5 * OPM_GRID; /* 120 */
@@ -767,7 +769,7 @@
       '<div class="lab-toolbox" role="list">' +
       '<button type="button" class="lab-tool lab-tool--opm' +
       (selectedTool === 'opm' ? ' is-selected' : '') +
-      '" draggable="true" data-lab-tool="opm" role="listitem">' +
+      '" draggable="true" data-lab-tool="opm" data-lab-category="' + TOOL_CATEGORY + '" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--opm" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
       '<strong>' + (meta.label || 'Viavi OLP-38') + '</strong>' +
@@ -1152,6 +1154,7 @@
 
   var tool = {
     id: 'opm',
+    category: TOOL_CATEGORY,
     mount: mount,
     onLayoutChange: onLayoutChange,
     onLaunchRequest: onLaunchRequest,

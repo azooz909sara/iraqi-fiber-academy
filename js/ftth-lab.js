@@ -623,13 +623,24 @@
     }
   }
 
+  function isOpmWorkspacePage() {
+    return !!(document.body && document.body.classList.contains('opm-page'));
+  }
+
+  function activeLabSettings() {
+    if (isOpmWorkspacePage() && global.OpmSettings) return global.OpmSettings;
+    return global.FtthLabSettings || null;
+  }
+
   function syncFtthLabAdminSettingsButton() {
-    var btn = $('ftth-lab-admin-settings-btn');
-    if (!btn) return;
     var show = isAdminPreviewContext();
-    btn.hidden = !show;
-    btn.style.display = show ? 'inline-flex' : 'none';
-    btn.classList.toggle('is-admin-visible', show);
+    ['ftth-lab-admin-settings-btn', 'opm-admin-settings-btn'].forEach(function (id) {
+      var btn = $(id);
+      if (!btn) return;
+      btn.hidden = !show;
+      btn.style.display = show ? 'inline-flex' : 'none';
+      btn.classList.toggle('is-admin-visible', show);
+    });
   }
 
   function armDragOnlyToolboxTool(toolId, message) {
@@ -638,32 +649,36 @@
   }
 
   function getPerformanceSpecs(toolKey) {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getPerformanceSpecs === 'function') {
-      return FtthLabSettings.getPerformanceSpecs(toolKey);
+    var s = activeLabSettings();
+    if (s && typeof s.getPerformanceSpecs === 'function') {
+      return s.getPerformanceSpecs(toolKey);
     }
     return null;
   }
 
   function getSfpVariants() {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getSfpVariants === 'function') {
-      return FtthLabSettings.getSfpVariants();
+    var s = activeLabSettings();
+    if (s && typeof s.getSfpVariants === 'function') {
+      return s.getSfpVariants();
     }
     return [];
   }
 
   function applyFtthLabToolboxIcons() {
-    if (global.FtthLabSettings && typeof FtthLabSettings.applyToolboxPresentation === 'function') {
-      FtthLabSettings.applyToolboxPresentation();
+    var s = activeLabSettings();
+    if (s && typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation();
       return;
     }
-    if (global.FtthLabSettings && typeof FtthLabSettings.applyToolboxIcons === 'function') {
-      FtthLabSettings.applyToolboxIcons();
+    if (s && typeof s.applyToolboxIcons === 'function') {
+      s.applyToolboxIcons();
     }
   }
 
   function getToolMeta(toolKey) {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
-      return FtthLabSettings.getItem(toolKey);
+    var s = activeLabSettings();
+    if (s && typeof s.getItem === 'function') {
+      return s.getItem(toolKey);
     }
     return null;
   }
@@ -697,7 +712,7 @@
     if (!bindUi._keysBound) {
       bindUi._keysBound = true;
       window.addEventListener('keydown', function (e) {
-        var settingsModal = $('ftth-lab-settings-modal');
+        var settingsModal = $('ftth-lab-settings-modal') || $('opm-settings-modal');
         if (settingsModal && !settingsModal.hidden) return;
 
         var ctrl = e.ctrlKey || e.metaKey;
@@ -756,9 +771,11 @@
     }
     setTimeout(applyFtthLabToolboxIcons, 0);
     watchToolboxForIconRefresh();
-    global.addEventListener('ifa:ftth-lab-config-saved', function () {
-      applyFtthLabConfig();
-      setStatus('Lab device settings updated');
+    ['ifa:ftth-lab-config-saved', 'ifa:opm-config-saved'].forEach(function (evt) {
+      global.addEventListener(evt, function () {
+        applyFtthLabConfig();
+        setStatus('Lab device settings updated');
+      });
     });
     setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Del delete · Esc clear · scroll to zoom');
   }

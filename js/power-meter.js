@@ -298,124 +298,10 @@
     });
 
     updateBatteryUi();
-    refreshPropertiesPanel();
   }
 
-  function refreshPropertiesPanel() {
-    var std = STANDARDS[state.standard] || STANDARDS.gpon;
-    var dbm = state.docked ? state.powerDbm : NaN;
-    var mw = isFinite(dbm) ? dbmToMw(dbm) : NaN;
-    var verdict = state.docked ? evaluate(dbm, std) : { status: 'idle', title: 'Dock SC cable', detail: '' };
-
-    var tele = { lossDb: 0, mismatches: 0 };
-    if (global.FtthLab && typeof FtthLab.getNetworkTelemetry === 'function') {
-      tele = FtthLab.getNetworkTelemetry() || tele;
-    } else if (global.FtthLab && typeof FtthLab.refreshPowerBudget === 'function') {
-      tele.lossDb = FtthLab.refreshPowerBudget() || 0;
-    }
-
-    var pathStr = '';
-    var pathLoss = null;
-    if (state.lastReading && state.lastReading.path && state.lastReading.path.length) {
-      pathStr = formatPathChain(state.lastReading.path);
-      if (isFinite(state.lastReading.lossDb)) pathLoss = state.lastReading.lossDb;
-    }
-    if (!pathStr) {
-      if (tele.lossDb > 0) pathStr = 'Linked topology · probe a port for chain';
-      else pathStr = 'No active optical path';
-    }
-    if (!state.docked) pathStr = 'SIGNAL LOW · dock SC into OLP-38';
-
-    var lossShow = pathLoss != null ? pathLoss : tele.lossDb;
-
-    var verdictWrap = $('opm-props-verdict');
-    var verdictBadge = $('opm-props-verdict-badge');
-    var verdictTitle = $('opm-props-verdict-title');
-    if (verdictWrap) verdictWrap.dataset.status = state.docked ? verdict.status : 'idle';
-    if (verdictBadge) {
-      verdictBadge.textContent = !state.docked
-        ? 'IDLE'
-        : verdict.status === 'pass'
-          ? 'PASS'
-          : verdict.status === 'warning'
-            ? 'WARN'
-            : verdict.status === 'fail'
-              ? 'FAIL'
-              : 'IDLE';
-    }
-    if (verdictTitle) verdictTitle.textContent = state.docked ? verdict.title : 'Dock SC cable';
-
-    var dbmEl = $('opm-props-dbm');
-    var readingLabel = $('opm-props-reading-label');
-    var altLabel = $('opm-props-alt-label');
-    if (readingLabel) {
-      readingLabel.textContent = state.unit === 'mw' ? 'Reading (mW)' : 'Reading (dBm)';
-    }
-    if (altLabel) {
-      altLabel.textContent = state.unit === 'mw' ? 'dBm' : 'mW';
-    }
-    if (dbmEl) {
-      if (!state.docked) dbmEl.textContent = 'SIGNAL LOW';
-      else if (!isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
-        dbmEl.textContent = 'SIGNAL LOW';
-      } else if (state.unit === 'mw') {
-        dbmEl.textContent = formatMw(mw);
-      } else {
-        dbmEl.textContent = formatDbm(dbm) + ' dBm';
-      }
-    }
-
-    var mwEl = $('opm-props-mw');
-    if (mwEl) {
-      if (!state.docked || !isFinite(dbm) || !(state.lastReading && state.lastReading.source)) {
-        mwEl.textContent = '—';
-      } else if (state.unit === 'mw') {
-        mwEl.textContent = formatDbm(dbm) + ' dBm';
-      } else {
-        mwEl.textContent = formatMw(mw);
-      }
-    }
-
-    var lossEl = $('opm-props-loss');
-    if (lossEl) {
-      if (state.lastReading && isFiniteNumber(state.lastReading.lossDb)) {
-        lossEl.textContent = state.lastReading.lossDb.toFixed(2) + ' dB';
-      } else if (state.referenceDbm != null && isFinite(dbm)) {
-        lossEl.textContent = Math.abs(state.referenceDbm - dbm).toFixed(2) + ' dB';
-      } else {
-        lossEl.textContent = lossShow > 0 || pathLoss != null
-          ? Number(lossShow).toFixed(2) + ' dB'
-          : '— dB';
-      }
-    }
-
-    var waveEl = $('opm-props-wavelength');
-    if (waveEl) waveEl.textContent = state.wavelength + ' nm';
-
-    var hintEl = $('opm-props-lambda-hint');
-    if (hintEl) hintEl.textContent = WAVELENGTH_HINT[state.wavelength] || '';
-
-    var pathEl = $('opm-props-path');
-    if (pathEl) pathEl.textContent = pathStr;
-
-    var alertEl = $('opm-props-alert');
-    if (alertEl) {
-      alertEl.classList.remove('is-warn', 'is-critical');
-      if (tele.mismatches > 0) {
-        alertEl.classList.add(tele.mismatches >= 2 ? 'is-critical' : 'is-warn');
-        alertEl.textContent =
-          tele.mismatches + ' APC/UPC mismatch' + (tele.mismatches > 1 ? 'es' : '');
-      } else if (state.lastReading && state.lastReading.mismatch) {
-        alertEl.classList.add('is-warn');
-        alertEl.textContent = 'Connector polish mismatch on path';
-      } else {
-        alertEl.textContent = 'Mating OK';
-      }
-    }
-
-    var snapCount = $('opm-props-snap-count');
-    if (snapCount) snapCount.textContent = '(' + state.snapshots.length + ')';
-  }
+  /** Legacy hook — properties sidebar no longer includes a telemetry summary card. */
+  function refreshPropertiesPanel() {}
 
   function renderLambdaCycle() {
     setTrainerText('.viavi__lambda-chip', state.wavelength + ' nm');
@@ -761,7 +647,6 @@
 
     if (snapCount) snapCount.textContent = '(' + state.snapshots.length + ')';
     updateBatteryUi();
-    refreshPropertiesPanel();
   }
 
   function takeSnapshot() {
@@ -798,9 +683,9 @@
   }
 
   function bindStatusBar() {
-    var snapBtn = $('opm-btn-snapshot') || $('opm-btn-snapshot-bar') || $('opm-props-snapshot');
+    var snapBtn = $('opm-btn-snapshot') || $('opm-btn-snapshot-bar');
     var snapBar = $('opm-btn-snapshot-bar');
-    var clearBtn = $('opm-btn-clear-ws') || $('opm-props-clear-ws');
+    var clearBtn = $('opm-btn-clear-ws');
     if (snapBtn) snapBtn.addEventListener('click', takeSnapshot);
     if (snapBar && snapBar !== snapBtn) snapBar.addEventListener('click', takeSnapshot);
     if (clearBtn) clearBtn.addEventListener('click', clearWorkspace);
