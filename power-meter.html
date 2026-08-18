@@ -51,9 +51,8 @@
         <button type="button" id="opm-admin-settings-btn" class="anatomy-top-btn admin-only-btn" style="display: none;" hidden>
           <i class="icon-settings" aria-hidden="true"></i> الإعدادات
         </button>
-        <a class="opm-nav-link" href="index.html">Home</a>
-        <a class="opm-nav-link" href="ftth-lab.html">FTTH Lab</a>
-        <a class="opm-nav-link is-active" href="power-meter.html" aria-current="page">Power Meter</a>
+        <a class="opm-nav-link" href="index.html">← Back to Home</a>
+        <nav class="sim-switcher" data-sim-switcher data-sim-switcher-class="opm-nav-link" aria-label="Other simulators"></nav>
         <div class="auth-slot auth-slot--sim shrink-0" data-auth-slot data-auth-variant="simulator">
           <button type="button" class="auth-login-btn auth-login-btn--sim" data-auth-login>تسجيل الدخول</button>
         </div>
@@ -319,6 +318,7 @@
       }
     })();
   </script>
+  <script src="js/platform-simulators.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>

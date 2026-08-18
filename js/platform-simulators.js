@@ -12,34 +12,44 @@
     {
       id: 'ftth-simulator',
       label: 'محاكي FTTH متكامل',
+      navLabel: 'FTTH Map Sim',
       href: 'simulator.html',
     },
     {
       id: 'otdr-simulator',
       label: 'محاكي OTDR افتراضي',
+      navLabel: 'OTDR',
       href: '',
     },
     {
       id: 'power-meter',
       label: 'قياس القدرة البصرية',
+      navLabel: 'Power Meter',
       href: 'power-meter.html',
     },
     {
       id: 'fusion-splicer',
       label: 'مختبر Fusion Splicer',
+      navLabel: 'Fusion Splicer',
       href: '',
     },
     {
       id: 'fiber-anatomy',
       label: 'تشريح الألياف 3D / 2D',
+      navLabel: 'Cable Anatomy',
       href: 'fiber-3d-simulator.html',
     },
     {
       id: 'patch-panel-lab',
       label: 'محاكي FTTH Network & Patch Panel',
+      navLabel: 'FTTH Lab',
       href: 'ftth-lab.html',
     },
   ];
+
+  var PAYWALL_TOAST_MSG = 'يتطلب فتح هذا المحاكي الاشتراك في باقة تدريبية';
+  var PAYWALL_PLAN_KEY = 'ifa_paywall_plan';
+  var PAYWALL_SIM_KEY = 'ifa_paywall_sim';
 
   var ALLOWED_IDS = {};
   SIMULATOR_CATALOG.forEach(function (s) {
@@ -258,10 +268,180 @@
   }
 
   function lockLabelForSimulator(simulatorId) {
-    var course = courseUnlockingSimulator(simulatorId);
-    var sim = findSimulator(simulatorId);
-    var name = (course && course.title) || (sim && sim.label) || 'مناسب';
-    return 'مغلق - يتطلب الاشتراك في كورس ' + name;
+    return PAYWALL_TOAST_MSG;
+  }
+
+  function recommendedPlanForSimulator(simulatorId) {
+    var id = String(simulatorId || '');
+    var plans = getPlans();
+    var matches = [];
+    plans.forEach(function (plan) {
+      if (simulatorsFromPlan(plan).indexOf(id) !== -1) matches.push(plan);
+    });
+    matches.sort(function (a, b) {
+      var rank = (a.accessRank || 0) - (b.accessRank || 0);
+      if (rank) return rank;
+      return (Number(a.price) || 0) - (Number(b.price) || 0);
+    });
+    if (matches.length) return matches[0];
+    for (var i = 0; i < plans.length; i++) {
+      if (plans[i].featured) return plans[i];
+    }
+    return plans[0] || null;
+  }
+
+  function currentPageFile() {
+    try {
+      var path = String(global.location.pathname || '').replace(/\\/g, '/');
+      var file = path.split('/').pop() || '';
+      if (!file && global.location.href) {
+        file = String(global.location.href).split('/').pop().split('?')[0].split('#')[0];
+      }
+      return decodeURIComponent(file).toLowerCase();
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function currentSimulatorIdFromLocation() {
+    var file = currentPageFile();
+    for (var i = 0; i < SIMULATOR_CATALOG.length; i++) {
+      var href = String(SIMULATOR_CATALOG[i].href || '')
+        .split('?')[0]
+        .split('#')[0]
+        .toLowerCase();
+      if (href && href === file) return SIMULATOR_CATALOG[i].id;
+    }
+    return '';
+  }
+
+  function showPaywallNotice(message) {
+    var text = message || PAYWALL_TOAST_MSG;
+    var el = document.getElementById('ifa-paywall-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'ifa-paywall-toast';
+      el.className = 'ifa-paywall-toast';
+      el.setAttribute('role', 'status');
+      el.setAttribute('aria-live', 'polite');
+      document.body.appendChild(el);
+    }
+    el.textContent = text;
+    el.classList.add('is-visible');
+    if (el._hideTimer) clearTimeout(el._hideTimer);
+    el._hideTimer = setTimeout(function () {
+      el.classList.remove('is-visible');
+    }, 3400);
+  }
+
+  function paywallRedirectUrl(simulatorId) {
+    var plan = recommendedPlanForSimulator(simulatorId);
+    try {
+      if (plan) sessionStorage.setItem(PAYWALL_PLAN_KEY, String(plan.id));
+      sessionStorage.setItem(PAYWALL_SIM_KEY, String(simulatorId || ''));
+    } catch (err) {
+      /* ignore */
+    }
+    var qs = 'needSim=' + encodeURIComponent(simulatorId || '');
+    if (plan) qs += '&highlightPlan=' + encodeURIComponent(plan.id);
+    return 'index.html?' + qs + '#pricing';
+  }
+
+  function interceptSimulatorLaunch(simulatorId, href) {
+    var id = String(simulatorId || '');
+    var openHref = withPreviewQuery(href || (findSimulator(id) && findSimulator(id).href) || '');
+    if (viewerCanAccess(id)) {
+      if (!openHref) {
+        showPaywallNotice('هذا المحاكي قيد الإعداد — سيكون متاحاً قريباً');
+        return false;
+      }
+      global.location.href = openHref;
+      return true;
+    }
+    showPaywallNotice(PAYWALL_TOAST_MSG);
+    setTimeout(function () {
+      global.location.href = paywallRedirectUrl(id);
+    }, 650);
+    return false;
+  }
+
+  function highlightTargetPlan() {
+    var pricing = document.getElementById('pricing') || document.getElementById('plans');
+    if (!pricing && !document.querySelector('.pricing-card')) return;
+
+    var params;
+    try {
+      params = new URLSearchParams(global.location.search);
+    } catch (err) {
+      params = { get: function () { return ''; } };
+    }
+    var planId = String(params.get('highlightPlan') || '');
+    var simId = String(params.get('needSim') || '');
+    try {
+      if (!planId) planId = sessionStorage.getItem(PAYWALL_PLAN_KEY) || '';
+      if (!simId) simId = sessionStorage.getItem(PAYWALL_SIM_KEY) || '';
+    } catch (err2) {
+      /* ignore */
+    }
+    if (!planId && simId) {
+      var rec = recommendedPlanForSimulator(simId);
+      planId = rec ? String(rec.id) : '';
+    }
+    if (!planId) return;
+
+    var cards = document.querySelectorAll('.pricing-card[data-plan-id]');
+    if (!cards.length) return;
+    var target = null;
+    cards.forEach(function (card) {
+      var match = String(card.getAttribute('data-plan-id')) === planId;
+      card.classList.toggle('pricing-card--paywall-target', match);
+      if (match) target = card;
+    });
+    var hash = String(global.location.hash || '');
+    if ((hash === '#pricing' || hash === '#plans') && target) {
+      setTimeout(function () {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
+  }
+
+  function enrolledSwitcherSimulators() {
+    var access = resolveViewerAccess();
+    var current = currentSimulatorIdFromLocation();
+    var ids = access.unlocked
+      ? SIMULATOR_CATALOG.map(function (s) {
+          return s.id;
+        })
+      : access.simulatorIds.slice();
+    return normalizeSimulatorIds(ids).filter(function (id) {
+      if (id === current) return false;
+      var sim = findSimulator(id);
+      return !!(sim && sim.href);
+    });
+  }
+
+  function renderSimulatorSwitchers() {
+    var hosts = document.querySelectorAll('[data-sim-switcher]');
+    if (!hosts.length) return;
+    var items = enrolledSwitcherSimulators();
+    hosts.forEach(function (host) {
+      var linkClass = host.getAttribute('data-sim-switcher-class') || 'sim-switcher__link';
+      host.innerHTML = items
+        .map(function (id) {
+          var sim = findSimulator(id);
+          var href = withPreviewQuery(sim.href);
+          return (
+            '<a class="' +
+            escapeHtml(linkClass) +
+            '" href="' +
+            escapeHtml(href) +
+            '">' +
+            escapeHtml(sim.navLabel || sim.label) +
+            '</a>'
+          );
+        })
+        .join('');
+    });
   }
 
   function collectViewerSimulatorIds(authUser, directoryUser) {
@@ -365,15 +545,13 @@
   function applyPublicSimulatorGates() {
     var cards = document.querySelectorAll('[data-simulator-card][data-simulator-id]');
     if (!cards.length) return;
-    var access = resolveViewerAccess();
 
     cards.forEach(function (card) {
       var id = card.getAttribute('data-simulator-id') || '';
       var href = card.getAttribute('data-simulator-href') || (findSimulator(id) && findSimulator(id).href) || '';
-      var allowed = access.unlocked || access.simulatorIds.indexOf(id) !== -1;
-      card.classList.toggle('feature-card--locked', !allowed);
-      card.classList.toggle('feature-card--unlocked', allowed);
-      card.setAttribute('data-simulator-locked', allowed ? '0' : '1');
+      card.classList.remove('feature-card--locked');
+      card.classList.add('feature-card--unlocked');
+      card.removeAttribute('data-simulator-locked');
 
       var accessEl = card.querySelector('[data-simulator-access]');
       if (!accessEl) {
@@ -383,20 +561,46 @@
         card.appendChild(accessEl);
       }
 
-      if (allowed) {
-        var openHref = withPreviewQuery(href);
-        accessEl.innerHTML = openHref
-          ? '<a class="feature-card__open-btn" href="' +
-            escapeHtml(openHref) +
-            '">افتح المحاكي</a>'
-          : '<span class="feature-card__open-btn feature-card__open-btn--soon">افتح المحاكي</span>';
-      } else {
-        accessEl.innerHTML =
-          '<span class="feature-card__lock-badge">' +
-          escapeHtml(lockLabelForSimulator(id)) +
-          '</span>';
-      }
+      var openHref = withPreviewQuery(href);
+      accessEl.innerHTML =
+        '<a class="feature-card__open-btn" href="' +
+        escapeHtml(openHref || '#simulators') +
+        '" data-simulator-launch="' +
+        escapeHtml(id) +
+        '">افتح المحاكي</a>';
     });
+  }
+
+  function bindLaunchInterceptor() {
+    if (document.documentElement.getAttribute('data-sim-paywall-bound') === '1') return;
+    document.documentElement.setAttribute('data-sim-paywall-bound', '1');
+    document.addEventListener(
+      'click',
+      function (e) {
+        var launch = e.target && e.target.closest ? e.target.closest('[data-simulator-launch]') : null;
+        if (!launch) {
+          var card = e.target && e.target.closest ? e.target.closest('[data-simulator-card] .feature-card__open-btn') : null;
+          if (card) {
+            launch = card.closest('[data-simulator-card]');
+          }
+        }
+        if (!launch) return;
+        var cardEl = launch.closest ? launch.closest('[data-simulator-card]') : null;
+        var id =
+          launch.getAttribute('data-simulator-launch') ||
+          (cardEl && cardEl.getAttribute('data-simulator-id')) ||
+          '';
+        if (!id) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var href =
+          (cardEl && cardEl.getAttribute('data-simulator-href')) ||
+          (findSimulator(id) && findSimulator(id).href) ||
+          '';
+        interceptSimulatorLaunch(id, href);
+      },
+      true
+    );
   }
 
   function enrolledCourseIdsForPlan(plan) {
@@ -478,7 +682,7 @@
     var enrolled = enrolledCourseIdsForPlan(plan);
     persistAuthSubscription(plan.id, enrolled);
     persistDirectorySubscription(authUser.email, plan.id, enrolled);
-    applyPublicSimulatorGates();
+    refreshAccessUi();
     try {
       global.dispatchEvent(
         new CustomEvent('ifa:subscription-changed', { detail: { planId: plan.id } })
@@ -489,14 +693,22 @@
     return { plan: plan, enrolledCourseIds: enrolled };
   }
 
-  function bindPublicRefresh() {
-    if (!document.querySelector('[data-simulator-card]')) return;
+  function refreshAccessUi() {
     applyPublicSimulatorGates();
-    global.addEventListener('load', applyPublicSimulatorGates);
-    global.addEventListener('ifa:local-auth-changed', applyPublicSimulatorGates);
-    global.addEventListener('ifa:subscription-changed', applyPublicSimulatorGates);
-    global.addEventListener('ifa:platform-courses-changed', applyPublicSimulatorGates);
-    global.addEventListener('ifa:platform-plans-changed', applyPublicSimulatorGates);
+    renderSimulatorSwitchers();
+    highlightTargetPlan();
+  }
+
+  function bindPublicRefresh() {
+    bindLaunchInterceptor();
+    refreshAccessUi();
+    global.addEventListener('load', refreshAccessUi);
+    global.addEventListener('hashchange', highlightTargetPlan);
+    global.addEventListener('ifa:local-auth-changed', refreshAccessUi);
+    global.addEventListener('ifa:subscription-changed', refreshAccessUi);
+    global.addEventListener('ifa:platform-courses-changed', refreshAccessUi);
+    global.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
+    document.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     global.addEventListener('storage', function (e) {
       if (
         !e.key ||
@@ -506,9 +718,15 @@
         e.key === 'ifa_pricing_plans' ||
         e.key === USERS_KEY
       ) {
-        applyPublicSimulatorGates();
+        refreshAccessUi();
       }
     });
+    setTimeout(highlightTargetPlan, 400);
+    setTimeout(highlightTargetPlan, 1600);
+    var grid = document.querySelector('#publicPricingGrid, .pricing__grid');
+    if (grid && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(highlightTargetPlan).observe(grid, { childList: true });
+    }
   }
 
   global.PlatformSimulators = {
@@ -521,7 +739,11 @@
     resolveViewerAccess: resolveViewerAccess,
     courseUnlockingSimulator: courseUnlockingSimulator,
     lockLabelForSimulator: lockLabelForSimulator,
+    recommendedPlanForSimulator: recommendedPlanForSimulator,
+    interceptSimulatorLaunch: interceptSimulatorLaunch,
     applyPublicSimulatorGates: applyPublicSimulatorGates,
+    renderSimulatorSwitchers: renderSimulatorSwitchers,
+    highlightTargetPlan: highlightTargetPlan,
     subscribeCurrentUserToPlan: subscribeCurrentUserToPlan,
     simulatorsFromCourse: simulatorsFromCourse,
     simulatorsFromPlan: simulatorsFromPlan,

@@ -133,6 +133,13 @@ body.opm-page {
   background: rgba(56, 189, 248, 0.08);
 }
 
+.sim-switcher {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 /* ─── Three-column workspace: toolbox | canvas | properties ─── */
 
 .opm-workspace {

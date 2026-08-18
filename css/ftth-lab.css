@@ -207,6 +207,13 @@ body.lab-page {
   border-color: rgba(56, 189, 248, 0.4);
 }
 
+.sim-switcher {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .lab-main {
   flex: 1;
   min-height: 0;

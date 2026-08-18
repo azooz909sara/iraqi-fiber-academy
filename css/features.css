@@ -114,25 +114,15 @@
 }
 
 .feature-card__lock-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  padding: 0.4rem 0.75rem;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.45;
-  color: #fecaca;
-  background: rgba(185, 28, 28, 0.18);
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  display: none !important;
 }
 
 .feature-card--locked {
-  opacity: 0.92;
+  opacity: 1;
 }
 
 .feature-card--locked::before {
-  background: linear-gradient(90deg, #64748b, #94a3b8);
+  background: linear-gradient(90deg, var(--color-accent-cyan, #00e5ff), var(--color-accent-blue, #3b82f6));
 }
 
 .feature-card--power-meter .feature-card__open-btn {

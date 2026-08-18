@@ -9,6 +9,13 @@ html[data-ifa-access='local-bypass'] #subscriber-gate {
   pointer-events: none !important;
 }
 
+.sim-switcher {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .subscriber-gate {
   position: fixed;
   inset: 0;
