@@ -241,26 +241,22 @@
       out.strandsPerTube = parseInt(item.strandsPerTube, 10) === 6 ? 6 : 12;
       out.dualGroup = !!item.dualGroup;
     } else {
-      var variants = Array.isArray(item.variants) && item.variants.length
+      var variants = Array.isArray(item.variants)
         ? item.variants.map(normalizeVariant)
-        : [normalizeVariant({
-          id: 'default',
-          label: out.label,
-          guideText: out.guideText,
-          media3D: out.media3D,
-          media2D: out.media2D,
-        })];
-      out.variants = variants;
-      out.activeVariantId = String(item.activeVariantId || variants[0].id);
-      if (!variants.some(function (v) { return v.id === out.activeVariantId; })) {
-        out.activeVariantId = variants[0].id;
-      }
+        : [];
       var factoryItem = FACTORY_DEFAULT_ANATOMY_CONFIG.items.filter(function (it) {
         return it.id === out.id && it.kind === 'component';
       })[0];
-      if (factoryItem && factoryItem.variants && variants.length === 1 && variants[0].id === 'default') {
+      if (factoryItem && factoryItem.variants && factoryItem.variants.length &&
+          (variants.length === 0 || (variants.length === 1 && variants[0].id === 'default'))) {
         out.variants = factoryItem.variants.map(normalizeVariant);
         out.activeVariantId = factoryItem.activeVariantId || out.variants[0].id;
+      } else {
+        out.variants = variants;
+        out.activeVariantId = String(item.activeVariantId || (variants[0] && variants[0].id) || '');
+        if (variants.length && !variants.some(function (v) { return v.id === out.activeVariantId; })) {
+          out.activeVariantId = variants[0].id;
+        }
       }
     }
     return out;

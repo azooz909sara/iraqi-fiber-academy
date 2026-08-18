@@ -699,22 +699,28 @@
     renderVariantPills();
   }
 
+  function isDisplayableVariant(variant) {
+    if (!variant || typeof variant !== 'object') return false;
+    var label = String(variant.label || '').trim();
+    if (!label) return false;
+    if (label === 'New Variant' || label === 'Variant') return false;
+    return true;
+  }
+
   function renderVariantPills() {
     var host = $('f3d-variant-pills');
     if (!host) return;
-    var isCable = state.component === 'cable';
     host.innerHTML = '';
-    if (isCable) {
+    var activeItem = state.component === 'cable' ? null : COMPONENTS[state.component];
+    var hasVariants = activeItem && Array.isArray(activeItem.variants) && activeItem.variants.length > 0;
+    var variants = hasVariants ? activeItem.variants.filter(isDisplayableVariant) : [];
+    if (state.component === 'cable' || !hasVariants || !variants.length) {
       host.hidden = true;
-      return;
-    }
-    var comp = COMPONENTS[state.component];
-    var variants = (comp && comp.variants) || [];
-    if (!variants.length) {
-      host.hidden = true;
+      host.style.display = 'none';
       return;
     }
     host.hidden = false;
+    host.style.display = 'flex';
     variants.forEach(function (variant) {
       var btn = document.createElement('button');
       btn.type = 'button';
