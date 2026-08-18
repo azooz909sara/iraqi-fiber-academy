@@ -184,6 +184,13 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   align-items: stretch;
 }
 
+.public-course-card-link {
+  display: block;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
 .public-course-card {
   position: relative;
   display: flex;
@@ -874,6 +881,116 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .ifa-paywall-toast.is-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+.feature-card__free-badge {
+  display: inline-block;
+  margin-inline-end: 0.45rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0a0e17;
+  background: var(--color-accent-phosphor);
+}
+
+.course-details {
+  padding-bottom: 4rem;
+}
+
+.course-details__title {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  margin: 0.35rem 0 0.6rem;
+}
+
+.course-details__desc,
+.course-details__hint,
+.course-details__lesson-desc {
+  color: var(--color-text-secondary);
+  max-width: 48rem;
+}
+
+.course-details__layout {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+}
+
+.course-details__curriculum {
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: var(--color-bg-card);
+  padding: 1rem;
+}
+
+.course-details__curriculum h2 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.course-lesson {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.7rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  margin-bottom: 0.4rem;
+  background: rgba(10, 14, 23, 0.35);
+}
+
+.course-lesson.is-active {
+  border-color: var(--color-accent-cyan);
+}
+
+.course-lesson--locked {
+  opacity: 0.92;
+}
+
+.course-lesson__badge {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+}
+
+.course-lesson__badge--free {
+  background: rgba(57, 255, 20, 0.16);
+  color: var(--color-accent-phosphor);
+}
+
+.course-lesson__badge--lock {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--color-text-secondary);
+}
+
+.course-lesson__plans {
+  font-size: 0.78rem;
+  color: var(--color-accent-cyan);
+}
+
+.course-details__player iframe,
+.course-details__player video {
+  width: 100%;
+  min-height: 18rem;
+  border: 0;
+  border-radius: 12px;
+  background: #000;
+}
+
+.course-details__locked-panel {
+  border: 1px dashed var(--color-border);
+  border-radius: 14px;
+  padding: 2rem 1.25rem;
+  text-align: center;
+}
+
+@media (max-width: 860px) {
+  .course-details__layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sim-switcher {

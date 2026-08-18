@@ -236,6 +236,7 @@
       templateFiles: (l && Array.isArray(l.templateFiles) ? l.templateFiles : []) || [],
       quiz: { questions: questions },
       comments: (l && Array.isArray(l.comments) ? l.comments : []) || [],
+      isFreePreview: !!(l && l.isFreePreview),
       order: (l && l.order) || (index || 0) + 1,
       createdAt: (l && l.createdAt) || new Date().toISOString(),
     };
@@ -430,6 +431,14 @@
           '" />' +
           '</label>' +
           '</div>' +
+          '<label class="admin-field admin-field--checkbox admin-lesson-preview-toggle">' +
+          '<input type="checkbox" data-lesson-field="isFreePreview" data-lesson-index="' +
+          index +
+          '"' +
+          (lesson.isFreePreview ? ' checked' : '') +
+          ' />' +
+          '<span class="admin-field__label">معاينة مجانية (Free Preview)</span>' +
+          '</label>' +
           renderLessonQuiz(lesson, index) +
           '</div>'
         );
@@ -491,10 +500,14 @@
       var videoFileName = document.querySelector(
         '[data-lesson-field="videoFileName"][data-lesson-index="' + index + '"]'
       );
+      var freePreview = document.querySelector(
+        '[data-lesson-field="isFreePreview"][data-lesson-index="' + index + '"]'
+      );
       if (title) lesson.title = title.value;
       if (description) lesson.description = description.value;
       if (videoUrl) lesson.videoUrl = videoUrl.value;
       if (videoFileName) lesson.videoFileName = videoFileName.value;
+      lesson.isFreePreview = !!(freePreview && freePreview.checked);
       if (!lesson.quiz || typeof lesson.quiz !== 'object') lesson.quiz = emptyQuiz();
       if (!Array.isArray(lesson.quiz.questions)) lesson.quiz.questions = [];
       lesson.order = index + 1;
@@ -955,6 +968,7 @@
               description: '',
               videoUrl: '',
               videoFileName: '',
+              isFreePreview: false,
               quiz: emptyQuiz(),
               order: lessonDrafts.length + 1,
               createdAt: new Date().toISOString(),

@@ -139,6 +139,7 @@
         description: '',
         videoUrl: '',
         videoFileName: '',
+        isFreePreview: false,
         order: index + 1,
         createdAt: new Date().toISOString(),
       };
@@ -368,6 +369,7 @@
           comments: Array.isArray(l.comments) ? l.comments : [],
           views: Number(l.views) || 0,
           completions: Number(l.completions) || 0,
+          isFreePreview: !!(l && l.isFreePreview),
           order: typeof l.order === 'number' ? l.order : index + 1,
           createdAt: l.createdAt || new Date().toISOString(),
         };

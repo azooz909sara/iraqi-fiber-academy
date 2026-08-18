@@ -183,6 +183,69 @@
     var initialHash = (window.location.hash || '#overview').replace(/^#/, '') || 'overview';
     showAdminView(initialHash);
     window.refreshAdminOverviewStats();
+    bindPlatformSettingsForm();
+  }
+
+  function bindPlatformSettingsForm() {
+    var form = document.getElementById('platformSettingsForm');
+    var list = document.getElementById('settingsFreeSimulators');
+    var daysInput = document.getElementById('settingsFreeTrialDays');
+    var statusEl = document.getElementById('settingsSaveStatus');
+    if (!form || !window.PlatformSimulators) return;
+
+    var catalog =
+      typeof window.PlatformSimulators.getCatalog === 'function'
+        ? window.PlatformSimulators.getCatalog()
+        : [];
+    var settings =
+      typeof window.PlatformSimulators.getPlatformSettings === 'function'
+        ? window.PlatformSimulators.getPlatformSettings()
+        : { freeSimulatorIds: [], freeTrialDays: 0 };
+    var selected = {};
+    (settings.freeSimulatorIds || []).forEach(function (id) {
+      selected[id] = true;
+    });
+    if (list) {
+      list.innerHTML = catalog
+        .map(function (sim) {
+          return (
+            '<label>' +
+            '<input type="checkbox" name="freeSimulator" value="' +
+            String(sim.id).replace(/"/g, '') +
+            '"' +
+            (selected[sim.id] ? ' checked' : '') +
+            ' />' +
+            '<span>' +
+            String(sim.label || sim.id) +
+            ' <code>' +
+            String(sim.id) +
+            '</code></span>' +
+            '</label>'
+          );
+        })
+        .join('');
+    }
+    if (daysInput) daysInput.value = String(settings.freeTrialDays || 0);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var ids = [];
+      form.querySelectorAll('input[name="freeSimulator"]:checked').forEach(function (input) {
+        if (input.value) ids.push(input.value);
+      });
+      var days = daysInput ? Number(daysInput.value) : 0;
+      var saved = window.PlatformSimulators.savePlatformSettings({
+        freeSimulatorIds: ids,
+        freeTrialDays: isFinite(days) && days > 0 ? days : 0,
+      });
+      if (statusEl) {
+        statusEl.textContent =
+          'تم الحفظ — تجربة ' +
+          (saved.freeTrialDays || 0) +
+          ' يوم، ومحاكيات مجانية: ' +
+          (saved.freeSimulatorIds.length || 0);
+      }
+    });
   }
 
   if (document.readyState === 'loading') {

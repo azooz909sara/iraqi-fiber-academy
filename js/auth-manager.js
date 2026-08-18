@@ -56,9 +56,81 @@ function getLocalAuthUser() {
       role: String(parsed.role || ''),
       planId: String(parsed.planId || ''),
       enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds.slice() : [],
+      trialExpiresAt: Number(parsed.trialExpiresAt) || 0,
     };
   } catch (err) {
     return null;
+  }
+}
+
+function readPlatformSettings() {
+  try {
+    var raw = localStorage.getItem('ifa_platform_settings');
+    if (!raw) return { freeSimulatorIds: [], freeTrialDays: 0 };
+    var parsed = JSON.parse(raw);
+    var days = Number(parsed && parsed.freeTrialDays);
+    return {
+      freeSimulatorIds: Array.isArray(parsed && parsed.freeSimulatorIds) ? parsed.freeSimulatorIds : [],
+      freeTrialDays: isFinite(days) && days > 0 ? Math.round(days) : 0,
+    };
+  } catch (err) {
+    return { freeSimulatorIds: [], freeTrialDays: 0 };
+  }
+}
+
+function trialExpiryMs(value) {
+  if (value == null || value === '') return 0;
+  var n = typeof value === 'number' ? value : Date.parse(value);
+  return isFinite(n) ? n : 0;
+}
+
+function hasActiveTrial(user) {
+  return trialExpiryMs(user && user.trialExpiresAt) > Date.now();
+}
+
+function resolveTrialExpiresAt(email, incoming) {
+  var previous = getLocalAuthUser();
+  var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(email);
+  if (incoming && trialExpiryMs(incoming) > 0) return trialExpiryMs(incoming);
+  if (sameEmail && trialExpiryMs(previous.trialExpiresAt) > 0) return trialExpiryMs(previous.trialExpiresAt);
+  try {
+    var usersRaw = localStorage.getItem('ifa_admin_users');
+    var users = usersRaw ? JSON.parse(usersRaw) : [];
+    if (Array.isArray(users)) {
+      for (var i = 0; i < users.length; i++) {
+        if (normalizeEmail(users[i] && users[i].email) === normalizeEmail(email)) {
+          var fromDir = trialExpiryMs(users[i].trialExpiresAt);
+          if (fromDir) return fromDir;
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    /* ignore */
+  }
+  if (sameEmail) return trialExpiryMs(previous.trialExpiresAt);
+  var days = readPlatformSettings().freeTrialDays;
+  if (days > 0) return Date.now() + days * 24 * 60 * 60 * 1000;
+  return 0;
+}
+
+function persistDirectoryTrial(email, trialExpiresAt) {
+  var key = normalizeEmail(email);
+  if (!key || !trialExpiresAt) return;
+  try {
+    var raw = localStorage.getItem('ifa_admin_users');
+    var list = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(list)) return;
+    var changed = false;
+    list = list.map(function (u) {
+      if (normalizeEmail(u && u.email) !== key) return u;
+      if (trialExpiryMs(u.trialExpiresAt)) return u;
+      changed = true;
+      return Object.assign({}, u, { trialExpiresAt: trialExpiresAt });
+    });
+    if (changed) localStorage.setItem('ifa_admin_users', JSON.stringify(list));
+  } catch (err) {
+    /* ignore */
   }
 }
 
@@ -66,6 +138,7 @@ function setLocalAuthUser(user) {
   if (!user || !normalizeEmail(user.email)) return;
   var previous = getLocalAuthUser();
   var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(user.email);
+  var trialExpiresAt = resolveTrialExpiresAt(user.email, user.trialExpiresAt);
   var payload = {
     name: String(user.name || user.displayName || '').trim() || normalizeEmail(user.email).split('@')[0],
     email: normalizeEmail(user.email),
@@ -81,6 +154,7 @@ function setLocalAuthUser(user) {
         : sameEmail && Array.isArray(previous.enrolledCourseIds)
           ? previous.enrolledCourseIds.slice()
           : [],
+    trialExpiresAt: trialExpiresAt,
     loggedInAt: new Date().toISOString(),
   };
   try {
@@ -88,6 +162,7 @@ function setLocalAuthUser(user) {
   } catch (err) {
     console.error('[Auth] local auth save failed', err);
   }
+  persistDirectoryTrial(payload.email, payload.trialExpiresAt);
   if (window.InstructorApps && typeof window.InstructorApps.setSessionEmail === 'function') {
     window.InstructorApps.setSessionEmail(payload.email);
   }
@@ -225,6 +300,7 @@ function ensureLocalDevSession() {
     role: 'admin',
     planId: existing && existing.planId,
     enrolledCourseIds: existing && existing.enrolledCourseIds,
+    trialExpiresAt: existing && existing.trialExpiresAt,
   });
 }
 
@@ -535,6 +611,7 @@ function loginLocalSession(options) {
     role: treatAsStudent ? 'student' : localBypass ? 'admin' : options.role || (isAdminEmail(email) ? 'admin' : 'student'),
     planId: (directoryUser && directoryUser.planId) || options.planId || '',
     enrolledCourseIds: (directoryUser && directoryUser.enrolledCourseIds) || options.enrolledCourseIds || [],
+    trialExpiresAt: trialExpiryMs(directoryUser && directoryUser.trialExpiresAt) || options.trialExpiresAt,
   });
   refreshSlots();
   notifyLocalAuthChanged({ type: 'login', email: email });
@@ -624,6 +701,35 @@ function bindAuthClicks() {
   });
 }
 
+function enforceSimulatorPageFromAuth() {
+  if (shouldBypassAccessControl()) return;
+  try {
+    if (new URLSearchParams(window.location.search).get('mode') === 'admin-preview') return;
+  } catch (err) {
+    /* ignore */
+  }
+  if (window.PlatformSimulators && typeof window.PlatformSimulators.viewerCanAccess === 'function') {
+    var file = '';
+    try {
+      file = decodeURIComponent(String(window.location.pathname || '').split('/').pop() || '').toLowerCase();
+    } catch (err2) {
+      file = '';
+    }
+    var sim = (window.PlatformSimulators.getCatalog && window.PlatformSimulators.getCatalog()) || [];
+    var match = null;
+    for (var i = 0; i < sim.length; i++) {
+      var href = String(sim[i].href || '').toLowerCase();
+      if (href && href === file) {
+        match = sim[i].id;
+        break;
+      }
+    }
+    if (!match) return;
+    if (window.PlatformSimulators.viewerCanAccess(match)) return;
+    window.location.replace('index.html#plans');
+  }
+}
+
 function initAuthUI() {
   bindAuthClicks();
   slots = Array.prototype.slice.call(document.querySelectorAll('[data-auth-slot]'));
@@ -645,6 +751,7 @@ function initAuthUI() {
   }
 
   refreshSlots();
+  enforceSimulatorPageFromAuth();
 
   onAuthStateChanged(auth, function (user) {
     lastUser = user || null;
@@ -726,4 +833,5 @@ window.IFAAuth = {
   setLocalAuthUser: setLocalAuthUser,
   clearLocalAuthUser: clearLocalAuthUser,
   loginLocalSession: loginLocalSession,
+  hasActiveTrial: hasActiveTrial,
 };

@@ -6,6 +6,7 @@
 
   var AUTH_KEY = 'ifa_auth_user';
   var USERS_KEY = 'ifa_admin_users';
+  var SETTINGS_KEY = 'ifa_platform_settings';
   var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
 
   var SIMULATOR_CATALOG = [
@@ -137,7 +138,56 @@
       role: String(parsed.role || ''),
       planId: String(parsed.planId || ''),
       enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds : [],
+      trialExpiresAt: Number(parsed.trialExpiresAt) || 0,
     };
+  }
+
+  function defaultPlatformSettings() {
+    return { freeSimulatorIds: [], freeTrialDays: 0 };
+  }
+
+  function getPlatformSettings() {
+    var parsed = readJson(SETTINGS_KEY, null);
+    var base = defaultPlatformSettings();
+    if (!parsed || typeof parsed !== 'object') return base;
+    base.freeSimulatorIds = normalizeSimulatorIds(parsed.freeSimulatorIds);
+    var days = Number(parsed.freeTrialDays);
+    base.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
+    return base;
+  }
+
+  function savePlatformSettings(patch) {
+    var next = Object.assign(defaultPlatformSettings(), getPlatformSettings(), patch || {});
+    next.freeSimulatorIds = normalizeSimulatorIds(next.freeSimulatorIds);
+    var days = Number(next.freeTrialDays);
+    next.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
+    } catch (err) {
+      console.error('[PlatformSimulators] settings save failed', err);
+    }
+    try {
+      global.dispatchEvent(new CustomEvent('ifa:platform-settings-changed', { detail: next }));
+    } catch (err2) {
+      /* ignore */
+    }
+    return next;
+  }
+
+  function isGloballyFreeSimulator(simulatorId) {
+    return getPlatformSettings().freeSimulatorIds.indexOf(String(simulatorId || '')) !== -1;
+  }
+
+  function trialExpiryMs(user) {
+    if (!user) return 0;
+    var t = user.trialExpiresAt;
+    if (t == null || t === '') return 0;
+    var n = typeof t === 'number' ? t : Date.parse(t);
+    return isFinite(n) ? n : 0;
+  }
+
+  function hasActiveTrial(user) {
+    return trialExpiryMs(user) > Date.now();
   }
 
   function findDirectoryUser(email) {
@@ -344,7 +394,16 @@
     }
     var qs = 'needSim=' + encodeURIComponent(simulatorId || '');
     if (plan) qs += '&highlightPlan=' + encodeURIComponent(plan.id);
-    return 'index.html?' + qs + '#pricing';
+    return 'index.html?' + qs + '#plans';
+  }
+
+  function enforceSimulatorPageAccess() {
+    if (isAdminPreviewContext()) return;
+    var id = currentSimulatorIdFromLocation();
+    if (!id) return;
+    if (viewerCanAccess(id)) return;
+    showPaywallNotice(PAYWALL_TOAST_MSG);
+    global.location.replace(paywallRedirectUrl(id));
   }
 
   function interceptSimulatorLaunch(simulatorId, href) {
@@ -491,7 +550,11 @@
 
     var authUser = getLocalAuthUser();
     if (!authUser) {
-      return { role: 'guest', unlocked: false, simulatorIds: [] };
+      return {
+        role: 'guest',
+        unlocked: false,
+        simulatorIds: getPlatformSettings().freeSimulatorIds.slice(),
+      };
     }
 
     var directoryUser = findDirectoryUser(authUser.email);
@@ -520,20 +583,41 @@
     }
 
     if (!studentActive) {
-      return { role: 'student', unlocked: false, simulatorIds: [] };
+      return {
+        role: 'student',
+        unlocked: false,
+        simulatorIds: getPlatformSettings().freeSimulatorIds.slice(),
+      };
     }
 
+    var trialUser = Object.assign({}, authUser, directoryUser || {});
+    if (hasActiveTrial(trialUser) || hasActiveTrial(authUser) || hasActiveTrial(directoryUser)) {
+      return {
+        role: 'student',
+        unlocked: true,
+        simulatorIds: SIMULATOR_CATALOG.map(function (s) {
+          return s.id;
+        }),
+      };
+    }
+
+    var ids = collectViewerSimulatorIds(authUser, directoryUser);
+    getPlatformSettings().freeSimulatorIds.forEach(function (id) {
+      if (ids.indexOf(id) === -1) ids.push(id);
+    });
     return {
       role: 'student',
       unlocked: false,
-      simulatorIds: collectViewerSimulatorIds(authUser, directoryUser),
+      simulatorIds: ids,
     };
   }
 
   function viewerCanAccess(simulatorId) {
+    var id = String(simulatorId || '');
+    if (isGloballyFreeSimulator(id)) return true;
     var access = resolveViewerAccess();
     if (access.unlocked) return true;
-    return access.simulatorIds.indexOf(String(simulatorId || '')) !== -1;
+    return access.simulatorIds.indexOf(id) !== -1;
   }
 
   function withPreviewQuery(href) {
@@ -561,13 +645,25 @@
         card.appendChild(accessEl);
       }
 
+      var allowed = viewerCanAccess(id);
       var openHref = withPreviewQuery(href);
+      var free = isGloballyFreeSimulator(id);
       accessEl.innerHTML =
+        (free
+          ? '<span class="feature-card__free-badge">مجاني</span>'
+          : '') +
         '<a class="feature-card__open-btn" href="' +
         escapeHtml(openHref || '#simulators') +
         '" data-simulator-launch="' +
         escapeHtml(id) +
-        '">افتح المحاكي</a>';
+        '">' +
+        (allowed ? 'افتح المحاكي' : 'يتطلب الاشتراك بالباقة') +
+        '</a>';
+      if (!allowed) {
+        card.classList.add('feature-card--locked');
+        card.classList.remove('feature-card--unlocked');
+        card.setAttribute('data-simulator-locked', '1');
+      }
     });
   }
 
@@ -701,6 +797,7 @@
 
   function bindPublicRefresh() {
     bindLaunchInterceptor();
+    enforceSimulatorPageAccess();
     refreshAccessUi();
     global.addEventListener('load', refreshAccessUi);
     global.addEventListener('hashchange', highlightTargetPlan);
@@ -709,6 +806,7 @@
     global.addEventListener('ifa:platform-courses-changed', refreshAccessUi);
     global.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     document.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
+    global.addEventListener('ifa:platform-settings-changed', refreshAccessUi);
     global.addEventListener('storage', function (e) {
       if (
         !e.key ||
@@ -716,7 +814,8 @@
         e.key === 'platform_courses' ||
         e.key === 'platform_plans' ||
         e.key === 'ifa_pricing_plans' ||
-        e.key === USERS_KEY
+        e.key === USERS_KEY ||
+        e.key === SETTINGS_KEY
       ) {
         refreshAccessUi();
       }
@@ -731,10 +830,15 @@
 
   global.PlatformSimulators = {
     CATALOG: SIMULATOR_CATALOG,
+    SETTINGS_KEY: SETTINGS_KEY,
     getCatalog: getCatalog,
     findSimulator: findSimulator,
     normalizeSimulatorIds: normalizeSimulatorIds,
     simulatorLabels: simulatorLabels,
+    getPlatformSettings: getPlatformSettings,
+    savePlatformSettings: savePlatformSettings,
+    isGloballyFreeSimulator: isGloballyFreeSimulator,
+    hasActiveTrial: hasActiveTrial,
     viewerCanAccess: viewerCanAccess,
     resolveViewerAccess: resolveViewerAccess,
     courseUnlockingSimulator: courseUnlockingSimulator,

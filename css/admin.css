@@ -1303,6 +1303,25 @@
   color: var(--color-accent-cyan);
 }
 
+.admin-lesson-preview-toggle {
+  margin: 0.15rem 0 0.35rem;
+}
+
+.admin-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.15rem;
+  max-width: 52rem;
+  padding: 0 0.25rem 1.5rem;
+}
+
+.admin-settings-form__actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
 .admin-lesson-card__media {
   display: grid;
   grid-template-columns: 1fr 1fr;

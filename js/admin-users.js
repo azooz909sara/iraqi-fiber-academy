@@ -217,6 +217,18 @@
       enrolledCourseIds: Array.isArray(payload && payload.enrolledCourseIds)
         ? payload.enrolledCourseIds
         : [],
+      trialExpiresAt: (function () {
+        if (payload && payload.trialExpiresAt) return Number(payload.trialExpiresAt) || Date.parse(payload.trialExpiresAt) || 0;
+        if (role !== 'student') return 0;
+        try {
+          var raw = localStorage.getItem('ifa_platform_settings');
+          var days = raw ? Number(JSON.parse(raw).freeTrialDays) : 0;
+          if (isFinite(days) && days > 0) return Date.now() + days * 24 * 60 * 60 * 1000;
+        } catch (err) {
+          /* ignore */
+        }
+        return 0;
+      })(),
     };
     var list = getUsers();
     list.unshift(user);

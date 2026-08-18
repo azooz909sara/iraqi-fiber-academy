@@ -757,12 +757,25 @@
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="settingsHeading">الإعدادات</h2>
-            <p class="admin-panel__desc">إعدادات النظام العامة ستتوفر هنا قريباً</p>
+            <p class="admin-panel__desc">التحكم في المحاكيات المجانية وفترة التجربة للحسابات الجديدة</p>
           </div>
         </div>
-        <div class="admin-panel__footer">
-          <p class="admin-panel__meta">لا توجد إعدادات إضافية حالياً.</p>
-        </div>
+        <form class="admin-settings-form" id="platformSettingsForm">
+          <fieldset class="admin-field admin-field--fieldset">
+            <legend class="admin-field__label">المحاكيات المجانية الافتراضية (Free Access)</legend>
+            <p class="admin-field__hint">المحاكيات المحددة تُفتح مباشرة للجميع دون اشتراك</p>
+            <div class="admin-simulator-checklist" id="settingsFreeSimulators"></div>
+          </fieldset>
+          <label class="admin-field">
+            <span class="admin-field__label">فترة التجربة للحسابات الجديدة (Free Trial Days)</span>
+            <input class="admin-field__input" id="settingsFreeTrialDays" type="number" min="0" max="365" step="1" value="0" />
+            <span class="admin-field__hint">0 = تعطيل التجربة. عند تسجيل حساب جديد تُمنح N يوماً من الوصول الكامل للمحاكيات.</span>
+          </label>
+          <div class="admin-settings-form__actions">
+            <button class="admin-btn admin-btn--primary" type="submit">حفظ الإعدادات</button>
+            <p class="admin-panel__meta" id="settingsSaveStatus" role="status"></p>
+          </div>
+        </form>
       </section>
     </main>
   </div>
