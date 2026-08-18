@@ -23,6 +23,7 @@
   };
   var TX_PRESETS = [3, 0, -3, -6];
   var DEFAULT_TX_DBM = -3;
+  var TOOL_CATEGORY = 'TEST EQUIPMENT';
 
   var ctx = null;
   var layer = null;
@@ -758,7 +759,7 @@
       '<div class="lab-toolbox" role="list">' +
       '<button type="button" class="lab-tool lab-tool--ols' +
       (selectedTool === 'ols' ? ' is-selected' : '') +
-      '" draggable="true" data-lab-tool="ols" role="listitem">' +
+      '" draggable="true" data-lab-tool="ols" data-lab-category="' + TOOL_CATEGORY + '" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--ols" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
       '<strong>OLS-35 / OPL</strong>' +
@@ -992,6 +993,7 @@
 
   var tool = {
     id: 'ols',
+    category: TOOL_CATEGORY,
     mount: mount,
     onLayoutChange: onLayoutChange,
     onLaunchRequest: onLaunchRequest,

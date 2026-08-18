@@ -1,6 +1,9 @@
 /**
  * FTTH Simulator — layout/label settings persistence and apply helpers.
  * Extracted from ftth-simulator-core.js (Phase 1).
+ *
+ * FTTH Lab toolbox icon overrides live in js/settings/FtthLabSettings.js
+ * (localStorage key: ifa_ftth_lab_config).
  */
 (function (global) {
   'use strict';

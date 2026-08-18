@@ -4993,3 +4993,264 @@ body.lab-pcord-winding .lab-pcord-fiber-hit {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ─── Admin settings button (admin preview / dashboard iframe only) ─── */
+
+.anatomy-top-btn.admin-only-btn {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.38rem 0.72rem;
+  border: 1px solid var(--lab-border);
+  border-radius: 0.55rem;
+  background: rgba(15, 23, 42, 0.75);
+  color: var(--lab-cyan);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+}
+
+.anatomy-top-btn.admin-only-btn.is-admin-visible {
+  display: inline-flex;
+}
+
+.anatomy-top-btn.admin-only-btn:hover {
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.icon-settings::before {
+  content: "⚙";
+}
+
+.lab-tool__mark--custom {
+  background-color: transparent !important;
+}
+
+.lab-tool__mark--custom::before,
+.lab-tool__mark--custom::after {
+  display: none !important;
+}
+
+/* ─── FTTH Lab settings modal ─── */
+
+.lab-settings-cms[hidden] {
+  display: none !important;
+}
+
+.lab-settings-cms {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.lab-settings-cms__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.72);
+  backdrop-filter: blur(4px);
+}
+
+.lab-settings-cms__panel {
+  position: relative;
+  z-index: 1;
+  width: min(920px, 96vw);
+  max-height: min(88vh, 820px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--lab-border);
+  border-radius: 0.75rem;
+  background: linear-gradient(180deg, #111827 0%, #0b1220 100%);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.lab-settings-cms__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--lab-border);
+  flex-shrink: 0;
+}
+
+.lab-settings-cms__header h2 {
+  margin: 0;
+  font-size: 1rem;
+  color: #fff;
+}
+
+.lab-settings-cms__header p {
+  margin: 0.35rem 0 0;
+  font-size: 0.72rem;
+  color: var(--lab-muted);
+}
+
+.lab-settings-cms__header code {
+  font-size: 0.68rem;
+  color: var(--lab-cyan);
+}
+
+.lab-settings-cms__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.lab-settings-cms__btn {
+  padding: 0.38rem 0.72rem;
+  border: 1px solid var(--lab-border);
+  border-radius: 0.45rem;
+  background: rgba(15, 23, 42, 0.85);
+  color: var(--lab-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.lab-settings-cms__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.lab-settings-cms__btn--primary {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+  border-color: rgba(56, 189, 248, 0.4);
+}
+
+.lab-settings-cms__btn--warn {
+  color: var(--lab-amber);
+}
+
+.lab-settings-cms__btn--ghost {
+  background: transparent;
+}
+
+.lab-settings-cms__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0.85rem 1.1rem 1rem;
+}
+
+.lab-settings-cms__section + .lab-settings-cms__section {
+  margin-top: 1rem;
+}
+
+.lab-settings-cms__cat {
+  margin: 0 0 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--lab-cyan);
+}
+
+.lab-settings-cms__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0.55rem;
+  background: rgba(15, 23, 42, 0.55);
+}
+
+.lab-settings-cms__row + .lab-settings-cms__row {
+  margin-top: 0.45rem;
+}
+
+.lab-settings-cms__preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.45rem;
+  background: rgba(2, 6, 23, 0.65);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+}
+
+.lab-settings-cms__mark {
+  width: 1.35rem;
+  height: 1.05rem;
+}
+
+.lab-settings-cms__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.lab-settings-cms__meta strong {
+  font-size: 0.8rem;
+  color: #e2e8f0;
+}
+
+.lab-settings-cms__meta span {
+  font-size: 0.68rem;
+  color: var(--lab-muted);
+}
+
+.lab-settings-cms__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.lab-settings-cms__upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  border: 1px dashed rgba(56, 189, 248, 0.35);
+  border-radius: 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--lab-cyan);
+  cursor: pointer;
+}
+
+.lab-settings-cms__upload input {
+  display: none;
+}
+
+.lab-settings-cms__status {
+  margin: 0;
+  padding: 0.55rem 1.1rem 0.85rem;
+  font-size: 0.72rem;
+  color: var(--lab-muted);
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.lab-settings-cms__status.is-error {
+  color: #f87171;
+}
+
+@media (max-width: 720px) {
+  .lab-settings-cms__header {
+    flex-direction: column;
+  }
+
+  .lab-settings-cms__row {
+    grid-template-columns: 1fr;
+  }
+
+  .lab-settings-cms__actions {
+    justify-content: flex-start;
+  }
+}
+

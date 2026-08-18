@@ -359,6 +359,27 @@
 
   var activeToolboxTool = null;
 
+  /** Sidebar category labels keyed by registered tool id. */
+  var TOOLBOX_CATEGORIES = {
+    'olt-fx16': 'ACTIVE EQUIPMENT',
+    'ols': 'TEST EQUIPMENT',
+    'smart-splitter': 'SPLITTERS',
+    'patch-cord': 'FIBER JUMPERS',
+    'sc-pigtail': 'FIBER JUMPERS',
+    'fiber-spool': 'FIBER JUMPERS',
+    'bend-jig': 'FIBER JUMPERS',
+    'sc-coupler': 'ADAPTERS',
+    'opm': 'TEST EQUIPMENT',
+    'vfl': 'TEST EQUIPMENT',
+  };
+
+  function getToolboxCategory(toolId) {
+    if (!toolId) return null;
+    var tool = state.tools[toolId];
+    if (tool && tool.category) return tool.category;
+    return TOOLBOX_CATEGORIES[toolId] || null;
+  }
+
   /**
    * Enforce a single toolbox active highlight across all rail categories
    * (Active Equipment / Splitters / Fiber Jumpers / Adapters / Test Equipment).
@@ -558,13 +579,47 @@
     }
   }
 
-  function bindUi() {
-    document.querySelectorAll('[data-lab-view]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        setViewMode(btn.getAttribute('data-lab-view'));
-      });
-    });
+  function isAdminPreviewContext() {
+    try {
+      if (global.self !== global.top) return true;
+    } catch (err) {
+      return true;
+    }
+    try {
+      return new URLSearchParams(global.location.search || '').get('mode') === 'admin-preview';
+    } catch (err2) {
+      return false;
+    }
+  }
 
+  function syncFtthLabAdminSettingsButton() {
+    var btn = $('ftth-lab-admin-settings-btn');
+    if (!btn) return;
+    var show = isAdminPreviewContext();
+    btn.hidden = !show;
+    btn.style.display = show ? 'inline-flex' : 'none';
+    btn.classList.toggle('is-admin-visible', show);
+  }
+
+  function applyFtthLabToolboxIcons() {
+    if (global.FtthLabSettings && typeof FtthLabSettings.applyToolboxIcons === 'function') {
+      FtthLabSettings.applyToolboxIcons();
+    }
+  }
+
+  function watchToolboxForIconRefresh() {
+    var panel = document.querySelector('.lab-rail__panel');
+    if (!panel || panel.dataset.iconWatch === '1') return;
+    panel.dataset.iconWatch = '1';
+    var debounceTimer;
+    var obs = new MutationObserver(function () {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(applyFtthLabToolboxIcons, 0);
+    });
+    obs.observe(panel, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+  }
+
+  function bindUi() {
     var undoBtn = $('lab-btn-undo');
     var redoBtn = $('lab-btn-redo');
     var deleteBtn = $('lab-btn-delete');
@@ -576,6 +631,9 @@
     if (!bindUi._keysBound) {
       bindUi._keysBound = true;
       window.addEventListener('keydown', function (e) {
+        var settingsModal = $('ftth-lab-settings-modal');
+        if (settingsModal && !settingsModal.hidden) return;
+
         var ctrl = e.ctrlKey || e.metaKey;
         var code = e.code || '';
         var key = e.key || '';
@@ -623,12 +681,19 @@
     state.booted = true;
     flushPendingTools();
     setViewMode('2d');
+    syncFtthLabAdminSettingsButton();
     handleLaunchQuery();
     if (api._launchTool === 'opm') {
       setTimeout(function () {
         notifyTools('onLaunchRequest', { tool: 'opm' });
       }, 120);
     }
+    setTimeout(applyFtthLabToolboxIcons, 0);
+    watchToolboxForIconRefresh();
+    global.addEventListener('ifa:ftth-lab-config-saved', function () {
+      applyFtthLabToolboxIcons();
+      setStatus('Toolbox icons updated');
+    });
     setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Del delete · Esc clear · scroll to zoom');
   }
 
@@ -1684,6 +1749,10 @@
     setSelectionOwner: setSelectionOwner,
     claimToolboxTool: claimToolboxTool,
     getActiveToolboxTool: getActiveToolboxTool,
+    getToolboxCategory: getToolboxCategory,
+    TOOLBOX_CATEGORIES: TOOLBOX_CATEGORIES,
+    applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
+    syncFtthLabAdminSettingsButton: syncFtthLabAdminSettingsButton,
     clearWorkspaceSelection: clearWorkspaceSelection,
     resetInspectorIdle: resetInspectorIdle,
     tryPatchPort: null,

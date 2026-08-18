@@ -308,7 +308,7 @@
             <p class="feature-card__desc">شرّح كابلات Last Mile وFTTH حتى 288F: الغلاف → الأنابيب → 6 أو 12 ليف لكل أنبوب، مع تمييز 48F Last Mile و48F Feeder، وعلامات الشريط الأوسط لأنابيب T13–T24 في كابل 288F.</p>
             <span class="feature-card__tag">3D / 2D Anatomy →</span>
           </a>
-          <a href="ftth-lab.html" class="feature-card feature-card--link fade-in" aria-label="فتح مختبر شبكة FTTH ولوحة التوصيل">
+          <a href="ftth-lab.html" class="feature-card feature-card--link fade-in" data-ftth-lab-card aria-label="فتح مختبر شبكة FTTH ولوحة التوصيل">
             <div class="feature-card__icon">🔌</div>
             <h3 class="feature-card__title">FTTH Network &amp; Patch Panel Lab</h3>
             <p class="feature-card__desc">مختبر FTTH: مقسمات PLC، أسلاك Patch Cord بطرفي A وB بنفس منطق السحب اليدوي (بدون تتبع تلقائي)، يُحفظ المسار عند الإطباق (SC/APC أخضر · SC/PC أزرق)، مع تنبيه عدم التوافق وخصم خسارة إضافي دون حظر التوصيل.</p>
@@ -772,6 +772,8 @@
       if (!isAdminPreviewContext()) return;
       var card = document.querySelector('[data-anatomy-simulator-card]');
       if (card) card.setAttribute('href', 'fiber-3d-simulator.html?mode=admin-preview');
+      var labCard = document.querySelector('[data-ftth-lab-card]');
+      if (labCard) labCard.setAttribute('href', 'ftth-lab.html?mode=admin-preview');
     })();
   </script>
   <script src="js/navigation.js"></script>

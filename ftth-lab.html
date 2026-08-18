@@ -31,10 +31,9 @@
             </svg>
           </button>
         </div>
-        <div class="lab-toggle-group" role="group" aria-label="Workspace view">
-          <button type="button" class="lab-toggle-btn is-active" data-lab-view="2d">2D Layout</button>
-          <button type="button" class="lab-toggle-btn" data-lab-view="3d">3D Workspace</button>
-        </div>
+        <button type="button" id="ftth-lab-admin-settings-btn" class="anatomy-top-btn admin-only-btn" style="display: none;" hidden>
+          <i class="icon-settings" aria-hidden="true"></i> الإعدادات
+        </button>
         <a class="lab-home-link" href="index.html">← Back to Home</a>
         <a class="lab-home-link" href="power-meter.html">Power Meter</a>
         <a class="lab-home-link" href="simulator.html">FTTH Map Sim</a>
@@ -53,9 +52,6 @@
             <h3 class="lab-rail__cat" id="lab-cat-active">Active Equipment</h3>
             <div id="lab-hw-tree" class="lab-hw-tree" aria-label="OLT tools">
               <!-- Filled by ftth-lab-olt-fx16.js -->
-            </div>
-            <div id="lab-ols-tree" class="lab-hw-tree" aria-label="Optical Laser Source">
-              <!-- OLS-35 · ftth-lab-ols.js -->
             </div>
           </section>
 
@@ -93,6 +89,9 @@
             <h3 class="lab-rail__cat" id="lab-cat-test">Test Equipment</h3>
             <div id="lab-opm-tree" class="lab-hw-tree" aria-label="Optical Power Meter">
               <!-- OPM · ftth-lab-opm.js -->
+            </div>
+            <div id="lab-ols-tree" class="lab-hw-tree" aria-label="Optical Laser Source">
+              <!-- OLS-35 · ftth-lab-ols.js -->
             </div>
             <div id="lab-vfl-tree" class="lab-hw-tree" aria-label="Visual Fault Locator">
               <!-- VFL · ftth-lab-vfl.js -->
@@ -136,6 +135,7 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/settings/FtthLabSettings.js"></script>
   <script src="js/ftth-lab.js"></script>
   <script src="js/ftth-lab-olt-fx16.js"></script>
   <script src="js/ftth-lab-splitter.js"></script>
@@ -147,6 +147,7 @@
   <script src="js/ftth-lab-vfl.js"></script>
   <script src="js/ftth-lab-opm.js"></script>
   <script src="js/ftth-lab-ols.js"></script>
+  <script src="js/ftth-lab-settings-cms.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>
