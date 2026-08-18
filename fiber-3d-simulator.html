@@ -27,6 +27,9 @@
           <button type="button" class="f3d-toggle-btn" data-f3d-view="2d">2D Layout</button>
         </div>
         <button type="button" class="f3d-toggle-btn is-active" id="f3d-auto-rotate" aria-pressed="true">Auto-Rotate: On</button>
+        <button type="button" id="anatomy-admin-settings-btn" class="anatomy-top-btn admin-only-btn" style="display: none;" hidden>
+          <i class="icon-settings" aria-hidden="true"></i> الإعدادات
+        </button>
         <a class="f3d-home-link" href="index.html">← Back to Home</a>
         <a class="f3d-home-link" href="power-meter.html">Power Meter</a>
         <a class="f3d-home-link" href="simulator.html">FTTH Map Sim</a>
@@ -38,124 +41,16 @@
     </header>
 
     <main class="f3d-main">
-      <aside class="f3d-rail" aria-label="Cable capacity and components">
-        <p class="f3d-rail__label">Last Mile Cable</p>
-        <ul class="f3d-component-list">
-          <li>
-            <button type="button" class="f3d-component-btn is-active" data-f3d-capacity="12">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>12F</strong>
-                <span>2 tubes × 6 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="24">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>24F</strong>
-                <span>4 tubes × 6 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="36">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>36F</strong>
-                <span>6 tubes × 6 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="48lm">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>48F [Last Mile]</strong>
-                <span>8 tubes × 6 strands</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-
-        <p class="f3d-rail__label" style="margin-top:1rem">FTTH Cable</p>
-        <ul class="f3d-component-list">
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="48f">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>48F [Feeder]</strong>
-                <span>4 tubes × 12 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="72">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>72F</strong>
-                <span>6 tubes × 12 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="144">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>144F</strong>
-                <span>12 tubes × 12 strands</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-capacity="288">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🧬</span>
-              <span class="f3d-component-btn__text">
-                <strong>288F</strong>
-                <span>24 tubes × 12 · T13–T24 mid-stripe</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-
-        <p class="f3d-rail__label" style="margin-top:1rem">Other Components</p>
-        <ul class="f3d-component-list">
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-component="fdt">
-              <span class="f3d-component-btn__icon" aria-hidden="true">📦</span>
-              <span class="f3d-component-btn__text">
-                <strong>FDT Cabinet</strong>
-                <span>Distribution trays &amp; ports</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-component="splitter">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🔀</span>
-              <span class="f3d-component-btn__text">
-                <strong>Optical Splitter</strong>
-                <span>Input &amp; fan-out</span>
-              </span>
-            </button>
-          </li>
-          <li>
-            <button type="button" class="f3d-component-btn" data-f3d-component="olt">
-              <span class="f3d-component-btn__icon" aria-hidden="true">🖥️</span>
-              <span class="f3d-component-btn__text">
-                <strong>OLT</strong>
-                <span>PON line card</span>
-              </span>
-            </button>
-          </li>
-        </ul>
-      </aside>
+      <aside class="f3d-rail" id="f3d-rail" aria-label="Cable capacity and components"></aside>
 
       <section class="f3d-stage-wrap" aria-label="Dissection stage">
         <div id="f3d-canvas-host"></div>
         <div id="f3d-2d-host" class="f3d-2d-host" hidden></div>
+        <div id="f3d-media-host" class="f3d-media-host" hidden></div>
         <div class="f3d-stage-hud">
-          <button type="button" class="f3d-layer-btn" id="f3d-reset-peel">Reset Jacket</button>
+          <button type="button" class="f3d-layer-btn btn-anatomy-action" id="btn-reset-jacket">Reset Jacket</button>
+          <button type="button" class="f3d-layer-btn btn-anatomy-action" id="btn-reset-tube">Reset Tube</button>
+          <div id="f3d-variant-pills" class="f3d-variant-pills" hidden></div>
           <span class="f3d-hint">2D/3D: jacket → tubes → strands (6F / 12F)</span>
         </div>
       </section>
@@ -166,8 +61,10 @@
           <h2>Fiber Cable Anatomy</h2>
           <p>Select a capacity, then click to peel layers hierarchically.</p>
         </div>
-        <p class="f3d-inspector__label">Loose Tubes</p>
-        <div class="f3d-layer-stack" id="f3d-layer-stack"></div>
+        <div class="f3d-loose-tubes" id="f3d-loose-tubes">
+          <p class="f3d-inspector__label" id="f3d-loose-tubes-label">Loose Tubes</p>
+          <div class="f3d-layer-stack" id="f3d-layer-stack"></div>
+        </div>
         <p class="f3d-inspector__label" id="f3d-fiber-caption" style="margin-top:0.9rem" hidden>Strands</p>
         <div class="f3d-fiber-grid" id="f3d-fiber-grid" hidden></div>
       </aside>
@@ -180,6 +77,9 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="js/fiber-anatomy-store.js"></script>
+  <script src="js/fiber-anatomy-cms.js"></script>
   <script src="js/fiber-3d-simulator.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>

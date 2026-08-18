@@ -18,7 +18,7 @@
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
-      simulators: { title: 'المحاكيات', subtitle: 'إعدادات المحاكيات' },
+      simulators: { title: 'إدارة موقعي', subtitle: 'معاينة وإدارة الموقع المباشر' },
       settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
     };
 
@@ -59,6 +59,7 @@
       if (id === 'courses' && typeof window.renderAdminCoursesTable === 'function') {
         window.renderAdminCoursesTable();
       }
+      document.body.classList.toggle('admin-body--site-preview', id === 'simulators');
     }
 
     function escapeOverviewHtml(value) {

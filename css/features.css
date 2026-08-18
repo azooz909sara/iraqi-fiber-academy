@@ -87,5 +87,9 @@
   filter: brightness(1.05);
 }
 
+.card-admin-settings-btn {
+  display: none !important;
+}
+
 @media (max-width: 1024px) { .features__grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 600px) { .features__grid { grid-template-columns: 1fr; } }

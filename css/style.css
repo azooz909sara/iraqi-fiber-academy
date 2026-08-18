@@ -826,3 +826,20 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   .learning-path__timeline::before { right: 22px; }
   .path-step__marker { width: 44px; height: 44px; font-size: 0.95rem; }
 }
+
+.card-admin-settings-btn,
+.admin-only-btn {
+  display: none;
+}
+
+.f3d-stage-wrap::before,
+.f3d-stage-wrap::after,
+.f3d-stage-hud {
+  pointer-events: none;
+}
+
+.f3d-stage-hud > *,
+#f3d-canvas-host,
+#f3d-canvas-host canvas {
+  pointer-events: auto;
+}

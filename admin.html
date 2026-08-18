@@ -62,7 +62,7 @@
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
         </svg>
-        المحاكيات
+        إدارة موقعي
       </a>
 
       <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
@@ -687,16 +687,9 @@
         </div>
       </div>
 
-      <section class="admin-panel admin-view" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
-        <div class="admin-panel__header">
-          <div>
-            <h2 class="admin-panel__title" id="simulatorsHeading">المحاكيات</h2>
-            <p class="admin-panel__desc">إدارة إعدادات المحاكيات ستتوفر هنا قريباً</p>
-          </div>
-        </div>
-        <div class="admin-panel__footer">
-          <p class="admin-panel__meta">لا توجد إعدادات إضافية حالياً.</p>
-        </div>
+      <section class="admin-panel admin-view admin-panel--site-preview" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
+        <h2 class="visually-hidden" id="simulatorsHeading">إدارة موقعي</h2>
+        <iframe id="site-preview-frame" class="admin-site-iframe" src="index.html?mode=admin-preview" title="معاينة الموقع المباشر"></iframe>
       </section>
 
       <section class="admin-panel admin-view" id="settings" data-admin-view="settings" aria-labelledby="settingsHeading" hidden>

@@ -130,6 +130,139 @@
     },
   };
 
+  var CATEGORIES = [];
+
+  function escapeRail(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function isCustomIconSrc(icon) {
+    if (!icon) return false;
+    return icon.indexOf('data:image') === 0 ||
+      icon.indexOf('http://') === 0 ||
+      icon.indexOf('https://') === 0 ||
+      icon.indexOf('/') === 0;
+  }
+
+  function railIconHtml(icon) {
+    if (isCustomIconSrc(icon)) {
+      return '<img class="f3d-component-btn__icon-img" alt="" src="' + escapeRail(icon) + '">';
+    }
+    return '<span class="f3d-component-btn__icon" aria-hidden="true">' + escapeRail(icon || '🧬') + '</span>';
+  }
+
+  function tubesForCount(count, dualGroup) {
+    if (dualGroup) return tubes288DualGroup();
+    var n = Math.max(1, count || 2);
+    var tubes = [];
+    var i;
+    for (i = 0; i < n; i++) tubes.push(COLOR_ORDER_12[i % 12]);
+    return tubes;
+  }
+
+  function applyAnatomyConfigFromStore() {
+    var cfg = window.FiberAnatomyStore
+      ? window.FiberAnatomyStore.getActiveConfig()
+      : (window.FACTORY_DEFAULT_ANATOMY_CONFIG || null);
+    if (!cfg) return;
+    var specs = {};
+    var components = {
+      cable: {
+        id: 'cable',
+        title: 'Fiber Cable Anatomy',
+        desc: 'Click the jacket to peel tubes, then click a tube to reveal its standard-color strands.',
+      },
+    };
+    (cfg.items || []).forEach(function (item) {
+      if (item.kind === 'component') {
+        components[item.id] = {
+          id: item.id,
+          title: item.guideTitle || item.label,
+          desc: item.guideText || item.sublabel || '',
+          media3D: item.media3D,
+          media2D: item.media2D,
+          variants: item.variants || [],
+          activeVariantId: item.activeVariantId || '',
+          icon: item.icon,
+          sublabel: item.sublabel,
+          categoryId: item.categoryId,
+        };
+        return;
+      }
+      specs[item.id] = {
+        capacity: item.capacity,
+        label: item.label,
+        badge: item.badge || item.label,
+        category: item.categoryId,
+        strandsPerTube: item.strandsPerTube,
+        dualGroup: !!item.dualGroup,
+        tubes: tubesForCount(item.tubeCount, item.dualGroup),
+        sublabel: item.sublabel,
+        guideTitle: item.guideTitle,
+        guideText: item.guideText,
+        media3D: item.media3D,
+        media2D: item.media2D,
+        icon: item.icon,
+      };
+    });
+    CABLE_SPECS = specs;
+    COMPONENTS = components;
+    CATEGORIES = cfg.categories || [];
+    if (state.component === 'cable') {
+      var key = resolveCapacityKey(state.capacity);
+      if (key == null) {
+        var firstKey = Object.keys(CABLE_SPECS)[0];
+        if (firstKey) state.capacity = firstKey;
+      }
+    } else if (!COMPONENTS[state.component]) {
+      state.component = 'cable';
+    }
+  }
+
+  function renderCableRail() {
+    var rail = $('f3d-rail');
+    if (!rail) return;
+    var html = '';
+    var cats = CATEGORIES.length ? CATEGORIES : [
+      { id: 'lastmile', label: 'Last Mile Cable' },
+      { id: 'ftth', label: 'FTTH Cable' },
+      { id: 'other', label: 'Other Components' },
+    ];
+    cats.forEach(function (cat, idx) {
+      html += '<p class="f3d-rail__label"' + (idx ? ' style="margin-top:1rem"' : '') + '>' +
+        escapeRail(cat.label) + '</p><ul class="f3d-component-list">';
+      if (cat.id === 'other') {
+        Object.keys(COMPONENTS).forEach(function (id) {
+          if (id === 'cable') return;
+          var comp = COMPONENTS[id];
+          if (comp.categoryId && comp.categoryId !== cat.id) return;
+          html += '<li><button type="button" class="f3d-component-btn" data-f3d-component="' +
+            escapeRail(id) + '">' + railIconHtml(comp.icon) +
+            '<span class="f3d-component-btn__text"><strong>' +
+            escapeRail(comp.title) + '</strong><span>' + escapeRail(comp.sublabel || '') +
+            '</span></span></button></li>';
+        });
+      } else {
+        Object.keys(CABLE_SPECS).forEach(function (key) {
+          var spec = CABLE_SPECS[key];
+          if (spec.category !== cat.id) return;
+          html += '<li><button type="button" class="f3d-component-btn" data-f3d-capacity="' +
+            escapeRail(key) + '">' + railIconHtml(spec.icon) +
+            '<span class="f3d-component-btn__text"><strong>' +
+            escapeRail(spec.label) + '</strong><span>' + escapeRail(spec.sublabel || '') +
+            '</span></span></button></li>';
+        });
+      }
+      html += '</ul>';
+    });
+    rail.innerHTML = html;
+    syncComponentButtons();
+  }
+
   var state = {
     component: 'cable',
     capacity: 12,
@@ -152,6 +285,7 @@
     layout3d: null,
     drag: null,
     raf: 0,
+    activeVariantId: null,
   };
 
   /* Base concentric cable layout (scaled per tube count in resolveLayout3d) */
@@ -306,14 +440,16 @@
           ? 'State 2 · Loose tubes (' + spec.tubes.length + ' × ' + sp + 'F)'
           : 'State 3 · Tube ' + (state.selectedTube + 1) + ' · ' + sp + ' strands';
       card.innerHTML =
-        '<h2>' + spec.label + ' Cable Anatomy</h2>' +
-        '<p>' + comp.desc + '</p>' +
+        '<h2>' + escapeRail(spec.guideTitle || (spec.label + ' Cable Anatomy')) + '</h2>' +
+        '<p>' + escapeRail(spec.guideText || comp.desc) + '</p>' +
         (spec.dualGroup
           ? '<p class="f3d-inspector__state">Tubes 13–24 · mid black stripe marker</p>'
           : '') +
         '<p class="f3d-inspector__state">' + peelLabel + '</p>';
     } else {
-      card.innerHTML = '<h2>' + comp.title + '</h2><p>' + comp.desc + '</p>';
+      var entity = getActiveEntity();
+      card.innerHTML = '<h2>' + escapeRail((entity && entity.guideTitle) || comp.title || '') +
+        '</h2><p>' + escapeRail((entity && (entity.guideText || entity.desc)) || comp.desc || '') + '</p>';
     }
 
     stack.innerHTML = '';
@@ -367,16 +503,43 @@
       }
     }
 
+    syncCableUiChrome();
     render2dLayout();
   }
 
   function render2dLayout() {
     var host = $('f3d-2d-host');
     if (!host) return;
-    if (state.viewMode !== '2d' || state.component !== 'cable') {
-      host.innerHTML = state.viewMode === '2d'
-        ? '<p class="f3d-2d-empty">2D technical layout is available for Fiber Cable. Select a capacity (12F–288F).</p>'
-        : '';
+    hideMediaOverlay();
+    if (state.viewMode !== '2d') {
+      host.innerHTML = '';
+      return;
+    }
+
+    var entity = getActiveEntity();
+    var media2D = entity && entity.media2D;
+    if (media2D && media2D.type === 'custom-media' && media2D.data) {
+      host.innerHTML = '';
+      var wrap = document.createElement('div');
+      wrap.className = 'f3d-2d-custom';
+      var isVideo = media2D.data.indexOf('data:video') === 0 || /\.mp4(\?|$)/i.test(media2D.data);
+      if (isVideo) {
+        var vid = document.createElement('video');
+        vid.controls = true;
+        vid.src = media2D.data;
+        wrap.appendChild(vid);
+      } else {
+        var img = document.createElement('img');
+        img.alt = (entity.label || entity.title || 'Schematic') + '';
+        img.src = media2D.data;
+        wrap.appendChild(img);
+      }
+      host.appendChild(wrap);
+      return;
+    }
+
+    if (state.component !== 'cable') {
+      host.innerHTML = '<p class="f3d-2d-empty">2D technical layout is available for Fiber Cable. Select a capacity (12F–288F).</p>';
       return;
     }
 
@@ -494,11 +657,88 @@
   /* ─── Peel state machine ─── */
 
   function resetPeel() {
+    if (state.component !== 'cable') return;
     state.peelState = 0;
     state.selectedTube = null;
     applyPeelVisibility();
     renderInspector();
     setStatus(getSpec().label + ' · Full cable jacket — click to peel tubes');
+  }
+
+  function resetTube() {
+    if (state.component !== 'cable') return;
+    if (state.peelState < 1) {
+      setStatus(getSpec().label + ' · Peel the jacket first to expose tubes');
+      return;
+    }
+    state.peelState = 1;
+    state.selectedTube = null;
+    applyPeelVisibility();
+    renderInspector();
+    var sp = getSpec().strandsPerTube || 12;
+    setStatus(getSpec().label + ' · Loose tubes restored — click a tube for ' + sp + ' strands');
+  }
+
+  function syncCableUiChrome() {
+    var isCable = state.component === 'cable';
+    var app = $('f3d-app');
+    if (app) {
+      app.classList.toggle('is-cable', isCable);
+      app.classList.toggle('is-hardware', !isCable);
+    }
+    var jacketBtn = $('btn-reset-jacket') || $('f3d-reset-peel');
+    var tubeBtn = $('btn-reset-tube');
+    var tubesWrap = $('f3d-loose-tubes');
+    var display = isCable ? 'inline-flex' : 'none';
+    if (jacketBtn) jacketBtn.style.display = display;
+    if (tubeBtn) tubeBtn.style.display = display;
+    if (tubesWrap) {
+      tubesWrap.hidden = !isCable;
+      tubesWrap.style.display = isCable ? '' : 'none';
+    }
+    renderVariantPills();
+  }
+
+  function renderVariantPills() {
+    var host = $('f3d-variant-pills');
+    if (!host) return;
+    var isCable = state.component === 'cable';
+    host.innerHTML = '';
+    if (isCable) {
+      host.hidden = true;
+      return;
+    }
+    var comp = COMPONENTS[state.component];
+    var variants = (comp && comp.variants) || [];
+    if (!variants.length) {
+      host.hidden = true;
+      return;
+    }
+    host.hidden = false;
+    variants.forEach(function (variant) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'f3d-variant-pill' +
+        (variant.id === state.activeVariantId ? ' active is-active' : '');
+      btn.setAttribute('data-f3d-variant', variant.id);
+      btn.textContent = variant.label;
+      host.appendChild(btn);
+    });
+  }
+
+  function setActiveHardwareVariant(variantId) {
+    var comp = COMPONENTS[state.component];
+    if (!comp || !comp.variants) return;
+    var found = comp.variants.filter(function (v) { return v.id === variantId; })[0];
+    if (!found) return;
+    state.activeVariantId = variantId;
+    comp.activeVariantId = variantId;
+    if (window.FiberAnatomyStore && typeof window.FiberAnatomyStore.setActiveVariant === 'function') {
+      window.FiberAnatomyStore.setActiveVariant(state.component, variantId, true);
+    }
+    rebuildSceneContent();
+    renderInspector();
+    setStatus((comp.title || '') + ' · ' + found.label);
   }
 
   function peelToTubes() {
@@ -531,7 +771,7 @@
     var layout = state.layout3d || resolveLayout3d(getSpec().tubes.length);
     var n = Math.max(getSpec().tubes.length, 1);
 
-    if (state.jacketMesh) {
+    if (state.jacketMesh && state.jacketMesh.material) {
       state.jacketMesh.visible = true;
       state.jacketMesh.material.transparent = false;
       state.jacketMesh.material.opacity = 1;
@@ -589,16 +829,70 @@
 
   /* ─── 3D builders ─── */
 
+  function getActiveEntity() {
+    if (state.component === 'cable') return getSpec();
+    var base = COMPONENTS[state.component];
+    if (!base) return base;
+    var variants = base.variants || [];
+    var variant = null;
+    if (variants.length) {
+      variant = variants.filter(function (v) { return v.id === state.activeVariantId; })[0] || variants[0];
+    }
+    if (!variant) return base;
+    return {
+      id: base.id,
+      title: base.title,
+      label: variant.label || base.label,
+      sublabel: base.sublabel,
+      guideTitle: (base.title || base.label || '') + (variant.label ? ' · ' + variant.label : ''),
+      guideText: variant.guideText || base.desc || '',
+      desc: variant.guideText || base.desc || '',
+      media3D: variant.media3D || base.media3D,
+      media2D: variant.media2D || base.media2D,
+      variants: variants,
+      activeVariantId: variant.id,
+    };
+  }
+
+  function hideMediaOverlay() {
+    var host = $('f3d-media-host');
+    if (!host) return;
+    host.innerHTML = '';
+    host.hidden = true;
+  }
+
   function rebuildSceneContent() {
+    hideMediaOverlay();
     if (!state.root || typeof THREE === 'undefined') return;
     disposeCableMeshes();
 
+    var entity = getActiveEntity();
+    var media3D = entity && entity.media3D;
+    if (media3D && media3D.type === 'custom-glb' && media3D.data && typeof THREE.GLTFLoader === 'function') {
+      var loader = new THREE.GLTFLoader();
+      loader.load(media3D.data, function (gltf) {
+        disposeCableMeshes();
+        if (!state.root) return;
+        state.root.add(gltf.scene);
+        state.propMeshes.push(gltf.scene);
+        state.jacketMesh = gltf.scene;
+      }, undefined, function () {
+        buildProcedural3D();
+        applyPeelVisibility();
+      });
+      return;
+    }
+
+    buildProcedural3D();
+    applyPeelVisibility();
+  }
+
+  function buildProcedural3D() {
     if (state.component === 'cable') buildCableAnatomy();
     else if (state.component === 'fdt') buildFdtAnatomy();
     else if (state.component === 'splitter') buildSplitterAnatomy();
+    else if (state.component === 'onu') buildOnuAnatomy();
     else buildOltAnatomy();
-
-    applyPeelVisibility();
   }
 
   function buildCableAnatomy() {
@@ -755,6 +1049,17 @@
     state.peelState = 0;
   }
 
+  function buildOnuAnatomy() {
+    var body = new THREE.Mesh(
+      new THREE.BoxGeometry(1.8, 0.55, 1.35),
+      new THREE.MeshStandardMaterial({ color: 0x155e75, roughness: 0.48, metalness: 0.22 })
+    );
+    state.root.add(body);
+    state.propMeshes.push(body);
+    state.jacketMesh = body;
+    state.peelState = 0;
+  }
+
   function buildOltAnatomy() {
     var chassis = new THREE.Mesh(
       new THREE.BoxGeometry(3.4, 1.4, 2.2),
@@ -782,6 +1087,7 @@
     var host2d = $('f3d-2d-host');
     if (host3d) host3d.hidden = state.viewMode !== '3d';
     if (host2d) host2d.hidden = state.viewMode !== '2d';
+    hideMediaOverlay();
     renderInspector();
     setStatus(state.viewMode === '2d' ? '2D technical layout' : '3D dissection view');
     onResize();
@@ -804,6 +1110,7 @@
     state.component = 'cable';
     state.peelState = 0;
     state.selectedTube = null;
+    state.activeVariantId = null;
     syncComponentButtons();
     rebuildSceneContent();
     renderInspector();
@@ -815,10 +1122,13 @@
     state.component = id;
     state.peelState = 0;
     state.selectedTube = null;
+    var variants = COMPONENTS[id].variants || [];
+    state.activeVariantId = COMPONENTS[id].activeVariantId || (variants[0] && variants[0].id) || null;
     syncComponentButtons();
     rebuildSceneContent();
     renderInspector();
-    setStatus(COMPONENTS[id].title);
+    var variant = variants.filter(function (v) { return v.id === state.activeVariantId; })[0];
+    setStatus(COMPONENTS[id].title + (variant ? ' · ' + variant.label : ''));
   }
 
   function syncComponentButtons() {
@@ -851,11 +1161,17 @@
     if (Math.abs(dx) + Math.abs(dy) > 3) state.drag.moved = true;
     state.drag.x = e.clientX;
     state.drag.y = e.clientY;
-    if (state.drag.moved) {
-      state.root.rotation.y += dx * 0.01;
-      state.root.rotation.x += dy * 0.008;
-      state.root.rotation.x = Math.max(-1.1, Math.min(1.1, state.root.rotation.x));
+    if (!state.drag.moved) return;
+    if (e.shiftKey || e.buttons === 4) {
+      if (state.camera) {
+        state.camera.position.x -= dx * 0.012;
+        state.camera.position.y += dy * 0.012;
+      }
+      return;
     }
+    state.root.rotation.y += dx * 0.01;
+    state.root.rotation.x += dy * 0.008;
+    state.root.rotation.x = Math.max(-1.1, Math.min(1.1, state.root.rotation.x));
   }
 
   function onStagePointerUp(e) {
@@ -971,16 +1287,19 @@
   }
 
   function bindUi() {
-    document.querySelectorAll('[data-f3d-component]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        setComponent(btn.getAttribute('data-f3d-component'));
+    var rail = $('f3d-rail');
+    if (rail && !rail.getAttribute('data-f3d-rail-bound')) {
+      rail.setAttribute('data-f3d-rail-bound', '1');
+      rail.addEventListener('click', function (e) {
+        var capBtn = e.target.closest ? e.target.closest('[data-f3d-capacity]') : null;
+        if (capBtn) {
+          setCapacity(capBtn.getAttribute('data-f3d-capacity'));
+          return;
+        }
+        var compBtn = e.target.closest ? e.target.closest('[data-f3d-component]') : null;
+        if (compBtn) setComponent(compBtn.getAttribute('data-f3d-component'));
       });
-    });
-    document.querySelectorAll('[data-f3d-capacity]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        setCapacity(btn.getAttribute('data-f3d-capacity'));
-      });
-    });
+    }
     document.querySelectorAll('[data-f3d-view]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         setViewMode(btn.getAttribute('data-f3d-view'));
@@ -992,18 +1311,64 @@
         setAutoRotate(!state.autoRotate);
       });
     }
-    var reset = $('f3d-reset-peel');
+    var reset = $('btn-reset-jacket') || $('f3d-reset-peel');
     if (reset) reset.addEventListener('click', resetPeel);
+    var resetTubeBtn = $('btn-reset-tube');
+    if (resetTubeBtn) resetTubeBtn.addEventListener('click', resetTube);
+    var pills = $('f3d-variant-pills');
+    if (pills && !pills.getAttribute('data-bound')) {
+      pills.setAttribute('data-bound', '1');
+      pills.addEventListener('click', function (e) {
+        var btn = e.target.closest ? e.target.closest('[data-f3d-variant]') : null;
+        if (btn) setActiveHardwareVariant(btn.getAttribute('data-f3d-variant'));
+      });
+    }
+    syncAnatomyAdminSettingsButton();
+    syncCableUiChrome();
+  }
+
+  function isAdminPreviewContext() {
+    try {
+      if (window.self !== window.top) return true;
+    } catch (err) {
+      return true;
+    }
+    try {
+      return new URLSearchParams(window.location.search).get('mode') === 'admin-preview';
+    } catch (err2) {
+      return false;
+    }
+  }
+
+  function syncAnatomyAdminSettingsButton() {
+    var btn = document.getElementById('anatomy-admin-settings-btn');
+    if (!btn) return;
+    var show = isAdminPreviewContext();
+    btn.hidden = !show;
+    btn.style.display = show ? 'inline-flex' : 'none';
+    btn.classList.toggle('is-admin-visible', show);
   }
 
   function boot() {
+    applyAnatomyConfigFromStore();
     bindUi();
+    renderCableRail();
     syncComponentButtons();
     setAutoRotate(true);
     setViewMode('3d');
-    setCapacity(12);
+    var firstCap = resolveCapacityKey(state.capacity) || Object.keys(CABLE_SPECS)[0] || 12;
+    setCapacity(firstCap);
     initThree();
-    setStatus('12F ready · click jacket to peel tubes');
+    window.addEventListener('ifa:anatomy-config-saved', function () {
+      applyAnatomyConfigFromStore();
+      renderCableRail();
+      if (state.component !== 'cable' && COMPONENTS[state.component]) {
+        state.activeVariantId = COMPONENTS[state.component].activeVariantId || state.activeVariantId;
+      }
+      rebuildSceneContent();
+      renderInspector();
+      setStatus('Anatomy CMS saved · workspace updated');
+    });
   }
 
   if (document.readyState === 'loading') {

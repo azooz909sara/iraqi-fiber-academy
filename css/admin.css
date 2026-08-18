@@ -1742,6 +1742,61 @@
   display: block;
 }
 
+.admin-body--site-preview,
+.admin-body:has([data-admin-view="simulators"]:not([hidden])) {
+  overflow: hidden;
+  height: 100vh;
+}
+
+.admin-body--site-preview .admin-topbar,
+.admin-body:has([data-admin-view="simulators"]:not([hidden])) .admin-topbar {
+  display: none;
+}
+
+.admin-body--site-preview .admin-main,
+.admin-body:has([data-admin-view="simulators"]:not([hidden])) .admin-main {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.admin-body--site-preview .admin-content,
+.admin-body:has([data-admin-view="simulators"]:not([hidden])) .admin-content {
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  min-height: 0;
+  flex: 1;
+}
+
+.admin-panel--site-preview {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.admin-site-iframe {
+  width: 100%;
+  height: 100vh;
+  border: none;
+  border-radius: 0;
+  display: block;
+  background: #0b1120;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1200px) {
   .admin-stats {
