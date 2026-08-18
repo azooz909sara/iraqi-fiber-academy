@@ -58,12 +58,19 @@
         </svg>
         الباقات والأسعار
       </a>
-      <a href="#simulators" class="admin-nav__link" data-section="simulators">
+      <a href="#simulators" class="admin-nav__link" data-section="simulators" data-site-parent>
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
         </svg>
         إدارة موقعي
       </a>
+      <div class="admin-nav__sub" data-site-subnav>
+        <a href="#simulators" class="admin-nav__sublink" data-section="simulators">المحاكيات</a>
+        <a href="#site-articles" class="admin-nav__sublink" data-section="site-articles">المقالات التقنية</a>
+        <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
+        <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
+        <a href="#site-preview" class="admin-nav__sublink" data-section="site-preview">معاينة الموقع</a>
+      </div>
 
       <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
       <a href="#settings" class="admin-nav__link" data-section="settings">
@@ -748,10 +755,190 @@
         </div>
       </div>
 
-      <section class="admin-panel admin-view admin-panel--site-preview" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
-        <h2 class="visually-hidden" id="simulatorsHeading">إدارة موقعي</h2>
+      <section class="admin-panel admin-view" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="simulatorsHeading">المحاكيات</h2>
+            <p class="admin-panel__desc">تحرير عنوان ووصف وأيقونة بطاقات المحاكيات الستة — يُحفظ في ifa_simulators_meta</p>
+          </div>
+        </div>
+        <div class="cms-sim-grid" id="cmsSimulatorsGrid"></div>
+      </section>
+
+      <section class="admin-panel admin-view" id="site-articles" data-admin-view="site-articles" aria-labelledby="siteArticlesHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="siteArticlesHeading">المقالات التقنية</h2>
+            <p class="admin-panel__desc">إضافة وتعديل وحذف المقالات المعروضة في الصفحة الرئيسية</p>
+          </div>
+          <button class="admin-btn admin-btn--primary" type="button" data-article-add>مقال جديد</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>العنوان</th><th>التصنيف</th><th>الوسوم</th><th></th></tr></thead>
+            <tbody id="cmsArticlesBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel admin-view" id="site-faq" data-admin-view="site-faq" aria-labelledby="siteFaqHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="siteFaqHeading">الأسئلة الشائعة</h2>
+            <p class="admin-panel__desc">إدارة الأسئلة والأجوبة وترتيبها في أكورديون الصفحة الرئيسية</p>
+          </div>
+          <button class="admin-btn admin-btn--primary" type="button" data-faq-add>سؤال جديد</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>السؤال</th><th>الإجابة</th><th></th></tr></thead>
+            <tbody id="cmsFaqBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel admin-view" id="site-testimonials" data-admin-view="site-testimonials" aria-labelledby="siteTestimonialsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="siteTestimonialsHeading">آراء المستخدمين</h2>
+            <p class="admin-panel__desc">إدارة تقييمات وآراء الطلاب المعروضة على الصفحة الرئيسية</p>
+          </div>
+          <button class="admin-btn admin-btn--primary" type="button" data-tst-add>رأي جديد</button>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table">
+            <thead><tr><th>الاسم</th><th>المسمى / الشركة</th><th>التقييم</th><th></th></tr></thead>
+            <tbody id="cmsTestimonialsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-panel admin-view admin-panel--site-preview" id="site-preview" data-admin-view="site-preview" aria-labelledby="sitePreviewHeading" hidden>
+        <h2 class="visually-hidden" id="sitePreviewHeading">معاينة الموقع</h2>
         <iframe id="site-preview-frame" class="admin-site-iframe" src="index.html?mode=admin-preview" title="معاينة الموقع المباشر"></iframe>
       </section>
+
+      <div class="admin-modal" id="articleEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-article-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--wide" role="dialog" aria-modal="true">
+          <form class="admin-modal__form" id="articleEditorForm">
+            <div class="admin-modal__header">
+              <h3 class="admin-modal__title" id="articleEditorTitleLabel">مقال جديد</h3>
+              <button class="admin-modal__close" type="button" data-close-article-modal aria-label="إغلاق">×</button>
+            </div>
+            <div class="admin-modal__body admin-modal__scroll">
+              <input type="hidden" id="articleEditorId" />
+              <input type="hidden" id="articleEditorImageData" />
+              <label class="admin-field"><span class="admin-field__label">عنوان المقال</span>
+                <input class="admin-field__input" id="articleEditorTitle" required /></label>
+              <div class="admin-form-grid">
+                <label class="admin-field"><span class="admin-field__label">التصنيف</span>
+                  <input class="admin-field__input" id="articleEditorCategory" placeholder="دليل فني" /></label>
+                <label class="admin-field"><span class="admin-field__label">الوسوم</span>
+                  <input class="admin-field__input" id="articleEditorTags" placeholder="OTDR, FTTH" /></label>
+              </div>
+              <label class="admin-field"><span class="admin-field__label">مقتطف</span>
+                <textarea class="admin-field__input admin-field__textarea" id="articleEditorExcerpt" rows="2"></textarea></label>
+              <label class="admin-field"><span class="admin-field__label">بيانات المؤلف / مدة القراءة</span>
+                <input class="admin-field__input" id="articleEditorMeta" /></label>
+              <label class="admin-field"><span class="admin-field__label">صورة بارزة (رابط)</span>
+                <input class="admin-field__input" id="articleEditorImageUrl" placeholder="https://..." /></label>
+              <label class="cms-file-btn">رفع صورة بارزة
+                <input type="file" id="articleEditorImageFile" accept="image/*" hidden /></label>
+              <img class="cms-image-preview" id="articleEditorImagePreview" alt="" hidden />
+              <div class="cms-rich-toolbar">
+                <label>الخط
+                  <select id="articleEditorFontFamily">
+                    <option value="">افتراضي</option>
+                    <option value="Tajawal, sans-serif">Tajawal</option>
+                    <option value="Cairo, sans-serif">Cairo</option>
+                    <option value="IBM Plex Sans Arabic, sans-serif">IBM Plex</option>
+                    <option value="Georgia, serif">Georgia</option>
+                  </select>
+                </label>
+                <label>الحجم
+                  <select id="articleEditorFontSize">
+                    <option value="0.9rem">صغير</option>
+                    <option value="1rem" selected>عادي</option>
+                    <option value="1.15rem">كبير</option>
+                    <option value="1.35rem">أكبر</option>
+                  </select>
+                </label>
+                <label>لون النص
+                  <input type="color" id="articleEditorTextColor" value="#e2e8f0" /></label>
+              </div>
+              <div class="admin-field">
+                <span class="admin-field__label">محتوى المقال</span>
+                <div class="cms-rich-body" id="articleEditorBody" contenteditable="true"></div>
+              </div>
+            </div>
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-article-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ المقال</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="admin-modal" id="faqEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-faq-modal></div>
+        <div class="admin-modal__dialog" role="dialog" aria-modal="true">
+          <form class="admin-modal__form" id="faqEditorForm">
+            <div class="admin-modal__header">
+              <h3 class="admin-modal__title" id="faqEditorTitleLabel">سؤال جديد</h3>
+              <button class="admin-modal__close" type="button" data-close-faq-modal aria-label="إغلاق">×</button>
+            </div>
+            <div class="admin-modal__body">
+              <input type="hidden" id="faqEditorId" />
+              <label class="admin-field"><span class="admin-field__label">السؤال</span>
+                <input class="admin-field__input" id="faqEditorQuestion" required /></label>
+              <label class="admin-field"><span class="admin-field__label">الإجابة</span>
+                <textarea class="admin-field__input admin-field__textarea" id="faqEditorAnswer" rows="5" required></textarea></label>
+            </div>
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-faq-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="admin-modal" id="tstEditorModal" hidden>
+        <div class="admin-modal__backdrop" data-close-tst-modal></div>
+        <div class="admin-modal__dialog" role="dialog" aria-modal="true">
+          <form class="admin-modal__form" id="tstEditorForm">
+            <div class="admin-modal__header">
+              <h3 class="admin-modal__title" id="tstEditorTitleLabel">رأي جديد</h3>
+              <button class="admin-modal__close" type="button" data-close-tst-modal aria-label="إغلاق">×</button>
+            </div>
+            <div class="admin-modal__body">
+              <input type="hidden" id="tstEditorId" />
+              <input type="hidden" id="tstEditorAvatarData" />
+              <label class="admin-field"><span class="admin-field__label">اسم المراجع</span>
+                <input class="admin-field__input" id="tstEditorName" required /></label>
+              <label class="admin-field"><span class="admin-field__label">المسمى الوظيفي / الشركة</span>
+                <input class="admin-field__input" id="tstEditorRole" /></label>
+              <label class="admin-field"><span class="admin-field__label">نص الرأي</span>
+                <textarea class="admin-field__input admin-field__textarea" id="tstEditorText" rows="4" required></textarea></label>
+              <label class="admin-field"><span class="admin-field__label">التقييم</span>
+                <select class="admin-field__input" id="tstEditorRating">
+                  <option value="5">★★★★★ 5</option>
+                  <option value="4">★★★★☆ 4</option>
+                  <option value="3">★★★☆☆ 3</option>
+                  <option value="2">★★☆☆☆ 2</option>
+                  <option value="1">★☆☆☆☆ 1</option>
+                </select></label>
+              <label class="cms-file-btn">رفع صورة المستخدم
+                <input type="file" id="tstEditorAvatarFile" accept="image/*" hidden /></label>
+              <img class="cms-avatar-preview" id="tstEditorAvatarPreview" alt="" hidden />
+            </div>
+            <div class="admin-modal__actions">
+              <button class="admin-btn admin-btn--ghost" type="button" data-close-tst-modal>إلغاء</button>
+              <button class="admin-btn admin-btn--primary" type="submit">حفظ الرأي</button>
+            </div>
+          </form>
+        </div>
+      </div>
 
       <section class="admin-panel admin-view" id="settings" data-admin-view="settings" aria-labelledby="settingsHeading" hidden>
         <div class="admin-panel__header">
@@ -782,6 +969,9 @@
 
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
+  <script src="js/articles.js"></script>
+  <script src="js/faq.js"></script>
+  <script src="js/testimonials.js"></script>
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
@@ -791,5 +981,6 @@
   <script src="js/admin-core.js"></script>
   <script src="js/admin-users-ui.js"></script>
   <script src="js/admin-instructors-ui.js"></script>
+  <script src="js/admin-site-cms.js"></script>
 </body>
 </html>

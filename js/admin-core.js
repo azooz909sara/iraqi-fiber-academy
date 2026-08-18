@@ -8,9 +8,17 @@
     var sidebar = document.getElementById('adminSidebar');
     var overlay = document.getElementById('adminOverlay');
     var toggle = document.getElementById('adminMenuToggle');
-    var navLinks = document.querySelectorAll('.admin-nav__link');
+    var navLinks = document.querySelectorAll('.admin-nav__link, .admin-nav__sublink');
     var topbarTitle = document.querySelector('.admin-topbar__title');
     var topbarSubtitle = document.querySelector('.admin-topbar__subtitle');
+
+    var SITE_VIEWS = {
+      simulators: true,
+      'site-articles': true,
+      'site-faq': true,
+      'site-testimonials': true,
+      'site-preview': true,
+    };
 
     var VIEW_META = {
       overview: { title: 'نظرة عامة', subtitle: 'أكاديمية الفايبر العراقية — نظرة عامة على المنصة' },
@@ -18,7 +26,11 @@
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
-      simulators: { title: 'إدارة موقعي', subtitle: 'معاينة وإدارة الموقع المباشر' },
+      simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات — محتوى البطاقات والأيقونات' },
+      'site-articles': { title: 'إدارة موقعي', subtitle: 'المقالات التقنية' },
+      'site-faq': { title: 'إدارة موقعي', subtitle: 'الأسئلة الشائعة' },
+      'site-testimonials': { title: 'إدارة موقعي', subtitle: 'آراء المستخدمين' },
+      'site-preview': { title: 'إدارة موقعي', subtitle: 'معاينة الموقع المباشر' },
       settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
     };
 
@@ -38,7 +50,11 @@
         view.hidden = view.getAttribute('data-admin-view') !== id;
       });
       navLinks.forEach(function (link) {
-        var active = link.getAttribute('data-section') === id;
+        var section = link.getAttribute('data-section');
+        var active = section === id;
+        if (link.hasAttribute('data-site-parent')) {
+          active = !!SITE_VIEWS[id];
+        }
         link.classList.toggle('active', active);
       });
       var meta = VIEW_META[id];
@@ -59,7 +75,10 @@
       if (id === 'courses' && typeof window.renderAdminCoursesTable === 'function') {
         window.renderAdminCoursesTable();
       }
-      document.body.classList.toggle('admin-body--site-preview', id === 'simulators');
+      if (SITE_VIEWS[id] && typeof window.renderAdminSiteCms === 'function') {
+        window.renderAdminSiteCms();
+      }
+      document.body.classList.toggle('admin-body--site-preview', id === 'site-preview');
     }
 
     function escapeOverviewHtml(value) {

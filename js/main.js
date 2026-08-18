@@ -2,19 +2,21 @@
   'use strict';
 
   document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.faq-item').forEach(function (item) {
-      const question = item.querySelector('.faq-item__question');
-      question.addEventListener('click', function () {
-        const isActive = item.classList.contains('active');
-        document.querySelectorAll('.faq-item').forEach(function (other) {
-          other.classList.remove('active');
-          other.querySelector('.faq-item__question').setAttribute('aria-expanded', 'false');
-        });
-        if (!isActive) {
-          item.classList.add('active');
-          question.setAttribute('aria-expanded', 'true');
-        }
+    document.addEventListener('click', function (e) {
+      var question = e.target.closest ? e.target.closest('.faq-item__question') : null;
+      if (!question) return;
+      var item = question.closest('.faq-item');
+      if (!item) return;
+      var isActive = item.classList.contains('active');
+      document.querySelectorAll('.faq-item').forEach(function (other) {
+        other.classList.remove('active');
+        var q = other.querySelector('.faq-item__question');
+        if (q) q.setAttribute('aria-expanded', 'false');
       });
+      if (!isActive) {
+        item.classList.add('active');
+        question.setAttribute('aria-expanded', 'true');
+      }
     });
 
     var modal = document.getElementById('instructorModal');

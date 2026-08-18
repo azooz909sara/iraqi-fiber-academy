@@ -7,6 +7,7 @@
   var AUTH_KEY = 'ifa_auth_user';
   var USERS_KEY = 'ifa_admin_users';
   var SETTINGS_KEY = 'ifa_platform_settings';
+  var META_KEY = 'ifa_simulators_meta';
   var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
 
   var SIMULATOR_CATALOG = [
@@ -82,12 +83,147 @@
     }
   }
 
+  function defaultSimulatorMeta() {
+    return {
+      'ftth-simulator': {
+        title: 'محاكي FTTH متكامل',
+        description:
+          'صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.',
+        icon: '🌐',
+        iconType: 'emoji',
+      },
+      'otdr-simulator': {
+        title: 'محاكي OTDR افتراضي',
+        description:
+          'تعلّم قراءة وتحليل منحنيات الانعكاس البصري (OTDR) وتحديد مواقع الأعطال بدقة دون معدات حقيقية.',
+        icon: '📊',
+        iconType: 'emoji',
+      },
+      'power-meter': {
+        title: 'قياس القدرة البصرية',
+        description:
+          'مدرّب OPM احترافي: أطوال موجية 1310/1490/1550، تحويل dBm↔mW، مرجع الخسارة، ومؤشرات Pass/Warning/Fail وفق GPON و EPON — مع ورشة ربط مصغّرة (Patch Cord · Pigtail · Splitter) لاختبار المسارات مباشرة بجانب جهاز القياس.',
+        icon: '⚡',
+        iconType: 'emoji',
+      },
+      'fusion-splicer': {
+        title: 'مختبر Fusion Splicer',
+        description:
+          'تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.',
+        icon: '🔬',
+        iconType: 'emoji',
+      },
+      'fiber-anatomy': {
+        title: 'Fiber Optics 3D / 2D Interactive Anatomy',
+        description:
+          'شرّح كابلات Last Mile وFTTH حتى 288F: الغلاف → الأنابيب → 6 أو 12 ليف لكل أنبوب، مع تمييز 48F Last Mile و48F Feeder، وعلامات الشريط الأوسط لأنابيب T13–T24 في كابل 288F.',
+        icon: '🧬',
+        iconType: 'emoji',
+      },
+      'patch-panel-lab': {
+        title: 'FTTH Network & Patch Panel Lab',
+        description:
+          'مختبر FTTH: مقسمات PLC، أسلاك Patch Cord بطرفي A وB بنفس منطق السحب اليدوي (بدون تتبع تلقائي)، يُحفظ المسار عند الإطباق (SC/APC أخضر · SC/PC أزرق)، مع تنبيه عدم التوافق وخصم خسارة إضافي دون حظر التوصيل.',
+        icon: '🔌',
+        iconType: 'emoji',
+      },
+    };
+  }
+
+  function getSimulatorMeta() {
+    var stored = readJson(META_KEY, {});
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) stored = {};
+    var defaults = defaultSimulatorMeta();
+    var out = {};
+    SIMULATOR_CATALOG.forEach(function (s) {
+      var d = defaults[s.id] || {};
+      var m = stored[s.id] || {};
+      var iconType = m.iconType === 'image' ? 'image' : 'emoji';
+      out[s.id] = {
+        title: String(m.title != null ? m.title : d.title || s.label).trim() || s.label,
+        description: String(m.description != null ? m.description : d.description || '').trim(),
+        icon: String(m.icon != null ? m.icon : d.icon || '◆'),
+        iconType: iconType,
+      };
+    });
+    return out;
+  }
+
+  function saveSimulatorMeta(partial) {
+    var current = getSimulatorMeta();
+    var incoming = partial && typeof partial === 'object' ? partial : {};
+    SIMULATOR_CATALOG.forEach(function (s) {
+      if (!incoming[s.id]) return;
+      var m = incoming[s.id];
+      current[s.id] = {
+        title: String(m.title != null ? m.title : current[s.id].title).trim() || current[s.id].title,
+        description: String(m.description != null ? m.description : current[s.id].description),
+        icon: String(m.icon != null ? m.icon : current[s.id].icon),
+        iconType: m.iconType === 'image' ? 'image' : 'emoji',
+      };
+    });
+    try {
+      localStorage.setItem(META_KEY, JSON.stringify(current));
+    } catch (err) {
+      console.error('[PlatformSimulators] meta save failed', err);
+    }
+    applySimulatorMetaToCards();
+    try {
+      global.dispatchEvent(new CustomEvent('ifa:simulators-meta-changed', { detail: current }));
+    } catch (err2) {
+      /* ignore */
+    }
+    return current;
+  }
+
+  function iconHtml(meta) {
+    if (!meta) return '◆';
+    if (meta.iconType === 'image' && meta.icon) {
+      return '<img class="feature-card__icon-img" src="' + escapeHtml(meta.icon) + '" alt="" />';
+    }
+    return escapeHtml(meta.icon || '◆');
+  }
+
+  function applySimulatorMetaToCards() {
+    var metaMap = getSimulatorMeta();
+    document.querySelectorAll('[data-simulator-card][data-simulator-id]').forEach(function (card) {
+      var id = card.getAttribute('data-simulator-id') || '';
+      var meta = metaMap[id];
+      if (!meta) return;
+      card.classList.remove('feature-card--power-meter');
+      var iconEl = card.querySelector('.feature-card__icon');
+      var titleEl = card.querySelector('.feature-card__title');
+      var descEl = card.querySelector('.feature-card__desc');
+      if (iconEl) iconEl.innerHTML = iconHtml(meta);
+      if (titleEl) titleEl.textContent = meta.title;
+      if (descEl) descEl.textContent = meta.description;
+    });
+  }
+
   function getCatalog() {
-    return SIMULATOR_CATALOG.slice();
+    var meta = getSimulatorMeta();
+    return SIMULATOR_CATALOG.map(function (s) {
+      var m = meta[s.id] || {};
+      return Object.assign({}, s, {
+        label: m.title || s.label,
+        description: m.description || '',
+        icon: m.icon,
+        iconType: m.iconType,
+      });
+    });
   }
 
   function findSimulator(id) {
-    return ALLOWED_IDS[String(id || '')] || null;
+    var base = ALLOWED_IDS[String(id || '')] || null;
+    if (!base) return null;
+    var meta = getSimulatorMeta()[base.id];
+    if (!meta) return Object.assign({}, base);
+    return Object.assign({}, base, {
+      label: meta.title || base.label,
+      description: meta.description || '',
+      icon: meta.icon,
+      iconType: meta.iconType,
+    });
   }
 
   function normalizeSimulatorIds(list) {
@@ -105,7 +241,8 @@
 
   function simulatorLabels(ids) {
     return normalizeSimulatorIds(ids).map(function (id) {
-      return ALLOWED_IDS[id].label;
+      var sim = findSimulator(id);
+      return (sim && sim.label) || ALLOWED_IDS[id].label;
     });
   }
 
@@ -629,6 +766,7 @@
   function applyPublicSimulatorGates() {
     var cards = document.querySelectorAll('[data-simulator-card][data-simulator-id]');
     if (!cards.length) return;
+    applySimulatorMetaToCards();
 
     cards.forEach(function (card) {
       var id = card.getAttribute('data-simulator-id') || '';
@@ -807,6 +945,7 @@
     global.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     document.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     global.addEventListener('ifa:platform-settings-changed', refreshAccessUi);
+    global.addEventListener('ifa:simulators-meta-changed', refreshAccessUi);
     global.addEventListener('storage', function (e) {
       if (
         !e.key ||
@@ -815,7 +954,8 @@
         e.key === 'platform_plans' ||
         e.key === 'ifa_pricing_plans' ||
         e.key === USERS_KEY ||
-        e.key === SETTINGS_KEY
+        e.key === SETTINGS_KEY ||
+        e.key === META_KEY
       ) {
         refreshAccessUi();
       }
@@ -831,7 +971,12 @@
   global.PlatformSimulators = {
     CATALOG: SIMULATOR_CATALOG,
     SETTINGS_KEY: SETTINGS_KEY,
+    META_KEY: META_KEY,
     getCatalog: getCatalog,
+    getSimulatorMeta: getSimulatorMeta,
+    saveSimulatorMeta: saveSimulatorMeta,
+    defaultSimulatorMeta: defaultSimulatorMeta,
+    applySimulatorMetaToCards: applySimulatorMetaToCards,
     findSimulator: findSimulator,
     normalizeSimulatorIds: normalizeSimulatorIds,
     simulatorLabels: simulatorLabels,

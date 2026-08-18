@@ -304,7 +304,7 @@
               <a class="feature-card__open-btn" href="#simulators" data-simulator-launch="otdr-simulator">افتح المحاكي</a>
             </div>
           </article>
-          <article class="feature-card feature-card--power-meter fade-in" data-simulator-card data-simulator-id="power-meter" data-simulator-href="power-meter.html">
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="power-meter" data-simulator-href="power-meter.html">
             <div class="feature-card__icon">⚡</div>
             <h3 class="feature-card__title">قياس القدرة البصرية</h3>
             <p class="feature-card__desc">مدرّب OPM احترافي: أطوال موجية 1310/1490/1550، تحويل dBm↔mW، مرجع الخسارة، ومؤشرات Pass/Warning/Fail وفق GPON و EPON — مع ورشة ربط مصغّرة (Patch Cord · Pigtail · Splitter) لاختبار المسارات مباشرة بجانب جهاز القياس.</p>
@@ -407,26 +407,7 @@
           <h2 class="section__title">المقالات التقنية</h2>
           <p class="section__subtitle">أدلة عملية ومحتوى من المدربين لمساعدتك على إتقان شبكات FTTH والألياف الضوئية</p>
         </div>
-        <div class="articles__grid">
-          <article class="article-card fade-in">
-            <span class="article-card__category">دليل فني</span>
-            <h3 class="article-card__title">أساسيات قراءة منحنى OTDR</h3>
-            <p class="article-card__desc">تعرّف على كيفية تفسير الأحداث، نقاط الخسارة، والانعكاسات لتحديد مواقع الأعطال بدقة.</p>
-            <span class="article-card__meta">بقلم فريق التدريب · 8 دقائق قراءة</span>
-          </article>
-          <article class="article-card fade-in">
-            <span class="article-card__category">محتوى المدربين</span>
-            <h3 class="article-card__title">أفضل ممارسات تصميم شبكة GPON</h3>
-            <p class="article-card__desc">إرشادات من المدربين حول تخطيط التقسيم، حساب الميزانية البصرية، وتجنب الأخطاء الشائعة في الميدان.</p>
-            <span class="article-card__meta">بقلم المدربين · 12 دقيقة قراءة</span>
-          </article>
-          <article class="article-card fade-in">
-            <span class="article-card__category">دليل تركيبي</span>
-            <h3 class="article-card__title">دليل اللحام البصري خطوة بخطوة</h3>
-            <p class="article-card__desc">شرح عملي لعملية Fusion Splicing من التحضير حتى اختبار الخسارة، مع نصائح للنتائج الاحترافية.</p>
-            <span class="article-card__meta">بقلم فريق الأكاديمية · 10 دقائق قراءة</span>
-          </article>
-        </div>
+        <div class="articles__grid" id="publicArticlesGrid"></div>
       </div>
     </section>
 
@@ -451,11 +432,7 @@
           <h2 class="section__title">ماذا يقول طلابنا؟</h2>
           <p class="section__subtitle">تجارب حقيقية من فنيين ومهندسين استفادوا من منصتنا</p>
         </div>
-        <div class="testimonials__grid">
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★★</div><p class="testimonial-card__text">المحاكي غيّر طريقة تدريبي للفنيين الجدد. أصبح بإمكانهم ارتكاب الأخطاء والتعلم منها دون تكلفة معدات باهظة.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">م</div><div><div class="testimonial-card__name">محمد العتيبي</div><div class="testimonial-card__role">مدير فني — شركة اتصالات</div></div></div></article>
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★★</div><p class="testimonial-card__text">كمهندسة شبكات، أعجبني مستوى التفاصيل في محاكاة OTDR. المنحنيات واقعية جداً وساعدتني في فهم قراءة الأعطال بسرعة.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">س</div><div><div class="testimonial-card__name">سارة الحربي</div><div class="testimonial-card__role">مهندسة ألياف ضوئية</div></div></div></article>
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★☆</div><p class="testimonial-card__text">انتقلت من صفر معرفة إلى القدرة على تصميم شبكة FTTH كاملة خلال شهرين. المسار التعليمي منظّم وواضح جداً.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">ع</div><div><div class="testimonial-card__name">عبدالله القحطاني</div><div class="testimonial-card__role">فني FTTH — مستقل</div></div></div></article>
-        </div>
+        <div class="testimonials__grid" id="publicTestimonialsGrid"></div>
       </div>
     </section>
 
@@ -466,14 +443,7 @@
           <h2 class="section__title">كل ما تحتاج معرفته</h2>
           <p class="section__subtitle">إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات</p>
         </div>
-        <div class="faq__list">
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>ما هي أكاديمية الفايبر العراقية وما الذي تقدمه؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>أكاديمية الفايبر العراقية هي منصة تدريبية متخصصة في مجال الألياف الضوئية وشبكات FTTH. نوفر محاكيات افتراضية تفاعلية تتيح لك التعلم والتدرب على تصميم وتركيب وصيانة الشبكات البصرية دون الحاجة لمعدات ميدانية.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل أحتاج خبرة سابقة للبدء؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>لا، المسار التعليمي مصمم للبدء من الصفر. تبدأ بالمفاهيم الأساسية وتتدرج حتى المستوى الاحترافي. الباقة المجانية تتيح لك تجربة المنصة والتأكد من ملاءمتها لك قبل الاشتراك.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>متى سيكون المحاكي التفاعلي متاحاً؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>نعمل حالياً على تطوير المحاكي التفاعلي الكامل ونخطط لإطلاق النسخة التجريبية (Beta) خلال الربع القادم. يمكنك الانضمام لقائمة الانتظار للحصول على وصول مبكر.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل الشهادات معتمدة؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>شهادات الباقة الاحترافية معتمدة من أكاديمية الفايبر العراقية وتُثبت إتمامك للمسار التدريبي الكامل واجتياز المشاريع العملية.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل يمكنني إلغاء اشتراكي في أي وقت؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>نعم، يمكنك إلغاء اشتراكك في أي وقت من لوحة التحكم الخاصة بك. سيستمر وصولك حتى نهاية فترة الاشتراك المدفوعة.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>ما الأجهزة والمتصفحات المدعومة؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>المنصة تعمل على جميع الأجهزة عبر المتصفحات الحديثة (Chrome, Firefox, Edge, Safari). للمحاكي المتقدم ننصح باستخدام حاسوب مع شاشة لا تقل عن 13 بوصة.</p></div></div>
-        </div>
+        <div class="faq__list" id="publicFaqList"></div>
       </div>
     </section>
   </main>
@@ -571,6 +541,9 @@
 
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
+  <script src="js/articles.js"></script>
+  <script src="js/faq.js"></script>
+  <script src="js/testimonials.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
