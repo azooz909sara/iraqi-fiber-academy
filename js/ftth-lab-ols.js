@@ -37,10 +37,49 @@
 
   function getTxPresets() {
     var meta = getToolMeta();
-    if (meta && meta.specs && Array.isArray(meta.specs.txLevels) && meta.specs.txLevels.length) {
+    if (meta && meta.performanceSpecs && meta.performanceSpecs.txLevels && meta.performanceSpecs.txLevels.length) {
+      return meta.performanceSpecs.txLevels.slice();
+    }
+    if (meta && meta.specs && meta.specs.txLevels && meta.specs.txLevels.length) {
       return meta.specs.txLevels.slice();
     }
     return TX_PRESETS_DEFAULT.slice();
+  }
+
+  function formatDbmList(levels) {
+    if (!levels || !levels.length) return '—';
+    return levels.map(function (n) {
+      return (n >= 0 ? '+' : '') + n + ' dBm';
+    }).join(' · ');
+  }
+
+  function formatPowerRange(range) {
+    if (!range) return '—';
+    var min = range.min;
+    var max = range.max;
+    if (min == null && max == null) return '—';
+    if (min != null && max != null) {
+      return (min >= 0 ? '+' : '') + min + ' … ' + (max >= 0 ? '+' : '') + max + ' dBm';
+    }
+    if (min != null) return (min >= 0 ? '+' : '') + min + ' dBm min';
+    return (max >= 0 ? '+' : '') + max + ' dBm max';
+  }
+
+  function performanceSpecsMarkup(meta) {
+    var ps = meta && meta.performanceSpecs;
+    if (!ps) return '';
+    var html = '<div class="lab-spl-sheet lab-spl-sheet--perf">';
+    if (ps.powerRangeDbm && (ps.powerRangeDbm.min != null || ps.powerRangeDbm.max != null)) {
+      html += '<div><span>Power range</span><strong>' + formatPowerRange(ps.powerRangeDbm) + '</strong></div>';
+    }
+    if (ps.txLevels && ps.txLevels.length) {
+      html += '<div><span>TX levels</span><strong>' + formatDbmList(ps.txLevels) + '</strong></div>';
+    }
+    if (ps.rxLevels && ps.rxLevels.length) {
+      html += '<div><span>RX levels</span><strong>' + formatDbmList(ps.rxLevels) + '</strong></div>';
+    }
+    html += '</div>';
+    return html;
   }
 
   function getDefaultTxDbm() {
@@ -809,13 +848,13 @@
     var btn = host.querySelector('[data-lab-tool="ols"]');
     if (!btn) return;
     btn.addEventListener('click', function () {
-      if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+      if (global.FtthLab && typeof FtthLab.armDragOnlyToolboxTool === 'function') {
+        FtthLab.armDragOnlyToolboxTool('ols', 'OLS-35 · drag onto workspace to place');
+      } else if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
         FtthLab.claimToolboxTool('ols');
       }
       selectedTool = 'ols';
       renderToolbox();
-      if (!devices.length) placeOls();
-      else selectOls(devices[devices.length - 1].id);
     });
     btn.addEventListener('dragstart', function (e) {
       if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
@@ -894,6 +933,7 @@
       '<div class="lab-polish-toggle" role="group" aria-label="Calibrated TX">' +
       txBtns +
       '</div>' +
+      performanceSpecsMarkup(meta) +
       '<div class="lab-spl-sheet">' +
       '<div><span>Power</span><strong>' + (d.poweredOn ? 'ON' : 'OFF') + '</strong></div>' +
       '<div><span>Laser</span><strong>' + (d.laserOn ? 'ON' : 'OFF') + '</strong></div>' +
@@ -949,9 +989,9 @@
     if (!payload || payload.tool !== 'ols') return;
     selectedTool = 'ols';
     renderToolbox();
-    if (!devices.length) placeOls();
-    else selectOls(devices[0].id);
-    if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
+    if (global.FtthLab && typeof FtthLab.armDragOnlyToolboxTool === 'function') {
+      FtthLab.armDragOnlyToolboxTool('ols', 'OLS-35 · drag onto workspace to place');
+    } else if (global.FtthLab && typeof FtthLab.claimToolboxTool === 'function') {
       FtthLab.claimToolboxTool('ols');
     }
   }

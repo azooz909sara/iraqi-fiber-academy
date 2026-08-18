@@ -5,6 +5,8 @@
   'use strict';
 
   var modalOpen = false;
+  var activeTab = 'devices';
+  var selectedSfpVariantId = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -87,7 +89,117 @@
     return html;
   }
 
-  function renderBody() {
+  function renderPerformanceFields(toolKey, ps, label) {
+    ps = ps || {};
+    var range = ps.powerRangeDbm || {};
+    var tx = (ps.txLevels && ps.txLevels.length) ? ps.txLevels.join(', ') : '';
+    var rx = (ps.rxLevels && ps.rxLevels.length) ? ps.rxLevels.join(', ') : '';
+    return (
+      '<article class="lab-settings-cms__perf-device" data-lab-perf-tool="' + escapeHtml(toolKey) + '">' +
+        '<h4>' + escapeHtml(label) + '</h4>' +
+        '<div class="lab-settings-cms__perf-grid">' +
+          '<label class="lab-settings-cms__field lab-settings-cms__field--inline">' +
+            '<span>Power min (dBm)</span>' +
+            '<input type="number" step="0.1" value="' + escapeAttr(range.min != null ? String(range.min) : '') + '" ' +
+              'data-lab-perf="powerMin" data-tool-key="' + escapeAttr(toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field lab-settings-cms__field--inline">' +
+            '<span>Power max (dBm)</span>' +
+            '<input type="number" step="0.1" value="' + escapeAttr(range.max != null ? String(range.max) : '') + '" ' +
+              'data-lab-perf="powerMax" data-tool-key="' + escapeAttr(toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>TX levels (comma-separated dBm)</span>' +
+            '<input type="text" value="' + escapeAttr(tx) + '" data-lab-perf="txLevels" data-tool-key="' + escapeAttr(toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>RX levels (comma-separated dBm)</span>' +
+            '<input type="text" value="' + escapeAttr(rx) + '" data-lab-perf="rxLevels" data-tool-key="' + escapeAttr(toolKey) + '">' +
+          '</label>' +
+        '</div>' +
+      '</article>'
+    );
+  }
+
+  function renderSfpVariantEditor(variant) {
+    var ps = variant.performanceSpecs || {};
+    var range = ps.powerRangeDbm || {};
+    return (
+      '<article class="lab-settings-cms__sfp-variant' +
+      (variant.id === selectedSfpVariantId ? ' is-active' : '') +
+      '" data-sfp-variant="' + escapeHtml(variant.id) + '">' +
+        '<div class="lab-settings-cms__sfp-head">' +
+          '<strong>' + escapeHtml(variant.shortName || variant.name) + '</strong>' +
+          '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" data-sfp-select="' +
+            escapeHtml(variant.id) + '">Edit</button>' +
+          '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" data-sfp-remove="' +
+            escapeHtml(variant.id) + '">Remove</button>' +
+        '</div>' +
+        (variant.id === selectedSfpVariantId
+          ? '<div class="lab-settings-cms__fields">' +
+              '<label class="lab-settings-cms__field"><span>Variant name</span>' +
+                '<input type="text" value="' + escapeAttr(variant.name) + '" data-sfp-field="name" data-sfp-id="' +
+                escapeAttr(variant.id) + '"></label>' +
+              '<label class="lab-settings-cms__field"><span>Short label</span>' +
+                '<input type="text" value="' + escapeAttr(variant.shortName) + '" data-sfp-field="shortName" data-sfp-id="' +
+                escapeAttr(variant.id) + '"></label>' +
+              '<div class="lab-settings-cms__perf-grid">' +
+                '<label class="lab-settings-cms__field lab-settings-cms__field--inline"><span>TX λ (nm)</span>' +
+                  '<input type="number" value="' + escapeAttr(String(variant.txNm || 1490)) + '" data-sfp-field="txNm" data-sfp-id="' +
+                  escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field lab-settings-cms__field--inline"><span>RX λ (nm)</span>' +
+                  '<input type="number" value="' + escapeAttr(String(variant.rxNm || 1310)) + '" data-sfp-field="rxNm" data-sfp-id="' +
+                  escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field lab-settings-cms__field--inline"><span>Power min (dBm)</span>' +
+                  '<input type="number" step="0.1" value="' + escapeAttr(range.min != null ? String(range.min) : '') +
+                  '" data-sfp-perf="powerMin" data-sfp-id="' + escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field lab-settings-cms__field--inline"><span>Power max (dBm)</span>' +
+                  '<input type="number" step="0.1" value="' + escapeAttr(range.max != null ? String(range.max) : '') +
+                  '" data-sfp-perf="powerMax" data-sfp-id="' + escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field"><span>TX levels (dBm)</span>' +
+                  '<input type="text" value="' + escapeAttr((ps.txLevels || []).join(', ')) +
+                  '" data-sfp-perf="txLevels" data-sfp-id="' + escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field"><span>RX levels / sensitivity (dBm)</span>' +
+                  '<input type="text" value="' + escapeAttr((ps.rxLevels || []).join(', ')) +
+                  '" data-sfp-perf="rxLevels" data-sfp-id="' + escapeAttr(variant.id) + '"></label>' +
+                '<label class="lab-settings-cms__field lab-settings-cms__field--inline"><span>Default TX (dBm)</span>' +
+                  '<input type="number" step="0.1" value="' + escapeAttr(ps.txDefault != null ? String(ps.txDefault) : '') +
+                  '" data-sfp-perf="txDefault" data-sfp-id="' + escapeAttr(variant.id) + '"></label>' +
+              '</div>' +
+            '</div>'
+          : '') +
+      '</article>'
+    );
+  }
+
+  function renderPerformanceTab() {
+    var host = $('ftth-lab-settings-body');
+    if (!host || !store()) return;
+    var draft = store().getDraft();
+    var html = '<section class="lab-settings-cms__section">' +
+      '<h3 class="lab-settings-cms__cat">SFP Variants</h3>' +
+      '<p class="lab-settings-cms__hint">Manage transceiver types installed in OLT SFP cages.</p>' +
+      '<div class="lab-settings-cms__sfp-list">';
+    (draft.sfpVariants || []).forEach(function (v) {
+      html += renderSfpVariantEditor(v);
+    });
+    html += '</div>' +
+      '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--primary" id="lab-settings-add-sfp">+ Add SFP Variant</button>' +
+      '</section>' +
+      '<section class="lab-settings-cms__section">' +
+      '<h3 class="lab-settings-cms__cat">Device Performance Specs</h3>';
+    (draft.items || []).forEach(function (item) {
+      if (store().PERFORMANCE_TOOL_KEYS.indexOf(item.toolKey) < 0) return;
+      html += renderPerformanceFields(item.toolKey, item.performanceSpecs, item.label);
+    });
+    html += '</section>';
+    host.innerHTML = html;
+    if (!selectedSfpVariantId && draft.sfpVariants && draft.sfpVariants[0]) {
+      selectedSfpVariantId = draft.sfpVariants[0].id;
+    }
+  }
+
+  function renderDevicesTab() {
     var host = $('ftth-lab-settings-body');
     if (!host || !store()) return;
     var draft = store().getDraft();
@@ -176,6 +288,10 @@
             '<button type="button" class="lab-settings-cms__btn" data-lab-settings-close>إغلاق</button>' +
           '</div>' +
         '</header>' +
+        '<nav class="lab-settings-cms__tabs" aria-label="Settings sections">' +
+          '<button type="button" class="lab-settings-cms__tab is-active" data-lab-settings-tab="devices">Devices &amp; Icons</button>' +
+          '<button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="performance">Performance Specs</button>' +
+        '</nav>' +
         '<div class="lab-settings-cms__body" id="ftth-lab-settings-body"></div>' +
         '<p class="lab-settings-cms__status" id="ftth-lab-settings-status"></p>' +
       '</div>';
@@ -184,8 +300,46 @@
   }
 
   function refresh() {
-    renderBody();
+    if (activeTab === 'performance') renderPerformanceTab();
+    else renderDevicesTab();
     syncToolbar();
+  }
+
+  function commitPerformanceField(toolKey, field, value) {
+    if (!store() || !toolKey) return;
+    var item = store().getDraft().items.filter(function (it) { return it.toolKey === toolKey; })[0];
+    if (!item) return;
+    var ps = Object.assign({}, item.performanceSpecs || {});
+    var range = Object.assign({}, ps.powerRangeDbm || {});
+    if (field === 'powerMin') range.min = value === '' ? null : Number(value);
+    if (field === 'powerMax') range.max = value === '' ? null : Number(value);
+    if (field === 'txLevels') ps.txLevels = store().parseTxLevels(value);
+    if (field === 'rxLevels') ps.rxLevels = store().parseTxLevels(value);
+    ps.powerRangeDbm = range;
+    store().updateItem(toolKey, { performanceSpecs: ps }, true);
+  }
+
+  function commitSfpVariantField(variantId, field, value) {
+    if (!store() || !variantId) return;
+    var patch = {};
+    if (field === 'name' || field === 'shortName') patch[field] = value;
+    if (field === 'txNm' || field === 'rxNm') patch[field] = Number(value);
+    store().updateSfpVariant(variantId, patch, true);
+  }
+
+  function commitSfpVariantPerf(variantId, field, value) {
+    if (!store() || !variantId) return;
+    var variant = store().getDraft().sfpVariants.filter(function (v) { return v.id === variantId; })[0];
+    if (!variant) return;
+    var ps = Object.assign({}, variant.performanceSpecs || {});
+    var range = Object.assign({}, ps.powerRangeDbm || {});
+    if (field === 'powerMin') range.min = value === '' ? null : Number(value);
+    if (field === 'powerMax') range.max = value === '' ? null : Number(value);
+    if (field === 'txLevels') ps.txLevels = store().parseTxLevels(value);
+    if (field === 'rxLevels') ps.rxLevels = store().parseTxLevels(value);
+    if (field === 'txDefault') ps.txDefault = Number(value);
+    ps.powerRangeDbm = range;
+    store().updateSfpVariant(variantId, { performanceSpecs: ps }, true);
   }
 
   function commitField(toolKey, field, value) {
@@ -226,6 +380,39 @@
     root.addEventListener('change', function (e) {
       var input = e.target;
       if (!input || !input.getAttribute) return;
+
+      if (input.getAttribute('data-lab-perf')) {
+        commitPerformanceField(
+          input.getAttribute('data-tool-key'),
+          input.getAttribute('data-lab-perf'),
+          input.value
+        );
+        setStatus('Performance specs updated · Save Changes to apply.');
+        refresh();
+        return;
+      }
+
+      if (input.getAttribute('data-sfp-field')) {
+        commitSfpVariantField(
+          input.getAttribute('data-sfp-id'),
+          input.getAttribute('data-sfp-field'),
+          input.value
+        );
+        setStatus('SFP variant updated · Save Changes to apply.');
+        refresh();
+        return;
+      }
+
+      if (input.getAttribute('data-sfp-perf')) {
+        commitSfpVariantPerf(
+          input.getAttribute('data-sfp-id'),
+          input.getAttribute('data-sfp-perf'),
+          input.value
+        );
+        setStatus('SFP performance updated · Save Changes to apply.');
+        refresh();
+        return;
+      }
 
       if (input.getAttribute('data-lab-icon-upload')) {
         var toolKey = input.getAttribute('data-lab-icon-upload');
@@ -285,6 +472,42 @@
     });
 
     root.addEventListener('click', function (e) {
+      var tabBtn = e.target.closest ? e.target.closest('[data-lab-settings-tab]') : null;
+      if (tabBtn) {
+        activeTab = tabBtn.getAttribute('data-lab-settings-tab') || 'devices';
+        root.querySelectorAll('[data-lab-settings-tab]').forEach(function (btn) {
+          btn.classList.toggle('is-active', btn.getAttribute('data-lab-settings-tab') === activeTab);
+        });
+        refresh();
+        return;
+      }
+      var addSfp = e.target.id === 'lab-settings-add-sfp' ? e.target : null;
+      if (addSfp && store()) {
+        selectedSfpVariantId = store().addSfpVariant();
+        activeTab = 'performance';
+        setStatus('SFP variant added · Save Changes to apply.');
+        refresh();
+        return;
+      }
+      var selBtn = e.target.closest ? e.target.closest('[data-sfp-select]') : null;
+      if (selBtn) {
+        selectedSfpVariantId = selBtn.getAttribute('data-sfp-select');
+        refresh();
+        return;
+      }
+      var rmBtn = e.target.closest ? e.target.closest('[data-sfp-remove]') : null;
+      if (rmBtn && store()) {
+        var rid = rmBtn.getAttribute('data-sfp-remove');
+        if (!window.confirm('Remove this SFP variant?')) return;
+        if (!store().removeSfpVariant(rid)) {
+          setStatus('Keep at least one SFP variant.', true);
+          return;
+        }
+        if (selectedSfpVariantId === rid) selectedSfpVariantId = null;
+        setStatus('SFP variant removed · Save Changes to apply.');
+        refresh();
+        return;
+      }
       var clearBtn = e.target.closest ? e.target.closest('[data-lab-icon-clear]') : null;
       if (!clearBtn || !store()) return;
       var toolKey = clearBtn.getAttribute('data-lab-icon-clear');
@@ -325,7 +548,15 @@
     modalOpen = true;
     var modal = $('ftth-lab-settings-modal');
     modal.hidden = false;
+    activeTab = 'devices';
+    selectedSfpVariantId = null;
     store().discardDraft();
+    var modalRoot = $('ftth-lab-settings-modal');
+    if (modalRoot) {
+      modalRoot.querySelectorAll('[data-lab-settings-tab]').forEach(function (btn) {
+        btn.classList.toggle('is-active', btn.getAttribute('data-lab-settings-tab') === activeTab);
+      });
+    }
     refresh();
     setStatus('');
   }

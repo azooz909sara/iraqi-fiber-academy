@@ -18,12 +18,60 @@
     '2x4': 7.3,
   };
 
+  var PERFORMANCE_TOOL_KEYS = ['chassis', 'sfp', 'ols', 'opm'];
+
+  var FACTORY_SFP_VARIANTS = [
+    {
+      id: 'huawei-ssx1t1ltb',
+      name: 'Huawei SSX1T1LTB (GPON Class B+)',
+      shortName: 'GPON B+',
+      txNm: 1490,
+      rxNm: 1310,
+      performanceSpecs: {
+        powerRangeDbm: { min: 1.5, max: 5.0 },
+        txLevels: [1.5, 3.0, 5.0],
+        rxLevels: [-28],
+        txDefault: 3.0,
+        sensitivity: -28,
+      },
+    },
+    {
+      id: 'gpon-cplus',
+      name: 'GPON OLT Class C+',
+      shortName: 'GPON C+',
+      txNm: 1490,
+      rxNm: 1310,
+      performanceSpecs: {
+        powerRangeDbm: { min: 3.0, max: 7.0 },
+        txLevels: [3.0, 5.0, 7.0],
+        rxLevels: [-32],
+        txDefault: 5.0,
+        sensitivity: -32,
+      },
+    },
+    {
+      id: 'xgs-pon-n1n2',
+      name: 'XGS-PON N1/N2',
+      shortName: 'XGS-PON',
+      txNm: 1577,
+      rxNm: 1270,
+      performanceSpecs: {
+        powerRangeDbm: { min: 4.0, max: 9.0 },
+        txLevels: [4.0, 5.5, 7.0, 9.0],
+        rxLevels: [-28],
+        txDefault: 5.5,
+        sensitivity: -28,
+      },
+    },
+  ];
+
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
   }
 
   var FACTORY_DEFAULT_FTTH_LAB_CONFIG = {
-    version: 2,
+    version: 3,
+    sfpVariants: clone(FACTORY_SFP_VARIANTS),
     categories: [
       { id: 'active', label: 'ACTIVE EQUIPMENT' },
       { id: 'splitters', label: 'SPLITTERS' },
@@ -35,6 +83,11 @@
         id: 'chassis', toolKey: 'chassis', categoryId: 'active',
         label: 'Nokia 7360 FX-16', sublabel: 'OLT', markClass: 'chassis', icon: '',
         guideText: 'Drag onto the workspace to place the OLT chassis.',
+        performanceSpecs: {
+          powerRangeDbm: { min: -32, max: 9.0 },
+          txLevels: [],
+          rxLevels: [-32, -28],
+        },
       },
       {
         id: 'card', toolKey: 'card', categoryId: 'active',
@@ -46,6 +99,11 @@
         label: 'SFP Transceiver', sublabel: 'Optical module', markClass: 'sfp', icon: '',
         guideText: 'Drop onto an empty square port on an installed FGLT-D line card.',
         specs: { txLevels: [-3, -6], defaultTxDbm: -3 },
+        performanceSpecs: {
+          powerRangeDbm: { min: 1.5, max: 9.0 },
+          txLevels: [1.5, 3.0, 5.0, 7.0],
+          rxLevels: [-32, -28],
+        },
       },
       {
         id: 'splitter', toolKey: 'splitter', categoryId: 'splitters',
@@ -57,12 +115,22 @@
         id: 'opm', toolKey: 'opm', categoryId: 'test',
         label: 'Viavi OLP-38', sublabel: 'SC dock · live dBm', markClass: 'opm', icon: '',
         guideText: 'Dock an SC Patch Cord or Pigtail into the metal adapter on top.',
+        performanceSpecs: {
+          powerRangeDbm: { min: -70, max: 10 },
+          txLevels: [],
+          rxLevels: [-70, -10],
+        },
       },
       {
         id: 'ols', toolKey: 'ols', categoryId: 'test',
         label: 'OLS-35', sublabel: 'Calibrated source · 1310 / 1550', markClass: 'ols', icon: '',
         guideText: 'Calibrated optical source · 1310 / 1550 nm · dock a patch cord, then enable laser.',
         specs: { txLevels: [-3, -6], defaultTxDbm: -3 },
+        performanceSpecs: {
+          powerRangeDbm: { min: -6, max: 3 },
+          txLevels: [-3, -6],
+          rxLevels: [],
+        },
       },
       {
         id: 'vfl', toolKey: 'vfl', categoryId: 'test',
@@ -113,6 +181,63 @@
       .filter(function (n) { return isFinite(n); });
   }
 
+  function normalizePerformanceSpecs(raw, factory) {
+    raw = raw && typeof raw === 'object' ? raw : {};
+    factory = factory && typeof factory === 'object' ? factory : {};
+    var rawRange = raw.powerRangeDbm && typeof raw.powerRangeDbm === 'object' ? raw.powerRangeDbm : {};
+    var factoryRange = factory.powerRangeDbm && typeof factory.powerRangeDbm === 'object'
+      ? factory.powerRangeDbm
+      : {};
+    var minVal = rawRange.min != null ? Number(rawRange.min) : factoryRange.min;
+    var maxVal = rawRange.max != null ? Number(rawRange.max) : factoryRange.max;
+    var out = {
+      powerRangeDbm: {
+        min: isFinite(minVal) ? minVal : null,
+        max: isFinite(maxVal) ? maxVal : null,
+      },
+      txLevels: parseTxLevels(raw.txLevels != null ? raw.txLevels : factory.txLevels),
+      rxLevels: parseTxLevels(raw.rxLevels != null ? raw.rxLevels : factory.rxLevels),
+    };
+    if (raw.txDefault != null || factory.txDefault != null) {
+      out.txDefault = Number(raw.txDefault != null ? raw.txDefault : factory.txDefault);
+    }
+    if (raw.sensitivity != null || factory.sensitivity != null) {
+      out.sensitivity = Number(raw.sensitivity != null ? raw.sensitivity : factory.sensitivity);
+    }
+    return out;
+  }
+
+  function normalizeSfpVariant(raw) {
+    var v = raw && typeof raw === 'object' ? raw : {};
+    var factory = FACTORY_SFP_VARIANTS.filter(function (fv) { return fv.id === v.id; })[0] || {};
+    return {
+      id: String(v.id || factory.id || ('sfp_' + Date.now())),
+      name: String(v.name || factory.name || 'SFP Variant'),
+      shortName: String(v.shortName || factory.shortName || 'SFP'),
+      txNm: Number(v.txNm != null ? v.txNm : factory.txNm) || 1490,
+      rxNm: Number(v.rxNm != null ? v.rxNm : factory.rxNm) || 1310,
+      performanceSpecs: normalizePerformanceSpecs(v.performanceSpecs, factory.performanceSpecs),
+    };
+  }
+
+  function normalizeSfpVariants(list) {
+    var src = Array.isArray(list) ? list : [];
+    var byId = {};
+    var out = [];
+    src.forEach(function (v) {
+      var norm = normalizeSfpVariant(v);
+      if (!byId[norm.id]) {
+        byId[norm.id] = true;
+        out.push(norm);
+      }
+    });
+    if (!out.length) return clone(FACTORY_SFP_VARIANTS).map(normalizeSfpVariant);
+    FACTORY_SFP_VARIANTS.forEach(function (fv) {
+      if (!byId[fv.id]) out.push(normalizeSfpVariant(fv));
+    });
+    return out;
+  }
+
   function normalizeSpecs(toolKey, specs, factorySpecs) {
     specs = specs && typeof specs === 'object' ? specs : {};
     factorySpecs = factorySpecs && typeof factorySpecs === 'object' ? factorySpecs : {};
@@ -151,21 +276,22 @@
   function normalizeItem(raw) {
     var item = raw && typeof raw === 'object' ? raw : {};
     var factory = factoryItemFor(item);
-    return {
+    var toolKey = String(item.toolKey || factory.toolKey || '');
+    var out = {
       id: String(item.id || factory.id || ('tool_' + Date.now())),
-      toolKey: String(item.toolKey || factory.toolKey || ''),
+      toolKey: toolKey,
       categoryId: String(item.categoryId || factory.categoryId || 'active'),
       label: String(item.label || factory.label || 'Toolbox item'),
       sublabel: String(item.sublabel || factory.sublabel || ''),
       guideText: String(item.guideText || factory.guideText || item.sublabel || factory.sublabel || ''),
       markClass: String(item.markClass || factory.markClass || ''),
       icon: clipIcon(item.icon || ''),
-      specs: normalizeSpecs(
-        String(item.toolKey || factory.toolKey || ''),
-        item.specs,
-        factory.specs
-      ),
+      specs: normalizeSpecs(toolKey, item.specs, factory.specs),
     };
+    if (PERFORMANCE_TOOL_KEYS.indexOf(toolKey) >= 0) {
+      out.performanceSpecs = normalizePerformanceSpecs(item.performanceSpecs, factory.performanceSpecs);
+    }
+    return out;
   }
 
   function normalizeConfig(raw) {
@@ -200,7 +326,8 @@
       return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
     });
     return {
-      version: 2,
+      version: 3,
+      sfpVariants: normalizeSfpVariants(src.sfpVariants),
       categories: cats.map(function (c) {
         return {
           id: String((c && c.id) || 'active'),
@@ -331,6 +458,88 @@
       return item ? clone(item) : null;
     },
 
+    getPerformanceSpecs: function (toolKey) {
+      var item = Store.getItem(toolKey);
+      return item && item.performanceSpecs ? clone(item.performanceSpecs) : null;
+    },
+
+    getSfpVariants: function () {
+      return clone(saved.sfpVariants || FACTORY_SFP_VARIANTS);
+    },
+
+    getSfpVariant: function (variantId) {
+      var list = Store.getSfpVariants();
+      var found = list.filter(function (v) { return v.id === variantId; })[0];
+      return found ? clone(found) : null;
+    },
+
+    updateSfpVariant: function (variantId, patch, recordHistory) {
+      var next = clone(draft);
+      next.sfpVariants = normalizeSfpVariants(next.sfpVariants);
+      var idx = next.sfpVariants.findIndex(function (v) { return v.id === variantId; });
+      if (idx < 0) return false;
+      next.sfpVariants[idx] = normalizeSfpVariant(Object.assign({}, next.sfpVariants[idx], patch, {
+        id: variantId,
+        performanceSpecs: Object.assign(
+          {},
+          next.sfpVariants[idx].performanceSpecs,
+          patch && patch.performanceSpecs
+        ),
+      }));
+      Store.setDraft(next, recordHistory !== false);
+      return true;
+    },
+
+    addSfpVariant: function () {
+      var next = clone(draft);
+      next.sfpVariants = normalizeSfpVariants(next.sfpVariants);
+      var id = 'sfp_' + Date.now();
+      next.sfpVariants.push(normalizeSfpVariant({
+        id: id,
+        name: 'New SFP Variant',
+        shortName: 'SFP',
+        txNm: 1490,
+        rxNm: 1310,
+        performanceSpecs: {
+          powerRangeDbm: { min: 0, max: 5 },
+          txLevels: [0, 3, 5],
+          rxLevels: [-28],
+          txDefault: 3,
+          sensitivity: -28,
+        },
+      }));
+      Store.setDraft(next, true);
+      return id;
+    },
+
+    removeSfpVariant: function (variantId) {
+      var next = clone(draft);
+      next.sfpVariants = normalizeSfpVariants(next.sfpVariants);
+      if (next.sfpVariants.length <= 1) return false;
+      next.sfpVariants = next.sfpVariants.filter(function (v) { return v.id !== variantId; });
+      Store.setDraft(next, true);
+      return true;
+    },
+
+    updatePerformanceSpecs: function (toolKey, patch, recordHistory) {
+      var item = draft.items.filter(function (it) { return it.toolKey === toolKey; })[0];
+      if (!item) return false;
+      var merged = normalizePerformanceSpecs(
+        Object.assign({}, item.performanceSpecs, patch, {
+          powerRangeDbm: Object.assign(
+            {},
+            item.performanceSpecs && item.performanceSpecs.powerRangeDbm,
+            patch && patch.powerRangeDbm
+          ),
+        }),
+        factoryItemFor(item).performanceSpecs
+      );
+      return Store.updateItem(toolKey, { performanceSpecs: merged }, recordHistory !== false);
+    },
+
+    PERFORMANCE_TOOL_KEYS: PERFORMANCE_TOOL_KEYS,
+    FACTORY_SFP_VARIANTS: FACTORY_SFP_VARIANTS,
+
     getIconForTool: function (toolKey) {
       var item = Store.getItem(toolKey);
       return item && item.icon ? item.icon : '';
@@ -357,6 +566,12 @@
         var merged = Object.assign({}, it, patch);
         if (patch.specs) {
           merged.specs = normalizeSpecs(toolKey, Object.assign({}, it.specs, patch.specs), factoryItemFor(it).specs);
+        }
+        if (patch.performanceSpecs) {
+          merged.performanceSpecs = normalizePerformanceSpecs(
+            Object.assign({}, it.performanceSpecs, patch.performanceSpecs),
+            factoryItemFor(it).performanceSpecs
+          );
         }
         return normalizeItem(merged);
       });

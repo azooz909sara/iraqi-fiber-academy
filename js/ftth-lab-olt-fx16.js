@@ -278,8 +278,35 @@
     return card.id;
   }
 
+  function getSfpProfileMap() {
+    var map = JSON.parse(JSON.stringify(SFP_PROFILES));
+    if (global.FtthLabSettings && typeof FtthLabSettings.getSfpVariants === 'function') {
+      FtthLabSettings.getSfpVariants().forEach(function (v) {
+        var ps = v.performanceSpecs || {};
+        var range = ps.powerRangeDbm || {};
+        var txMin = isFinite(range.min) ? range.min : 0;
+        var txMax = isFinite(range.max) ? range.max : 5;
+        map[v.id] = {
+          id: v.id,
+          name: v.name,
+          shortName: v.shortName,
+          txNm: v.txNm || 1490,
+          rxNm: v.rxNm || 1310,
+          txMin: txMin,
+          txMax: txMax,
+          txDefault: isFinite(ps.txDefault) ? ps.txDefault : (ps.txLevels && ps.txLevels[0]) || txMin,
+          sensitivity: isFinite(ps.sensitivity) ? ps.sensitivity : ((ps.rxLevels && ps.rxLevels[0]) || -28),
+          txLevels: ps.txLevels || [],
+          rxLevels: ps.rxLevels || [],
+        };
+      });
+    }
+    return map;
+  }
+
   function getSfpProfile(id) {
-    return SFP_PROFILES[id] || SFP_PROFILES[SFP_PROFILE_DEFAULT];
+    var map = getSfpProfileMap();
+    return map[id] || map[SFP_PROFILE_DEFAULT] || SFP_PROFILES[SFP_PROFILE_DEFAULT];
   }
 
   function clampSfpTx(profile, value) {
@@ -1078,8 +1105,9 @@
       if (mod) normalizeSfpModule(mod);
       var spec = mod ? getSfpProfile(mod.profileId) : null;
       var profileOpts = '';
-      Object.keys(SFP_PROFILES).forEach(function (pid) {
-        var pr = SFP_PROFILES[pid];
+      var profileMap = getSfpProfileMap();
+      Object.keys(profileMap).forEach(function (pid) {
+        var pr = profileMap[pid];
         profileOpts +=
           '<option value="' + pr.id + '"' +
           (spec && spec.id === pr.id ? ' selected' : '') + '>' +
@@ -1094,6 +1122,17 @@
           '<span>TX ' + spec.txNm + ' nm</span>' +
           '<span>RX ' + spec.rxNm + ' nm</span>' +
           '<span>Sens ' + spec.sensitivity + ' dBm</span>' +
+          (spec.txLevels && spec.txLevels.length
+            ? '<span>TX levels ' + spec.txLevels.map(function (n) {
+              return (n >= 0 ? '+' : '') + n;
+            }).join(', ') + ' dBm</span>'
+            : '') +
+          (spec.rxLevels && spec.rxLevels.length
+            ? '<span>RX levels ' + spec.rxLevels.map(function (n) {
+              return (n >= 0 ? '+' : '') + n;
+            }).join(', ') + ' dBm</span>'
+            : '') +
+          '<span>Range ' + spec.txMin + ' … ' + spec.txMax + ' dBm</span>' +
           '</div>' +
           '<p class="lab-inspector__label">TX power <strong data-sfp-tx-val>' +
           fmtDbm(mod.txDbm) + '</strong></p>' +
@@ -1935,9 +1974,14 @@
     syncSfpPatchState: syncSfpPatchState,
     setSfpProfile: setSfpProfile,
     setSfpTxPower: setSfpTxPower,
-    getSfpProfiles: function () { return SFP_PROFILES; },
+    getSfpProfiles: function () { return getSfpProfileMap(); },
     selectPort: selectPort,
     selectCard: selectCard,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+      rebuildViews();
+    },
   };
 
   function tryRegister() {

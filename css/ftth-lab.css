@@ -5330,3 +5330,76 @@ body.lab-pcord-winding .lab-pcord-fiber-hit {
   letter-spacing: 0.03em;
 }
 
+.lab-settings-cms__tabs {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.55rem 1.1rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+  flex-shrink: 0;
+}
+
+.lab-settings-cms__tab {
+  padding: 0.42rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem 0.45rem 0 0;
+  background: transparent;
+  color: var(--lab-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.lab-settings-cms__tab.is-active {
+  color: var(--lab-cyan);
+  border-color: rgba(56, 189, 248, 0.35);
+  border-bottom-color: transparent;
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.lab-settings-cms__hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.68rem;
+  color: var(--lab-muted);
+}
+
+.lab-settings-cms__perf-device,
+.lab-settings-cms__sfp-variant {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.55rem;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.lab-settings-cms__perf-device h4,
+.lab-settings-cms__sfp-head strong {
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+}
+
+.lab-settings-cms__sfp-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.lab-settings-cms__sfp-head strong {
+  flex: 1;
+  margin: 0;
+}
+
+.lab-settings-cms__perf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.45rem;
+}
+
+.lab-spl-sheet--perf {
+  margin: 0.55rem 0;
+  border: 1px dashed rgba(56, 189, 248, 0.2);
+  background: rgba(56, 189, 248, 0.04);
+}
+

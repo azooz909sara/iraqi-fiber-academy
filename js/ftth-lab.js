@@ -353,7 +353,38 @@
     if (redoBtn) redoBtn.disabled = timelineIndex < 0 || timelineIndex >= timeline.length - 1;
   }
 
+  /**
+   * Strip canvas selection outlines so only one workspace entity can appear
+   * selected. Toolbox sidebar highlights (.lab-rail) are untouched.
+   */
+  function stripWorkspaceSelectionOutlines() {
+    var stage = $('lab-canvas-2d');
+    if (!stage) return;
+    stage.querySelectorAll('.is-selected').forEach(function (el) {
+      if (el.closest('.lab-rail')) return;
+      el.classList.remove('is-selected');
+    });
+  }
+
+  /** Deselect every tool except the one about to claim selection. */
+  function clearOtherToolSelections(exceptToolId) {
+    Object.keys(state.tools).forEach(function (id) {
+      if (id === exceptToolId) return;
+      var tool = state.tools[id];
+      if (!tool || typeof tool.clearSelection !== 'function') return;
+      try {
+        tool.clearSelection();
+      } catch (err) {
+        console.warn('[FtthLab] clearSelection failed:', id, err);
+      }
+    });
+    stripWorkspaceSelectionOutlines();
+  }
+
   function setSelectionOwner(toolId) {
+    if (toolId) {
+      clearOtherToolSelections(toolId);
+    }
     selectionOwner = toolId || null;
   }
 
@@ -599,6 +630,25 @@
     btn.hidden = !show;
     btn.style.display = show ? 'inline-flex' : 'none';
     btn.classList.toggle('is-admin-visible', show);
+  }
+
+  function armDragOnlyToolboxTool(toolId, message) {
+    claimToolboxTool(toolId);
+    setStatus(message || 'Drag onto workspace to place equipment.');
+  }
+
+  function getPerformanceSpecs(toolKey) {
+    if (global.FtthLabSettings && typeof FtthLabSettings.getPerformanceSpecs === 'function') {
+      return FtthLabSettings.getPerformanceSpecs(toolKey);
+    }
+    return null;
+  }
+
+  function getSfpVariants() {
+    if (global.FtthLabSettings && typeof FtthLabSettings.getSfpVariants === 'function') {
+      return FtthLabSettings.getSfpVariants();
+    }
+    return [];
   }
 
   function applyFtthLabToolboxIcons() {
@@ -1770,6 +1820,9 @@
     applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
     applyFtthLabConfig: applyFtthLabConfig,
     getToolMeta: getToolMeta,
+    getPerformanceSpecs: getPerformanceSpecs,
+    getSfpVariants: getSfpVariants,
+    armDragOnlyToolboxTool: armDragOnlyToolboxTool,
     syncFtthLabAdminSettingsButton: syncFtthLabAdminSettingsButton,
     clearWorkspaceSelection: clearWorkspaceSelection,
     resetInspectorIdle: resetInspectorIdle,
