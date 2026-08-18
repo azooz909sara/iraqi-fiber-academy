@@ -189,13 +189,24 @@
       if (!button) return;
       var planId = button.getAttribute('data-plan') || '';
       var planName = '';
+      var plan = null;
       if (window.PlatformPlans && typeof window.PlatformPlans.findPlan === 'function') {
-        var plan = window.PlatformPlans.findPlan(planId);
+        plan = window.PlatformPlans.findPlan(planId);
         if (plan) planName = plan.name;
       }
       if (!planName) {
         var legacy = { free: 'المجانية', standard: 'القياسية', professional: 'الاحترافية' };
         planName = legacy[planId] || planId;
+      }
+      if (window.PlatformSimulators && typeof window.PlatformSimulators.subscribeCurrentUserToPlan === 'function') {
+        try {
+          window.PlatformSimulators.subscribeCurrentUserToPlan(planId);
+          alert('تم تفعيل اشتراكك في باقة: ' + planName + '\nستظهر المحاكيات المسموحة في قسم المحاكيات.');
+          return;
+        } catch (err) {
+          alert((err && err.message) || 'تعذر تفعيل الاشتراك.\nالباقة المختارة: ' + planName);
+          return;
+        }
       }
       alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });

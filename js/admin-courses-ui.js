@@ -110,97 +110,101 @@
     select.innerHTML = html;
   }
 
-  function fillPresetSelect() {
-    var select = document.getElementById('coursePresetSelect');
-    if (!select || !window.PlatformCourses) return;
-    var grouped = window.PlatformCourses.getPresetsGrouped();
-    var html = '<option value="">— اختر لتعبئة النموذج فوراً —</option>';
-
-    function addGroup(label, items) {
-      if (!items || !items.length) return;
-      html += '<optgroup label="' + escapeHtml(label) + '">';
-      items.forEach(function (p) {
-        html +=
-          '<option value="' +
-          escapeHtml(p.id) +
-          '">' +
-          escapeHtml(p.title) +
-          '</option>';
-      });
-      html += '</optgroup>';
+  function normalizeCurrencyCode(value) {
+    if (window.PlatformCourses && typeof window.PlatformCourses.normalizeCurrency === 'function') {
+      return window.PlatformCourses.normalizeCurrency(value);
     }
-
-    addGroup('الكورسات المنفردة', grouped.individual);
-    addGroup('البرامج الاحترافية المجمعة', grouped.program);
-    addGroup('الكورس الشامل', grouped.master);
-    select.innerHTML = html;
+    var key = String(value || '').trim().toUpperCase();
+    if (key === 'USD' || key === '$') return 'USD';
+    return 'IQD';
   }
 
-  function fillRequiredPlanSelect(selectedId, category) {
-    var select = document.getElementById('courseEditorRequiredPlan');
-    if (!select) return;
-    var plans =
-      window.PlatformPlans && typeof window.PlatformPlans.getPlans === 'function'
-        ? window.PlatformPlans.getPlans()
-        : [];
-    var preferredLevel = 'free';
-    if (category === 'program') preferredLevel = 'standard';
-    if (category === 'master') preferredLevel = 'professional';
-
-    var html = '<option value="">— تلقائي حسب فئة الكورس (' + preferredLevel + ') —</option>';
-    plans.forEach(function (plan) {
-      html +=
-        '<option value="' +
-        escapeHtml(plan.id) +
-        '">' +
-        escapeHtml(plan.name) +
-        ' — ' +
-        escapeHtml(
-          window.PlatformPlans.formatPrice
-            ? window.PlatformPlans.formatPrice(plan)
-            : String(plan.price)
-        ) +
-        ' (' +
-        escapeHtml(plan.accessLevel || '') +
-        ')</option>';
-    });
-    select.innerHTML = html;
-
-    if (selectedId && plans.some(function (p) { return p.id === selectedId; })) {
-      select.value = selectedId;
-    } else {
-      // Prefer plan matching category access level
-      var match =
-        window.PlatformPlans && window.PlatformPlans.findPlanByAccessLevel
-          ? window.PlatformPlans.findPlanByAccessLevel(preferredLevel)
-          : null;
-      select.value = match ? match.id : '';
-    }
+  function writeCourseCurrency(value) {
+    var el = document.getElementById('course-currency');
+    if (!el) return;
+    el.value = normalizeCurrencyCode(value);
   }
 
-  function applyPreset(presetId) {
-    if (!window.PlatformCourses || !presetId) return;
-    var preset = window.PlatformCourses.findPreset(presetId);
-    if (!preset) return;
+  function readCourseCurrency() {
+    var el = document.getElementById('course-currency');
+    return normalizeCurrencyCode(el && el.value);
+  }
 
-    document.getElementById('courseEditorName').value = preset.title || '';
-    document.getElementById('courseEditorDescription').value = preset.description || '';
-    document.getElementById('courseEditorHours').value = preset.durationHours || '';
-    document.getElementById('courseEditorWeeks').value = preset.durationWeeks || '';
-    document.getElementById('courseEditorPrice').value =
-      preset.price != null && preset.price !== '' ? preset.price : '';
-    document.getElementById('courseEditorCurrency').value = preset.currency || 'ر.س';
-    document.getElementById('courseEditorSchedule').value = preset.weeklySchedule || '';
-    document.getElementById('courseEditorCategory').value = preset.category || 'individual';
-    document.getElementById('courseEditorStatus').value = 'draft';
-    fillRequiredPlanSelect(preset.requiredPlanId || '', preset.category || 'individual');
-    fillInstructorSelect('');
+  function parsePriceValue(val) {
+    if (window.PlatformCourses && typeof window.PlatformCourses.parsePrice === 'function') {
+      return window.PlatformCourses.parsePrice(val);
+    }
+    if (window.PlatformPlans && typeof window.PlatformPlans.parsePrice === 'function') {
+      return window.PlatformPlans.parsePrice(val);
+    }
+    var clean = String(val == null ? '' : val).replace(/,/g, '').trim();
+    var n = Number(clean);
+    return isFinite(n) && n >= 0 ? n : 0;
+  }
 
-    lessonDrafts = (preset.lessons || []).map(function (l, index) {
-      return cloneLessonDraft(l, index);
+  function formatPriceInputValue(val) {
+    var n = parsePriceValue(val);
+    if (!n) return '';
+    if (window.PlatformCourses && typeof window.PlatformCourses.formatGroupedAmount === 'function') {
+      return window.PlatformCourses.formatGroupedAmount(n);
+    }
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function bindPriceInput(id) {
+    var el = document.getElementById(id);
+    if (!el || el.dataset.priceBound === '1') return;
+    el.dataset.priceBound = '1';
+    el.addEventListener('blur', function () {
+      if (!String(el.value || '').trim()) return;
+      el.value = formatPriceInputValue(el.value);
     });
-    renderLessonDrafts();
-    showToast('تم تعبئة النموذج من الكتالوج — راجع ثم احفظ', 'info');
+  }
+
+  function writeSimulatorChecks(ids) {
+    var selected = {};
+    (ids || []).forEach(function (id) {
+      selected[String(id)] = true;
+    });
+    document.querySelectorAll('#courseEditorSimulators input[name="courseSimulator"]').forEach(function (input) {
+      input.checked = !!selected[input.value];
+    });
+  }
+
+  function readSimulatorChecks() {
+    var ids = [];
+    document.querySelectorAll('#courseEditorSimulators input[name="courseSimulator"]:checked').forEach(function (input) {
+      if (input.value) ids.push(input.value);
+    });
+    if (window.PlatformSimulators && typeof window.PlatformSimulators.normalizeSimulatorIds === 'function') {
+      return window.PlatformSimulators.normalizeSimulatorIds(ids);
+    }
+    return ids;
+  }
+
+  function writeGeneratePlanCheck() {
+    var el = document.getElementById('courseEditorGeneratePlan');
+    if (!el) return;
+    el.checked = true;
+  }
+
+  function syncCoursePricingPlan(course) {
+    if (!course || !window.PlatformPlans || typeof window.PlatformPlans.upsertFromCourse !== 'function') {
+      return course;
+    }
+    var plan = window.PlatformPlans.upsertFromCourse(course, {
+      generateMatchingPlan: true,
+    });
+    if (!plan) return course;
+    if (String(course.requiredPlanId || '') === String(plan.id) && course.autoPricingPlan) {
+      return course;
+    }
+    return window.PlatformCourses.updateCourse(course.id, {
+      requiredPlanId: plan.id,
+      accessLevel: plan.accessLevel || course.accessLevel,
+      currency: course.currency,
+      autoPricingPlan: true,
+    });
   }
 
   function emptyQuiz() {
@@ -438,16 +442,14 @@
     var titleEl = document.getElementById('courseEditorTitle');
     if (!modal) return;
 
-    fillPresetSelect();
-    document.getElementById('coursePresetSelect').value = '';
     document.getElementById('courseEditorId').value = course ? course.id : '';
     document.getElementById('courseEditorName').value = course ? course.title : '';
     document.getElementById('courseEditorDescription').value = course ? course.description : '';
     document.getElementById('courseEditorHours').value = course ? course.durationHours || '' : '';
     document.getElementById('courseEditorWeeks').value = course ? course.durationWeeks || '' : '';
     document.getElementById('courseEditorPrice').value =
-      course && course.price != null && course.price !== '' ? course.price : '';
-    document.getElementById('courseEditorCurrency').value = course ? course.currency || 'ر.س' : 'ر.س';
+      course && parsePriceValue(course.price) ? formatPriceInputValue(course.price) : '';
+    writeCourseCurrency(course ? course.currency : 'IQD');
     document.getElementById('courseEditorSchedule').value = course ? course.weeklySchedule || '' : '';
     document.getElementById('courseEditorStatus').value = course
       ? course.softDeleted
@@ -457,10 +459,8 @@
     document.getElementById('courseEditorCategory').value = course
       ? course.category || 'individual'
       : 'individual';
-    fillRequiredPlanSelect(
-      course ? course.requiredPlanId || '' : '',
-      course ? course.category || 'individual' : 'individual'
-    );
+    writeSimulatorChecks(course ? course.allowedSimulators : []);
+    writeGeneratePlanCheck();
 
     fillInstructorSelect(course && !course.isAcademy ? course.instructorEmail : '');
     lessonDrafts =
@@ -854,7 +854,7 @@
             window.PlatformCourses.formatPrice
               ? window.PlatformCourses.formatPrice(course)
               : course.price
-                ? course.price + ' ' + (course.currency || 'ر.س')
+                ? course.price + ' د.ع'
                 : 'مجاناً'
           ) +
           '</span>' +
@@ -909,6 +909,7 @@
   }
 
   function bind() {
+    bindPriceInput('courseEditorPrice');
     var search = document.getElementById('courseSearch');
     if (search) {
       search.addEventListener('input', function () {
@@ -940,13 +941,6 @@
     var refreshBtn = document.getElementById('refreshCoursesBtn');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', renderCoursesTable);
-    }
-
-    var presetSelect = document.getElementById('coursePresetSelect');
-    if (presetSelect) {
-      presetSelect.addEventListener('change', function () {
-        if (presetSelect.value) applyPreset(presetSelect.value);
-      });
     }
 
     var addLessonBtn = document.getElementById('addCourseLessonBtn');
@@ -984,15 +978,10 @@
           description: (document.getElementById('courseEditorDescription') || {}).value,
           durationHours: (document.getElementById('courseEditorHours') || {}).value,
           durationWeeks: (document.getElementById('courseEditorWeeks') || {}).value,
-          price: (document.getElementById('courseEditorPrice') || {}).value,
-          currency: (document.getElementById('courseEditorCurrency') || {}).value || 'ر.س',
-          requiredPlanId: (document.getElementById('courseEditorRequiredPlan') || {}).value || '',
+          price: parsePriceValue((document.getElementById('courseEditorPrice') || {}).value),
+          currency: readCourseCurrency(),
+          requiredPlanId: '',
           accessLevel: (function () {
-            var planId = (document.getElementById('courseEditorRequiredPlan') || {}).value || '';
-            if (planId && window.PlatformPlans && window.PlatformPlans.findPlan) {
-              var p = window.PlatformPlans.findPlan(planId);
-              if (p) return p.accessLevel;
-            }
             var cat = (document.getElementById('courseEditorCategory') || {}).value || 'individual';
             if (cat === 'master') return 'professional';
             if (cat === 'program') return 'standard';
@@ -1001,6 +990,8 @@
           weeklySchedule: (document.getElementById('courseEditorSchedule') || {}).value,
           status: (document.getElementById('courseEditorStatus') || {}).value,
           category: (document.getElementById('courseEditorCategory') || {}).value || 'individual',
+          allowedSimulators: readSimulatorChecks(),
+          autoPricingPlan: true,
           instructorEmail: instructor.instructorEmail,
           instructorName: instructor.instructorName,
           lessons: collectLessonDraftsFromDom(),
@@ -1010,8 +1001,10 @@
         };
         try {
           var wasPublish = payload.status === 'published';
-          if (id) window.PlatformCourses.updateCourse(id, payload);
-          else window.PlatformCourses.addCourse(payload);
+          var saved = id
+            ? window.PlatformCourses.updateCourse(id, payload)
+            : window.PlatformCourses.addCourse(payload);
+          saved = syncCoursePricingPlan(saved) || saved;
           closeCourseModal();
           renderCoursesTable();
           if (wasPublish) showToast('تم النشر بنجاح!', 'success');
@@ -1170,7 +1163,6 @@
       }
     });
 
-    fillPresetSelect();
     renderCoursesTable();
   }
 

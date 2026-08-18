@@ -54,6 +54,8 @@ function getLocalAuthUser() {
       isAdmin: !!parsed.isAdmin,
       isInstructor: !!parsed.isInstructor,
       role: String(parsed.role || ''),
+      planId: String(parsed.planId || ''),
+      enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds.slice() : [],
     };
   } catch (err) {
     return null;
@@ -62,6 +64,8 @@ function getLocalAuthUser() {
 
 function setLocalAuthUser(user) {
   if (!user || !normalizeEmail(user.email)) return;
+  var previous = getLocalAuthUser();
+  var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(user.email);
   var payload = {
     name: String(user.name || user.displayName || '').trim() || normalizeEmail(user.email).split('@')[0],
     email: normalizeEmail(user.email),
@@ -70,6 +74,13 @@ function setLocalAuthUser(user) {
     isAdmin: !!user.isAdmin,
     isInstructor: !!user.isInstructor,
     role: String(user.role || ''),
+    planId: user.planId != null ? String(user.planId) : sameEmail ? String(previous.planId || '') : '',
+    enrolledCourseIds:
+      Array.isArray(user.enrolledCourseIds)
+        ? user.enrolledCourseIds.slice()
+        : sameEmail && Array.isArray(previous.enrolledCourseIds)
+          ? previous.enrolledCourseIds.slice()
+          : [],
     loggedInAt: new Date().toISOString(),
   };
   try {
@@ -200,6 +211,9 @@ function shouldShowDashboardLinks(email) {
 function ensureLocalDevSession() {
   if (!shouldBypassAccessControl()) return null;
   var existing = getLocalAuthUser();
+  if (existing && String(existing.role || '').toLowerCase() === 'student') {
+    return existing;
+  }
   var email = (existing && existing.email) || LOCAL_DEV_EMAIL;
   return setLocalAuthUser({
     name: (existing && existing.name) || 'Local Dev',
@@ -209,6 +223,8 @@ function ensureLocalDevSession() {
     isAdmin: true,
     isInstructor: true,
     role: 'admin',
+    planId: existing && existing.planId,
+    enrolledCourseIds: existing && existing.enrolledCourseIds,
   });
 }
 
@@ -430,6 +446,8 @@ function resolveActiveIdentity() {
         isAdmin: local.isAdmin,
         isInstructor: local.isInstructor,
         role: local.role,
+        planId: local.planId || '',
+        enrolledCourseIds: local.enrolledCourseIds || [],
       },
       source: 'local',
     };
@@ -486,14 +504,37 @@ function loginLocalSession(options) {
     email = defaultEmail;
   }
   var name = String(options.name || '').trim() || nameFromEmail(email) || (localBypass ? 'Local Dev' : 'مستخدم');
+  var directoryUser = null;
+  try {
+    var usersRaw = localStorage.getItem('ifa_admin_users');
+    var users = usersRaw ? JSON.parse(usersRaw) : [];
+    if (Array.isArray(users)) {
+      for (var i = 0; i < users.length; i++) {
+        if (normalizeEmail(users[i] && users[i].email) === email) {
+          directoryUser = users[i];
+          break;
+        }
+      }
+    }
+  } catch (err) {
+    directoryUser = null;
+  }
+  var directoryRole = String((directoryUser && directoryUser.role) || '').toLowerCase();
+  var treatAsStudent = directoryRole === 'student';
   setLocalAuthUser({
-    name: name,
+    name: (directoryUser && directoryUser.name) || name,
     email: email,
     photoURL: options.photoURL || '',
-    isSubscriber: localBypass ? true : !!options.isSubscriber,
-    isAdmin: localBypass ? true : options.isAdmin === true || isAdminEmail(email),
-    isInstructor: localBypass ? true : !!options.isInstructor,
-    role: localBypass ? 'admin' : options.role || (isAdminEmail(email) ? 'admin' : 'student'),
+    isSubscriber: treatAsStudent
+      ? directoryUser.status !== 'expired' && directoryUser.status !== 'suspended'
+      : localBypass
+        ? true
+        : !!options.isSubscriber,
+    isAdmin: treatAsStudent ? false : localBypass ? true : options.isAdmin === true || isAdminEmail(email),
+    isInstructor: treatAsStudent ? false : localBypass ? true : !!options.isInstructor,
+    role: treatAsStudent ? 'student' : localBypass ? 'admin' : options.role || (isAdminEmail(email) ? 'admin' : 'student'),
+    planId: (directoryUser && directoryUser.planId) || options.planId || '',
+    enrolledCourseIds: (directoryUser && directoryUser.enrolledCourseIds) || options.enrolledCourseIds || [],
   });
   refreshSlots();
   notifyLocalAuthChanged({ type: 'login', email: email });
@@ -679,3 +720,10 @@ function initAuthUI() {
 }
 
 initAuthUI();
+
+window.IFAAuth = {
+  getLocalAuthUser: getLocalAuthUser,
+  setLocalAuthUser: setLocalAuthUser,
+  clearLocalAuthUser: clearLocalAuthUser,
+  loginLocalSession: loginLocalSession,
+};

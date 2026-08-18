@@ -71,20 +71,34 @@
       plan.featured && plan.badge
         ? '<span class="pricing-card__badge">' + escapeHtml(plan.badge) + '</span>'
         : '';
+    var currencyText =
+      window.PlatformPlans && typeof window.PlatformPlans.currencyLabel === 'function'
+        ? window.PlatformPlans.currencyLabel(plan.currency)
+        : plan.currency === 'USD' || plan.currency === '$'
+          ? '$'
+          : 'د.ع';
+    var grouped =
+      window.PlatformPlans && typeof window.PlatformPlans.formatGroupedAmount === 'function'
+        ? window.PlatformPlans.formatGroupedAmount(plan.price)
+        : String(plan.price || 0);
     var amount =
       Number(plan.price) === 0
-        ? '0 <span>' + escapeHtml(plan.currency || 'ر.س') + '</span>'
-        : escapeHtml(String(plan.price)) +
+        ? '0 <span>' + escapeHtml(currencyText) + '</span>'
+        : escapeHtml(grouped) +
           ' <span>' +
-          escapeHtml(plan.currency || 'ر.س') +
+          escapeHtml(currencyText) +
           '</span>';
     var count = courseCountForPlan(plan);
+    var simCount = Array.isArray(plan.allowedSimulators) ? plan.allowedSimulators.length : 0;
     var accessNote =
       '<li><span class="pricing-card__check">✓</span> ' +
       (count
         ? 'يشمل ' + count + ' كورساً منشوراً'
         : 'وصول حسب مستوى الباقة') +
-      '</li>';
+      '</li>' +
+      (simCount
+        ? '<li><span class="pricing-card__check">✓</span> ' + simCount + ' محاكيات مضمّنة</li>'
+        : '');
     var features = (plan.features || [])
       .map(function (f) {
         var ok = f.included !== false;

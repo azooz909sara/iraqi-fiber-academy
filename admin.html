@@ -504,13 +504,6 @@
 
             <div class="admin-form-grid">
               <label class="admin-field admin-field--full">
-                <span class="admin-field__label">اقتراح جاهز من الكتالوج</span>
-                <select class="admin-field__input" id="coursePresetSelect" aria-label="اختيار كورس جاهز">
-                  <option value="">— اختر لتعبئة النموذج فوراً —</option>
-                </select>
-                <span class="admin-field__hint">الكورسات المنفردة · البرامج الاحترافية · الكورس الشامل</span>
-              </label>
-              <label class="admin-field admin-field--full">
                 <span class="admin-field__label">عنوان الكورس</span>
                 <input class="admin-field__input" type="text" id="courseEditorName" required />
               </label>
@@ -533,17 +526,56 @@
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">سعر الكورس</span>
-                <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorPrice" placeholder="0 = مجاناً" />
+                <input
+                  class="admin-field__input admin-field__input--price"
+                  type="text"
+                  inputmode="numeric"
+                  id="courseEditorPrice"
+                  placeholder="مثال: 150,000"
+                  autocomplete="off"
+                />
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">العملة</span>
-                <input class="admin-field__input" type="text" id="courseEditorCurrency" value="ر.س" placeholder="ر.س" />
+                <select class="admin-field__input" id="course-currency" name="currency" required>
+                  <option value="IQD" selected>د.ع</option>
+                  <option value="USD">$</option>
+                </select>
               </label>
-              <label class="admin-field admin-field--full">
-                <span class="admin-field__label">باقة الوصول المطلوبة</span>
-                <select class="admin-field__input" id="courseEditorRequiredPlan"></select>
-                <span class="admin-field__hint">يربط الكورس بمستوى الباقة — يظهر على البطاقة ويتزامن مع قسم الأسعار</span>
-              </label>
+              <fieldset class="admin-field admin-field--full admin-field--fieldset">
+                <legend class="admin-field__label">المحاكيات المخصصة لهذا الكورس / الباقة</legend>
+                <div class="admin-simulator-checklist" id="courseEditorSimulators">
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="ftth-simulator" />
+                    <span>محاكي FTTH متكامل <code>ftth-simulator</code></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="otdr-simulator" />
+                    <span>محاكي OTDR افتراضي <code>otdr-simulator</code></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="power-meter" />
+                    <span>قياس القدرة البصرية <code>power-meter</code></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="fusion-splicer" />
+                    <span>مختبر Fusion Splicer <code>fusion-splicer</code></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="fiber-anatomy" />
+                    <span>تشريح الألياف 3D / 2D <code>fiber-anatomy</code></span>
+                  </label>
+                  <label>
+                    <input type="checkbox" name="courseSimulator" value="patch-panel-lab" />
+                    <span>محاكي FTTH Network &amp; Patch Panel <code>patch-panel-lab</code></span>
+                  </label>
+                </div>
+                <label class="admin-field--checkbox admin-field--generate-plan">
+                  <input type="checkbox" id="courseEditorGeneratePlan" checked disabled />
+                  <span>إنشاء باقة أسعار مطابقة باسم الكورس تلقائياً</span>
+                </label>
+                <span class="admin-field__hint">تُنشأ باقة باسم الكورس تلقائياً عند كل حفظ، وتشمل المحاكيات المحددة</span>
+              </fieldset>
               <label class="admin-field">
                 <span class="admin-field__label">المدة بالساعات</span>
                 <input class="admin-field__input" type="number" min="0" step="1" id="courseEditorHours" placeholder="مثال: 24" />
@@ -602,7 +634,7 @@
         </div>
         <div class="admin-plans-list" id="adminPlansList"></div>
         <div class="admin-panel__footer">
-          <p class="admin-panel__meta">التغييرات تُحفظ في <code>platform_plans</code> وتُحدَّث على الموقع تلقائياً.</p>
+          <p class="admin-panel__meta">التغييرات تُحفظ في <code>platform_plans</code> و<code>ifa_pricing_plans</code> وتُحدَّث على الموقع تلقائياً.</p>
         </div>
       </section>
 
@@ -626,7 +658,15 @@
                 </label>
                 <label class="admin-field">
                   <span class="admin-field__label">السعر</span>
-                  <input class="admin-field__input" type="number" min="0" step="1" id="planEditorPrice" required />
+                  <input
+                    class="admin-field__input admin-field__input--price"
+                    type="text"
+                    inputmode="numeric"
+                    id="planEditorPrice"
+                    placeholder="مثال: 150,000"
+                    autocomplete="off"
+                    required
+                  />
                 </label>
                 <label class="admin-field">
                   <span class="admin-field__label">العملة</span>
@@ -635,14 +675,6 @@
                 <label class="admin-field">
                   <span class="admin-field__label">دورة الفوترة</span>
                   <input class="admin-field__input" type="text" id="planEditorPeriod" placeholder="شهرياً / سنوياً / مجاناً للأبد" />
-                </label>
-                <label class="admin-field">
-                  <span class="admin-field__label">مستوى الوصول</span>
-                  <select class="admin-field__input" id="planEditorAccessLevel">
-                    <option value="free">مجاني — دروس أساسية</option>
-                    <option value="standard">قياسي — كورسات وبرامج</option>
-                    <option value="professional">احترافي — كامل المنصة</option>
-                  </select>
                 </label>
                 <label class="admin-field">
                   <span class="admin-field__label">نص زر الاشتراك</span>
@@ -671,6 +703,35 @@
                     <label><input type="checkbox" id="planCatMaster" /> الشامل</label>
                   </div>
                   <span class="admin-field__hint">تحدد أي أنواع كورسات تُفتح بهذه الباقة</span>
+                </fieldset>
+                <fieldset class="admin-field admin-field--full admin-field--fieldset">
+                  <legend class="admin-field__label">المحاكيات المخصصة لهذه الباقة</legend>
+                  <div class="admin-simulator-checklist" id="planEditorSimulators">
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="ftth-simulator" />
+                      <span>محاكي FTTH متكامل <code>ftth-simulator</code></span>
+                    </label>
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="otdr-simulator" />
+                      <span>محاكي OTDR افتراضي <code>otdr-simulator</code></span>
+                    </label>
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="power-meter" />
+                      <span>قياس القدرة البصرية <code>power-meter</code></span>
+                    </label>
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="fusion-splicer" />
+                      <span>مختبر Fusion Splicer <code>fusion-splicer</code></span>
+                    </label>
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="fiber-anatomy" />
+                      <span>تشريح الألياف 3D / 2D <code>fiber-anatomy</code></span>
+                    </label>
+                    <label>
+                      <input type="checkbox" name="planSimulator" value="patch-panel-lab" />
+                      <span>محاكي FTTH Network &amp; Patch Panel <code>patch-panel-lab</code></span>
+                    </label>
+                  </div>
                 </fieldset>
                 <label class="admin-field admin-field--full">
                   <span class="admin-field__label">المميزات (سطر لكل ميزة)</span>
@@ -707,6 +768,7 @@
   </div>
 
   <script src="js/env-access.js"></script>
+  <script src="js/platform-simulators.js"></script>
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>

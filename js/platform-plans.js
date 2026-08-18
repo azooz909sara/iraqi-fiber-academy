@@ -8,9 +8,19 @@
   'use strict';
 
   var PLANS_KEY = 'platform_plans';
+  var PLANS_ALIAS_KEY = 'ifa_pricing_plans';
   var SEED_FLAG_KEY = 'platform_plans_initialized';
   var SEED_VERSION_KEY = 'platform_plans_seed_version';
   var SEED_VERSION = '2';
+
+  var DEFAULT_SIMULATOR_IDS = [
+    'ftth-simulator',
+    'otdr-simulator',
+    'power-meter',
+    'fusion-splicer',
+    'fiber-anatomy',
+    'patch-panel-lab',
+  ];
 
   var ACCESS_LEVELS = {
     free: { key: 'free', rank: 0, label: 'مجاني' },
@@ -52,7 +62,31 @@
   }
 
   function writeJson(key, value) {
-    return storageSet(key, JSON.stringify(value));
+    var ok = storageSet(key, JSON.stringify(value));
+    if (key === PLANS_KEY) {
+      storageSet(PLANS_ALIAS_KEY, JSON.stringify(value));
+    }
+    return ok;
+  }
+
+  function normalizeSimulatorIds(list) {
+    if (global.PlatformSimulators && typeof global.PlatformSimulators.normalizeSimulatorIds === 'function') {
+      return global.PlatformSimulators.normalizeSimulatorIds(list);
+    }
+    if (!Array.isArray(list)) return [];
+    var allowed = {};
+    DEFAULT_SIMULATOR_IDS.forEach(function (id) {
+      allowed[id] = true;
+    });
+    var out = [];
+    var seen = {};
+    list.forEach(function (item) {
+      var id = String(item || '').trim();
+      if (!allowed[id] || seen[id]) return;
+      seen[id] = true;
+      out.push(id);
+    });
+    return out;
   }
 
   function normalizeAccessLevel(value) {
@@ -101,6 +135,49 @@
       .filter(Boolean);
   }
 
+  function normalizeCurrency(value) {
+    if (global.PlatformCourses && typeof global.PlatformCourses.normalizeCurrency === 'function') {
+      return global.PlatformCourses.normalizeCurrency(value);
+    }
+    var raw = String(value || '').trim();
+    var key = raw.toUpperCase();
+    if (key === 'USD' || key === '$' || key === 'DOLLAR' || raw === 'دولار') return 'USD';
+    return 'IQD';
+  }
+
+  function currencyLabel(code) {
+    if (global.PlatformCourses && typeof global.PlatformCourses.currencyLabel === 'function') {
+      return global.PlatformCourses.currencyLabel(code);
+    }
+    return normalizeCurrency(code) === 'USD' ? '$' : 'د.ع';
+  }
+
+  function parsePrice(val) {
+    if (global.PlatformCourses && typeof global.PlatformCourses.parsePrice === 'function') {
+      return global.PlatformCourses.parsePrice(val);
+    }
+    if (typeof val === 'number' && isFinite(val)) return val < 0 ? 0 : val;
+    var clean = String(val == null ? '' : val)
+      .replace(/,/g, '')
+      .replace(/٬/g, '')
+      .replace(/،/g, '')
+      .replace(/\s/g, '')
+      .trim();
+    if (!clean) return 0;
+    var n = Number(clean);
+    if (!isFinite(n) || n < 0) return 0;
+    return n;
+  }
+
+  function formatGroupedAmount(val) {
+    if (global.PlatformCourses && typeof global.PlatformCourses.formatGroupedAmount === 'function') {
+      return global.PlatformCourses.formatGroupedAmount(val);
+    }
+    var n = parsePrice(val);
+    if (!n) return '0';
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
   function defaultCategoriesForLevel(level) {
     var key = normalizeAccessLevel(level);
     if (key === 'free') return ['individual'];
@@ -110,8 +187,7 @@
 
   function normalizePlan(raw) {
     if (!raw || typeof raw !== 'object') return null;
-    var price = Number(raw.price);
-    if (!isFinite(price) || price < 0) price = 0;
+    var price = parsePrice(raw.price);
     var accessLevel = normalizeAccessLevel(
       raw.accessLevel || raw.tier || (raw.id === 'plan_free' ? 'free' : raw.id === 'plan_pro' ? 'professional' : '')
     );
@@ -123,7 +199,7 @@
       name: String(raw.name || '').trim(),
       description: String(raw.description || '').trim(),
       price: price,
-      currency: String(raw.currency || 'ر.س').trim() || 'ر.س',
+      currency: normalizeCurrency(raw.currency),
       period: String(raw.period || '').trim(),
       ctaLabel: String(raw.ctaLabel || 'اشترك الآن').trim() || 'اشترك الآن',
       ctaStyle: raw.ctaStyle === 'primary' ? 'primary' : 'outline',
@@ -134,6 +210,8 @@
       accessRank: meta.rank,
       courseCategories: categories,
       sortOrder: isFinite(Number(raw.sortOrder)) ? Number(raw.sortOrder) : 0,
+      allowedSimulators: normalizeSimulatorIds(raw.allowedSimulators),
+      sourceCourseId: String(raw.sourceCourseId || '').trim(),
       updatedAt: raw.updatedAt || new Date().toISOString(),
       createdAt: raw.createdAt || new Date().toISOString(),
     };
@@ -146,7 +224,7 @@
         name: 'المجانية',
         description: 'للمبتدئين والتجربة الأولى',
         price: 0,
-        currency: 'ر.س',
+        currency: 'IQD',
         period: 'مجاناً للأبد',
         ctaLabel: 'ابدأ مجاناً',
         ctaStyle: 'outline',
@@ -154,6 +232,7 @@
         accessLevel: 'free',
         courseCategories: ['individual'],
         sortOrder: 0,
+        allowedSimulators: [],
         features: [
           { text: 'الوصول للدروس الأساسية', included: true },
           { text: '3 سيناريوهات محاكاة', included: true },
@@ -167,7 +246,7 @@
         name: 'القياسية',
         description: 'للفنيين والمهتمين بالتخصص',
         price: 149,
-        currency: 'ر.س',
+        currency: 'IQD',
         period: 'شهرياً',
         ctaLabel: 'اشترك الآن',
         ctaStyle: 'primary',
@@ -176,6 +255,7 @@
         accessLevel: 'standard',
         courseCategories: ['individual', 'program'],
         sortOrder: 1,
+        allowedSimulators: ['ftth-simulator', 'otdr-simulator', 'power-meter'],
         features: [
           { text: 'كل مميزات المجانية', included: true },
           { text: 'محاكي FTTH كامل', included: true },
@@ -189,7 +269,7 @@
         name: 'الاحترافية',
         description: 'للمهندسين ومديري المشاريع',
         price: 349,
-        currency: 'ر.س',
+        currency: 'IQD',
         period: 'شهرياً',
         ctaLabel: 'اشترك الآن',
         ctaStyle: 'outline',
@@ -197,6 +277,14 @@
         accessLevel: 'professional',
         courseCategories: ['individual', 'program', 'master'],
         sortOrder: 2,
+        allowedSimulators: [
+          'ftth-simulator',
+          'otdr-simulator',
+          'power-meter',
+          'fusion-splicer',
+          'fiber-anatomy',
+          'patch-panel-lab',
+        ],
         features: [
           { text: 'كل مميزات القياسية', included: true },
           { text: 'جميع المحاكيات المتقدمة', included: true },
@@ -216,6 +304,10 @@
     var initialized = storageGet(SEED_FLAG_KEY) === '1';
     var version = storageGet(SEED_VERSION_KEY);
     var current = readJson(PLANS_KEY, null);
+    if (!Array.isArray(current) || !current.length) {
+      var alias = readJson(PLANS_ALIAS_KEY, null);
+      if (Array.isArray(alias) && alias.length) current = alias;
+    }
 
     // First visit only — never re-seed after the admin clears the list.
     if (!initialized && (!Array.isArray(current) || !current.length)) {
@@ -353,10 +445,9 @@
 
   function formatPrice(plan) {
     if (!plan) return '—';
-    var amount = Number(plan.price) || 0;
-    var currency = plan.currency || 'ر.س';
-    if (amount === 0) return 'مجاناً';
-    return amount + ' ' + currency;
+    var amount = parsePrice(plan.price);
+    if (!amount) return 'مجاناً';
+    return formatGroupedAmount(amount) + ' ' + currencyLabel(plan.currency);
   }
 
   function planUnlocksCategory(plan, category) {
@@ -390,10 +481,84 @@
     ];
   }
 
+  function simulatorFeatureLines(ids) {
+    var labels =
+      global.PlatformSimulators && typeof global.PlatformSimulators.simulatorLabels === 'function'
+        ? global.PlatformSimulators.simulatorLabels(ids)
+        : normalizeSimulatorIds(ids);
+    return labels.map(function (text) {
+      return { text: 'محاكي: ' + text, included: true };
+    });
+  }
+
+  function findPlanBySourceCourse(courseId) {
+    var key = String(courseId || '');
+    if (!key) return null;
+    var list = getPlans();
+    for (var i = 0; i < list.length; i++) {
+      if (String(list[i].sourceCourseId || '') === key) return list[i];
+    }
+    return null;
+  }
+
+  function upsertFromCourse(course, options) {
+    if (!course || !course.id) return null;
+    options = options || {};
+    var sims = normalizeSimulatorIds(course.allowedSimulators);
+    var generate = options.generateMatchingPlan === true;
+    var existing = findPlanBySourceCourse(course.id);
+    var linked = !existing && course.requiredPlanId ? findPlan(course.requiredPlanId) : existing;
+    var features = [{ text: 'الوصول لكورس ' + (course.title || ''), included: true }].concat(
+      simulatorFeatureLines(sims)
+    );
+
+    if (generate) {
+      if (existing && String(existing.sourceCourseId || '') === String(course.id)) {
+        return updatePlan(existing.id, {
+          name: String(course.title || '').trim() || existing.name,
+          description: String(course.description || '').trim() || existing.description,
+          price: parsePrice(course.price),
+          currency: normalizeCurrency(course.currency || existing.currency),
+          period: existing.period || 'لكامل الكورس',
+          accessLevel: course.accessLevel || existing.accessLevel || 'standard',
+          courseCategories: course.category ? [course.category] : existing.courseCategories || ['individual'],
+          allowedSimulators: sims,
+          sourceCourseId: course.id,
+          features: features,
+        });
+      }
+      return addPlan({
+        name: String(course.title || '').trim() || 'باقة الكورس',
+        description: String(course.description || '').trim() || 'باقة وصول مطابقة للكورس',
+        price: parsePrice(course.price),
+        currency: normalizeCurrency(course.currency),
+        period: 'لكامل الكورس',
+        accessLevel: course.accessLevel || 'standard',
+        courseCategories: course.category ? [course.category] : ['individual'],
+        ctaLabel: 'اشترك الآن',
+        ctaStyle: 'primary',
+        featured: false,
+        features: features,
+        allowedSimulators: sims,
+        sourceCourseId: course.id,
+      });
+    }
+
+    if (linked) {
+      var linkedPatch = { allowedSimulators: sims };
+      if (String(linked.sourceCourseId || '') === String(course.id)) {
+        linkedPatch.sourceCourseId = course.id;
+      }
+      return updatePlan(linked.id, linkedPatch);
+    }
+    return null;
+  }
+
   ensureSeeded();
 
   global.PlatformPlans = {
     PLANS_KEY: PLANS_KEY,
+    PLANS_ALIAS_KEY: PLANS_ALIAS_KEY,
     getPlans: getPlans,
     savePlans: savePlans,
     findPlan: findPlan,
@@ -402,12 +567,19 @@
     updatePlan: updatePlan,
     deletePlan: deletePlan,
     formatPrice: formatPrice,
+    parsePrice: parsePrice,
+    formatGroupedAmount: formatGroupedAmount,
     normalizePlan: normalizePlan,
+    normalizeCurrency: normalizeCurrency,
+    currencyLabel: currencyLabel,
     normalizeAccessLevel: normalizeAccessLevel,
     getAccessMeta: getAccessMeta,
     getAccessLevels: getAccessLevels,
     planUnlocksCategory: planUnlocksCategory,
     courseMatchesPlan: courseMatchesPlan,
     countCoursesForPlan: countCoursesForPlan,
+    normalizeSimulatorIds: normalizeSimulatorIds,
+    findPlanBySourceCourse: findPlanBySourceCourse,
+    upsertFromCourse: upsertFromCourse,
   };
 })(typeof window !== 'undefined' ? window : this);

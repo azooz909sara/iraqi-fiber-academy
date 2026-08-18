@@ -287,33 +287,55 @@
           <h2 class="section__title">المحاكيات</h2>
           <p class="section__subtitle">أدوات محاكاة متقدمة مصممة خصيصاً لفنيي ومهندسي الألياف الضوئية</p>
         </div>
-        <div class="features__grid">
-          <a href="simulator.html" class="feature-card feature-card--link fade-in" aria-label="فتح محاكي FTTH">
+        <div class="features__grid" id="publicSimulatorsGrid">
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="ftth-simulator" data-simulator-href="simulator.html">
             <div class="feature-card__icon">🌐</div>
             <h3 class="feature-card__title">محاكي FTTH متكامل</h3>
             <p class="feature-card__desc">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
-            <span class="feature-card__tag">FTTH Simulator →</span>
-          </a>
-          <article class="feature-card fade-in"><div class="feature-card__icon">📊</div><h3 class="feature-card__title">محاكي OTDR افتراضي</h3><p class="feature-card__desc">تعلّم قراءة وتحليل منحنيات الانعكاس البصري (OTDR) وتحديد مواقع الأعطال بدقة دون معدات حقيقية.</p><span class="feature-card__tag">OTDR Simulator</span></article>
-          <a href="power-meter.html" class="feature-card feature-card--link feature-card--power-meter fade-in" aria-label="فتح مدرّب قياس القدرة البصرية وورشة الربط">
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="otdr-simulator" data-simulator-href="">
+            <div class="feature-card__icon">📊</div>
+            <h3 class="feature-card__title">محاكي OTDR افتراضي</h3>
+            <p class="feature-card__desc">تعلّم قراءة وتحليل منحنيات الانعكاس البصري (OTDR) وتحديد مواقع الأعطال بدقة دون معدات حقيقية.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
+          <article class="feature-card feature-card--power-meter fade-in" data-simulator-card data-simulator-id="power-meter" data-simulator-href="power-meter.html">
             <div class="feature-card__icon">⚡</div>
             <h3 class="feature-card__title">قياس القدرة البصرية</h3>
             <p class="feature-card__desc">مدرّب OPM احترافي: أطوال موجية 1310/1490/1550، تحويل dBm↔mW، مرجع الخسارة، ومؤشرات Pass/Warning/Fail وفق GPON و EPON — مع ورشة ربط مصغّرة (Patch Cord · Pigtail · Splitter) لاختبار المسارات مباشرة بجانب جهاز القياس.</p>
-            <span class="feature-card__tag">افتح Power Meter Trainer →</span>
-          </a>
-          <article class="feature-card fade-in"><div class="feature-card__icon">🔬</div><h3 class="feature-card__title">مختبر Fusion Splicer</h3><p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p><span class="feature-card__tag">Splicing Lab</span></article>
-          <a href="fiber-3d-simulator.html" class="feature-card feature-card--link fade-in" data-anatomy-simulator-card aria-label="فتح محاكي التشريح التفاعلي ثلاثي الأبعاد للألياف الضوئية">
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fusion-splicer" data-simulator-href="">
+            <div class="feature-card__icon">🔬</div>
+            <h3 class="feature-card__title">مختبر Fusion Splicer</h3>
+            <p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fiber-anatomy" data-simulator-href="fiber-3d-simulator.html" data-anatomy-simulator-card>
             <div class="feature-card__icon">🧬</div>
             <h3 class="feature-card__title">Fiber Optics 3D / 2D Interactive Anatomy</h3>
             <p class="feature-card__desc">شرّح كابلات Last Mile وFTTH حتى 288F: الغلاف → الأنابيب → 6 أو 12 ليف لكل أنبوب، مع تمييز 48F Last Mile و48F Feeder، وعلامات الشريط الأوسط لأنابيب T13–T24 في كابل 288F.</p>
-            <span class="feature-card__tag">3D / 2D Anatomy →</span>
-          </a>
-          <a href="ftth-lab.html" class="feature-card feature-card--link fade-in" data-ftth-lab-card aria-label="فتح مختبر شبكة FTTH ولوحة التوصيل">
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="patch-panel-lab" data-simulator-href="ftth-lab.html" data-ftth-lab-card>
             <div class="feature-card__icon">🔌</div>
             <h3 class="feature-card__title">FTTH Network &amp; Patch Panel Lab</h3>
             <p class="feature-card__desc">مختبر FTTH: مقسمات PLC، أسلاك Patch Cord بطرفي A وB بنفس منطق السحب اليدوي (بدون تتبع تلقائي)، يُحفظ المسار عند الإطباق (SC/APC أخضر · SC/PC أزرق)، مع تنبيه عدم التوافق وخصم خسارة إضافي دون حظر التوصيل.</p>
-            <span class="feature-card__tag">Patch Panel Lab →</span>
-          </a>
+            <div class="feature-card__access" data-simulator-access>
+              <span class="feature-card__lock-badge">مغلق - يتطلب الاشتراك في كورس مناسب</span>
+            </div>
+          </article>
         </div>
       </div>
     </section>
@@ -547,6 +569,7 @@
   </div>
 
   <script src="js/env-access.js"></script>
+  <script src="js/platform-simulators.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
@@ -770,10 +793,15 @@
         }
       }
       if (!isAdminPreviewContext()) return;
-      var card = document.querySelector('[data-anatomy-simulator-card]');
-      if (card) card.setAttribute('href', 'fiber-3d-simulator.html?mode=admin-preview');
+      var anatomy = document.querySelector('[data-anatomy-simulator-card]');
+      if (anatomy) anatomy.setAttribute('data-simulator-href', 'fiber-3d-simulator.html?mode=admin-preview');
       var labCard = document.querySelector('[data-ftth-lab-card]');
-      if (labCard) labCard.setAttribute('href', 'ftth-lab.html?mode=admin-preview');
+      if (labCard) labCard.setAttribute('data-simulator-href', 'ftth-lab.html?mode=admin-preview');
+      var ftth = document.querySelector('[data-simulator-id="ftth-simulator"]');
+      if (ftth) ftth.setAttribute('data-simulator-href', 'simulator.html?mode=admin-preview');
+      if (window.PlatformSimulators && typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function') {
+        window.PlatformSimulators.applyPublicSimulatorGates();
+      }
     })();
   </script>
   <script src="js/navigation.js"></script>

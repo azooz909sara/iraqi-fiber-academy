@@ -83,6 +83,47 @@
     return VALID_CATEGORY[c] ? c : 'individual';
   }
 
+  function normalizeCurrency(value) {
+    var raw = String(value || '').trim();
+    var key = raw.toUpperCase();
+    if (key === 'USD' || key === '$' || key === 'DOLLAR' || raw === 'دولار') return 'USD';
+    if (
+      key === 'IQD' ||
+      raw === 'د.ع' ||
+      raw === 'د.ع.' ||
+      key === 'IQD' ||
+      raw === 'ر.س' ||
+      key === 'SAR'
+    ) {
+      return 'IQD';
+    }
+    return 'IQD';
+  }
+
+  function currencyLabel(code) {
+    return normalizeCurrency(code) === 'USD' ? '$' : 'د.ع';
+  }
+
+  function parsePrice(val) {
+    if (typeof val === 'number' && isFinite(val)) return val < 0 ? 0 : val;
+    var clean = String(val == null ? '' : val)
+      .replace(/,/g, '')
+      .replace(/٬/g, '')
+      .replace(/،/g, '')
+      .replace(/\s/g, '')
+      .trim();
+    if (!clean) return 0;
+    var n = Number(clean);
+    if (!isFinite(n) || n < 0) return 0;
+    return n;
+  }
+
+  function formatGroupedAmount(val) {
+    var n = parsePrice(val);
+    if (!n) return '0';
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
   function isAcademyAssignment(email, name) {
     var key = normalizeEmail(email);
     if (!key) return true;
@@ -356,12 +397,8 @@
       isAcademy: academy,
       durationHours: Number(raw.durationHours) || 0,
       durationWeeks: Number(raw.durationWeeks) || 0,
-      price: (function () {
-        var p = Number(raw.price);
-        if (!isFinite(p) || p < 0) return 0;
-        return p;
-      })(),
-      currency: String(raw.currency || 'ر.س').trim() || 'ر.س',
+      price: parsePrice(raw.price),
+      currency: normalizeCurrency(raw.currency),
       requiredPlanId: String(raw.requiredPlanId || raw.planId || '').trim(),
       accessLevel: (function () {
         var level = String(raw.accessLevel || raw.requiredAccessLevel || '').trim().toLowerCase();
@@ -380,6 +417,20 @@
         return 'free';
       })(),
       weeklySchedule: String(raw.weeklySchedule || '').trim(),
+      allowedSimulators: (function () {
+        if (global.PlatformSimulators && typeof global.PlatformSimulators.normalizeSimulatorIds === 'function') {
+          return global.PlatformSimulators.normalizeSimulatorIds(raw.allowedSimulators);
+        }
+        if (global.PlatformPlans && typeof global.PlatformPlans.normalizeSimulatorIds === 'function') {
+          return global.PlatformPlans.normalizeSimulatorIds(raw.allowedSimulators);
+        }
+        return Array.isArray(raw.allowedSimulators)
+          ? raw.allowedSimulators.map(function (id) {
+              return String(id || '').trim();
+            }).filter(Boolean)
+          : [];
+      })(),
+      autoPricingPlan: !!raw.autoPricingPlan,
       lessons: normalizeLessons(raw.lessons),
       enrolledCount: Number(raw.enrolledCount) || 0,
       views: Number(raw.views) || 0,
@@ -648,10 +699,9 @@
 
   function formatPrice(course) {
     if (!course) return '—';
-    var amount = Number(course.price);
-    if (!isFinite(amount) || amount <= 0) return 'مجاناً';
-    var currency = course.currency || 'ر.س';
-    return amount + ' ' + currency;
+    var amount = parsePrice(course.price);
+    if (!amount) return 'مجاناً';
+    return formatGroupedAmount(amount) + ' ' + currencyLabel(course.currency);
   }
 
   function resolveCoursePlan(course) {
@@ -725,6 +775,12 @@
       instructorName: instructorName,
       durationHours: payload && payload.durationHours,
       durationWeeks: payload && payload.durationWeeks,
+      price: payload && payload.price,
+      currency: payload && payload.currency,
+      requiredPlanId: payload && payload.requiredPlanId,
+      accessLevel: payload && payload.accessLevel,
+      allowedSimulators: payload && payload.allowedSimulators,
+      autoPricingPlan: payload && payload.autoPricingPlan,
       weeklySchedule: payload && payload.weeklySchedule,
       lessons: payload && payload.lessons,
       enrolledCount: payload && payload.enrolledCount,
@@ -864,6 +920,10 @@
     sortByDisplayOrder: sortByDisplayOrder,
     formatDuration: formatDuration,
     formatPrice: formatPrice,
+    parsePrice: parsePrice,
+    formatGroupedAmount: formatGroupedAmount,
+    normalizeCurrency: normalizeCurrency,
+    currencyLabel: currencyLabel,
     resolveCoursePlan: resolveCoursePlan,
     formatCourseAccessLabel: formatCourseAccessLabel,
     getPublishedCount: getPublishedCount,

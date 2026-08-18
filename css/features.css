@@ -81,10 +81,62 @@
   border-radius: 6px;
 }
 
-.feature-card--power-meter:hover .feature-card__tag {
-  background: linear-gradient(135deg, #86efac, #7dd3fc);
+.feature-card__access {
+  margin-top: 1.15rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.feature-card__open-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.45rem 0.95rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
   color: #0b1220;
-  filter: brightness(1.05);
+  background: linear-gradient(135deg, var(--color-accent-cyan, #00e5ff), #38bdf8);
+  text-decoration: none;
+  transition: filter var(--transition-fast), transform var(--transition-fast);
+}
+
+.feature-card__open-btn:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.feature-card__open-btn--soon {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.feature-card__lock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.45;
+  color: #fecaca;
+  background: rgba(185, 28, 28, 0.18);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.feature-card--locked {
+  opacity: 0.92;
+}
+
+.feature-card--locked::before {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
+.feature-card--power-meter .feature-card__open-btn {
+  background: linear-gradient(135deg, #4ade80, #38bdf8);
 }
 
 .card-admin-settings-btn {

@@ -105,7 +105,9 @@
     }
     var amount = Number(course && course.price);
     if (!isFinite(amount) || amount <= 0) return 'مجاناً';
-    return amount + ' ' + ((course && course.currency) || 'ر.س');
+    var label =
+      course && (course.currency === 'USD' || course.currency === '$') ? '$' : 'د.ع';
+    return amount + ' ' + label;
   }
 
   function accessPlanLabel(course) {
