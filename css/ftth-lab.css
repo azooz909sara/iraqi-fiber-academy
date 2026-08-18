@@ -5254,3 +5254,79 @@ body.lab-pcord-winding .lab-pcord-fiber-hit {
   }
 }
 
+.lab-settings-cms__device {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 0.65rem;
+  background: rgba(15, 23, 42, 0.35);
+  overflow: hidden;
+}
+
+.lab-settings-cms__device + .lab-settings-cms__device {
+  margin-top: 0.65rem;
+}
+
+.lab-settings-cms__row--head {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin-top: 0;
+}
+
+.lab-settings-cms__fields {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0 0.75rem 0.85rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+}
+
+.lab-settings-cms__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  font-size: 0.68rem;
+  color: var(--lab-muted);
+  font-weight: 600;
+}
+
+.lab-settings-cms__field input,
+.lab-settings-cms__field textarea {
+  padding: 0.42rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 0.4rem;
+  background: rgba(2, 6, 23, 0.65);
+  color: var(--lab-text);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.lab-settings-cms__field textarea {
+  resize: vertical;
+  min-height: 2.6rem;
+}
+
+.lab-settings-cms__specs {
+  padding-top: 0.35rem;
+  border-top: 1px dashed rgba(148, 163, 184, 0.15);
+}
+
+.lab-settings-cms__specs-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--lab-cyan);
+}
+
+.lab-settings-cms__loss-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  gap: 0.45rem;
+}
+
+.lab-settings-cms__field--inline span {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+

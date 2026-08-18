@@ -1058,10 +1058,11 @@
     var glow = collectLaserTargets();
     var pathCount = (glow.pcords || []).length + (glow.pigtails || []).length;
     var laserOn = mode !== 'OFF';
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('vfl')) || {};
 
     card.innerHTML =
-      '<h2>Visual Fault Locator</h2>' +
-      '<p>10 mW · 650 nm · plug SC Patch Cord or Pigtail into the open central adapter.</p>';
+      '<h2>' + (meta.label || 'Visual Fault Locator') + '</h2>' +
+      '<p>' + (meta.guideText || '10 mW · 650 nm · plug SC Patch Cord or Pigtail into the open central adapter.') + '</p>';
 
     if (!detail) return;
     detail.hidden = false;
@@ -1202,6 +1203,10 @@
     clearSelection: clearSelection,
     cancelPatch: cancelPatch,
     onToolboxClaim: onToolboxClaim,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

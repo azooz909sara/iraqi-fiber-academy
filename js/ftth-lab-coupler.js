@@ -535,9 +535,10 @@
     }
 
     var isApc = normalizePolish(c.polish) === 'APC';
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('coupler')) || {};
     card.innerHTML =
-      '<h2>SC/APC Coupler</h2>' +
-      '<p>Dual-port mating sleeve · plug a patch cord into Port 1 and Port 2 to bridge the link.</p>';
+      '<h2>' + (meta.label || 'SC/APC Coupler') + '</h2>' +
+      '<p>' + (meta.guideText || 'Dual-port mating sleeve · plug a patch cord into Port 1 and Port 2 to bridge the link.') + '</p>';
 
     if (!detail) return;
     detail.hidden = false;
@@ -701,6 +702,10 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     getNetworkLossDb: getCouplerLossDb,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

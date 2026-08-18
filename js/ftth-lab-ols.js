@@ -21,9 +21,38 @@
     auto: -6,
     multi: -6,
   };
-  var TX_PRESETS = [3, 0, -3, -6];
+  var TX_PRESETS_DEFAULT = [-3, -6];
   var DEFAULT_TX_DBM = -3;
   var TOOL_CATEGORY = 'TEST EQUIPMENT';
+
+  function getToolMeta() {
+    if (global.FtthLab && typeof FtthLab.getToolMeta === 'function') {
+      return FtthLab.getToolMeta('ols');
+    }
+    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
+      return FtthLabSettings.getItem('ols');
+    }
+    return null;
+  }
+
+  function getTxPresets() {
+    var meta = getToolMeta();
+    if (meta && meta.specs && Array.isArray(meta.specs.txLevels) && meta.specs.txLevels.length) {
+      return meta.specs.txLevels.slice();
+    }
+    return TX_PRESETS_DEFAULT.slice();
+  }
+
+  function getDefaultTxDbm() {
+    var presets = getTxPresets();
+    var meta = getToolMeta();
+    if (meta && meta.specs && meta.specs.defaultTxDbm != null) {
+      var d = Number(meta.specs.defaultTxDbm);
+      if (presets.indexOf(d) >= 0) return d;
+    }
+    if (presets.indexOf(-3) >= 0) return -3;
+    return presets[0];
+  }
 
   var ctx = null;
   var layer = null;
@@ -110,7 +139,7 @@
   /** Launch power for the active MODE (Single −3 dBm · Auto/Multi −6 dBm). */
   function configuredDbm(d, wavelengthNm) {
     var preset = Number(d && d.txDbm);
-    if (TX_PRESETS.indexOf(preset) >= 0) return preset;
+    if (getTxPresets().indexOf(preset) >= 0) return preset;
     return modeTxDbm(normalizeDisplayMode(d));
   }
 
@@ -471,7 +500,7 @@
     var d = findDevice(id);
     if (!d) return;
     var n = Number(dbm);
-    if (TX_PRESETS.indexOf(n) < 0) return;
+    if (getTxPresets().indexOf(n) < 0) return;
     if (d.txDbm === n) return;
     d.txDbm = n;
     rebuildLayer();
@@ -715,14 +744,14 @@
       displayMode: 'single',
       autoLambda: false,
       docked: false,
-      txDbm: DEFAULT_TX_DBM,
+      txDbm: getDefaultTxDbm(),
     };
     devices.push(d);
     syncLinkedOpmWavelength(d.wavelength);
     selectOls(d.id);
     rebuildLayer();
     pushHistory();
-    setStatus('OLS-35 / OPL placed · Single · TX −3 dBm · dock SC fiber · laser ON');
+    setStatus('OLS-35 placed · Single · TX ' + formatCfgDbm(getDefaultTxDbm()) + ' · dock SC fiber · laser ON');
     return d;
   }
 
@@ -755,6 +784,9 @@
   function renderToolbox() {
     var host = document.getElementById('lab-ols-tree');
     if (!host) return;
+    var meta = getToolMeta() || {};
+    var title = meta.label || 'OLS-35';
+    var sub = meta.sublabel || 'Calibrated source · 1310 / 1550';
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
       '<button type="button" class="lab-tool lab-tool--ols' +
@@ -762,12 +794,15 @@
       '" draggable="true" data-lab-tool="ols" data-lab-category="' + TOOL_CATEGORY + '" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--ols" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>OLS-35 / OPL</strong>' +
-      '<span>Calibrated source · 1310 / 1550</span>' +
+      '<strong>' + title + '</strong>' +
+      '<span>' + sub + '</span>' +
       '</span>' +
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -840,7 +875,10 @@
     var cfg = configuredDbm(d);
     var pwr = outputDbm(d);
     var mode = normalizeDisplayMode(d);
-    var txBtns = TX_PRESETS.map(function (n) {
+    var meta = getToolMeta() || {};
+    var title = meta.label || 'OLS-35';
+    var guide = meta.guideText || 'Calibrated optical source · 1310 / 1550 nm · dock a patch cord, then enable laser.';
+    var txBtns = getTxPresets().map(function (n) {
       var lab = (n >= 0 ? '+' : '') + n + ' dBm';
       return (
         '<button type="button" class="lab-polish-btn' +
@@ -850,8 +888,8 @@
     }).join('');
     detail.innerHTML =
       '<div class="lab-inspector__card">' +
-      '<h2>OLS-35 / OPL</h2>' +
-      '<p>Calibrated optical source · 1310 / 1550 nm · dock a patch cord, then enable laser.</p>' +
+      '<h2>' + title + '</h2>' +
+      '<p>' + guide + '</p>' +
       '<p class="lab-inspector__label">TX level</p>' +
       '<div class="lab-polish-toggle" role="group" aria-label="Calibrated TX">' +
       txBtns +
@@ -1003,6 +1041,10 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     placeOls: placeOls,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

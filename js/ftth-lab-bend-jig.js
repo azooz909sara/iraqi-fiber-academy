@@ -545,9 +545,10 @@
     }
     var th = clampTheta(j.theta);
     var db = macroBendLossDb(th);
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('jig')) || {};
     card.innerHTML =
-      '<h2>Macro-Bend Tester</h2>' +
-      '<p>Fixed base guide + articulated arm. Snap a patch cord through the slot, then set θ.</p>';
+      '<h2>' + (meta.label || 'Macro-Bend Tester') + '</h2>' +
+      '<p>' + (meta.guideText || 'Fixed base guide + articulated arm. Snap a patch cord through the slot, then set θ.') + '</p>';
     if (!detail) return;
     detail.hidden = false;
     detail.innerHTML =
@@ -652,6 +653,10 @@
     onToolboxClaim: onToolboxClaim,
     placeJig: placeJig,
     updateInspector: updateInspector,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

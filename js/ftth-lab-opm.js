@@ -762,6 +762,7 @@
   function renderToolbox() {
     var host = document.getElementById('lab-opm-tree');
     if (!host) return;
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('opm')) || {};
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
       '<button type="button" class="lab-tool lab-tool--opm' +
@@ -769,12 +770,15 @@
       '" draggable="true" data-lab-tool="opm" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--opm" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>Viavi OLP-38</strong>' +
-      '<span>SC dock · live dBm</span>' +
+      '<strong>' + (meta.label || 'Viavi OLP-38') + '</strong>' +
+      '<span>' + (meta.sublabel || 'SC dock · live dBm') + '</span>' +
       '</span>' +
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -972,11 +976,14 @@
     card.dataset.opmInspector = '1';
     card.hidden = true;
     detail.hidden = false;
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('opm')) || {};
+    var title = meta.label || 'Viavi OLP-38';
+    var guide = meta.guideText || 'Dock an <strong>SC</strong> Patch Cord or Pigtail into the metal adapter on top.';
     var r = d.lastReading;
     detail.innerHTML =
       '<div class="lab-inspector__card">' +
-      '<h2>Viavi OLP-38</h2>' +
-      '<p>Dock an <strong>SC</strong> Patch Cord or Pigtail into the metal adapter on top.</p>' +
+      '<h2>' + title + '</h2>' +
+      '<p>' + guide + '</p>' +
       '<div class="lab-spl-sheet">' +
       '<div><span>Dock</span><strong>' + (d.docked ? 'Occupied' : 'Open') + '</strong></div>' +
       '<div><span>Reading</span><strong>' +
@@ -1122,6 +1129,10 @@
     onToolboxClaim: onToolboxClaim,
     placeOpm: placeOpm,
     refreshDockReadings: refreshDockReadings,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

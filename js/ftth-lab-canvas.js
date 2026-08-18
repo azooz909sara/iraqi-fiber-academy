@@ -798,6 +798,10 @@
     onToolboxClaim: onToolboxClaim,
     placeSpool: placeSpool,
     updateInspector: updateInspector,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

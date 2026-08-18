@@ -5732,6 +5732,10 @@
     applyLaserGlow: applyLaserGlow,
     translateForVfl: translateForVfl,
     detachPcordsFromOltPort: detachPcordsFromOltPort,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+    },
   };
 
   function tryRegister() {

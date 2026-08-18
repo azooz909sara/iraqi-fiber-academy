@@ -602,9 +602,25 @@
   }
 
   function applyFtthLabToolboxIcons() {
+    if (global.FtthLabSettings && typeof FtthLabSettings.applyToolboxPresentation === 'function') {
+      FtthLabSettings.applyToolboxPresentation();
+      return;
+    }
     if (global.FtthLabSettings && typeof FtthLabSettings.applyToolboxIcons === 'function') {
       FtthLabSettings.applyToolboxIcons();
     }
+  }
+
+  function getToolMeta(toolKey) {
+    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
+      return FtthLabSettings.getItem(toolKey);
+    }
+    return null;
+  }
+
+  function applyFtthLabConfig() {
+    applyFtthLabToolboxIcons();
+    notifyTools('onLabConfigChanged');
   }
 
   function watchToolboxForIconRefresh() {
@@ -691,8 +707,8 @@
     setTimeout(applyFtthLabToolboxIcons, 0);
     watchToolboxForIconRefresh();
     global.addEventListener('ifa:ftth-lab-config-saved', function () {
-      applyFtthLabToolboxIcons();
-      setStatus('Toolbox icons updated');
+      applyFtthLabConfig();
+      setStatus('Lab device settings updated');
     });
     setStatus('FTTH Lab ready · Ctrl+Z / Ctrl+Y · Del delete · Esc clear · scroll to zoom');
   }
@@ -1752,6 +1768,8 @@
     getToolboxCategory: getToolboxCategory,
     TOOLBOX_CATEGORIES: TOOLBOX_CATEGORIES,
     applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
+    applyFtthLabConfig: applyFtthLabConfig,
+    getToolMeta: getToolMeta,
     syncFtthLabAdminSettingsButton: syncFtthLabAdminSettingsButton,
     clearWorkspaceSelection: clearWorkspaceSelection,
     resetInspectorIdle: resetInspectorIdle,

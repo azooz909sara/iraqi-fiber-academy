@@ -1,5 +1,5 @@
 /**
- * Admin settings modal for FTTH Lab toolbox icons (admin preview only).
+ * Admin settings modal for FTTH Lab toolbox icons + device metadata (admin preview only).
  */
 (function () {
   'use strict';
@@ -14,6 +14,10 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value).replace(/'/g, '&#39;');
   }
 
   function store() { return window.FtthLabSettings; }
@@ -47,6 +51,42 @@
     if (redo) redo.disabled = !s.canRedo();
   }
 
+  function renderSpecsFields(item) {
+    var html = '';
+    if (item.toolKey === 'ols' || item.toolKey === 'sfp') {
+      var levels = (item.specs && item.specs.txLevels) ? item.specs.txLevels.join(', ') : '-3, -6';
+      var defTx = (item.specs && item.specs.defaultTxDbm != null) ? item.specs.defaultTxDbm : -3;
+      html +=
+        '<div class="lab-settings-cms__specs">' +
+          '<p class="lab-settings-cms__specs-title">TX output levels (dBm)</p>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Available levels (comma-separated)</span>' +
+            '<input type="text" value="' + escapeAttr(levels) + '" ' +
+              'data-lab-spec="txLevels" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Default TX level (dBm)</span>' +
+            '<input type="number" step="0.1" value="' + escapeAttr(String(defTx)) + '" ' +
+              'data-lab-spec="defaultTxDbm" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+          '</label>' +
+        '</div>';
+    }
+    if (item.toolKey === 'splitter') {
+      var losses = (item.specs && item.specs.losses) ? item.specs.losses : store().DEFAULT_SPLITTER_LOSSES;
+      html += '<div class="lab-settings-cms__specs"><p class="lab-settings-cms__specs-title">Nominal insertion loss (dB)</p><div class="lab-settings-cms__loss-grid">';
+      Object.keys(store().DEFAULT_SPLITTER_LOSSES).forEach(function (ratio) {
+        html +=
+          '<label class="lab-settings-cms__field lab-settings-cms__field--inline">' +
+            '<span>' + escapeHtml(ratio.replace('x', ':')) + '</span>' +
+            '<input type="number" step="0.1" min="0" value="' + escapeAttr(String(losses[ratio] != null ? losses[ratio] : '')) + '" ' +
+              'data-lab-spec-loss="' + escapeAttr(ratio) + '" data-tool-key="splitter">' +
+          '</label>';
+      });
+      html += '</div></div>';
+    }
+    return html;
+  }
+
   function renderBody() {
     var host = $('ftth-lab-settings-body');
     if (!host || !store()) return;
@@ -64,25 +104,46 @@
           previewStyle = ' style="background-image:url(\'' + item.icon.replace(/'/g, '%27') + '\');background-size:contain;background-repeat:no-repeat;background-position:center;background-color:transparent;border-color:rgba(148,163,184,0.25);"';
         }
         html +=
-          '<div class="lab-settings-cms__row" data-lab-icon-row="' + escapeHtml(item.toolKey) + '">' +
-            '<div class="lab-settings-cms__preview" aria-hidden="true">' +
-              '<span class="' + previewClass + ' lab-settings-cms__mark"' + previewStyle + '></span>' +
+          '<article class="lab-settings-cms__device" data-lab-device="' + escapeHtml(item.toolKey) + '">' +
+            '<div class="lab-settings-cms__row lab-settings-cms__row--head">' +
+              '<div class="lab-settings-cms__preview" aria-hidden="true">' +
+                '<span class="' + previewClass + ' lab-settings-cms__mark"' + previewStyle + '></span>' +
+              '</div>' +
+              '<div class="lab-settings-cms__meta">' +
+                '<strong>' + escapeHtml(item.label) + '</strong>' +
+                '<span>' + escapeHtml(item.sublabel) + '</span>' +
+              '</div>' +
+              '<div class="lab-settings-cms__actions">' +
+                '<label class="lab-settings-cms__upload">' +
+                  'Upload icon' +
+                  '<input type="file" accept="image/png, image/svg+xml, image/jpeg" ' +
+                    'data-lab-icon-upload="' + escapeHtml(item.toolKey) + '">' +
+                '</label>' +
+                '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" ' +
+                  'data-lab-icon-clear="' + escapeHtml(item.toolKey) + '"' +
+                  (item.icon ? '' : ' disabled') + '>Clear icon</button>' +
+              '</div>' +
             '</div>' +
-            '<div class="lab-settings-cms__meta">' +
-              '<strong>' + escapeHtml(item.label) + '</strong>' +
-              '<span>' + escapeHtml(item.sublabel) + '</span>' +
-            '</div>' +
-            '<div class="lab-settings-cms__actions">' +
-              '<label class="lab-settings-cms__upload">' +
-                'Upload icon' +
-                '<input type="file" accept="image/png, image/svg+xml, image/jpeg" ' +
-                  'data-lab-icon-upload="' + escapeHtml(item.toolKey) + '">' +
+            '<div class="lab-settings-cms__fields">' +
+              '<label class="lab-settings-cms__field">' +
+                '<span>Device title / name</span>' +
+                '<input type="text" value="' + escapeAttr(item.label) + '" ' +
+                  'data-lab-field="label" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
               '</label>' +
-              '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" ' +
-                'data-lab-icon-clear="' + escapeHtml(item.toolKey) + '"' +
-                (item.icon ? '' : ' disabled') + '>Clear</button>' +
+              '<label class="lab-settings-cms__field">' +
+                '<span>Subtitle (toolbox)</span>' +
+                '<input type="text" value="' + escapeAttr(item.sublabel) + '" ' +
+                  'data-lab-field="sublabel" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+              '</label>' +
+              '<label class="lab-settings-cms__field">' +
+                '<span>Description / guide (properties pane)</span>' +
+                '<textarea rows="2" data-lab-field="guideText" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+                  escapeHtml(item.guideText) +
+                '</textarea>' +
+              '</label>' +
+              renderSpecsFields(item) +
             '</div>' +
-          '</div>';
+          '</article>';
       });
       html += '</section>';
     });
@@ -105,7 +166,7 @@
         '<header class="lab-settings-cms__header">' +
           '<div>' +
             '<h2 id="ftth-lab-settings-title">إعدادات مختبر FTTH</h2>' +
-            '<p>Toolbox icons · saved in this browser (<code>ifa_ftth_lab_config</code>)</p>' +
+            '<p>Device names, specs, toolbox icons · <code>ifa_ftth_lab_config</code></p>' +
           '</div>' +
           '<div class="lab-settings-cms__toolbar">' +
             '<button type="button" class="lab-settings-cms__btn" id="ftth-lab-settings-undo" title="Ctrl+Z">Undo</button>' +
@@ -127,6 +188,36 @@
     syncToolbar();
   }
 
+  function commitField(toolKey, field, value) {
+    if (!store() || !toolKey || !field) return;
+    var patch = {};
+    patch[field] = value;
+    store().updateItem(toolKey, patch, true);
+  }
+
+  function commitSpecField(toolKey, specKey, value) {
+    if (!store() || !toolKey || !specKey) return;
+    var item = store().getDraft().items.filter(function (it) { return it.toolKey === toolKey; })[0];
+    if (!item) return;
+    var specs = Object.assign({}, item.specs || {});
+    if (specKey === 'txLevels') {
+      specs.txLevels = store().parseTxLevels(value);
+    } else if (specKey === 'defaultTxDbm') {
+      specs.defaultTxDbm = Number(value);
+    }
+    store().updateItem(toolKey, { specs: specs }, true);
+  }
+
+  function commitSplitterLoss(toolKey, ratio, value) {
+    if (!store() || toolKey !== 'splitter' || !ratio) return;
+    var item = store().getDraft().items.filter(function (it) { return it.toolKey === 'splitter'; })[0];
+    if (!item) return;
+    var losses = Object.assign({}, (item.specs && item.specs.losses) || store().DEFAULT_SPLITTER_LOSSES);
+    var n = Number(value);
+    if (isFinite(n)) losses[ratio] = n;
+    store().updateItem('splitter', { specs: { losses: losses } }, true);
+  }
+
   function bindModal(root) {
     root.querySelectorAll('[data-lab-settings-close]').forEach(function (el) {
       el.addEventListener('click', closeModal);
@@ -134,27 +225,63 @@
 
     root.addEventListener('change', function (e) {
       var input = e.target;
-      if (!input || !input.getAttribute || !input.getAttribute('data-lab-icon-upload')) return;
-      var toolKey = input.getAttribute('data-lab-icon-upload');
-      var file = input.files && input.files[0];
-      input.value = '';
-      if (!file || !store()) return;
-      var reader = new FileReader();
-      reader.onload = function () {
-        var data = String(reader.result || '');
-        if (data.indexOf('data:image') !== 0) {
-          setStatus('Please upload PNG, JPEG, or SVG.', true);
-          return;
-        }
-        if (data.length > store().MAX_ICON_CHARS) {
-          setStatus('Icon file is too large for browser storage.', true);
-          return;
-        }
-        store().setToolIcon(toolKey, data, true);
-        setStatus('Icon updated · Save Changes to persist.');
+      if (!input || !input.getAttribute) return;
+
+      if (input.getAttribute('data-lab-icon-upload')) {
+        var toolKey = input.getAttribute('data-lab-icon-upload');
+        var file = input.files && input.files[0];
+        input.value = '';
+        if (!file || !store()) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+          var data = String(reader.result || '');
+          if (data.indexOf('data:image') !== 0) {
+            setStatus('Please upload PNG, JPEG, or SVG.', true);
+            return;
+          }
+          if (data.length > store().MAX_ICON_CHARS) {
+            setStatus('Icon file is too large for browser storage.', true);
+            return;
+          }
+          store().setToolIcon(toolKey, data, true);
+          setStatus('Icon updated · Save Changes to persist.');
+          refresh();
+        };
+        reader.readAsDataURL(file);
+        return;
+      }
+
+      if (input.getAttribute('data-lab-field')) {
+        commitField(
+          input.getAttribute('data-tool-key'),
+          input.getAttribute('data-lab-field'),
+          input.value
+        );
+        setStatus('Updated · Save Changes to apply to workspace.');
         refresh();
-      };
-      reader.readAsDataURL(file);
+        return;
+      }
+
+      if (input.getAttribute('data-lab-spec')) {
+        commitSpecField(
+          input.getAttribute('data-tool-key'),
+          input.getAttribute('data-lab-spec'),
+          input.value
+        );
+        setStatus('Specs updated · Save Changes to apply.');
+        refresh();
+        return;
+      }
+
+      if (input.getAttribute('data-lab-spec-loss')) {
+        commitSplitterLoss(
+          input.getAttribute('data-tool-key'),
+          input.getAttribute('data-lab-spec-loss'),
+          input.value
+        );
+        setStatus('Splitter loss updated · Save Changes to apply.');
+        refresh();
+      }
     });
 
     root.addEventListener('click', function (e) {
@@ -179,7 +306,7 @@
       }
     });
     $('ftth-lab-settings-reset').addEventListener('click', function () {
-      if (window.confirm('Reset all FTTH Lab toolbox icons to factory defaults?')) {
+      if (window.confirm('Reset all FTTH Lab device settings to factory defaults?')) {
         store().resetToDefaults();
         setStatus('Draft reset to factory defaults. Click Save Changes to apply.');
         refresh();
@@ -187,7 +314,7 @@
     });
     $('ftth-lab-settings-save').addEventListener('click', function () {
       var ok = store().saveChanges();
-      setStatus(ok ? 'Saved · toolbox icons updated.' : 'Save failed (storage quota).', !ok);
+      setStatus(ok ? 'Saved · toolbox and properties updated.' : 'Save failed (storage quota).', !ok);
       syncToolbar();
     });
   }

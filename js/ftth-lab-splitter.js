@@ -114,9 +114,23 @@
     return p ? p.polish : 'UPC';
   }
 
+  function lossDbForType(type) {
+    var spec = SPLITTER_SPECS[type];
+    if (!spec) return 0;
+    if (global.FtthLab && typeof FtthLab.getToolMeta === 'function') {
+      var meta = FtthLab.getToolMeta('splitter');
+      if (meta && meta.specs && meta.specs.losses && meta.specs.losses[type] != null) {
+        var n = Number(meta.specs.losses[type]);
+        if (isFinite(n)) return n;
+      }
+    }
+    return spec.lossDb;
+  }
+
   function lossFor(s) {
     var spec = SPLITTER_SPECS[s.type];
-    return spec ? spec.lossDb : 0;
+    if (!spec) return 0;
+    return lossDbForType(s.type);
   }
 
   function cloneJson(value) {
@@ -669,6 +683,9 @@
   function renderToolbox() {
     var host = document.getElementById('lab-splitter-tree');
     if (!host) return;
+    var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('splitter')) || {};
+    var title = meta.label || 'Splitter';
+    var sub = meta.sublabel || 'Configure on workspace';
 
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -677,13 +694,16 @@
       '" draggable="true" data-lab-tool="splitter" role="listitem">' +
       '<span class="lab-tool__mark lab-tool__mark--splitter" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +
-      '<strong>Splitter</strong>' +
-      '<span>Configure on workspace</span>' +
+      '<strong>' + title + '</strong>' +
+      '<span>' + sub + '</span>' +
       '</span>' +
       '</button>' +
       '</div>';
 
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -1347,6 +1367,11 @@
     getNetworkLossDb: getNetworkLossDb,
     getLaserModels: getLaserModels,
     applySplitterLaserGlow: applySplitterLaserGlow,
+    onLabConfigChanged: function () {
+      renderToolbox();
+      updateInspector();
+      updateBudgetHud();
+    },
   };
 
   function tryRegister() {
