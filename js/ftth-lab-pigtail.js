@@ -1754,6 +1754,11 @@
       renderToolbox();
       updateInspector();
     },
+    exportProjectState: captureSnapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ pigtails: [], seq: 0 });
+    },
   };
 
   function tryRegister() {

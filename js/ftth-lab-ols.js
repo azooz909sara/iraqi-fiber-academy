@@ -977,6 +977,19 @@
     if (global.FtthLab && FtthLab.recordHistory) FtthLab.recordHistory();
   }
 
+  function exportProjectState() {
+    return JSON.parse(JSON.stringify({ devices: devices, seq: seq }));
+  }
+
+  function importProjectState(snap) {
+    devices = (snap && snap.devices) ? JSON.parse(JSON.stringify(snap.devices)) : [];
+    seq = (snap && snap.seq) || 0;
+    selection = { kind: 'none', id: null };
+    rebuildLayer();
+    updateInspector();
+    notifyOptical();
+  }
+
   function onLayoutChange(payload) {
     if (payload && payload.source === 'ols' && payload.live) return;
     devices.forEach(function (d) {
@@ -1084,6 +1097,11 @@
     onLabConfigChanged: function () {
       renderToolbox();
       updateInspector();
+    },
+    exportProjectState: exportProjectState,
+    importProjectState: importProjectState,
+    resetProjectState: function () {
+      importProjectState({ devices: [], seq: 0 });
     },
   };
 

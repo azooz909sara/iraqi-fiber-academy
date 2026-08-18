@@ -1372,6 +1372,11 @@
       updateInspector();
       updateBudgetHud();
     },
+    exportProjectState: captureSnapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ splitters: [], connections: [], seq: 0, connSeq: 0 });
+    },
   };
 
   function tryRegister() {

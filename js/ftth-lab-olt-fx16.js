@@ -1982,6 +1982,16 @@
       updateInspector();
       rebuildViews();
     },
+    exportProjectState: captureSnapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      resetAssembly();
+      rebuildViews();
+      updateInspector();
+      renderToolbox();
+      var hud = document.getElementById('lab-hud-mode');
+      if (hud) hud.textContent = '2D Layout · Empty Workspace';
+    },
   };
 
   function tryRegister() {

@@ -1678,6 +1678,108 @@
     } catch (err) { /* ignore */ }
   }
 
+  var currentProjectName = null;
+  var currentProjectId = null;
+  var TOOL_RESTORE_ORDER = [
+    'olt-fx16',
+    'smart-splitter',
+    'sc-coupler',
+    'fiber-spool',
+    'bend-jig',
+    'ols',
+    'opm',
+    'vfl',
+    'sc-pigtail',
+    'patch-cord',
+  ];
+
+  function cloneJson(value) {
+    try {
+      return JSON.parse(JSON.stringify(value == null ? null : value));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function serializeProjectState() {
+    var tools = {};
+    Object.keys(state.tools).forEach(function (id) {
+      var tool = state.tools[id];
+      if (tool && typeof tool.exportProjectState === 'function') {
+        try {
+          tools[id] = tool.exportProjectState();
+        } catch (err) {
+          console.warn('[FtthLab] exportProjectState failed:', id, err);
+        }
+      }
+    });
+    return {
+      version: 1,
+      kind: 'ifa-ftth-lab-project',
+      savedAt: new Date().toISOString(),
+      zoom2d: state.zoom2d,
+      pan2dX: state.pan2dX,
+      pan2dY: state.pan2dY,
+      tools: tools,
+    };
+  }
+
+  function resetAllToolWorkspaces() {
+    Object.keys(state.tools).forEach(function (id) {
+      var tool = state.tools[id];
+      if (tool && typeof tool.resetProjectState === 'function') {
+        try { tool.resetProjectState(); } catch (err) {
+          console.warn('[FtthLab] resetProjectState failed:', id, err);
+        }
+      }
+    });
+    if (global.FtthLab) global.FtthLab._patchPending = null;
+    notifyTools('cancelPatch');
+    notifyTools('clearSelection');
+    selectionOwner = null;
+    resetInspectorIdle();
+  }
+
+  function restoreProjectState(payload) {
+    if (!payload || typeof payload !== 'object') return false;
+    if (payload.kind && payload.kind !== 'ifa-ftth-lab-project') return false;
+    var toolsPayload = payload.tools && typeof payload.tools === 'object' ? payload.tools : {};
+    resetAllToolWorkspaces();
+    var seen = {};
+    TOOL_RESTORE_ORDER.forEach(function (id) {
+      seen[id] = true;
+      var tool = state.tools[id];
+      if (!tool || typeof tool.importProjectState !== 'function') return;
+      try { tool.importProjectState(cloneJson(toolsPayload[id]) || {}); } catch (err) {
+        console.warn('[FtthLab] importProjectState failed:', id, err);
+      }
+    });
+    Object.keys(toolsPayload).forEach(function (id) {
+      if (seen[id]) return;
+      var tool = state.tools[id];
+      if (!tool || typeof tool.importProjectState !== 'function') return;
+      try { tool.importProjectState(cloneJson(toolsPayload[id]) || {}); } catch (err2) {
+        console.warn('[FtthLab] importProjectState failed:', id, err2);
+      }
+    });
+    if (typeof payload.zoom2d === 'number') state.zoom2d = payload.zoom2d;
+    if (typeof payload.pan2dX === 'number') state.pan2dX = payload.pan2dX;
+    if (typeof payload.pan2dY === 'number') state.pan2dY = payload.pan2dY;
+    applyZoom2d();
+    notifyTools('onLayoutChange', { source: 'project-restore' });
+    return true;
+  }
+
+  function clearWorkspace() {
+    resetAllToolWorkspaces();
+    state.zoom2d = 1;
+    applyZoom2d();
+    currentProjectName = null;
+    currentProjectId = null;
+    notifyTools('onLayoutChange', { source: 'project-clear' });
+    setStatus('New empty project', true);
+  }
+
   var api = {
     registerTool: registerTool,
     setViewMode: setViewMode,
@@ -1837,6 +1939,13 @@
     applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
     applyFtthLabConfig: applyFtthLabConfig,
     getToolMeta: getToolMeta,
+    serializeProjectState: serializeProjectState,
+    restoreProjectState: restoreProjectState,
+    clearWorkspace: clearWorkspace,
+    getCurrentProjectName: function () { return currentProjectName; },
+    setCurrentProjectName: function (name) { currentProjectName = name || null; },
+    getCurrentProjectId: function () { return currentProjectId; },
+    setCurrentProjectId: function (id) { currentProjectId = id || null; },
     getPerformanceSpecs: getPerformanceSpecs,
     getSfpVariants: getSfpVariants,
     armDragOnlyToolboxTool: armDragOnlyToolboxTool,

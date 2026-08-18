@@ -706,6 +706,11 @@
       renderToolbox();
       updateInspector();
     },
+    exportProjectState: snapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ couplers: [], seq: 0, selection: { kind: 'none', couplerId: null } });
+    },
   };
 
   function tryRegister() {

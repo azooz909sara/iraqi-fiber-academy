@@ -802,6 +802,11 @@
       renderToolbox();
       updateInspector();
     },
+    exportProjectState: snapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ spools: [], seq: 0, selection: { kind: 'none', spoolId: null } });
+    },
   };
 
   function tryRegister() {

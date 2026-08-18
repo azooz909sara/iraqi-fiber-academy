@@ -5736,6 +5736,11 @@
       renderToolbox();
       updateInspector();
     },
+    exportProjectState: captureSnapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ cords: [], seq: 0 });
+    },
   };
 
   function tryRegister() {

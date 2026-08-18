@@ -657,6 +657,11 @@
       renderToolbox();
       updateInspector();
     },
+    exportProjectState: snapshot,
+    importProjectState: applySnapshot,
+    resetProjectState: function () {
+      applySnapshot({ jigs: [], seq: 0, selection: { kind: 'none', jigId: null } });
+    },
   };
 
   function tryRegister() {
