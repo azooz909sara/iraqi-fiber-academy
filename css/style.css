@@ -569,6 +569,53 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .article-card__desc { font-size: 0.9rem; color: var(--color-text-secondary); line-height: 1.7; flex: 1; }
 .article-card__meta { font-size: 0.8rem; color: var(--color-text-muted); margin-top: 0.5rem; }
 
+.article-body,
+.cms-rich-body {
+  position: relative;
+  isolation: isolate;
+  z-index: 0;
+}
+
+.img-behind-text {
+  position: absolute;
+  z-index: 1;
+  opacity: 0.6;
+  cursor: move;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.img-behind-text.is-selected {
+  outline: 2px dashed #00e5ff;
+  outline-offset: 2px;
+  z-index: 5;
+}
+
+.article-text-layer {
+  position: relative;
+  z-index: 2;
+}
+
+.articles__grid,
+.articles-container,
+#articles-grid {
+  display: grid;
+}
+
+.faq__list,
+#faq-accordion {
+  display: block;
+}
+
+.testimonials-section {
+  display: block;
+}
+
+.testimonials__grid,
+#testimonials-grid {
+  display: grid;
+}
+
 /* Testimonials */
 .testimonials__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
 

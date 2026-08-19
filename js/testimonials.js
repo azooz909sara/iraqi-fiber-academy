@@ -18,6 +18,23 @@
       .replace(/"/g, '&quot;');
   }
 
+  function isAdminPreview() {
+    try {
+      if (global.self !== global.top) return true;
+    } catch (err) {
+      return true;
+    }
+    try {
+      return new URLSearchParams(global.location.search).get('mode') === 'admin-preview';
+    } catch (err2) {
+      return false;
+    }
+  }
+
+  function normalizeStatus(value) {
+    return String(value || '').trim() === 'hidden' ? 'hidden' : 'published';
+  }
+
   function defaultTestimonials() {
     return [
       {
@@ -27,6 +44,7 @@
         text: 'المحاكي غيّر طريقة تدريبي للفنيين الجدد. أصبح بإمكانهم ارتكاب الأخطاء والتعلم منها دون تكلفة معدات باهظة.',
         rating: 5,
         avatar: '',
+        status: 'published',
       },
       {
         id: 'tst-2',
@@ -35,6 +53,7 @@
         text: 'كمهندسة شبكات، أعجبني مستوى التفاصيل في محاكاة OTDR. المنحنيات واقعية جداً وساعدتني في فهم قراءة الأعطال بسرعة.',
         rating: 5,
         avatar: '',
+        status: 'published',
       },
       {
         id: 'tst-3',
@@ -43,6 +62,7 @@
         text: 'انتقلت من صفر معرفة إلى القدرة على تصميم شبكة FTTH كاملة خلال شهرين. المسار التعليمي منظّم وواضح جداً.',
         rating: 4,
         avatar: '',
+        status: 'published',
       },
     ];
   }
@@ -69,6 +89,19 @@
     return s ? s.charAt(0) : '؟';
   }
 
+  function normalize(item) {
+    var t = item && typeof item === 'object' ? item : {};
+    return {
+      id: String(t.id || uid()),
+      name: String(t.name || '').trim(),
+      role: String(t.role || '').trim(),
+      text: String(t.text || '').trim(),
+      rating: clampRating(t.rating),
+      avatar: String(t.avatar || ''),
+      status: normalizeStatus(t.status),
+    };
+  }
+
   function getTestimonials() {
     try {
       var raw = localStorage.getItem(KEY);
@@ -81,16 +114,17 @@
     }
   }
 
-  function normalize(item) {
-    var t = item && typeof item === 'object' ? item : {};
-    return {
-      id: String(t.id || uid()),
-      name: String(t.name || '').trim(),
-      role: String(t.role || '').trim(),
-      text: String(t.text || '').trim(),
-      rating: clampRating(t.rating),
-      avatar: String(t.avatar || ''),
-    };
+  function isVisibleStatus(status) {
+    var s = String(status == null ? '' : status).trim().toLowerCase();
+    return !s || s === 'published';
+  }
+
+  function getPublishedTestimonials() {
+    var published = getTestimonials().filter(function (t) {
+      return isVisibleStatus(t.status);
+    });
+    if (published.length) return published;
+    return defaultTestimonials();
   }
 
   function saveTestimonials(list) {
@@ -118,7 +152,7 @@
         '" />'
       : escapeHtml(initial(item.name));
     return (
-      '<article class="testimonial-card fade-in" data-testimonial-id="' +
+      '<article class="testimonial-card fade-in visible" data-testimonial-id="' +
       escapeHtml(item.id) +
       '">' +
       '<span class="testimonial-card__quote">"</span>' +
@@ -143,32 +177,63 @@
     );
   }
 
+  function findPublicTestimonialsHost() {
+    return (
+      document.getElementById('testimonials-grid') ||
+      document.querySelector('.testimonials__grid') ||
+      document.getElementById('publicTestimonialsGrid')
+    );
+  }
+
   function renderPublic() {
-    var grid = document.querySelector('.testimonials__grid');
+    var grid = findPublicTestimonialsHost();
     if (!grid) return;
-    var list = getTestimonials();
+    grid.style.display = 'grid';
+    var section = document.querySelector('.testimonials-section') || grid.closest('section');
+    if (section) section.style.display = 'block';
+    var list = getPublishedTestimonials();
+    if (isAdminPreview()) {
+      var all = getTestimonials();
+      if (all.length) list = all;
+    }
     grid.innerHTML = list.length
       ? list.map(cardHtml).join('')
-      : '<p class="section__subtitle">لا توجد آراء بعد.</p>';
+      : defaultTestimonials().map(cardHtml).join('');
+    if (typeof global.reobserveAnimations === 'function') {
+      global.reobserveAnimations(grid);
+    }
+  }
+
+  function loadPublicTestimonials() {
+    renderPublic();
   }
 
   function bindPublic() {
-    renderPublic();
+    try {
+      renderPublic();
+    } catch (err) {
+      console.error('[PlatformTestimonials] public render failed', err);
+    }
     global.addEventListener('storage', function (e) {
       if (!e.key || e.key === KEY) renderPublic();
     });
     global.addEventListener('ifa:platform-testimonials-changed', renderPublic);
+    global.addEventListener('load', renderPublic);
   }
 
   global.PlatformTestimonials = {
     KEY: KEY,
     uid: uid,
     getTestimonials: getTestimonials,
+    getPublishedTestimonials: getPublishedTestimonials,
     saveTestimonials: saveTestimonials,
     defaultTestimonials: defaultTestimonials,
     renderPublic: renderPublic,
+    loadPublicTestimonials: loadPublicTestimonials,
     stars: stars,
+    isAdminPreview: isAdminPreview,
   };
+  global.loadPublicTestimonials = loadPublicTestimonials;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bindPublic);

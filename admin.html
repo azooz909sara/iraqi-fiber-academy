@@ -8,6 +8,9 @@
   <link rel="icon" type="image/png" href="images/logo.png" />
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/admin.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Alexandria&family=Almarai&family=Cairo&family=Inter&family=Montserrat&family=Noto+Kufi+Arabic&family=Poppins&family=Roboto&family=Tajawal&display=swap" rel="stylesheet">
 </head>
 <body class="admin-body">
 
@@ -759,7 +762,7 @@
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="simulatorsHeading">المحاكيات</h2>
-            <p class="admin-panel__desc">تحرير عنوان ووصف وأيقونة بطاقات المحاكيات الستة — يُحفظ في ifa_simulators_meta</p>
+            <p class="admin-panel__desc">تحرير عنوان ووصف بطاقات المحاكيات الستة — يُحفظ في ifa_simulators_meta</p>
           </div>
         </div>
         <div class="cms-sim-grid" id="cmsSimulatorsGrid"></div>
@@ -775,7 +778,7 @@
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>العنوان</th><th>التصنيف</th><th>الوسوم</th><th></th></tr></thead>
+            <thead><tr><th>العنوان</th><th>التصنيف</th><th>الحالة</th><th>الوسوم</th><th></th></tr></thead>
             <tbody id="cmsArticlesBody"></tbody>
           </table>
         </div>
@@ -791,7 +794,7 @@
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>السؤال</th><th>الإجابة</th><th></th></tr></thead>
+            <thead><tr><th>السؤال</th><th>الإجابة</th><th>الحالة</th><th></th></tr></thead>
             <tbody id="cmsFaqBody"></tbody>
           </table>
         </div>
@@ -807,7 +810,7 @@
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
-            <thead><tr><th>الاسم</th><th>المسمى / الشركة</th><th>التقييم</th><th></th></tr></thead>
+            <thead><tr><th>الاسم</th><th>المسمى / الشركة</th><th>التقييم</th><th>الحالة</th><th></th></tr></thead>
             <tbody id="cmsTestimonialsBody"></tbody>
           </table>
         </div>
@@ -818,9 +821,9 @@
         <iframe id="site-preview-frame" class="admin-site-iframe" src="index.html?mode=admin-preview" title="معاينة الموقع المباشر"></iframe>
       </section>
 
-      <div class="admin-modal" id="articleEditorModal" hidden>
+      <div class="admin-modal" id="articleEditorModal" data-article-modal hidden>
         <div class="admin-modal__backdrop" data-close-article-modal></div>
-        <div class="admin-modal__dialog admin-modal__dialog--wide" role="dialog" aria-modal="true">
+        <div class="admin-modal__dialog admin-modal__dialog--wide ql-container" id="article-modal" role="dialog" aria-modal="true">
           <form class="admin-modal__form" id="articleEditorForm">
             <div class="admin-modal__header">
               <h3 class="admin-modal__title" id="articleEditorTitleLabel">مقال جديد</h3>
@@ -841,19 +844,33 @@
                 <textarea class="admin-field__input admin-field__textarea" id="articleEditorExcerpt" rows="2"></textarea></label>
               <label class="admin-field"><span class="admin-field__label">بيانات المؤلف / مدة القراءة</span>
                 <input class="admin-field__input" id="articleEditorMeta" /></label>
+              <label class="admin-field"><span class="admin-field__label">حالة النشر</span>
+                <select class="admin-field__input" id="articleEditorStatus">
+                  <option value="draft">مسودة</option>
+                  <option value="published">منشور</option>
+                </select></label>
               <label class="admin-field"><span class="admin-field__label">صورة بارزة (رابط)</span>
                 <input class="admin-field__input" id="articleEditorImageUrl" placeholder="https://..." /></label>
               <label class="cms-file-btn">رفع صورة بارزة
                 <input type="file" id="articleEditorImageFile" accept="image/*" hidden /></label>
               <img class="cms-image-preview" id="articleEditorImagePreview" alt="" hidden />
-              <div class="cms-rich-toolbar">
+              <div class="cms-rich-toolbar cms-rich-toolbar--extended">
                 <label>الخط
                   <select id="articleEditorFontFamily">
                     <option value="">افتراضي</option>
-                    <option value="Tajawal, sans-serif">Tajawal</option>
-                    <option value="Cairo, sans-serif">Cairo</option>
-                    <option value="IBM Plex Sans Arabic, sans-serif">IBM Plex</option>
-                    <option value="Georgia, serif">Georgia</option>
+                    <optgroup label="عربي">
+                      <option value="Cairo, sans-serif">Cairo</option>
+                      <option value="Tajawal, sans-serif">Tajawal</option>
+                      <option value="Almarai, sans-serif">Almarai</option>
+                      <option value="Alexandria, sans-serif">Alexandria</option>
+                      <option value="'Noto Kufi Arabic', sans-serif">Noto Kufi Arabic</option>
+                    </optgroup>
+                    <optgroup label="English">
+                      <option value="Inter, sans-serif">Inter</option>
+                      <option value="Montserrat, sans-serif">Montserrat</option>
+                      <option value="Poppins, sans-serif">Poppins</option>
+                      <option value="Roboto, sans-serif">Roboto</option>
+                    </optgroup>
                   </select>
                 </label>
                 <label>الحجم
@@ -866,10 +883,49 @@
                 </label>
                 <label>لون النص
                   <input type="color" id="articleEditorTextColor" value="#e2e8f0" /></label>
+                <div class="cms-rich-toolbar__group" role="group" aria-label="محاذاة النص">
+                  <button class="cms-rich-btn" type="button" data-cms-align="right" title="محاذاة لليمين">⇤</button>
+                  <button class="cms-rich-btn" type="button" data-cms-align="center" title="توسيط">≡</button>
+                  <button class="cms-rich-btn" type="button" data-cms-align="left" title="محاذاة لليسار">⇥</button>
+                  <button class="cms-rich-btn" type="button" data-cms-align="justify" title="ضبط">☰</button>
+                </div>
+                <div class="cms-rich-toolbar__group" role="group" aria-label="اتجاه النص">
+                  <button class="cms-rich-btn" type="button" data-cms-dir="rtl" title="من اليمين لليسار">RTL</button>
+                  <button class="cms-rich-btn" type="button" data-cms-dir="ltr" title="من اليسار لليمين">LTR</button>
+                </div>
+                <button class="cms-file-btn" type="button" id="articleEditorInsertImage">إدراج صورة في المحتوى</button>
+                <button class="cms-rich-btn ql-fullscreen" type="button" title="ملء الشاشة" aria-label="ملء الشاشة">⛶</button>
+                <input type="file" id="articleEditorBodyImageFile" accept="image/*" hidden />
               </div>
               <div class="admin-field">
                 <span class="admin-field__label">محتوى المقال</span>
-                <div class="cms-rich-body" id="articleEditorBody" contenteditable="true"></div>
+                <div class="cms-rich-body-wrap" id="articleEditorBodyWrap">
+                  <div class="cms-rich-body" id="articleEditorBody" contenteditable="true"></div>
+                  <div class="cms-img-handles" id="articleImgHandles" hidden aria-hidden="true">
+                    <span class="cms-img-handle" data-handle="nw"></span>
+                    <span class="cms-img-handle" data-handle="n"></span>
+                    <span class="cms-img-handle" data-handle="ne"></span>
+                    <span class="cms-img-handle" data-handle="e"></span>
+                    <span class="cms-img-handle" data-handle="se"></span>
+                    <span class="cms-img-handle" data-handle="s"></span>
+                    <span class="cms-img-handle" data-handle="sw"></span>
+                    <span class="cms-img-handle" data-handle="w"></span>
+                  </div>
+                  <div class="cms-img-context-menu" id="articleImgContextMenu" hidden role="menu" aria-label="تخطيط الصورة">
+                    <p class="cms-img-context-menu__title">تخطيط الصورة</p>
+                    <button type="button" role="menuitem" data-img-layout="inline">سطري مع النص</button>
+                    <button type="button" role="menuitem" data-img-layout="square-right">مربع (يمين)</button>
+                    <button type="button" role="menuitem" data-img-layout="square-left">مربع (يسار)</button>
+                    <button type="button" role="menuitem" data-img-layout="tight">مشدود</button>
+                    <button type="button" role="menuitem" data-img-layout="top-bottom">أعلى وأسفل</button>
+                    <button type="button" role="menuitem" data-img-layout="behind">خلف النص</button>
+                    <button type="button" role="menuitem" data-img-layout="front">أمام النص</button>
+                    <div class="cms-img-context-menu__divider"></div>
+                    <p class="cms-img-context-menu__title">الموضع</p>
+                    <button type="button" role="menuitem" data-img-position="flow">يتحرك مع النص</button>
+                    <button type="button" role="menuitem" data-img-position="fixed">تثبيت الموضع في الصفحة</button>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="admin-modal__actions">
@@ -894,6 +950,11 @@
                 <input class="admin-field__input" id="faqEditorQuestion" required /></label>
               <label class="admin-field"><span class="admin-field__label">الإجابة</span>
                 <textarea class="admin-field__input admin-field__textarea" id="faqEditorAnswer" rows="5" required></textarea></label>
+              <label class="admin-field"><span class="admin-field__label">حالة النشر</span>
+                <select class="admin-field__input" id="faqEditorStatus">
+                  <option value="draft">مسودة</option>
+                  <option value="published">نشر</option>
+                </select></label>
             </div>
             <div class="admin-modal__actions">
               <button class="admin-btn admin-btn--ghost" type="button" data-close-faq-modal>إلغاء</button>
@@ -931,6 +992,11 @@
               <label class="cms-file-btn">رفع صورة المستخدم
                 <input type="file" id="tstEditorAvatarFile" accept="image/*" hidden /></label>
               <img class="cms-avatar-preview" id="tstEditorAvatarPreview" alt="" hidden />
+              <label class="admin-field"><span class="admin-field__label">حالة العرض</span>
+                <select class="admin-field__input" id="tstEditorStatus">
+                  <option value="published">نشر</option>
+                  <option value="hidden">إخفاء</option>
+                </select></label>
             </div>
             <div class="admin-modal__actions">
               <button class="admin-btn admin-btn--ghost" type="button" data-close-tst-modal>إلغاء</button>

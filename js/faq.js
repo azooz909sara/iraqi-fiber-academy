@@ -18,6 +18,23 @@
       .replace(/"/g, '&quot;');
   }
 
+  function isAdminPreview() {
+    try {
+      if (global.self !== global.top) return true;
+    } catch (err) {
+      return true;
+    }
+    try {
+      return new URLSearchParams(global.location.search).get('mode') === 'admin-preview';
+    } catch (err2) {
+      return false;
+    }
+  }
+
+  function normalizeStatus(value) {
+    return String(value || '').trim() === 'draft' ? 'draft' : 'published';
+  }
+
   function defaultFaqs() {
     return [
       {
@@ -25,38 +42,59 @@
         question: 'ما هي أكاديمية الفايبر العراقية وما الذي تقدمه؟',
         answer:
           'أكاديمية الفايبر العراقية هي منصة تدريبية متخصصة في مجال الألياف الضوئية وشبكات FTTH. نوفر محاكيات افتراضية تفاعلية تتيح لك التعلم والتدرب على تصميم وتركيب وصيانة الشبكات البصرية دون الحاجة لمعدات ميدانية.',
+        status: 'published',
       },
       {
         id: 'faq-2',
         question: 'هل أحتاج خبرة سابقة للبدء؟',
         answer:
           'لا، المسار التعليمي مصمم للبدء من الصفر. تبدأ بالمفاهيم الأساسية وتتدرج حتى المستوى الاحترافي. الباقة المجانية تتيح لك تجربة المنصة والتأكد من ملاءمتها لك قبل الاشتراك.',
+        status: 'published',
       },
       {
         id: 'faq-3',
         question: 'متى سيكون المحاكي التفاعلي متاحاً؟',
         answer:
           'نعمل حالياً على تطوير المحاكي التفاعلي الكامل ونخطط لإطلاق النسخة التجريبية (Beta) خلال الربع القادم. يمكنك الانضمام لقائمة الانتظار للحصول على وصول مبكر.',
+        status: 'published',
       },
       {
         id: 'faq-4',
         question: 'هل الشهادات معتمدة؟',
         answer:
           'شهادات الباقة الاحترافية معتمدة من أكاديمية الفايبر العراقية وتُثبت إتمامك للمسار التدريبي الكامل واجتياز المشاريع العملية.',
+        status: 'published',
       },
       {
         id: 'faq-5',
         question: 'هل يمكنني إلغاء اشتراكي في أي وقت؟',
         answer:
           'نعم، يمكنك إلغاء اشتراكك في أي وقت من لوحة التحكم الخاصة بك. سيستمر وصولك حتى نهاية فترة الاشتراك المدفوعة.',
+        status: 'published',
       },
       {
         id: 'faq-6',
         question: 'ما الأجهزة والمتصفحات المدعومة؟',
         answer:
           'المنصة تعمل على جميع الأجهزة عبر المتصفحات الحديثة (Chrome, Firefox, Edge, Safari). للمحاكي المتقدم ننصح باستخدام حاسوب مع شاشة لا تقل عن 13 بوصة.',
+        status: 'published',
       },
     ];
+  }
+
+  function normalizeFaq(item) {
+    var f = item && typeof item === 'object' ? item : {};
+    return {
+      id: String(f.id || uid()),
+      question: String(f.question || '').trim(),
+      answer: String(f.answer || '').trim(),
+      status: normalizeStatus(f.status),
+    };
+  }
+
+  function isPublishedStatus(status) {
+    var s = String(status == null ? '' : status).trim().toLowerCase();
+    return !s || s === 'published';
   }
 
   function getFaqs() {
@@ -65,27 +103,22 @@
       if (!raw) return defaultFaqs();
       var parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return defaultFaqs();
-      return parsed.map(function (item) {
-        var f = item && typeof item === 'object' ? item : {};
-        return {
-          id: String(f.id || uid()),
-          question: String(f.question || '').trim(),
-          answer: String(f.answer || '').trim(),
-        };
-      });
+      return parsed.map(normalizeFaq);
     } catch (err) {
       return defaultFaqs();
     }
   }
 
-  function saveFaqs(list) {
-    var next = (Array.isArray(list) ? list : []).map(function (f) {
-      return {
-        id: String(f.id || uid()),
-        question: String(f.question || '').trim(),
-        answer: String(f.answer || '').trim(),
-      };
+  function getPublishedFaqs() {
+    var published = getFaqs().filter(function (f) {
+      return isPublishedStatus(f.status);
     });
+    if (published.length) return published;
+    return defaultFaqs();
+  }
+
+  function saveFaqs(list) {
+    var next = (Array.isArray(list) ? list : []).map(normalizeFaq);
     try {
       localStorage.setItem(KEY, JSON.stringify(next));
     } catch (err) {
@@ -102,7 +135,7 @@
 
   function itemHtml(faq) {
     return (
-      '<div class="faq-item fade-in" data-faq-id="' +
+      '<div class="faq-item fade-in visible" data-faq-id="' +
       escapeHtml(faq.id) +
       '">' +
       '<button class="faq-item__question" type="button" aria-expanded="false">' +
@@ -118,31 +151,60 @@
     );
   }
 
+  function findPublicFaqHost() {
+    return (
+      document.getElementById('faq-accordion') ||
+      document.querySelector('.faq__list') ||
+      document.getElementById('publicFaqList')
+    );
+  }
+
   function renderPublic() {
-    var listEl = document.querySelector('.faq__list');
+    var listEl = findPublicFaqHost();
     if (!listEl) return;
-    var list = getFaqs();
+    listEl.style.display = 'block';
+    var list = getPublishedFaqs();
+    if (isAdminPreview()) {
+      var all = getFaqs();
+      if (all.length) list = all;
+    }
     listEl.innerHTML = list.length
       ? list.map(itemHtml).join('')
-      : '<p class="section__subtitle">لا توجد أسئلة بعد.</p>';
+      : defaultFaqs().map(itemHtml).join('');
+    if (typeof global.reobserveAnimations === 'function') {
+      global.reobserveAnimations(listEl);
+    }
+  }
+
+  function loadPublicFAQs() {
+    renderPublic();
   }
 
   function bindPublic() {
-    renderPublic();
+    try {
+      renderPublic();
+    } catch (err) {
+      console.error('[PlatformFaqs] public render failed', err);
+    }
     global.addEventListener('storage', function (e) {
       if (!e.key || e.key === KEY) renderPublic();
     });
     global.addEventListener('ifa:platform-faqs-changed', renderPublic);
+    global.addEventListener('load', renderPublic);
   }
 
   global.PlatformFaqs = {
     KEY: KEY,
     uid: uid,
     getFaqs: getFaqs,
+    getPublishedFaqs: getPublishedFaqs,
     saveFaqs: saveFaqs,
     defaultFaqs: defaultFaqs,
     renderPublic: renderPublic,
+    loadPublicFAQs: loadPublicFAQs,
+    isAdminPreview: isAdminPreview,
   };
+  global.loadPublicFAQs = loadPublicFAQs;
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', bindPublic);

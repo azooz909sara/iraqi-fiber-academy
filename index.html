@@ -407,7 +407,7 @@
           <h2 class="section__title">المقالات التقنية</h2>
           <p class="section__subtitle">أدلة عملية ومحتوى من المدربين لمساعدتك على إتقان شبكات FTTH والألياف الضوئية</p>
         </div>
-        <div class="articles__grid" id="publicArticlesGrid"></div>
+        <div class="articles__grid articles-container" id="articles-grid"></div>
       </div>
     </section>
 
@@ -425,14 +425,14 @@
       </div>
     </section>
 
-    <section class="section section--alt" id="testimonials">
+    <section class="section section--alt testimonials-section" id="testimonials">
       <div class="container">
         <div class="section__header fade-in">
           <span class="section__badge">آراء المستخدمين</span>
           <h2 class="section__title">ماذا يقول طلابنا؟</h2>
           <p class="section__subtitle">تجارب حقيقية من فنيين ومهندسين استفادوا من منصتنا</p>
         </div>
-        <div class="testimonials__grid" id="publicTestimonialsGrid"></div>
+        <div class="testimonials__grid" id="testimonials-grid"></div>
       </div>
     </section>
 
@@ -443,7 +443,7 @@
           <h2 class="section__title">كل ما تحتاج معرفته</h2>
           <p class="section__subtitle">إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات</p>
         </div>
-        <div class="faq__list" id="publicFaqList"></div>
+        <div class="faq__list" id="faq-accordion"></div>
       </div>
     </section>
   </main>
@@ -544,6 +544,25 @@
   <script src="js/articles.js"></script>
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
+  <script>
+    (function bootPublicCms() {
+      function run() {
+        try {
+          if (typeof loadPublicArticles === 'function') loadPublicArticles();
+          if (typeof loadPublicFAQs === 'function') loadPublicFAQs();
+          if (typeof loadPublicTestimonials === 'function') loadPublicTestimonials();
+        } catch (err) {
+          console.error('[CMS public boot]', err);
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run);
+      } else {
+        run();
+      }
+      window.addEventListener('load', run);
+    })();
+  </script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
