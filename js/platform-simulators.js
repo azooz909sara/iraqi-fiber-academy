@@ -31,9 +31,9 @@
     },
     {
       id: 'fusion-splicer',
-      label: 'مختبر Fusion Splicer',
+      label: 'مختبر لحام الألياف الضوئية (Fusion Splicer Lab)',
       navLabel: 'Fusion Splicer',
-      href: '',
+      href: 'fusion-splicer.html',
     },
     {
       id: 'fiber-anatomy',
@@ -107,7 +107,7 @@
         iconType: 'emoji',
       },
       'fusion-splicer': {
-        title: 'مختبر Fusion Splicer',
+        title: 'مختبر لحام الألياف الضوئية (Fusion Splicer Lab)',
         description:
           'تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.',
         icon: '🔬',

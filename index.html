@@ -312,12 +312,12 @@
               <a class="feature-card__open-btn" href="power-meter.html" data-simulator-launch="power-meter">افتح المحاكي</a>
             </div>
           </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fusion-splicer" data-simulator-href="">
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fusion-splicer" data-simulator-href="fusion-splicer.html" data-fusion-splicer-card>
             <div class="feature-card__icon">🔬</div>
             <h3 class="feature-card__title">مختبر Fusion Splicer</h3>
             <p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p>
             <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="#simulators" data-simulator-launch="fusion-splicer">افتح المحاكي</a>
+              <a class="feature-card__open-btn" href="fusion-splicer.html" data-simulator-launch="fusion-splicer">افتح المحاكي</a>
             </div>
           </article>
           <article class="feature-card fade-in" data-simulator-card data-simulator-id="fiber-anatomy" data-simulator-href="fiber-3d-simulator.html" data-anatomy-simulator-card>
@@ -806,8 +806,12 @@
       if (anatomy) anatomy.setAttribute('data-simulator-href', 'fiber-3d-simulator.html?mode=admin-preview');
       var labCard = document.querySelector('[data-ftth-lab-card]');
       if (labCard) labCard.setAttribute('data-simulator-href', 'ftth-lab.html?mode=admin-preview');
+      var splicerCard = document.querySelector('[data-fusion-splicer-card]');
+      if (splicerCard) splicerCard.setAttribute('data-simulator-href', 'fusion-splicer.html?mode=admin-preview');
       var ftth = document.querySelector('[data-simulator-id="ftth-simulator"]');
       if (ftth) ftth.setAttribute('data-simulator-href', 'simulator.html?mode=admin-preview');
+      var powerMeter = document.querySelector('[data-simulator-id="power-meter"]');
+      if (powerMeter) powerMeter.setAttribute('data-simulator-href', 'power-meter.html?mode=admin-preview');
       if (window.PlatformSimulators && typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function') {
         window.PlatformSimulators.applyPublicSimulatorGates();
       }
