@@ -34,6 +34,16 @@
   var HISTORY_MAX = 60;
   var PIGTAIL_CATENARY_SAMPLES = 48;
   var PIGTAIL_CATENARY_SLACK = 1.12;
+  /** Visual length for 60mm splice protection sleeve (lab world px). */
+  var SLEEVE_LEN_PX = 56;
+  var SLEEVE_H_PX = 9;
+  /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
+  var ORTHO_FILLET_R = 16;
+  var ORTHO_TURN_PX = 10;
+  var ORTHO_MIN_SEG = 8;
+  var ORTHO_BACKTRACK_PX = 8;
+  /** Initial free length: connector (left) → bare tip (right), same Y. */
+  var SPAWN_LEN_PX = 120;
 
   var ctx = null;
   var layer = null;
@@ -282,12 +292,147 @@
     if (!snap) return;
     historyLocked = true;
     pigtails = cloneJson(snap.pigtails) || [];
+    pigtails.forEach(function (p) {
+      if (!p) return;
+      p.hasSleeve = !!p.hasSleeve;
+      if (!Array.isArray(p.pathHistory)) {
+        p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
+      }
+      if (!Array.isArray(p.route)) p.route = p.pathHistory.slice();
+      else p.route = p.pathHistory.slice();
+      p.routeMode = p.routeMode === 'gravity' ? 'gravity' : 'snake';
+      p.snake = null;
+    });
     seq = snap.seq || 0;
     selection = { kind: 'none', id: null };
     rebuildLayer();
     updateInspector();
     refreshBudget();
     historyLocked = false;
+  }
+
+  /**
+   * Snap sleeve onto the bare-fiber tip (End B), covering the cleaved end.
+   */
+  function sleeveGeometry(p) {
+    var tipB = { x: p.bx, y: p.by };
+    var toward;
+    if (usesOrthoRoute(p)) {
+      var pts = orthoPolyline(p);
+      toward = pts.length >= 2 ? pts[pts.length - 2] : bootAnchor(p);
+    } else {
+      toward = bootAnchor(p);
+    }
+    var dx = toward.x - tipB.x;
+    var dy = toward.y - tipB.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var ux = dx / len;
+    var uy = dy / len;
+    var mx = tipB.x + ux * (SLEEVE_LEN_PX * 0.48);
+    var my = tipB.y + uy * (SLEEVE_LEN_PX * 0.48);
+    var rot = (Math.atan2(tipB.y - toward.y, tipB.x - toward.x) * 180) / Math.PI;
+    return {
+      x: mx,
+      y: my,
+      rot: rot,
+      w: SLEEVE_LEN_PX,
+      h: SLEEVE_H_PX,
+    };
+  }
+
+  function sleeveStyle(p) {
+    var g = sleeveGeometry(p);
+    return (
+      'left:' + Math.round(g.x - g.w / 2) + 'px;' +
+      'top:' + Math.round(g.y - g.h / 2) + 'px;' +
+      'width:' + g.w + 'px;' +
+      'height:' + g.h + 'px;' +
+      'transform-origin:50% 50%;' +
+      'transform:rotate(' + g.rot.toFixed(2) + 'deg)'
+    );
+  }
+
+  /** Slide a 60mm protection sleeve onto a pigtail bare tip. Returns true if applied. */
+  function applySleeve(id, opts) {
+    opts = opts || {};
+    var p = findPigtail(id);
+    if (!p) return false;
+    if (p.hasSleeve && !opts.force) {
+      setStatus('Sleeve already on this pigtail');
+      selectPigtail(id);
+      return false;
+    }
+    p.hasSleeve = true;
+    selectPigtail(id);
+    rebuildLayer();
+    var el = layer && layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + id + '"]');
+    if (el) {
+      el.classList.add('is-sliding');
+      window.setTimeout(function () {
+        if (el && el.classList) el.classList.remove('is-sliding');
+      }, 420);
+    }
+    pushHistory();
+    updateInspector();
+    setStatus('Sleeve 60mm · attached to bare fiber tip');
+    return true;
+  }
+
+  function hitTestPigtailBareEnd(clientX, clientY) {
+    var list = document.elementsFromPoint
+      ? document.elementsFromPoint(clientX, clientY)
+      : [];
+    var i;
+    var el;
+    var node;
+    for (i = 0; i < list.length; i++) {
+      el = list[i];
+      if (!el || !el.closest) continue;
+      node = el.closest('[data-pt-id][data-pt-end="B"], .lab-pigtail__tail');
+      if (!node) continue;
+      var id = node.getAttribute('data-pt-id');
+      if (id && findPigtail(id)) return id;
+    }
+    /* Near-tip tolerance: also accept fiber hit near bare end */
+    for (i = 0; i < list.length; i++) {
+      el = list[i];
+      if (!el || !el.closest) continue;
+      node = el.closest('[data-pt-fiber], [data-pt-drag]');
+      if (!node) continue;
+      var fid =
+        node.getAttribute('data-pt-fiber') ||
+        node.getAttribute('data-pt-drag');
+      var p = fid && findPigtail(fid);
+      if (!p) continue;
+      var world = clientToWorld(clientX, clientY);
+      if (dist2(world.x, world.y, p.bx, p.by) <= 36) return fid;
+    }
+    return null;
+  }
+
+  function hitTestPigtailAtClient(clientX, clientY) {
+    var bare = hitTestPigtailBareEnd(clientX, clientY);
+    if (bare) return bare;
+    var list = document.elementsFromPoint
+      ? document.elementsFromPoint(clientX, clientY)
+      : [];
+    var i;
+    var el;
+    var node;
+    for (i = 0; i < list.length; i++) {
+      el = list[i];
+      if (!el || !el.closest) continue;
+      node = el.closest('[data-pt-fiber], [data-pt-drag], [data-pt-id], [data-pt-node], [data-pt-sleeve]');
+      if (!node) continue;
+      var id =
+        node.getAttribute('data-pt-fiber') ||
+        node.getAttribute('data-pt-drag') ||
+        node.getAttribute('data-pt-id') ||
+        node.getAttribute('data-pt-node') ||
+        node.getAttribute('data-pt-sleeve');
+      if (id && findPigtail(id)) return id;
+    }
+    return null;
   }
 
   function pushHistory() {
@@ -330,29 +475,37 @@
     var pos = (typeof x === 'number' && typeof y === 'number')
       ? { x: x, y: y }
       : defaultPos();
+    /* Pure horizontal spawn: SC on the left, bare tip straight right. */
+    var tipX = pos.x + SPAWN_LEN_PX;
+    var tipY = pos.y;
+    var horizRot = endRotationDeg(pos.x, pos.y, tipX, tipY);
     var item = {
       id: 'pt-' + seq,
       ax: pos.x,
       ay: pos.y,
-      bx: pos.x,
-      by: pos.y + 120,
+      bx: tipX,
+      by: tipY,
       polish: 'PC',
       connector: {
         attached: null,
         mismatch: false,
         lockedRot: null,
-        liveRot: null,
+        liveRot: horizRot,
       },
       tail: { attached: null },
       route: [],
-      fixedLength: null,
+      pathHistory: [],
+      routeMode: 'snake',
+      fixedLength: SPAWN_LEN_PX,
+      hasSleeve: false,
+      drawLockRot: horizRot,
     };
     pigtails.push(item);
     selectPigtail(item.id);
     rebuildLayer();
     pushHistory();
     refreshBudget();
-    setStatus('SC Pigtail placed · drag connector to a port · bare tip for splice / termination');
+    setStatus('SC Pigtail placed · horizontal · drag connector or bare tip to route');
     return item;
   }
 
@@ -390,6 +543,7 @@
   }
 
   function getConnRot(p) {
+    if (typeof p.drawLockRot === 'number') return p.drawLockRot;
     if (p.connector.attached) {
       if (typeof p.connector.lockedRot === 'number') return p.connector.lockedRot;
       if (p.connector.attached && typeof p.connector.attached.lockedRot === 'number') {
@@ -657,6 +811,7 @@
     };
     p.connector.lockedRot = lockedRot;
     p.connector.liveRot = null;
+    p.drawLockRot = null;
     p.connector.mismatch = mismatch;
     var bx = p.bx;
     var by = p.by;
@@ -874,8 +1029,9 @@
     if (typeof p.fixedLength === 'number' && p.fixedLength > 0) {
       return Math.max(p.fixedLength, chord * 1.0002);
     }
-    if (p.route && p.route.length) {
-      var poly = [{ x: p0.x, y: p0.y }].concat(p.route).concat([{ x: tipB.x, y: tipB.y }]);
+    var hist = (p.pathHistory && p.pathHistory.length) ? p.pathHistory : p.route;
+    if (hist && hist.length) {
+      var poly = [{ x: p0.x, y: p0.y }].concat(hist).concat([{ x: tipB.x, y: tipB.y }]);
       var len = 0;
       var i;
       for (i = 1; i < poly.length; i++) {
@@ -892,20 +1048,479 @@
     return Math.max(chord * slack, chord * 1.0002);
   }
 
-  /**
-   * Fiber starts at boot rear tip, short axial strain-relief stub, then a
-   * continuous gravitational catenary to the bare tip — Free Draw, Meter,
-   * drag, and plugged states all use the same curve (never straight / jagged).
-   */
-  function fiberPath(p) {
+  function getRouteMode(p) {
+    return p && p.routeMode === 'gravity' ? 'gravity' : 'snake';
+  }
+
+  function ensurePathHistory(p) {
+    if (!p) return [];
+    if (!Array.isArray(p.pathHistory)) {
+      p.pathHistory = Array.isArray(p.route) ? p.route.slice() : [];
+    }
+    p.route = p.pathHistory;
+    return p.pathHistory;
+  }
+
+  function syncPathAlias(p) {
+    if (!p) return;
+    ensurePathHistory(p);
+    p.route = p.pathHistory;
+  }
+
+  function setRouteMode(id, mode) {
+    var p = findPigtail(id);
+    if (!p) return;
+    p.routeMode = mode === 'gravity' ? 'gravity' : 'snake';
+    syncPathAlias(p);
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    setStatus(
+      p.routeMode === 'snake'
+        ? 'Snake Route Mode · orthogonal L-ghost + filleted corners'
+        : 'Gravity Physics Mode · catenary sag'
+    );
+  }
+
+  function strainReliefStart(p) {
     var tipA = bootAnchor(p);
     var tA = bootOutDir(getConnRot(p));
-    var tipB = { x: p.bx, y: p.by };
     var stub = Math.max(STRAIN_RELIEF_PX * 0.55, BOOT_EXIT_STUB);
-    var p0 = {
+    return {
       x: tipA.x + tA.x * stub,
       y: tipA.y + tA.y * stub,
     };
+  }
+
+  function collapseOrthoPts(pts) {
+    var out = [];
+    var i;
+    for (i = 0; i < pts.length; i++) {
+      var pt = pts[i];
+      if (!pt) continue;
+      if (
+        out.length &&
+        Math.abs(out[out.length - 1].x - pt.x) < 0.5 &&
+        Math.abs(out[out.length - 1].y - pt.y) < 0.5
+      ) {
+        continue;
+      }
+      out.push({ x: pt.x, y: pt.y });
+    }
+    return out;
+  }
+
+  function orthoPolyline(p) {
+    var start = strainReliefStart(p);
+    var tipB = { x: p.bx, y: p.by };
+    var hist = ensurePathHistory(p);
+    var ghost = p.snake && p.snake.ghost ? { x: p.snake.ghost.x, y: p.snake.ghost.y } : null;
+    var dragA = !!(p.snake && p.snake.dragEnd === 'A');
+    var pts = [{ x: start.x, y: start.y }];
+    var i;
+    /* Ghost bend sits between the free tip and committed history (never in pathHistory). */
+    if (ghost && dragA) pts.push(ghost);
+    for (i = 0; i < hist.length; i++) {
+      pts.push({ x: hist[i].x, y: hist[i].y });
+    }
+    if (ghost && !dragA) pts.push(ghost);
+    pts.push(tipB);
+    return collapseOrthoPts(pts);
+  }
+
+  function inferAxis(from, to) {
+    if (!from || !to) return null;
+    var dx = to.x - from.x;
+    var dy = to.y - from.y;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return null;
+    /* Prefer H-then-V ghost when axes are equal. */
+    return Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+  }
+
+  /**
+   * Preview L-bend from locked vertex → cursor (not committed).
+   * Primary axis picks the first leg so we never invert into a Z-stair.
+   * axis 'h' → horizontal then vertical; 'v' → vertical then horizontal.
+   */
+  function ghostBendFrom(last, cursorX, cursorY, axis) {
+    if (!last || !axis) return null;
+    var dx = cursorX - last.x;
+    var dy = cursorY - last.y;
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return null;
+    if (axis === 'h') {
+      if (Math.abs(dy) < 0.5) return null;
+      return { x: cursorX, y: last.y };
+    }
+    if (Math.abs(dx) < 0.5) return null;
+    return { x: last.x, y: cursorY };
+  }
+
+  function commitGhostCorner(corners, last, ghost, atFront) {
+    if (!ghost || !last) return last;
+    if (dist2(last.x, last.y, ghost.x, ghost.y) < ORTHO_MIN_SEG) return last;
+    if (atFront) corners.unshift({ x: ghost.x, y: ghost.y });
+    else corners.push({ x: ghost.x, y: ghost.y });
+    return { x: ghost.x, y: ghost.y };
+  }
+
+  /** Dominant axis from last locked point → cursor (recomputed every move). */
+  function primaryAxisFromDelta(dx, dy) {
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) return null;
+    return Math.abs(dx) >= Math.abs(dy) ? 'h' : 'v';
+  }
+
+  /**
+   * Pop committed corners while the cursor retreats back along the route.
+   * Returns the new hinge/last point after any unrolls.
+   */
+  function backtrackCorners(corners, anchor, cursorX, cursorY, atFront) {
+    var guard = 0;
+    while (corners.length && guard++ < 64) {
+      var last = atFront ? corners[0] : corners[corners.length - 1];
+      var prev = atFront
+        ? (corners.length > 1 ? corners[1] : anchor)
+        : (corners.length > 1 ? corners[corners.length - 2] : anchor);
+
+      var inDx = last.x - prev.x;
+      var inDy = last.y - prev.y;
+      var inLen = Math.sqrt(inDx * inDx + inDy * inDy) || 1;
+      var outDx = cursorX - last.x;
+      var outDy = cursorY - last.y;
+      /* Positive along = continuing past the corner in the arrival direction. */
+      var along = (outDx * inDx + outDy * inDy) / inLen;
+      var perp = (outDx * (-inDy) + outDy * inDx) / inLen;
+      var dLast = Math.sqrt(outDx * outDx + outDy * outDy);
+
+      var pastCorner = along < -ORTHO_BACKTRACK_PX && Math.abs(perp) <= Math.max(ORTHO_TURN_PX * 2, 24);
+      var onCornerBacking =
+        dLast <= ORTHO_TURN_PX && along < 0 && Math.abs(perp) <= ORTHO_TURN_PX * 2;
+
+      if (!pastCorner && !onCornerBacking) break;
+
+      if (atFront) corners.shift();
+      else corners.pop();
+    }
+    if (atFront) {
+      return corners.length ? corners[0] : anchor;
+    }
+    return corners.length ? corners[corners.length - 1] : anchor;
+  }
+
+  /**
+   * Aim connector boot / ferrule along the active travel segment.
+   * Bare-tip rotation is derived in tailStyle from the last path segment.
+   */
+  function alignEndsToTravel(p, dragEnd) {
+    if (!p) return;
+    if (dragEnd === 'A') {
+      var hinge = (p.pathHistory && p.pathHistory.length)
+        ? p.pathHistory[0]
+        : { x: p.bx, y: p.by };
+      /* Ferrule leads outward along travel (hinge → connector). */
+      var lead = headingRotFromMotion(p.ax - hinge.x, p.ay - hinge.y);
+      p.drawLockRot = lead;
+      p.connector.liveRot = lead;
+      return;
+    }
+    if (p.connector.attached) return;
+    var first = (p.pathHistory && p.pathHistory.length)
+      ? p.pathHistory[0]
+      : { x: p.bx, y: p.by };
+    var bootAim = endRotationDeg(p.ax, p.ay, first.x, first.y);
+    p.drawLockRot = bootAim;
+    p.connector.liveRot = bootAim;
+  }
+
+  /**
+   * SVG path for orthogonal polyline with smooth quadratic fillets at corners.
+   */
+  function filletOrthoSvg(pts, radius) {
+    pts = collapseOrthoPts(pts);
+    if (pts.length < 2) return '';
+    if (pts.length === 2) {
+      return 'M ' + pts[0].x + ' ' + pts[0].y + ' L ' + pts[1].x + ' ' + pts[1].y;
+    }
+    var rMax = Math.max(8, Math.min(24, radius != null ? radius : ORTHO_FILLET_R));
+    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var i;
+    for (i = 1; i < pts.length - 1; i++) {
+      var prev = pts[i - 1];
+      var mid = pts[i];
+      var next = pts[i + 1];
+      var v1x = mid.x - prev.x;
+      var v1y = mid.y - prev.y;
+      var v2x = next.x - mid.x;
+      var v2y = next.y - mid.y;
+      var len1 = Math.sqrt(v1x * v1x + v1y * v1y) || 1;
+      var len2 = Math.sqrt(v2x * v2x + v2y * v2y) || 1;
+      var r = Math.min(rMax, len1 * 0.5, len2 * 0.5);
+      if (r < 2) {
+        d += ' L ' + mid.x + ' ' + mid.y;
+        continue;
+      }
+      var before = {
+        x: mid.x - (v1x / len1) * r,
+        y: mid.y - (v1y / len1) * r,
+      };
+      var after = {
+        x: mid.x + (v2x / len2) * r,
+        y: mid.y + (v2y / len2) * r,
+      };
+      d += ' L ' + before.x + ' ' + before.y;
+      d += ' Q ' + mid.x + ' ' + mid.y + ' ' + after.x + ' ' + after.y;
+    }
+    var last = pts[pts.length - 1];
+    d += ' L ' + last.x + ' ' + last.y;
+    return d;
+  }
+
+  /**
+   * Begin / continue orthogonal snake from either end.
+   * Never clears pathHistory — continues recorded vertices.
+   */
+  function beginOrthoSnake(p, dragEnd) {
+    ensurePathHistory(p);
+    dragEnd = dragEnd === 'A' ? 'A' : 'B';
+    var hist = p.pathHistory;
+    var startA = strainReliefStart(p);
+    var tipB = { x: p.bx, y: p.by };
+
+    if (dragEnd === 'B') {
+      if (typeof p.drawLockRot !== 'number') {
+        p.drawLockRot = getConnRot(p);
+      }
+      p.connector.liveRot = p.drawLockRot;
+      var lastB = hist.length ? hist[hist.length - 1] : startA;
+      p.snake = {
+        dragEnd: 'B',
+        corners: hist.slice(),
+        axis: null,
+        ghost: null,
+        pin: { x: p.ax, y: p.ay },
+      };
+      /* Seed axis from current tip so the first move stays on the spawn axis. */
+      p.snake.axis = inferAxis(lastB, tipB);
+    } else {
+      var hingeA = hist.length ? hist[0] : tipB;
+      p.snake = {
+        dragEnd: 'A',
+        corners: hist.slice(),
+        axis: null,
+        ghost: null,
+        pinB: { x: p.bx, y: p.by },
+      };
+      p.snake.axis = inferAxis(hingeA, { x: p.ax, y: p.ay });
+    }
+  }
+
+  /**
+   * Adaptive primary-axis routing while dragging tip B.
+   * Dominant H/V each frame — no sticky inverted Z-stair.
+   * Backtracking pops corners when retreating along the route.
+   */
+  function updateOrthoSnake(p, cursorX, cursorY) {
+    if (!p.snake) beginOrthoSnake(p, 'B');
+    if (p.snake.dragEnd === 'A') {
+      updateOrthoSnakeFromA(p, cursorX, cursorY);
+      return;
+    }
+
+    p.ax = p.snake.pin.x;
+    p.ay = p.snake.pin.y;
+
+    var start = strainReliefStart(p);
+    var corners = p.snake.corners;
+    var last = backtrackCorners(corners, start, cursorX, cursorY, false);
+
+    var dx = cursorX - last.x;
+    var dy = cursorY - last.y;
+    var axis = primaryAxisFromDelta(dx, dy);
+    p.snake.axis = axis;
+
+    if (!axis) {
+      p.bx = last.x;
+      p.by = last.y;
+      p.snake.ghost = null;
+      p.pathHistory = corners.slice();
+      syncPathAlias(p);
+      alignEndsToTravel(p, 'B');
+      return;
+    }
+
+    if (axis === 'h') {
+      /*
+       * Predominantly horizontal: extend straight to mouseX (no vertical stair).
+       * Tip rides the horizontal rail; secondary dy beyond threshold commits a corner.
+       */
+      if (Math.abs(dy) > ORTHO_TURN_PX) {
+        var bendH = { x: cursorX, y: last.y };
+        last = commitGhostCorner(corners, last, bendH, false);
+        p.bx = last.x;
+        p.by = cursorY;
+        p.snake.axis = 'v';
+        p.snake.ghost = null;
+      } else {
+        p.bx = cursorX;
+        p.by = last.y;
+        p.snake.ghost = null;
+      }
+    } else {
+      /* Predominantly vertical: extend straight to mouseY. */
+      if (Math.abs(dx) > ORTHO_TURN_PX) {
+        var bendV = { x: last.x, y: cursorY };
+        last = commitGhostCorner(corners, last, bendV, false);
+        p.bx = cursorX;
+        p.by = last.y;
+        p.snake.axis = 'h';
+        p.snake.ghost = null;
+      } else {
+        p.bx = last.x;
+        p.by = cursorY;
+        p.snake.ghost = null;
+      }
+    }
+
+    p.pathHistory = corners.slice();
+    syncPathAlias(p);
+    alignEndsToTravel(p, 'B');
+  }
+
+  function updateOrthoSnakeFromA(p, cursorX, cursorY) {
+    p.bx = p.snake.pinB.x;
+    p.by = p.snake.pinB.y;
+
+    var tipB = { x: p.bx, y: p.by };
+    var corners = p.snake.corners;
+    var hinge = backtrackCorners(corners, tipB, cursorX, cursorY, true);
+
+    var dx = cursorX - hinge.x;
+    var dy = cursorY - hinge.y;
+    var axis = primaryAxisFromDelta(dx, dy);
+    p.snake.axis = axis;
+
+    if (!axis) {
+      p.ax = hinge.x;
+      p.ay = hinge.y;
+      p.snake.ghost = null;
+      p.pathHistory = corners.slice();
+      syncPathAlias(p);
+      alignEndsToTravel(p, 'A');
+      return;
+    }
+
+    if (axis === 'h') {
+      if (Math.abs(dy) > ORTHO_TURN_PX) {
+        var bendH = { x: cursorX, y: hinge.y };
+        hinge = commitGhostCorner(corners, hinge, bendH, true);
+        p.ax = hinge.x;
+        p.ay = cursorY;
+        p.snake.axis = 'v';
+        p.snake.ghost = null;
+      } else {
+        p.ax = cursorX;
+        p.ay = hinge.y;
+        p.snake.ghost = null;
+      }
+    } else if (Math.abs(dx) > ORTHO_TURN_PX) {
+      var bendV = { x: hinge.x, y: cursorY };
+      hinge = commitGhostCorner(corners, hinge, bendV, true);
+      p.ax = cursorX;
+      p.ay = hinge.y;
+      p.snake.axis = 'h';
+      p.snake.ghost = null;
+    } else {
+      p.ax = hinge.x;
+      p.ay = cursorY;
+      p.snake.ghost = null;
+    }
+
+    p.pathHistory = corners.slice();
+    syncPathAlias(p);
+    alignEndsToTravel(p, 'A');
+  }
+
+  function endOrthoSnake(p) {
+    if (!p) return;
+    if (p.snake && p.snake.corners) {
+      var corners = p.snake.corners.slice();
+      var ghost = p.snake.ghost;
+      /* Lock remaining L-bend so release never leaves a diagonal elastic segment. */
+      if (ghost) {
+        if (p.snake.dragEnd === 'A') {
+          var hinge = corners.length ? corners[0] : { x: p.bx, y: p.by };
+          commitGhostCorner(corners, hinge, ghost, true);
+        } else {
+          var start = strainReliefStart(p);
+          var last = corners.length ? corners[corners.length - 1] : start;
+          commitGhostCorner(corners, last, ghost, false);
+        }
+      }
+      p.pathHistory = corners;
+    }
+    syncPathAlias(p);
+    p.snake = null;
+    var startLen = strainReliefStart(p);
+    var poly = [{ x: startLen.x, y: startLen.y }]
+      .concat(p.pathHistory || [])
+      .concat([{ x: p.bx, y: p.by }]);
+    var len = 0;
+    var i;
+    for (i = 1; i < poly.length; i++) {
+      len += dist2(poly[i - 1].x, poly[i - 1].y, poly[i].x, poly[i].y);
+    }
+    p.fixedLength = Math.max(40, len);
+  }
+
+  function usesOrthoRoute(p) {
+    /* Snake mode is always orthogonal (incl. horizontal spawn with empty hist). */
+    return !!(p && getRouteMode(p) === 'snake');
+  }
+
+  function moveTipGravity(p, dragEnd, cursorX, cursorY) {
+    if (dragEnd === 'A') {
+      p.ax = cursorX;
+      p.ay = cursorY;
+      /* Instant heading — no lerp damping */
+      p.connector.liveRot = endRotationDeg(p.ax, p.ay, p.bx, p.by);
+      p.drawLockRot = null;
+    } else {
+      p.bx = cursorX;
+      p.by = cursorY;
+    }
+  }
+
+  /**
+   * Fiber path: snake (ortho + fillets) or gravity catenary per routeMode.
+   * pathHistory is always preserved regardless of render mode.
+   * Active snake.ghost is included as an L-preview bend (not stored until commit).
+   */
+  function fiberPath(p) {
+    var tipA = bootAnchor(p);
+    var p0 = strainReliefStart(p);
+    var tipB = { x: p.bx, y: p.by };
+    ensurePathHistory(p);
+
+    if (usesOrthoRoute(p)) {
+      var pts = orthoPolyline(p);
+      if (
+        !pts.length ||
+        Math.abs(pts[0].x - p0.x) > 0.5 ||
+        Math.abs(pts[0].y - p0.y) > 0.5
+      ) {
+        pts = [{ x: p0.x, y: p0.y }].concat(pts);
+        pts = collapseOrthoPts(pts);
+      }
+      var body = filletOrthoSvg(pts, ORTHO_FILLET_R);
+      var rest = String(body || '')
+        .replace(/^M\s*[-+]?[\d.]+(?:e[-+]?\d+)?\s+[-+]?[\d.]+(?:e[-+]?\d+)?/i, '')
+        .trim();
+      return (
+        'M ' + tipA.x + ' ' + tipA.y +
+        ' L ' + p0.x + ' ' + p0.y +
+        (rest ? ' ' + rest : '')
+      );
+    }
+
     var L = resolvePigtailRenderLength(p, p0, tipB);
     var mid = samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES);
     var d = 'M ' + tipA.x + ' ' + tipA.y + ' L ' + p0.x + ' ' + p0.y;
@@ -915,6 +1530,30 @@
     }
     d += ' L ' + tipB.x + ' ' + tipB.y;
     return d;
+  }
+
+  /** Dashed L-bend overlay for the uncommitted ghost segment only. */
+  function ghostPreviewPath(p) {
+    if (!p || !p.snake || !p.snake.ghost) return '';
+    var ghost = { x: p.snake.ghost.x, y: p.snake.ghost.y };
+    var pts;
+    if (p.snake.dragEnd === 'A') {
+      var startA = strainReliefStart(p);
+      var hinge = p.pathHistory.length
+        ? { x: p.pathHistory[0].x, y: p.pathHistory[0].y }
+        : { x: p.bx, y: p.by };
+      pts = [startA, ghost, hinge];
+    } else {
+      var startB = strainReliefStart(p);
+      var last = p.pathHistory.length
+        ? {
+            x: p.pathHistory[p.pathHistory.length - 1].x,
+            y: p.pathHistory[p.pathHistory.length - 1].y,
+          }
+        : startB;
+      pts = [last, ghost, { x: p.bx, y: p.by }];
+    }
+    return filletOrthoSvg(collapseOrthoPts(pts), ORTHO_FILLET_R);
   }
 
   function connectorStyle(p) {
@@ -928,8 +1567,21 @@
   }
 
   function tailStyle(p) {
-    /* Buffer (top/−Y) faces connector; cleave (+Y) faces away — +180 vs endRotationDeg */
-    var rot = endRotationDeg(p.bx, p.by, p.ax, p.ay) + 180;
+    var rot;
+    if (usesOrthoRoute(p)) {
+      var pts = orthoPolyline(p);
+      if (pts.length >= 2) {
+        var a = pts[pts.length - 2];
+        var b = pts[pts.length - 1];
+        /* Cleave leads along travel (prev → tip). */
+        rot = headingRotFromMotion(b.x - a.x, b.y - a.y);
+      } else {
+        rot = headingRotFromMotion(p.bx - p.ax, p.by - p.ay);
+      }
+    } else {
+      /* Buffer faces connector; cleave faces away */
+      rot = endRotationDeg(p.bx, p.by, p.ax, p.ay) + 180;
+    }
     return (
       'left:' + Math.round(p.bx - TAIL_W / 2) + 'px;' +
       'top:' + Math.round(p.by - TAIL_H / 2) + 'px;' +
@@ -963,6 +1615,7 @@
       '</defs>';
     pigtails.forEach(function (p) {
       var path = fiberPath(p);
+      var ghost = ghostPreviewPath(p);
       var bad = p.connector.mismatch;
       var sel = selection.id === p.id ? ' is-selected' : '';
       html +=
@@ -970,6 +1623,10 @@
         '" fill="none" />' +
         '<path class="lab-pigtail-fiber' + (bad ? ' is-mismatch' : '') + sel +
         '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" />' +
+        (ghost
+          ? '<path class="lab-pigtail-fiber-ghost" data-pt-ghost="' + p.id +
+            '" d="' + ghost + '" fill="none" />'
+          : '') +
         '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + path +
         '" fill="none" />';
     });
@@ -1002,6 +1659,10 @@
         '<i class="lab-vfl-exit-flare__hot"></i>' +
         '</span>' +
         '</button>' +
+        (p.hasSleeve
+          ? '<div class="lab-pigtail-sleeve" data-pt-sleeve="' + p.id + '" style="' +
+            sleeveStyle(p) + '" title="Sleeve 60mm" aria-hidden="true"></div>'
+          : '') +
         '</div>';
     });
 
@@ -1013,16 +1674,51 @@
   function updateFiberPath(p) {
     if (!layer) return;
     var d = fiberPath(p);
+    var ghostD = ghostPreviewPath(p);
     var path = layer.querySelector('[data-pt-fiber="' + p.id + '"]');
     var hit = layer.querySelector('.lab-pigtail-fiber-hit[data-pt-drag="' + p.id + '"]');
     var laser = layer.querySelector('[data-pt-laser="' + p.id + '"]');
+    var ghostEl = layer.querySelector('[data-pt-ghost="' + p.id + '"]');
     if (path) path.setAttribute('d', d);
     if (hit) hit.setAttribute('d', d);
     if (laser) laser.setAttribute('d', d);
+    if (ghostD) {
+      if (ghostEl) {
+        ghostEl.setAttribute('d', ghostD);
+      } else if (path && path.parentNode) {
+        var g = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        g.setAttribute('class', 'lab-pigtail-fiber-ghost');
+        g.setAttribute('data-pt-ghost', p.id);
+        g.setAttribute('d', ghostD);
+        g.setAttribute('fill', 'none');
+        path.parentNode.insertBefore(g, path.nextSibling);
+      }
+    } else if (ghostEl && ghostEl.parentNode) {
+      ghostEl.parentNode.removeChild(ghostEl);
+    }
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (aBtn) aBtn.setAttribute('style', connectorStyle(p));
     if (bBtn) bBtn.setAttribute('style', tailStyle(p));
+    var sleeve = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
+    if (p.hasSleeve) {
+      if (sleeve) {
+        sleeve.setAttribute('style', sleeveStyle(p));
+      } else {
+        var node = layer.querySelector('[data-pt-node="' + p.id + '"]');
+        if (node) {
+          var wrap = document.createElement('div');
+          wrap.className = 'lab-pigtail-sleeve';
+          wrap.setAttribute('data-pt-sleeve', p.id);
+          wrap.setAttribute('style', sleeveStyle(p));
+          wrap.setAttribute('title', 'Sleeve 60mm');
+          wrap.innerHTML = '';
+          node.appendChild(wrap);
+        }
+      }
+    } else if (sleeve && sleeve.parentNode) {
+      sleeve.parentNode.removeChild(sleeve);
+    }
   }
 
   function clearPlugHighlights() {
@@ -1064,20 +1760,29 @@
           setStatus('Drag the free end (connector or bare tip)');
           return;
         }
-        var zoom = getZoom() || 1;
-        var sx = e.clientX;
-        var sy = e.clientY;
+        var w0 = clientToWorld(e.clientX, e.clientY);
         var oax = p.ax;
         var oay = p.ay;
         var obx = p.bx;
         var oby = p.by;
+        ensurePathHistory(p);
+        var hist0 = p.pathHistory.map(function (pt) {
+          return { x: pt.x, y: pt.y };
+        });
         function onMove(ev) {
-          var dx = (ev.clientX - sx) / zoom;
-          var dy = (ev.clientY - sy) / zoom;
+          var w = clientToWorld(ev.clientX, ev.clientY);
+          var dx = w.x - w0.x;
+          var dy = w.y - w0.y;
           p.ax = oax + dx;
           p.ay = oay + dy;
           p.bx = obx + dx;
           p.by = oby + dy;
+          if (hist0.length) {
+            p.pathHistory = hist0.map(function (pt) {
+              return { x: pt.x + dx, y: pt.y + dy };
+            });
+            syncPathAlias(p);
+          }
           updateFiberPath(p);
         }
         function onUp() {
@@ -1090,7 +1795,7 @@
       });
     });
 
-    /* Connector drag / plug */
+    /* Connector drag / plug — snake from A or gravity 1:1 world tracking */
     host.querySelectorAll('[data-pt-end="A"]').forEach(function (btn) {
       btn.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -1101,26 +1806,28 @@
         if (!p) return;
         selectPigtail(id);
 
-        var zoom = getZoom() || 1;
-        var sx = e.clientX;
-        var sy = e.clientY;
-        var oax = p.ax;
-        var oay = p.ay;
         var home = p.connector.attached
           ? { x: p.connector.attached.wx, y: p.connector.attached.wy }
           : null;
         var unplugged = false;
         var moved = false;
+        var snakeMode = getRouteMode(p) === 'snake';
+
+        if (snakeMode) {
+          beginOrthoSnake(p, 'A');
+        } else {
+          p.snake = { dragEnd: 'A' };
+        }
+
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pigtail-dragging');
         try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 
         function onMove(ev) {
           moved = true;
-          var dx = (ev.clientX - sx) / zoom;
-          var dy = (ev.clientY - sy) / zoom;
+          var world = clientToWorld(ev.clientX, ev.clientY);
           if (p.connector.attached && !unplugged) {
-            var pull = dist2(0, 0, dx, dy);
+            var pull = dist2(world.x, world.y, home.x, home.y);
             if (pull < UNPLUG_PULL_PX) {
               seatConnectorAtPort(p, home.x, home.y);
               updateFiberPath(p);
@@ -1129,16 +1836,26 @@
             detachConnector(p);
             unplugged = true;
             btn.classList.remove('is-attached');
-            setStatus('Connector free · release on a port to plug');
+            if (snakeMode) beginOrthoSnake(p, 'A');
+            setStatus(
+              snakeMode
+                ? 'Connector · snake route · release on a port to plug'
+                : 'Connector free · release on a port to plug'
+            );
           }
-          p.ax = oax + dx;
-          p.ay = oay + dy;
-          updateLiveHeading(p, dx, dy);
+
+          if (snakeMode) {
+            updateOrthoSnake(p, world.x, world.y);
+          } else {
+            moveTipGravity(p, 'A', world.x, world.y);
+          }
+
           var hit = resolvePlugHit(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
           if (hit && hit.owner === 'ols') {
             var mag = applyOlsMagneticPull(p, hit, ev.clientX, ev.clientY);
             if (mag === 'lock' && !p.connector.attached) {
+              endOrthoSnake(p);
               attachConnector(p, hit);
               window.removeEventListener('pointermove', onMove);
               window.removeEventListener('pointerup', onUp);
@@ -1155,7 +1872,7 @@
               setStatus('OLS-35 · magnetic dock · SC seated vertical');
               return;
             }
-          } else if (hit && (hit.owner === 'vfl' || hit.owner === 'opm') &&
+          } else if (!snakeMode && hit && (hit.owner === 'vfl' || hit.owner === 'opm') &&
               dist2(p.ax, p.ay, hit.wx, hit.wy) < PLUG_SNAP_PX * 3) {
             p.connector.liveRot = 180;
           }
@@ -1170,7 +1887,9 @@
           btn.classList.remove('is-dragging');
           document.body.classList.remove('lab-pigtail-dragging');
           clearPlugHighlights();
-          p.connector.liveRot = null;
+          if (snakeMode) endOrthoSnake(p);
+          else p.snake = null;
+          if (!p.connector.attached) p.connector.liveRot = null;
 
           if (!p.connector.attached) {
             var hit = resolvePlugHit(ev.clientX, ev.clientY);
@@ -1184,8 +1903,6 @@
               : 9999;
             if (hit && d < snapR) {
               attachConnector(p, hit);
-            } else if (home && unplugged && !moved) {
-              /* noop */
             }
           }
           rebuildLayer();
@@ -1200,7 +1917,7 @@
       });
     });
 
-    /* Bare tip drag / dock */
+    /* Bare tip drag — snake from B or gravity 1:1; connector stays pinned in snake */
     host.querySelectorAll('[data-pt-end="B"]').forEach(function (btn) {
       btn.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -1211,25 +1928,25 @@
         if (!p) return;
         selectPigtail(id);
 
-        var zoom = getZoom() || 1;
-        var sx = e.clientX;
-        var sy = e.clientY;
-        var obx = p.bx;
-        var oby = p.by;
         var home = p.tail.attached
           ? { x: p.tail.attached.wx, y: p.tail.attached.wy }
           : null;
         var undocked = false;
         var moved = false;
+        var snakeMode = getRouteMode(p) === 'snake';
+
+        if (snakeMode) beginOrthoSnake(p, 'B');
+        else p.snake = { dragEnd: 'B' };
+
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pigtail-dragging');
 
         function onMove(ev) {
           moved = true;
-          var dx = (ev.clientX - sx) / zoom;
-          var dy = (ev.clientY - sy) / zoom;
+          var world = clientToWorld(ev.clientX, ev.clientY);
           if (p.tail.attached && !undocked) {
-            if (dist2(0, 0, dx, dy) < TAIL_SNAP_PX) {
+            var pull = dist2(world.x, world.y, home.x, home.y);
+            if (pull < TAIL_SNAP_PX) {
               p.bx = home.x;
               p.by = home.y;
               updateFiberPath(p);
@@ -1238,10 +1955,20 @@
             detachTail(p);
             undocked = true;
             btn.classList.remove('is-attached');
-            setStatus('Bare tip free · release on a splice / termination point');
+            if (snakeMode) beginOrthoSnake(p, 'B');
+            setStatus(
+              snakeMode
+                ? 'Bare tip · snake route · release on splice / termination'
+                : 'Bare tip free · release on splice / termination'
+            );
           }
-          p.bx = obx + dx;
-          p.by = oby + dy;
+
+          if (snakeMode) {
+            updateOrthoSnake(p, world.x, world.y);
+          } else {
+            moveTipGravity(p, 'B', world.x, world.y);
+          }
+
           var hit = hitTestTailTarget(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
           updateFiberPath(p);
@@ -1254,10 +1981,14 @@
           btn.classList.remove('is-dragging');
           document.body.classList.remove('lab-pigtail-dragging');
           clearPlugHighlights();
+          if (snakeMode) endOrthoSnake(p);
+          else p.snake = null;
 
           if (!p.tail.attached) {
             var hit = hitTestTailTarget(ev.clientX, ev.clientY);
-            if (hit) attachTail(p, hit);
+            if (hit) {
+              attachTail(p, hit);
+            }
           }
           rebuildLayer();
           updateInspector();
@@ -1490,6 +2221,15 @@
     detail.hidden = false;
     detail.innerHTML =
       '<div class="lab-pigtail-config">' +
+      '<p class="lab-inspector__label">Cable route mode</p>' +
+      '<div class="lab-route-mode-toggle" role="group" aria-label="Pigtail route mode">' +
+      '<button type="button" class="lab-route-mode-btn' +
+      (getRouteMode(p) === 'snake' ? ' is-active' : '') +
+      '" data-pt-route-mode="' + p.id + ':snake">Snake Route Mode</button>' +
+      '<button type="button" class="lab-route-mode-btn' +
+      (getRouteMode(p) === 'gravity' ? ' is-active' : '') +
+      '" data-pt-route-mode="' + p.id + ':gravity">Gravity Physics Mode</button>' +
+      '</div>' +
       '<p class="lab-inspector__label">Connector polish</p>' +
       '<div class="lab-polish-toggle" role="group">' +
       '<button type="button" class="lab-polish-btn is-upc' + (!isApc ? ' is-active' : '') +
@@ -1521,6 +2261,12 @@
       '">Remove Pigtail</button>' +
       '</div>';
 
+    detail.querySelectorAll('[data-pt-route-mode]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-pt-route-mode').split(':');
+        setRouteMode(parts[0], parts[1]);
+      });
+    });
     detail.querySelectorAll('[data-pt-polish]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pt-polish').split(':');
@@ -1655,11 +2401,13 @@
       p.ay += dy;
       p.bx += dx;
       p.by += dy;
-      if (p.route && p.route.length) {
-        p.route.forEach(function (pt) {
+      ensurePathHistory(p);
+      if (p.pathHistory && p.pathHistory.length) {
+        p.pathHistory.forEach(function (pt) {
           pt.x += dx;
           pt.y += dy;
         });
+        syncPathAlias(p);
       }
       syncAttached(p);
       if (opts.live) updateFiberPath(p);
@@ -1704,6 +2452,9 @@
       };
 
       FtthLab.detachPigtailsFromVfl = detachPigtailsFromVfl;
+      FtthLab.applySleeveToPigtail = applySleeve;
+      FtthLab.hitTestPigtailAtClient = hitTestPigtailAtClient;
+      FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {
@@ -1749,6 +2500,9 @@
     getMismatchCount: getMismatchCount,
     getLaserGraphNodes: getLaserGraphNodes,
     applyLaserGlow: applyLaserGlow,
+    applySleeve: applySleeve,
+    hitTestPigtailAtClient: hitTestPigtailAtClient,
+    hitTestPigtailBareEnd: hitTestPigtailBareEnd,
     translateForVfl: translateForVfl,
     onLabConfigChanged: function () {
       renderToolbox();

@@ -2173,6 +2173,37 @@ body.lab-node-resizing .lab-2d-stage {
   margin-bottom: 0.45rem;
 }
 
+.lab-route-mode-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.lab-route-mode-btn {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.4rem;
+  padding: 0.5rem 0.35rem;
+  background: rgba(15, 23, 42, 0.65);
+  color: var(--lab-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+
+.lab-route-mode-btn:hover {
+  border-color: rgba(56, 189, 248, 0.45);
+  color: #e2e8f0;
+}
+
+.lab-route-mode-btn.is-active {
+  border-color: rgba(56, 189, 248, 0.65);
+  background: rgba(14, 165, 233, 0.18);
+  color: #7dd3fc;
+}
+
 .lab-polish-btn {
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 0.4rem;
@@ -2912,6 +2943,17 @@ body.lab-pcord-linking .lab-pcord-fiber {
   filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
 }
 
+.lab-pigtail-fiber-ghost {
+  stroke: #fde68a;
+  stroke-width: 1.85;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 7 5;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
 .lab-pigtail-fiber.is-selected {
   stroke: #fde047;
   stroke-width: 2.65;
@@ -2984,6 +3026,129 @@ body.lab-pcord-linking .lab-pcord-fiber {
 
 .lab-pigtail.is-selected .lab-pigtail__tail:not(.is-attached) {
   filter: drop-shadow(0 0 3px rgba(250, 204, 21, 0.55));
+}
+
+/* ── Splice protection sleeve (60mm) — simple translucent tube ── */
+.lab-sleeve-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+
+.lab-sleeve-free {
+  position: absolute;
+  z-index: 5;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border: 1px solid rgba(226, 232, 240, 0.7);
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.55) 0%,
+    rgba(203, 213, 225, 0.32) 50%,
+    rgba(148, 163, 184, 0.28) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 1px 3px rgba(0, 0, 0, 0.22);
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.lab-sleeve-free:active,
+.lab-sleeve-free.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
+}
+
+.lab-sleeve-free.is-selected {
+  border-color: rgba(56, 189, 248, 0.75);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 0 0 1px rgba(56, 189, 248, 0.35),
+    0 0 10px rgba(56, 189, 248, 0.25);
+}
+
+.lab-pigtail-sleeve {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+  box-sizing: border-box;
+  border-radius: 999px;
+  border: 1px solid rgba(226, 232, 240, 0.72);
+  background: linear-gradient(
+    180deg,
+    rgba(248, 250, 252, 0.58) 0%,
+    rgba(203, 213, 225, 0.34) 50%,
+    rgba(148, 163, 184, 0.3) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.65),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+  opacity: 0.78;
+  transform-origin: 50% 50%;
+}
+
+.lab-pigtail-sleeve.is-sliding {
+  animation: lab-sleeve-slide-in 0.42s ease-out both;
+}
+
+@keyframes lab-sleeve-slide-in {
+  from {
+    opacity: 0.15;
+    filter: blur(0.4px);
+  }
+  to {
+    opacity: 0.78;
+    filter: none;
+  }
+}
+
+.lab-pigtail__tail.is-sleeve-target {
+  outline: 1.5px solid #e2e8f0;
+  outline-offset: 2px;
+  filter: drop-shadow(0 0 5px rgba(226, 232, 240, 0.7));
+}
+
+.lab-tool__mark--sleeve {
+  width: 1.55rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(203, 213, 225, 0.65);
+  background: linear-gradient(180deg, rgba(248, 250, 252, 0.75), rgba(148, 163, 184, 0.45));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 0;
+}
+
+.lab-tool__mark--sleeve img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  opacity: 0.95;
+}
+
+.lab-tool--sleeve .lab-tool__copy strong,
+.tool-item[data-tool="sleeve"] .lab-tool__copy strong {
+  color: #e2e8f0;
+}
+
+.tool-item[data-tool="sleeve"]:hover,
+.lab-tool--sleeve:hover {
+  border-color: rgba(56, 189, 248, 0.55);
+  background: rgba(14, 165, 233, 0.12);
+}
+
+body.lab-sleeve-dragging {
+  cursor: grabbing;
+  user-select: none;
 }
 
 body.lab-pigtail-dragging {

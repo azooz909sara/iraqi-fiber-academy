@@ -397,6 +397,7 @@
     'smart-splitter': 'SPLITTERS',
     'patch-cord': 'FIBER JUMPERS',
     'sc-pigtail': 'FIBER JUMPERS',
+    'splice-sleeve': 'FUSION SPLICING',
     'fiber-spool': 'FIBER JUMPERS',
     'bend-jig': 'FIBER JUMPERS',
     'sc-coupler': 'ADAPTERS',
