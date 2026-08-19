@@ -313,7 +313,7 @@
     return (
       '<article class="article-card fade-in visible" data-article-id="' +
       escapeHtml(article.id) +
-      '">' +
+      '" role="button" tabindex="0">' +
       img +
       (article.category
         ? '<span class="article-card__category">' + escapeHtml(article.category) + '</span>'
@@ -327,6 +327,118 @@
       (article.meta ? '<span class="article-card__meta">' + escapeHtml(article.meta) + '</span>' : tags) +
       '</article>'
     );
+  }
+
+  function ensureArticleReaderModal() {
+    var modal = document.getElementById('article-reader-modal');
+    if (modal) return modal;
+    modal = document.createElement('div');
+    modal.className = 'article-reader';
+    modal.id = 'article-reader-modal';
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    modal.innerHTML =
+      '<div class="article-reader__backdrop" data-article-reader-close></div>' +
+      '<div class="article-reader__dialog" role="dialog" aria-modal="true" aria-labelledby="articleReaderTitle">' +
+      '<header class="article-reader__toolbar">' +
+      '<button type="button" class="article-reader__close" data-article-reader-close aria-label="إغلاق">✕ إغلاق</button>' +
+      '</header>' +
+      '<div class="article-reader__scroll">' +
+      '<img class="article-reader__cover" id="articleReaderCover" alt="" hidden />' +
+      '<span class="article-reader__category" id="articleReaderCategory" hidden></span>' +
+      '<h1 class="article-reader__title" id="articleReaderTitle"></h1>' +
+      '<p class="article-reader__meta" id="articleReaderMeta"></p>' +
+      '<div class="article-reader__body article-body" id="articleReaderBody"></div>' +
+      '</div></div>';
+    document.body.appendChild(modal);
+    return modal;
+  }
+
+  function closeArticleReader() {
+    var modal = document.getElementById('article-reader-modal');
+    if (!modal) return;
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('article-reader-open');
+  }
+
+  function openArticleReader(article) {
+    if (!article) return;
+    var modal = ensureArticleReaderModal();
+    var cover = document.getElementById('articleReaderCover');
+    var category = document.getElementById('articleReaderCategory');
+    var title = document.getElementById('articleReaderTitle');
+    var meta = document.getElementById('articleReaderMeta');
+    var body = document.getElementById('articleReaderBody');
+
+    if (cover) {
+      if (article.image) {
+        cover.hidden = false;
+        cover.src = article.image;
+        cover.alt = article.title || '';
+      } else {
+        cover.hidden = true;
+        cover.removeAttribute('src');
+      }
+    }
+    if (category) {
+      if (article.category) {
+        category.hidden = false;
+        category.textContent = article.category;
+      } else {
+        category.hidden = true;
+        category.textContent = '';
+      }
+    }
+    if (title) title.textContent = article.title || '';
+    if (meta) meta.textContent = article.meta || article.tags || '';
+    if (body) {
+      body.innerHTML = sanitizeArticleHtml(article.body || '') || '<p>' + escapeHtml(excerptFrom(article)) + '</p>';
+      body.style.cssText = bodyStyle(article);
+    }
+
+    modal.hidden = false;
+    modal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('article-reader-open');
+  }
+
+  function findArticleById(id) {
+    var found = null;
+    getArticles().forEach(function (a) {
+      if (a.id === String(id)) found = a;
+    });
+    if (found) return found;
+    defaultArticles().forEach(function (a) {
+      if (a.id === String(id)) found = a;
+    });
+    return found;
+  }
+
+  function bindArticleReader() {
+    if (bindArticleReader._bound) return;
+    bindArticleReader._bound = true;
+
+    document.addEventListener('click', function (e) {
+      var closeBtn = e.target.closest ? e.target.closest('[data-article-reader-close]') : null;
+      if (closeBtn) {
+        closeArticleReader();
+        return;
+      }
+      var card = e.target.closest ? e.target.closest('.article-card[data-article-id]') : null;
+      if (!card) return;
+      var article = findArticleById(card.getAttribute('data-article-id'));
+      if (article) openArticleReader(article);
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeArticleReader();
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      var card = e.target.closest ? e.target.closest('.article-card[data-article-id]') : null;
+      if (!card) return;
+      e.preventDefault();
+      var article = findArticleById(card.getAttribute('data-article-id'));
+      if (article) openArticleReader(article);
+    });
   }
 
   function findPublicArticlesHost() {
@@ -362,6 +474,7 @@
   function bindPublic() {
     try {
       renderPublic();
+      bindArticleReader();
     } catch (err) {
       console.error('[PlatformArticles] public render failed', err);
     }
@@ -383,6 +496,8 @@
     defaultArticles: defaultArticles,
     renderPublic: renderPublic,
     loadPublicArticles: loadPublicArticles,
+    openArticleReader: openArticleReader,
+    closeArticleReader: closeArticleReader,
     bodyStyle: bodyStyle,
     sanitizeArticleHtml: sanitizeArticleHtml,
     isAdminPreview: isAdminPreview,

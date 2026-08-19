@@ -539,6 +539,22 @@
     </div>
   </div>
 
+  <div class="article-reader" id="article-reader-modal" hidden aria-hidden="true">
+    <div class="article-reader__backdrop" data-article-reader-close></div>
+    <div class="article-reader__dialog" role="dialog" aria-modal="true" aria-labelledby="articleReaderTitle">
+      <header class="article-reader__toolbar">
+        <button type="button" class="article-reader__close" data-article-reader-close aria-label="إغلاق">✕ إغلاق</button>
+      </header>
+      <div class="article-reader__scroll">
+        <img class="article-reader__cover" id="articleReaderCover" alt="" hidden />
+        <span class="article-reader__category" id="articleReaderCategory" hidden></span>
+        <h1 class="article-reader__title" id="articleReaderTitle"></h1>
+        <p class="article-reader__meta" id="articleReaderMeta"></p>
+        <div class="article-reader__body article-body" id="articleReaderBody"></div>
+      </div>
+    </div>
+  </div>
+
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
   <script src="js/articles.js"></script>
