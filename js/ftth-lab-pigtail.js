@@ -34,9 +34,8 @@
   var HISTORY_MAX = 60;
   var PIGTAIL_CATENARY_SAMPLES = 48;
   var PIGTAIL_CATENARY_SLACK = 1.12;
-  /** Visual length for 60mm splice protection sleeve (lab world px). */
-  var SLEEVE_LEN_PX = 56;
-  var SLEEVE_H_PX = 9;
+  var SLEEVE_MOUNT_PROX_PX = 25;
+  var SLEEVE_EJECT_PULL_PX = 14;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
   var ORTHO_FILLET_R = 16;
   var ORTHO_TURN_PX = 10;
@@ -67,6 +66,13 @@
 
   function getZoom() {
     return (global.FtthLab && FtthLab.getZoom2d && FtthLab.getZoom2d()) || 1;
+  }
+
+  function getSleeveSizePx() {
+    if (global.FtthLab && typeof FtthLab.getSleeveSizePx === 'function') {
+      return FtthLab.getSleeveSizePx();
+    }
+    return { w: 56, h: 8 };
   }
 
   function getWorldSize() {
@@ -155,6 +161,15 @@
   /** Ferrule/nose leads along (dx, dy) — same as patch cord. */
   function headingRotFromMotion(dx, dy) {
     return Math.atan2(dx, -dy) * 180 / Math.PI;
+  }
+
+  /**
+   * Sleeve long axis parallel to fiber tangent (CSS y+ down).
+   * headingRotFromMotion is +90° off — do not use for sleeve alignment.
+   */
+  function fiberPathTangentRotDeg(dx, dy) {
+    if (Math.abs(dx) < 0.0001 && Math.abs(dy) < 0.0001) return 0;
+    return Math.atan2(dy, dx) * 180 / Math.PI;
   }
 
   /** Angled OLT SFP tier: the seat axis is baked into the port element. */
@@ -295,6 +310,10 @@
     pigtails.forEach(function (p) {
       if (!p) return;
       p.hasSleeve = !!p.hasSleeve;
+      if (p.hasSleeve && typeof p.sleeveAlong !== 'number') {
+        p.sleeveAlong = 0;
+      }
+      if (!p.hasSleeve) p.sleeveAlong = null;
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
       }
@@ -312,31 +331,237 @@
   }
 
   /**
-   * Snap sleeve onto the bare-fiber tip (End B), covering the cleaved end.
+   * Bare-fiber path for sleeve sliding: 0% = cleaved tip (End B), 100% = strain relief.
+   */
+  function fiberSleevePathPoints(p) {
+    var tipB = { x: p.bx, y: p.by };
+    var p0 = strainReliefStart(p);
+    if (usesOrthoRoute(p)) {
+      return sampleFilletOrthoPoints(orthoPolyline(p), ORTHO_FILLET_R).slice().reverse();
+    }
+    var L = resolvePigtailRenderLength(p, p0, tipB);
+    return samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES).slice().reverse();
+  }
+
+  function polylineLength(pts) {
+    var len = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      len += dist2(pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y);
+    }
+    return len;
+  }
+
+  function defaultSleeveAlong(totalLen, sleeveW) {
+    if (!totalLen || totalLen < 1) return 0;
+    return Math.min(1, (sleeveW * 0.48) / totalLen);
+  }
+
+  function pushSleevePathPt(out, pt) {
+    if (!pt) return;
+    if (
+      out.length &&
+      Math.abs(out[out.length - 1].x - pt.x) < 0.25 &&
+      Math.abs(out[out.length - 1].y - pt.y) < 0.25
+    ) {
+      return;
+    }
+    out.push({ x: pt.x, y: pt.y });
+  }
+
+  function sampleQuadraticArc(p0, cp, p1, steps) {
+    var out = [];
+    var i;
+    steps = Math.max(2, steps || 10);
+    for (i = 1; i <= steps; i++) {
+      var t = i / steps;
+      var mt = 1 - t;
+      out.push({
+        x: mt * mt * p0.x + 2 * mt * t * cp.x + t * t * p1.x,
+        y: mt * mt * p0.y + 2 * mt * t * cp.y + t * t * p1.y,
+      });
+    }
+    return out;
+  }
+
+  /** Dense world points along filleted ortho route (matches visible fiber fillets). */
+  function sampleFilletOrthoPoints(pts, radius) {
+    pts = collapseOrthoPts(pts);
+    if (!pts.length) return [];
+    if (pts.length < 2) return [{ x: pts[0].x, y: pts[0].y }];
+    var rMax = Math.max(8, Math.min(24, radius != null ? radius : ORTHO_FILLET_R));
+    var out = [];
+    var i;
+    pushSleevePathPt(out, pts[0]);
+    if (pts.length === 2) {
+      pushSleevePathPt(out, pts[1]);
+      return out;
+    }
+    for (i = 1; i < pts.length - 1; i++) {
+      var prev = pts[i - 1];
+      var mid = pts[i];
+      var next = pts[i + 1];
+      var v1x = mid.x - prev.x;
+      var v1y = mid.y - prev.y;
+      var v2x = next.x - mid.x;
+      var v2y = next.y - mid.y;
+      var len1 = Math.sqrt(v1x * v1x + v1y * v1y) || 1;
+      var len2 = Math.sqrt(v2x * v2x + v2y * v2y) || 1;
+      var r = Math.min(rMax, len1 * 0.5, len2 * 0.5);
+      if (r < 2) {
+        pushSleevePathPt(out, mid);
+        continue;
+      }
+      var before = {
+        x: mid.x - (v1x / len1) * r,
+        y: mid.y - (v1y / len1) * r,
+      };
+      var after = {
+        x: mid.x + (v2x / len2) * r,
+        y: mid.y + (v2y / len2) * r,
+      };
+      pushSleevePathPt(out, before);
+      sampleQuadraticArc(before, mid, after, 10).forEach(function (pt) {
+        pushSleevePathPt(out, pt);
+      });
+    }
+    pushSleevePathPt(out, pts[pts.length - 1]);
+    return out;
+  }
+
+  function pointAtPathDistance(pts, dist) {
+    if (!pts || !pts.length) {
+      return { x: 0, y: 0, rot: 0, dist: 0, t: 0 };
+    }
+    if (pts.length === 1) {
+      return { x: pts[0].x, y: pts[0].y, rot: 0, dist: 0, t: 0 };
+    }
+    var total = polylineLength(pts);
+    if (dist <= 0) {
+      var dx0 = pts[1].x - pts[0].x;
+      var dy0 = pts[1].y - pts[0].y;
+      return {
+        x: pts[0].x,
+        y: pts[0].y,
+        rot: fiberPathTangentRotDeg(dx0, dy0),
+        dist: 0,
+        t: 0,
+      };
+    }
+    if (dist >= total) {
+      var last = pts.length - 1;
+      var dxL = pts[last].x - pts[last - 1].x;
+      var dyL = pts[last].y - pts[last - 1].y;
+      return {
+        x: pts[last].x,
+        y: pts[last].y,
+        rot: fiberPathTangentRotDeg(dxL, dyL),
+        dist: total,
+        t: 1,
+      };
+    }
+    var acc = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      var ax = pts[i - 1].x;
+      var ay = pts[i - 1].y;
+      var bx = pts[i].x;
+      var by = pts[i].y;
+      var segLen = dist2(ax, ay, bx, by);
+      if (acc + segLen >= dist) {
+        var u = segLen > 0 ? (dist - acc) / segLen : 0;
+        return {
+          x: ax + (bx - ax) * u,
+          y: ay + (by - ay) * u,
+          rot: fiberPathTangentRotDeg(bx - ax, by - ay),
+          dist: dist,
+          t: total > 0 ? dist / total : 0,
+        };
+      }
+      acc += segLen;
+    }
+    return pointAtPathDistance(pts, total);
+  }
+
+  function projectOntoFiberPath(pts, wx, wy) {
+    if (!pts || pts.length < 2) {
+      return { x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: 0 };
+    }
+    var total = polylineLength(pts);
+    var best = null;
+    var acc = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      var ax = pts[i - 1].x;
+      var ay = pts[i - 1].y;
+      var bx = pts[i].x;
+      var by = pts[i].y;
+      var segDx = bx - ax;
+      var segDy = by - ay;
+      var segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+      var segLen2 = segLen * segLen;
+      var u = segLen2 > 0 ? ((wx - ax) * segDx + (wy - ay) * segDy) / segLen2 : 0;
+      var uClamped = Math.max(0, Math.min(1, u));
+      var px = ax + segDx * uClamped;
+      var py = ay + segDy * uClamped;
+      var perp = dist2(wx, wy, px, py);
+      var along = acc + uClamped * segLen;
+      var cand = {
+        x: px,
+        y: py,
+        rot: fiberPathTangentRotDeg(segDx, segDy),
+        dist: along,
+        t: total > 0 ? along / total : 0,
+        perpDist: perp,
+      };
+      if (!best || perp < best.perpDist) best = cand;
+      acc += segLen;
+    }
+    /* Extrapolate before the bare tip so backward pull can eject. */
+    var ax0 = pts[0].x;
+    var ay0 = pts[0].y;
+    var bx0 = pts[1].x;
+    var by0 = pts[1].y;
+    var segDx0 = bx0 - ax0;
+    var segDy0 = by0 - ay0;
+    var segLen0 = Math.sqrt(segDx0 * segDx0 + segDy0 * segDy0) || 1;
+    var u0 = ((wx - ax0) * segDx0 + (wy - ay0) * segDy0) / (segLen0 * segLen0);
+    if (u0 < 0) {
+      var px0 = ax0 + segDx0 * u0;
+      var py0 = ay0 + segDy0 * u0;
+      var perp0 = dist2(wx, wy, px0, py0);
+      var along0 = u0 * segLen0;
+      if (!best || perp0 <= best.perpDist + 6) {
+        best = {
+          x: px0,
+          y: py0,
+          rot: fiberPathTangentRotDeg(segDx0, segDy0),
+          dist: along0,
+          t: total > 0 ? along0 / total : 0,
+          perpDist: perp0,
+        };
+      }
+    }
+    return best || { x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: 0 };
+  }
+
+  /**
+   * Sleeve pose locked to fiber path coordinate (sleeveAlong: 0% tip → 100% strain relief).
    */
   function sleeveGeometry(p) {
-    var tipB = { x: p.bx, y: p.by };
-    var toward;
-    if (usesOrthoRoute(p)) {
-      var pts = orthoPolyline(p);
-      toward = pts.length >= 2 ? pts[pts.length - 2] : bootAnchor(p);
-    } else {
-      toward = bootAnchor(p);
-    }
-    var dx = toward.x - tipB.x;
-    var dy = toward.y - tipB.y;
-    var len = Math.sqrt(dx * dx + dy * dy) || 1;
-    var ux = dx / len;
-    var uy = dy / len;
-    var mx = tipB.x + ux * (SLEEVE_LEN_PX * 0.48);
-    var my = tipB.y + uy * (SLEEVE_LEN_PX * 0.48);
-    var rot = (Math.atan2(tipB.y - toward.y, tipB.x - toward.x) * 180) / Math.PI;
+    var size = getSleeveSizePx();
+    var pts = fiberSleevePathPoints(p);
+    var total = polylineLength(pts);
+    var along = typeof p.sleeveAlong === 'number'
+      ? p.sleeveAlong
+      : defaultSleeveAlong(total, size.w);
+    var pt = pointAtPathDistance(pts, along * total);
     return {
-      x: mx,
-      y: my,
-      rot: rot,
-      w: SLEEVE_LEN_PX,
-      h: SLEEVE_H_PX,
+      x: pt.x,
+      y: pt.y,
+      rot: pt.rot,
+      w: size.w,
+      h: size.h,
     };
   }
 
@@ -352,8 +577,54 @@
     );
   }
 
+  function triggerSleeveSlideIn(id) {
+    var el = layer && layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + id + '"]');
+    if (!el) return;
+    el.classList.add('is-sliding');
+    window.setTimeout(function () {
+      if (el && el.classList) el.classList.remove('is-sliding');
+    }, 420);
+  }
+
+  function updateSleeveElement(p, el) {
+    if (!el || !p || !p.hasSleeve) return;
+    el.setAttribute('style', sleeveStyle(p));
+  }
+
+  function dragSleeveAlongPath(p, wx, wy) {
+    var pts = fiberSleevePathPoints(p);
+    var total = polylineLength(pts);
+    var size = getSleeveSizePx();
+    var proj = projectOntoFiberPath(pts, wx, wy);
+    if (proj.dist < -SLEEVE_EJECT_PULL_PX) {
+      return { eject: true, x: wx, y: wy };
+    }
+    p.sleeveAlong = total > 0
+      ? Math.max(0, Math.min(1, proj.dist / total))
+      : 0;
+    return { eject: false, proj: proj };
+  }
+
+  function findBareTipProximity(clientX, clientY, thresholdPx) {
+    var world = clientToWorld(clientX, clientY);
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : SLEEVE_MOUNT_PROX_PX;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p || p.hasSleeve) continue;
+      var d = dist2(world.x, world.y, p.bx, p.by);
+      if (d <= thr && d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    return best ? { id: best.id, dist: bestD } : null;
+  }
+
   /** Slide a 60mm protection sleeve onto a pigtail bare tip. Returns true if applied. */
-  function applySleeve(id, opts) {
+  function mountSleeve(id, opts) {
     opts = opts || {};
     var p = findPigtail(id);
     if (!p) return false;
@@ -362,20 +633,45 @@
       selectPigtail(id);
       return false;
     }
+    var pts = fiberSleevePathPoints(p);
+    var total = polylineLength(pts);
+    var size = getSleeveSizePx();
     p.hasSleeve = true;
+    p.sleeveAlong = typeof opts.sleeveAlong === 'number'
+      ? Math.max(0, Math.min(1, opts.sleeveAlong))
+      : defaultSleeveAlong(total, size.w);
+    if (opts.consumeFreeSleeveId && global.FtthLab &&
+        typeof FtthLab.consumeFreeSleeve === 'function') {
+      FtthLab.consumeFreeSleeve(opts.consumeFreeSleeveId);
+    }
     selectPigtail(id);
     rebuildLayer();
-    var el = layer && layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + id + '"]');
-    if (el) {
-      el.classList.add('is-sliding');
-      window.setTimeout(function () {
-        if (el && el.classList) el.classList.remove('is-sliding');
-      }, 420);
-    }
+    if (opts.slideIn !== false) triggerSleeveSlideIn(id);
     pushHistory();
     updateInspector();
-    setStatus('Sleeve 60mm · attached to bare fiber tip');
+    setStatus('Sleeve 60mm · slid onto bare fiber');
     return true;
+  }
+
+  function applySleeve(id, opts) {
+    return mountSleeve(id, opts);
+  }
+
+  function ejectSleeve(id, wx, wy) {
+    var p = findPigtail(id);
+    if (!p || !p.hasSleeve) return null;
+    var g = sleeveGeometry(p);
+    var spawnX = typeof wx === 'number' ? wx : g.x;
+    var spawnY = typeof wy === 'number' ? wy : g.y;
+    p.hasSleeve = false;
+    p.sleeveAlong = null;
+    rebuildLayer();
+    pushHistory();
+    if (global.FtthLab && typeof FtthLab.placeFreeSleeve === 'function') {
+      FtthLab.placeFreeSleeve(spawnX, spawnY, { fromEject: true });
+    }
+    setStatus('Sleeve ejected · free to move');
+    return { x: spawnX, y: spawnY };
   }
 
   function hitTestPigtailBareEnd(clientX, clientY) {
@@ -519,11 +815,11 @@
     setStatus('SC Pigtail removed');
   }
 
-  function selectPigtail(id) {
+  function selectPigtail(id, opts) {
     selection = { kind: 'pigtail', id: id };
     claimSelection();
     updateInspector();
-    rebuildLayer();
+    if (!(opts && opts.skipRebuild)) rebuildLayer();
   }
 
   function setConnectorPolish(id, polish) {
@@ -1660,8 +1956,8 @@
         '</span>' +
         '</button>' +
         (p.hasSleeve
-          ? '<div class="lab-pigtail-sleeve" data-pt-sleeve="' + p.id + '" style="' +
-            sleeveStyle(p) + '" title="Sleeve 60mm" aria-hidden="true"></div>'
+          ? '<div class="lab-pigtail-sleeve lab-sleeve-tube" data-pt-sleeve="' + p.id + '" style="' +
+            sleeveStyle(p) + '" title="Sleeve 60mm · drag along fiber" aria-label="Splice protection sleeve"></div>'
           : '') +
         '</div>';
     });
@@ -1708,7 +2004,7 @@
         var node = layer.querySelector('[data-pt-node="' + p.id + '"]');
         if (node) {
           var wrap = document.createElement('div');
-          wrap.className = 'lab-pigtail-sleeve';
+          wrap.className = 'lab-pigtail-sleeve lab-sleeve-tube';
           wrap.setAttribute('data-pt-sleeve', p.id);
           wrap.setAttribute('style', sleeveStyle(p));
           wrap.setAttribute('title', 'Sleeve 60mm');
@@ -1738,8 +2034,67 @@
     host.querySelectorAll('[data-pt-node]').forEach(function (node) {
       node.addEventListener('click', function (e) {
         if (e.target.closest('[data-pt-end]') || e.target.closest('[data-pt-drag]')) return;
+        if (e.target.closest('[data-pt-sleeve]')) return;
         e.stopPropagation();
         selectPigtail(node.getAttribute('data-pt-node'));
+      });
+    });
+
+    host.querySelectorAll('[data-pt-sleeve]').forEach(function (btn) {
+      btn.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var id = btn.getAttribute('data-pt-sleeve');
+        var p = findPigtail(id);
+        if (!p || !p.hasSleeve) return;
+        selectPigtail(id, { skipRebuild: true });
+        btn.classList.add('is-dragging');
+        document.body.classList.add('lab-sleeve-dragging');
+        try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+        var moved = false;
+        var ejected = false;
+
+        function finishDrag(ev) {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+          try { btn.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
+          btn.classList.remove('is-dragging');
+          document.body.classList.remove('lab-sleeve-dragging');
+        }
+
+        function onMove(ev) {
+          moved = true;
+          var world = clientToWorld(ev.clientX, ev.clientY);
+          var result = dragSleeveAlongPath(p, world.x, world.y);
+          if (result.eject) {
+            ejected = true;
+            finishDrag(ev);
+            ejectSleeve(id, world.x, world.y);
+            return;
+          }
+          updateSleeveElement(p, btn);
+        }
+
+        function onUp(ev) {
+          if (ejected) return;
+          var world = clientToWorld(ev.clientX, ev.clientY);
+          var result = dragSleeveAlongPath(p, world.x, world.y);
+          finishDrag(ev);
+          if (result.eject) {
+            ejectSleeve(id, world.x, world.y);
+            return;
+          }
+          rebuildLayer();
+          updateInspector();
+          if (moved) pushHistory();
+        }
+
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
       });
     });
 
@@ -2452,7 +2807,10 @@
       };
 
       FtthLab.detachPigtailsFromVfl = detachPigtailsFromVfl;
-      FtthLab.applySleeveToPigtail = applySleeve;
+      FtthLab.applySleeveToPigtail = mountSleeve;
+      FtthLab.mountSleeveOnPigtail = mountSleeve;
+      FtthLab.ejectSleeveFromPigtail = ejectSleeve;
+      FtthLab.findBareTipProximity = findBareTipProximity;
       FtthLab.hitTestPigtailAtClient = hitTestPigtailAtClient;
       FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
 
@@ -2501,6 +2859,9 @@
     getLaserGraphNodes: getLaserGraphNodes,
     applyLaserGlow: applyLaserGlow,
     applySleeve: applySleeve,
+    mountSleeve: mountSleeve,
+    ejectSleeve: ejectSleeve,
+    findBareTipProximity: findBareTipProximity,
     hitTestPigtailAtClient: hitTestPigtailAtClient,
     hitTestPigtailBareEnd: hitTestPigtailBareEnd,
     translateForVfl: translateForVfl,

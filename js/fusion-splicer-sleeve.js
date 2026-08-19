@@ -5,10 +5,9 @@
 (function (global) {
   'use strict';
 
-  var SLEEVE_W = 56;
-  var SLEEVE_H = 8;
   var HISTORY_MAX = 40;
   var DRAG_THRESHOLD_PX = 3;
+  var SLEEVE_MOUNT_PROX_PX = 25;
 
   var layer = null;
   var sleeves = [];
@@ -22,6 +21,13 @@
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
+  }
+
+  function getSleeveSizePx() {
+    if (global.FtthLab && typeof FtthLab.getSleeveSizePx === 'function') {
+      return FtthLab.getSleeveSizePx();
+    }
+    return { w: 56, h: 8 };
   }
 
   function getZoom() {
@@ -88,19 +94,65 @@
     return true;
   }
 
-  function applyToPigtail(id) {
+  function applyToPigtail(id, opts) {
     if (!id) return false;
+    if (global.FtthLab && typeof FtthLab.mountSleeveOnPigtail === 'function') {
+      return !!FtthLab.mountSleeveOnPigtail(id, opts || {});
+    }
     if (global.FtthLab && typeof FtthLab.applySleeveToPigtail === 'function') {
-      return !!FtthLab.applySleeveToPigtail(id);
+      return !!FtthLab.applySleeveToPigtail(id, opts || {});
     }
     return false;
   }
 
-  function hitBareFiberEnd(clientX, clientY) {
-    if (global.FtthLab && typeof FtthLab.hitTestPigtailBareEnd === 'function') {
-      return FtthLab.hitTestPigtailBareEnd(clientX, clientY);
+  function findBareTipProximity(clientX, clientY) {
+    if (global.FtthLab && typeof FtthLab.findBareTipProximity === 'function') {
+      return FtthLab.findBareTipProximity(clientX, clientY, SLEEVE_MOUNT_PROX_PX);
     }
     return null;
+  }
+
+  function consumeFreeSleeve(id) {
+    sleeves = sleeves.filter(function (s) { return s.id !== id; });
+    if (selection.id === id) selection = { kind: 'none', id: null };
+    rebuildLayer();
+  }
+
+  function placeFreeSleeve(x, y, opts) {
+    opts = opts || {};
+    seq += 1;
+    var item = {
+      id: 'slv-' + seq,
+      x: typeof x === 'number' ? Math.round(x) : 0,
+      y: typeof y === 'number' ? Math.round(y) : 0,
+    };
+    sleeves.push(item);
+    selection = { kind: 'sleeve', id: item.id };
+    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
+      FtthLab.setSelectionOwner('splice-sleeve');
+    }
+    rebuildLayer();
+    if (!opts.silent) pushHistory();
+    updateInspector();
+    if (opts.fromEject) {
+      setStatus('Sleeve ejected · drag along fiber or move freely');
+    }
+    return item;
+  }
+
+  function tryProximityMount(clientX, clientY, freeSleeveId) {
+    var hit = findBareTipProximity(clientX, clientY);
+    if (!hit) return false;
+    if (!applyToPigtail(hit.id, {
+      consumeFreeSleeveId: freeSleeveId,
+      slideIn: true,
+    })) {
+      return false;
+    }
+    selectedTool = null;
+    renderToolbox();
+    updateInspector();
+    return true;
   }
 
   function ensureLayer() {
@@ -115,11 +167,12 @@
   }
 
   function sleeveFreeStyle(s) {
+    var size = getSleeveSizePx();
     return (
-      'left:' + Math.round(s.x - SLEEVE_W / 2) + 'px;' +
-      'top:' + Math.round(s.y - SLEEVE_H / 2) + 'px;' +
-      'width:' + SLEEVE_W + 'px;' +
-      'height:' + SLEEVE_H + 'px;'
+      'left:' + Math.round(s.x - size.w / 2) + 'px;' +
+      'top:' + Math.round(s.y - size.h / 2) + 'px;' +
+      'width:' + size.w + 'px;' +
+      'height:' + size.h + 'px;'
     );
   }
 
@@ -130,7 +183,7 @@
     sleeves.forEach(function (s) {
       var sel = selection.id === s.id ? ' is-selected' : '';
       html +=
-        '<button type="button" class="lab-sleeve-free' + sel + '" data-sleeve-id="' + s.id +
+        '<button type="button" class="lab-sleeve-free lab-sleeve-tube' + sel + '" data-sleeve-id="' + s.id +
         '" style="' + sleeveFreeStyle(s) + '" title="علبة حماية الوصلة (60mm)" ' +
         'aria-label="Splice protection sleeve 60mm"></button>';
     });
@@ -167,19 +220,7 @@
   }
 
   function tryAttachAtClient(clientX, clientY, freeSleeveId) {
-    var ptId = hitBareFiberEnd(clientX, clientY);
-    if (!ptId) return false;
-    if (!applyToPigtail(ptId)) return false;
-    if (freeSleeveId) {
-      sleeves = sleeves.filter(function (s) { return s.id !== freeSleeveId; });
-      if (selection.id === freeSleeveId) selection = { kind: 'none', id: null };
-      rebuildLayer();
-      pushHistory();
-    }
-    selectedTool = null;
-    renderToolbox();
-    updateInspector();
-    return true;
+    return tryProximityMount(clientX, clientY, freeSleeveId);
   }
 
   function updateInspector() {
@@ -195,13 +236,14 @@
     }
   }
 
-  function selectSleeve(id) {
+  function selectSleeve(id, opts) {
     selection = { kind: 'sleeve', id: id };
     if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
       FtthLab.setSelectionOwner('splice-sleeve');
     }
-    rebuildLayer();
     updateInspector();
+    /* skipRebuild during live drag — rebuild destroys the node under the pointer */
+    if (!(opts && opts.skipRebuild)) rebuildLayer();
   }
 
   /** Hold-to-move with window listeners (same pattern as other lab nodes). */
@@ -214,7 +256,15 @@
         var id = btn.getAttribute('data-sleeve-id');
         var s = findSleeve(id);
         if (!s) return;
-        selectSleeve(id);
+        selectSleeve(id, { skipRebuild: true });
+        if (layer) {
+          layer.querySelectorAll('.lab-sleeve-free.is-selected').forEach(function (el) {
+            if (el !== btn) el.classList.remove('is-selected');
+          });
+        }
+        btn.classList.add('is-selected', 'is-dragging');
+        document.body.classList.add('lab-sleeve-dragging');
+        try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 
         var zoom = getZoom() || 1;
         var sx = e.clientX;
@@ -222,9 +272,16 @@
         var ox = s.x;
         var oy = s.y;
         var moved = false;
+        var mounted = false;
 
-        btn.classList.add('is-dragging');
-        document.body.classList.add('lab-sleeve-dragging');
+        function endFreeDrag(ev) {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', onUp);
+          window.removeEventListener('pointercancel', onUp);
+          try { btn.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
+          btn.classList.remove('is-dragging');
+          document.body.classList.remove('lab-sleeve-dragging');
+        }
 
         function onMove(ev) {
           var dx = (ev.clientX - sx) / zoom;
@@ -235,17 +292,19 @@
           moved = true;
           s.x = Math.round(ox + dx);
           s.y = Math.round(oy + dy);
-          btn.setAttribute('style', sleeveFreeStyle(s));
+          var size = getSleeveSizePx();
+          btn.style.left = Math.round(s.x - size.w / 2) + 'px';
+          btn.style.top = Math.round(s.y - size.h / 2) + 'px';
+          if (tryProximityMount(ev.clientX, ev.clientY, id)) {
+            mounted = true;
+            endFreeDrag(ev);
+          }
         }
 
         function onUp(ev) {
-          window.removeEventListener('pointermove', onMove);
-          window.removeEventListener('pointerup', onUp);
-          window.removeEventListener('pointercancel', onUp);
-          btn.classList.remove('is-dragging');
-          document.body.classList.remove('lab-sleeve-dragging');
-
-          if (tryAttachAtClient(ev.clientX, ev.clientY, id)) return;
+          if (mounted) return;
+          endFreeDrag(ev);
+          if (tryProximityMount(ev.clientX, ev.clientY, id)) return;
           if (moved) pushHistory();
           rebuildLayer();
           updateInspector();
@@ -386,6 +445,10 @@
     ensureLayer();
     rebuildLayer();
     pushHistory();
+    if (global.FtthLab) {
+      FtthLab.placeFreeSleeve = placeFreeSleeve;
+      FtthLab.consumeFreeSleeve = consumeFreeSleeve;
+    }
   }
 
   var tool = {

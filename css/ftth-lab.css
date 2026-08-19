@@ -3037,12 +3037,9 @@ body.lab-pcord-linking .lab-pcord-fiber {
   overflow: visible;
 }
 
-.lab-sleeve-free {
-  position: absolute;
-  z-index: 5;
+/* Shared fixed geometry: 56×8 lab-world px (see FtthLab.SLEEVE_60MM_*_PX). */
+.lab-sleeve-tube {
   box-sizing: border-box;
-  padding: 0;
-  margin: 0;
   border: 1px solid rgba(226, 232, 240, 0.7);
   border-radius: 999px;
   background: linear-gradient(
@@ -3054,8 +3051,24 @@ body.lab-pcord-linking .lab-pcord-fiber {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.7),
     0 1px 3px rgba(0, 0, 0, 0.22);
+}
+
+.lab-sleeve-free {
+  position: absolute;
+  z-index: 5;
   cursor: grab;
   pointer-events: auto;
+}
+
+/* Expanded hit target without changing the painted tube size. */
+.lab-sleeve-free::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
+}
+
+.lab-sleeve-free:hover {
+  cursor: grab;
 }
 
 .lab-sleeve-free:active,
@@ -3074,22 +3087,15 @@ body.lab-pcord-linking .lab-pcord-fiber {
 
 .lab-pigtail-sleeve {
   position: absolute;
-  z-index: 2;
-  pointer-events: none;
-  box-sizing: border-box;
-  border-radius: 999px;
-  border: 1px solid rgba(226, 232, 240, 0.72);
-  background: linear-gradient(
-    180deg,
-    rgba(248, 250, 252, 0.58) 0%,
-    rgba(203, 213, 225, 0.34) 50%,
-    rgba(148, 163, 184, 0.3) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.65),
-    0 1px 2px rgba(0, 0, 0, 0.2);
-  opacity: 0.78;
+  z-index: 6;
+  pointer-events: auto;
+  cursor: grab;
   transform-origin: 50% 50%;
+}
+
+.lab-pigtail-sleeve.is-dragging {
+  cursor: grabbing;
+  opacity: 0.85;
 }
 
 .lab-pigtail-sleeve.is-sliding {
@@ -3098,11 +3104,11 @@ body.lab-pcord-linking .lab-pcord-fiber {
 
 @keyframes lab-sleeve-slide-in {
   from {
-    opacity: 0.15;
+    opacity: 0.55;
     filter: blur(0.4px);
   }
   to {
-    opacity: 0.78;
+    opacity: 1;
     filter: none;
   }
 }

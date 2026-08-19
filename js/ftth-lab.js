@@ -205,6 +205,7 @@
     if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
     if (target.closest('.lab-pcord')) return false;
     if (target.closest('.lab-pigtail')) return false;
+    if (target.closest('.lab-sleeve-free') || target.closest('[data-sleeve-id]')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;
     if (target.closest('.lab-opm') || target.closest('.lab-opm-port') ||
@@ -2064,6 +2065,15 @@
     PATCH_CORD_DEFAULT_ROT_A: -90,
     PATCH_CORD_DEFAULT_ROT_B: 90,
     PATCH_CORD_DEFAULT_SAG_SLACK: 1.18,
+    /**
+     * 60mm splice protection sleeve — fixed lab-world px (~7:1 vs 2.15px bare fiber).
+     * Same size for free workspace sleeves and pigtail-mounted sleeves.
+     */
+    SLEEVE_60MM_W_PX: 56,
+    SLEEVE_60MM_H_PX: 8,
+    getSleeveSizePx: function () {
+      return { w: api.SLEEVE_60MM_W_PX, h: api.SLEEVE_60MM_H_PX };
+    },
     /**
      * Elastic rubber-band sag (screen y+ down). Depth scales with tip span;
      * excess lengthPx (Meter Mode / locked length) deepens the belly.
