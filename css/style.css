@@ -1251,6 +1251,35 @@ body.article-reader-open {
   opacity: 0.55;
 }
 
+.tool-item[data-tool="stripper"] {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.72);
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  font: inherit;
+  user-select: none;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.tool-item[data-tool="stripper"]:hover,
+.tool-item[data-tool="stripper"].is-selected {
+  border-color: rgba(250, 204, 21, 0.55);
+  background: rgba(234, 179, 8, 0.12);
+}
+
+.tool-item[data-tool="stripper"]:active,
+.tool-item[data-tool="stripper"].is-dragging {
+  cursor: grabbing;
+  opacity: 0.55;
+}
+
 /* Pigtail dual route-mode toggle */
 .lab-route-mode-toggle {
   display: grid;

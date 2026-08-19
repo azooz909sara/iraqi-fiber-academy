@@ -36,6 +36,8 @@
   var PIGTAIL_CATENARY_SLACK = 1.12;
   var SLEEVE_MOUNT_PROX_PX = 25;
   var SLEEVE_EJECT_PULL_PX = 14;
+  var STRIP_CLAMP_PROX_PX = 44;
+  var STRIP_TIP_ZONE_PX = 58;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
   var ORTHO_FILLET_R = 16;
   var ORTHO_TURN_PX = 10;
@@ -314,6 +316,10 @@
         p.sleeveAlong = 0;
       }
       if (!p.hasSleeve) p.sleeveAlong = null;
+      if (typeof p.stripStage !== 'number') p.stripStage = 0;
+      if (typeof p.stripPeel !== 'number') p.stripPeel = 0;
+      if (p.stripStage < 0) p.stripStage = 0;
+      if (p.stripStage > 2) p.stripStage = 2;
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
       }
@@ -605,6 +611,97 @@
     return { eject: false, proj: proj };
   }
 
+  function stripStageLabel(stage) {
+    if (stage >= 2) return 'Bare glass (125 µm)';
+    if (stage >= 1) return 'Buffer exposed · strip acrylate';
+    return 'Jacketed · peel outer sheath';
+  }
+
+  function findStripTarget(clientX, clientY, thresholdPx) {
+    var world = clientToWorld(clientX, clientY);
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_CLAMP_PROX_PX;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p) continue;
+      var stage = p.stripStage || 0;
+      if (stage >= 2) continue;
+      var pts = fiberSleevePathPoints(p);
+      if (!pts || pts.length < 2) continue;
+      var proj = projectOntoFiberPath(pts, world.x, world.y);
+      if (proj.perpDist > thr || proj.dist > STRIP_TIP_ZONE_PX) continue;
+      if (proj.perpDist < bestD) {
+        var tip = pts[0];
+        var inner = pts[1];
+        var dx = tip.x - inner.x;
+        var dy = tip.y - inner.y;
+        var len = Math.sqrt(dx * dx + dy * dy) || 1;
+        bestD = proj.perpDist;
+        best = {
+          id: p.id,
+          stage: stage,
+          x: proj.x,
+          y: proj.y,
+          rot: proj.rot,
+          peelUx: dx / len,
+          peelUy: dy / len,
+          perpDist: proj.perpDist,
+        };
+      }
+    }
+    return best;
+  }
+
+  function setStripPeel(id, peel) {
+    var p = findPigtail(id);
+    if (!p) return;
+    var n = Number(peel);
+    if (!isFinite(n)) n = 0;
+    p.stripPeel = Math.max(0, Math.min(1, n));
+    updateStripVisuals(p);
+  }
+
+  function clearStripPeel(id) {
+    var p = findPigtail(id);
+    if (!p) return;
+    p.stripPeel = 0;
+    updateStripVisuals(p);
+  }
+
+  function commitStripStage(id) {
+    var p = findPigtail(id);
+    if (!p) return false;
+    var stage = p.stripStage || 0;
+    if (stage >= 2) return false;
+    p.stripStage = stage + 1;
+    p.stripPeel = 0;
+    rebuildLayer();
+    pushHistory();
+    updateInspector();
+    return true;
+  }
+
+  function updateStripVisuals(p) {
+    if (!layer || !p) return;
+    var peel = p.stripPeel || 0;
+    var stage = p.stripStage || 0;
+    var fiber = layer.querySelector('[data-pt-fiber="' + p.id + '"]');
+    if (fiber) {
+      fiber.classList.toggle('is-strip-peeling', peel > 0.02);
+      fiber.style.setProperty('--strip-peel', peel.toFixed(3));
+    }
+    var tail = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
+    if (tail) {
+      tail.classList.toggle('is-strip-peeling', peel > 0.02);
+      tail.style.setProperty('--strip-peel', peel.toFixed(3));
+    }
+    if (stage < 2) return;
+    if (fiber) fiber.classList.add('is-strip-stage2');
+    if (tail) tail.classList.add('is-strip-stage2');
+  }
+
   function findBareTipProximity(clientX, clientY, thresholdPx) {
     var world = clientToWorld(clientX, clientY);
     var thr = typeof thresholdPx === 'number' ? thresholdPx : SLEEVE_MOUNT_PROX_PX;
@@ -794,6 +891,8 @@
       routeMode: 'snake',
       fixedLength: SPAWN_LEN_PX,
       hasSleeve: false,
+      stripStage: 0,
+      stripPeel: 0,
       drawLockRot: horizRot,
     };
     pigtails.push(item);
@@ -1914,11 +2013,17 @@
       var ghost = ghostPreviewPath(p);
       var bad = p.connector.mismatch;
       var sel = selection.id === p.id ? ' is-selected' : '';
+      var stripStage = p.stripStage || 0;
+      var stripCls =
+        (stripStage >= 1 ? ' is-strip-stage1' : '') +
+        (stripStage >= 2 ? ' is-strip-stage2' : '') +
+        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '');
       html +=
         '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + path +
         '" fill="none" />' +
-        '<path class="lab-pigtail-fiber' + (bad ? ' is-mismatch' : '') + sel +
-        '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" />' +
+        '<path class="lab-pigtail-fiber' + (bad ? ' is-mismatch' : '') + sel + stripCls +
+        '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" ' +
+        'style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />' +
         (ghost
           ? '<path class="lab-pigtail-fiber-ghost" data-pt-ghost="' + p.id +
             '" d="' + ghost + '" fill="none" />'
@@ -1946,10 +2051,25 @@
         '</button>' +
         '<button type="button" class="lab-pigtail__tail' +
         (p.tail.attached ? ' is-attached' : '') +
-        '" data-pt-id="' + p.id + '" data-pt-end="B" style="' + tailStyle(p) + '" ' +
-        'title="Bare fiber · splice / termination" aria-label="Bare fiber tail">' +
-        '<span class="lab-pigtail__buffer" aria-hidden="true"></span>' +
-        '<span class="lab-pigtail__cleave" aria-hidden="true"></span>' +
+        (stripStage >= 1 ? ' is-strip-stage1' : '') +
+        (stripStage >= 2 ? ' is-strip-stage2' : '') +
+        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '') +
+        '" data-pt-id="' + p.id + '" data-pt-end="B" style="' + tailStyle(p) +
+        ';--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" ' +
+        'title="Bare fiber · ' + stripStageLabel(stripStage) + '" aria-label="Bare fiber tail">' +
+        '<span class="lab-pigtail__jacket' +
+        (stripStage >= 1 ? ' is-strip-removed' : '') +
+        ((p.stripPeel || 0) > 0 && stripStage === 0 ? ' is-strip-peeling' : '') +
+        '" aria-hidden="true"></span>' +
+        '<span class="lab-pigtail__buffer' +
+        (stripStage >= 1 ? ' is-strip-exposed' : ' is-strip-jacketed') +
+        (stripStage >= 2 ? ' is-strip-removed' : '') +
+        ((p.stripPeel || 0) > 0 && stripStage === 1 ? ' is-strip-peeling' : '') +
+        '" aria-hidden="true"></span>' +
+        '<span class="lab-pigtail__cleave' +
+        (stripStage >= 2 ? ' is-strip-bare' : '') +
+        (stripStage === 1 ? ' is-strip-buffered' : '') +
+        '" aria-hidden="true"></span>' +
         '<span class="lab-vfl-exit-flare lab-vfl-exit-flare--tail" aria-hidden="true">' +
         '<i class="lab-vfl-exit-flare__aura"></i>' +
         '<i class="lab-vfl-exit-flare__hot"></i>' +
@@ -2608,6 +2728,7 @@
       (isApc ? 'is-apc-text' : 'is-upc-text') + '">' + displayPolish(p.polish) +
       '</strong></div>' +
       '<div><span>Ends</span><strong>SC · Bare</strong></div>' +
+      '<div><span>Strip</span><strong>' + stripStageLabel(p.stripStage || 0) + '</strong></div>' +
       '<div><span>IL</span><strong>' +
       (p.connector.attached ? loss.toFixed(2) + ' dB' : '—') +
       '</strong></div>' +
@@ -2813,6 +2934,10 @@
       FtthLab.findBareTipProximity = findBareTipProximity;
       FtthLab.hitTestPigtailAtClient = hitTestPigtailAtClient;
       FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
+      FtthLab.findPigtailStripTarget = findStripTarget;
+      FtthLab.setPigtailStripPeel = setStripPeel;
+      FtthLab.clearPigtailStripPeel = clearStripPeel;
+      FtthLab.commitPigtailStripStage = commitStripStage;
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {
@@ -2862,6 +2987,10 @@
     mountSleeve: mountSleeve,
     ejectSleeve: ejectSleeve,
     findBareTipProximity: findBareTipProximity,
+    findStripTarget: findStripTarget,
+    setStripPeel: setStripPeel,
+    clearStripPeel: clearStripPeel,
+    commitStripStage: commitStripStage,
     hitTestPigtailAtClient: hitTestPigtailAtClient,
     hitTestPigtailBareEnd: hitTestPigtailBareEnd,
     translateForVfl: translateForVfl,
