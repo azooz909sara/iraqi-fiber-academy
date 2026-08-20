@@ -589,7 +589,7 @@
     if (status) {
       status.textContent = 'تم الحفظ — ' + saved.slides.length + ' شريحة · كل ' + saved.intervalSeconds + ' ثانية';
     }
-    toast('تم حفظ عرض البطل');
+    toast('تم حفظ الصفحة الرئيسية');
     reloadSitePreview();
   }
 

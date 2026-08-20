@@ -11,7 +11,6 @@
 
   var timerId = null;
   var currentIndex = 0;
-  var paused = false;
   var activeConfig = null;
 
   function uid() {
@@ -169,59 +168,23 @@
     }
   }
 
-  function updateToggleBtn(btn) {
-    if (!btn) return;
-    var total = getSlideCount();
-    var playing = !paused && total > 1;
-    btn.setAttribute('aria-pressed', playing ? 'true' : 'false');
-    btn.setAttribute('aria-label', playing ? 'إيقاف العرض مؤقتاً' : 'تشغيل العرض');
-    btn.innerHTML = playing
-      ? '<span class="hero-slideshow__toggle-icon" aria-hidden="true">❚❚</span><span class="hero-slideshow__toggle-text">إيقاف</span>'
-      : '<span class="hero-slideshow__toggle-icon" aria-hidden="true">▶</span><span class="hero-slideshow__toggle-text">تشغيل</span>';
-  }
-
   function goToSlide(index) {
     var slides = document.querySelectorAll('.hero-content-slide');
-    var dots = document.querySelectorAll('.hero-slideshow__dot');
     if (!slides.length) return;
     currentIndex = ((index % slides.length) + slides.length) % slides.length;
     slides.forEach(function (el, i) {
       el.classList.toggle('is-active', i === currentIndex);
     });
-    dots.forEach(function (el, i) {
-      el.classList.toggle('is-active', i === currentIndex);
-      el.setAttribute('aria-current', i === currentIndex ? 'true' : 'false');
-    });
   }
 
   function startTimer() {
     stopTimer();
-    if (paused || getSlideCount() < 2) return;
+    if (getSlideCount() < 2) return;
     var intervalSec =
       activeConfig && activeConfig.intervalSeconds ? activeConfig.intervalSeconds : DEFAULT_INTERVAL;
     timerId = setInterval(function () {
       goToSlide(currentIndex + 1);
     }, intervalSec * 1000);
-  }
-
-  function bindControls(root, toggleBtn) {
-    if (root.dataset.bound === '1') return;
-    root.dataset.bound = '1';
-
-    root.addEventListener('click', function (e) {
-      var dot = e.target.closest ? e.target.closest('[data-slide-to]') : null;
-      if (dot) {
-        goToSlide(Number(dot.getAttribute('data-slide-to')));
-        startTimer();
-        return;
-      }
-      if (e.target.closest && e.target.closest('#heroSlideshowToggle')) {
-        paused = !paused;
-        updateToggleBtn(toggleBtn);
-        if (paused) stopTimer();
-        else startTimer();
-      }
-    });
   }
 
   function cloneNetworkVisual() {
@@ -324,27 +287,9 @@
     });
   }
 
-  function renderDots(dotsEl, total) {
-    if (!dotsEl) return;
-    dotsEl.innerHTML = '';
-    for (var i = 0; i < total; i++) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'hero-slideshow__dot' + (i === currentIndex ? ' is-active' : '');
-      btn.setAttribute('data-slide-to', String(i));
-      btn.setAttribute('aria-label', 'الشريحة ' + (i + 1));
-      btn.setAttribute('aria-current', i === currentIndex ? 'true' : 'false');
-      dotsEl.appendChild(btn);
-    }
-  }
-
   function mountHeroSlideshow() {
-    var root = document.getElementById('heroSlideshow');
     var slidesEl = document.getElementById('heroSlideshowSlides');
-    var dotsEl = document.getElementById('heroSlideshowDots');
-    var toggleBtn = document.getElementById('heroSlideshowToggle');
-    var controls = document.getElementById('heroSlideshowControls');
-    if (!root || !slidesEl) return;
+    if (!slidesEl) return;
 
     activeConfig = getConfig();
     var slides = getSlidesForDisplay();
@@ -362,10 +307,6 @@
     var total = getSlideCount();
     currentIndex = prevIndex >= total ? 0 : prevIndex;
     goToSlide(currentIndex);
-    renderDots(dotsEl, total);
-    if (controls) controls.hidden = total < 2;
-    updateToggleBtn(toggleBtn);
-    bindControls(root, toggleBtn);
     startTimer();
   }
 

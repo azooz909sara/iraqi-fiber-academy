@@ -16,10 +16,6 @@
       simulators: true,
       'site-stats': true,
       'site-hero-slideshow': true,
-      'site-articles': true,
-      'site-faq': true,
-      'site-testimonials': true,
-      'site-preview': true,
     };
 
     var VIEW_META = {
@@ -28,13 +24,13 @@
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
-      simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات — محتوى البطاقات والأيقونات' },
-      'site-stats': { title: 'إدارة موقعي', subtitle: 'إدارة الإحصائيات (Website Statistics)' },
-      'site-hero-slideshow': { title: 'إدارة موقعي', subtitle: 'عرض البطل — Hero Slideshow' },
-      'site-articles': { title: 'إدارة موقعي', subtitle: 'المقالات التقنية' },
-      'site-faq': { title: 'إدارة موقعي', subtitle: 'الأسئلة الشائعة' },
-      'site-testimonials': { title: 'إدارة موقعي', subtitle: 'آراء المستخدمين' },
-      'site-preview': { title: 'إدارة موقعي', subtitle: 'معاينة الموقع المباشر' },
+      simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات والعرض — بطاقات المحاكي ومعاينة الدوران' },
+      'site-stats': { title: 'إدارة موقعي', subtitle: 'إدارة الإحصائيات' },
+      'site-hero-slideshow': { title: 'إدارة موقعي', subtitle: 'الصفحة الرئيسية — Homepage' },
+      'site-articles': { title: 'المقالات التقنية', subtitle: 'إضافة وتعديل المقالات المعروضة في الصفحة الرئيسية' },
+      'site-faq': { title: 'الأسئلة الشائعة', subtitle: 'إدارة الأسئلة والأجوبة في الصفحة الرئيسية' },
+      'site-testimonials': { title: 'آراء المستخدمين', subtitle: 'إدارة آراء وتقييمات المستخدمين' },
+      'site-preview': { title: 'معاينة الموقع', subtitle: 'معاينة الموقع المباشر' },
       settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
     };
 
@@ -79,7 +75,7 @@
       if (id === 'courses' && typeof window.renderAdminCoursesTable === 'function') {
         window.renderAdminCoursesTable();
       }
-      if (SITE_VIEWS[id] && typeof window.renderAdminSiteCms === 'function') {
+      if ((SITE_VIEWS[id] || id.indexOf('site-') === 0) && typeof window.renderAdminSiteCms === 'function') {
         window.renderAdminSiteCms();
       }
       document.body.classList.toggle('admin-body--site-preview', id === 'site-preview');

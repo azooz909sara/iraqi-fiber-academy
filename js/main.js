@@ -212,14 +212,5 @@
       }
       alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });
-
-    document.querySelectorAll('.demo__mock-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        document.querySelectorAll('.demo__mock-btn').forEach(function (b) {
-          b.classList.remove('demo__mock-btn--active');
-        });
-        this.classList.add('demo__mock-btn--active');
-      });
-    });
   });
 })();

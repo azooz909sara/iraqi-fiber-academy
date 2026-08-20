@@ -77,15 +77,8 @@
           <div class="fiber-line-animated"></div>
         </div>
       </div>
-      <div class="hero-content-slider" id="heroSlideshow" aria-roledescription="carousel" aria-label="Hero content slider">
+      <div class="hero-content-slider" id="heroSlideshow" aria-roledescription="carousel" aria-label="Homepage slides">
         <div class="hero-content-slider__track" id="heroSlideshowSlides"></div>
-        <div class="hero-content-slider__controls" id="heroSlideshowControls" hidden>
-          <button type="button" class="hero-slideshow__toggle" id="heroSlideshowToggle" aria-pressed="false" aria-label="إيقاف العرض مؤقتاً">
-            <span class="hero-slideshow__toggle-icon" aria-hidden="true">❚❚</span>
-            <span class="hero-slideshow__toggle-text">إيقاف</span>
-          </button>
-          <div class="hero-slideshow__dots" id="heroSlideshowDots" role="tablist" aria-label="اختيار الشريحة"></div>
-        </div>
       </div>
       <template id="heroNetworkTemplate">
         <div class="hero__visual-card">
@@ -349,45 +342,31 @@
 
     <section class="section demo" id="demo">
       <div class="container">
-        <div class="demo__wrapper">
-          <div class="demo__content fade-in">
-            <span class="section__badge">معاينة المحاكي</span>
-            <h2 class="section__title" style="text-align:right">لمحة عن بيئة المحاكاة</h2>
-            <p class="section__subtitle" style="text-align:right;margin-inline:0">واجهة تفاعلية لمحاكاة شبكات الألياف الضوئية — جربها الآن</p>
-            <ul class="demo__features-list">
-              <li>تصميم شبكة FTTH كاملة بسحب وإفلات</li>
-              <li>محاكاة إشارات OTDR في الوقت الفعلي</li>
-              <li>قياس القدرة البصرية لكل نقطة</li>
-              <li>سيناريوهات أعطال واقعية للتدريب</li>
-            </ul>
-            <a href="simulator.html" class="btn btn--primary" style="margin-top:1.5rem">Try Simulator</a>
+        <div class="demo__wrapper" id="simulatorShowcase" data-sim-showcase>
+          <div class="demo__content sim-showcase__content">
+            <span class="section__badge">معاينة المحاكيات</span>
+            <div class="sim-showcase__copy" id="simShowcaseCopy" aria-live="polite">
+              <h2 class="section__title sim-showcase__title" id="simShowcaseTitle" style="text-align:right">محاكي FTTH متكامل</h2>
+              <p class="section__subtitle sim-showcase__desc" id="simShowcaseDesc" style="text-align:right;margin-inline:0">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
+              <a href="simulator.html" class="btn btn--primary sim-showcase__cta" id="simShowcaseCta" style="margin-top:1.5rem" data-simulator-launch="ftth-simulator">Try Simulator</a>
+            </div>
           </div>
-          <div class="demo__screen fade-in">
+          <div class="demo__screen sim-showcase__screen" id="simShowcaseScreen">
             <div class="demo__screen-header">
               <span class="demo__screen-dot demo__screen-dot--red"></span>
               <span class="demo__screen-dot demo__screen-dot--yellow"></span>
               <span class="demo__screen-dot demo__screen-dot--green"></span>
-              <span class="demo__screen-title">fiber-academy-simulator v2.0</span>
+              <span class="demo__screen-title" id="simShowcaseScreenTitle">fiber-academy-simulator v2.0</span>
             </div>
             <div class="demo__screen-body">
-              <div class="demo__mock-toolbar">
-                <span class="demo__mock-btn demo__mock-btn--active">FTTH</span>
-                <span class="demo__mock-btn">OTDR</span>
-                <span class="demo__mock-btn">Power</span>
-                <span class="demo__mock-btn">Splice</span>
+              <div class="demo__mock-toolbar" id="simShowcaseToolbar" aria-hidden="true"></div>
+              <div class="demo__mock-canvas sim-showcase__canvas" id="simShowcaseCanvas">
+                <div class="sim-showcase__visual" id="simShowcaseVisual" aria-hidden="true"></div>
+                <div class="demo__coming-soon sim-showcase__soon" id="simShowcaseSoon" hidden>
+                  <span>قريباً — قيد التطوير</span>
+                </div>
               </div>
-              <div class="demo__mock-canvas">
-                <div class="demo__fiber-line"></div>
-                <div class="demo__fiber-node demo__fiber-node--1"></div>
-                <div class="demo__fiber-node demo__fiber-node--2"></div>
-                <div class="demo__fiber-node demo__fiber-node--3"></div>
-                <div class="demo__coming-soon"><span>قريباً — Coming Soon</span></div>
-              </div>
-              <div class="demo__mock-stats">
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">-18.5 dBm</div><div class="demo__mock-stat-label">Power Level</div></div>
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">0.02 dB</div><div class="demo__mock-stat-label">Splice Loss</div></div>
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">12.4 km</div><div class="demo__mock-stat-label">Fiber Length</div></div>
-              </div>
+              <div class="demo__mock-stats" id="simShowcaseStats"></div>
             </div>
           </div>
         </div>
@@ -551,6 +530,7 @@
 
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
+  <script src="js/platform-simulator-showcase.js"></script>
   <script src="js/articles.js"></script>
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
