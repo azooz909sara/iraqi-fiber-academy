@@ -36,8 +36,13 @@
   var PIGTAIL_CATENARY_SLACK = 1.12;
   var SLEEVE_MOUNT_PROX_PX = 25;
   var SLEEVE_EJECT_PULL_PX = 14;
-  var STRIP_CLAMP_PROX_PX = 44;
-  var STRIP_TIP_ZONE_PX = 58;
+  var STRIP_CLAMP_PROX_PX = 15;
+  var STRIP_TIP_ZONE_PX = 96;
+  /** Match CFS-3 peel thresholds — exposed length advances from tip toward connector. */
+  var STRIP_JACKET_PX = 42;
+  var STRIP_BUFFER_PX = 26;
+  /** Hard max distance from cutting notch to fiber centerline for clamp/strip. */
+  var STRIP_NOTCH_HIT_PX = 15;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
   var ORTHO_FILLET_R = 16;
   var ORTHO_TURN_PX = 10;
@@ -320,6 +325,8 @@
       if (typeof p.stripPeel !== 'number') p.stripPeel = 0;
       if (p.stripStage < 0) p.stripStage = 0;
       if (p.stripStage > 2) p.stripStage = 2;
+      if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
+      syncStripLength(p);
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
       }
@@ -617,38 +624,363 @@
     return 'Jacketed · peel outer sheath';
   }
 
+  /** Committed stripped length from tip (ignores ephemeral peel animation). */
+  function stripCommittedPx(p) {
+    if (!p) return 0;
+    var n = Number(p.stripLengthPx);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
+  /** How many px from the cleaved tip are currently stripped (jacket/buffer removed). */
+  function stripExposedFromTipPx(p) {
+    return stripCommittedPx(p);
+  }
+
+  function syncStripStageFromLength(p) {
+    if (!p) return;
+    var len = stripCommittedPx(p);
+    if (len >= STRIP_JACKET_PX + STRIP_BUFFER_PX - 0.5) {
+      p.stripStage = 2;
+    } else if (len >= STRIP_JACKET_PX - 0.5) {
+      if ((p.stripStage || 0) < 1) p.stripStage = 1;
+    }
+  }
+
+  function syncStripLength(p) {
+    if (!p) return;
+    /* Keep committed length; stage follows length for jacket→buffer unlock. */
+    if (!isFinite(Number(p.stripLengthPx)) || p.stripLengthPx < 0) p.stripLengthPx = 0;
+    syncStripStageFromLength(p);
+  }
+
+  /** Visual kind for the tip-side segment: buffer coating or bare glass. */
+  function stripExposedKind(p) {
+    var stage = p.stripStage || 0;
+    if (stage >= 2) return 'bare';
+    if (stage >= 1) return 'buffer';
+    if (stripCommittedPx(p) > 0.5 || (p.stripPeel || 0) > 0.02) return 'buffer';
+    return null;
+  }
+
+  function svgPathFromPoints(pts) {
+    if (!pts || !pts.length) return '';
+    var d = 'M ' + pts[0].x + ' ' + pts[0].y;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      d += ' L ' + pts[i].x + ' ' + pts[i].y;
+    }
+    return d;
+  }
+
+  /** Slice a polyline between two arc-length distances [d0, d1]. */
+  function slicePolylineByDistance(pts, d0, d1) {
+    if (!pts || pts.length < 2) return pts ? pts.slice() : [];
+    var total = polylineLength(pts);
+    if (total < 0.01) return [{ x: pts[0].x, y: pts[0].y }];
+    var a = Math.max(0, Math.min(total, d0));
+    var b = Math.max(0, Math.min(total, d1));
+    if (b < a) {
+      var tmp = a;
+      a = b;
+      b = tmp;
+    }
+    if (b - a < 0.25) {
+      var mid = pointAtPathDistance(pts, (a + b) / 2);
+      return [{ x: mid.x, y: mid.y }, { x: mid.x, y: mid.y }];
+    }
+    var start = pointAtPathDistance(pts, a);
+    var end = pointAtPathDistance(pts, b);
+    var out = [{ x: start.x, y: start.y }];
+    var acc = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      var ax = pts[i - 1].x;
+      var ay = pts[i - 1].y;
+      var bx = pts[i].x;
+      var by = pts[i].y;
+      var segLen = dist2(ax, ay, bx, by);
+      var next = acc + segLen;
+      if (next > a + 0.01 && acc < b - 0.01) {
+        if (acc >= a - 0.01 && next <= b + 0.01) {
+          pushSleevePathPt(out, { x: bx, y: by });
+        } else if (acc < a && next > a && next <= b) {
+          pushSleevePathPt(out, { x: bx, y: by });
+        } else if (acc >= a && acc < b && next > b) {
+          /* end handled below */
+        } else if (acc < a && next > b) {
+          /* segment spans both ends — only endpoints */
+        }
+      }
+      acc = next;
+    }
+    pushSleevePathPt(out, { x: end.x, y: end.y });
+    if (out.length < 2) out.push({ x: end.x, y: end.y });
+    return out;
+  }
+
+  /**
+   * Full render polyline connector → tip (same geometry as fiberPath).
+   */
+  function fiberRenderPathPoints(p) {
+    var tipA = bootAnchor(p);
+    var p0 = strainReliefStart(p);
+    var tipB = { x: p.bx, y: p.by };
+    ensurePathHistory(p);
+    var pts = [{ x: tipA.x, y: tipA.y }, { x: p0.x, y: p0.y }];
+    if (usesOrthoRoute(p)) {
+      var ortho = orthoPolyline(p);
+      var i;
+      for (i = 0; i < ortho.length; i++) {
+        pushSleevePathPt(pts, ortho[i]);
+      }
+      pushSleevePathPt(pts, tipB);
+      return sampleFilletOrthoPoints(collapseOrthoPts(pts), ORTHO_FILLET_R);
+    }
+    var L = resolvePigtailRenderLength(p, p0, tipB);
+    var mid = samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES);
+    var j;
+    for (j = 1; j < mid.length; j++) {
+      pushSleevePathPt(pts, mid[j]);
+    }
+    return pts;
+  }
+
+  function buildPigtailFiberSvg(p) {
+    var fullPts = fiberRenderPathPoints(p);
+    var fullPath = svgPathFromPoints(fullPts) || fiberPath(p);
+    var bad = p.connector.mismatch;
+    var sel = selection.id === p.id ? ' is-selected' : '';
+    var exposed = stripExposedFromTipPx(p);
+    var kind = stripExposedKind(p);
+    var total = polylineLength(fullPts);
+    var html =
+      '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
+      '" fill="none" />';
+
+    if (kind && exposed > 1 && total > exposed + 1) {
+      var cut = Math.max(0, total - exposed);
+      var jacketPts = slicePolylineByDistance(fullPts, 0, cut);
+      var tipPts = slicePolylineByDistance(fullPts, cut, total);
+      var jacketD = svgPathFromPoints(jacketPts);
+      var tipD = svgPathFromPoints(tipPts);
+      html +=
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
+        (bad ? ' is-mismatch' : '') + sel +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + jacketD +
+        '" fill="none" />' +
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + kind +
+        (bad ? ' is-mismatch' : '') +
+        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '') +
+        '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="stripped" d="' + tipD +
+        '" fill="none" style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />';
+    } else {
+      html +=
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
+        (bad ? ' is-mismatch' : '') + sel +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath +
+        '" fill="none" style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />';
+    }
+
+    var ghost = ghostPreviewPath(p);
+    if (ghost) {
+      html +=
+        '<path class="lab-pigtail-fiber-ghost" data-pt-ghost="' + p.id +
+        '" d="' + ghost + '" fill="none" />';
+    }
+    html +=
+      '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + fullPath +
+      '" fill="none" />';
+    return html;
+  }
+
+  function setStripGuideLine(guide) {
+    var host = ensureLayer();
+    if (!host) return;
+    var svg = host.querySelector('.lab-pigtail-svg');
+    if (!svg) return;
+    var el = svg.querySelector('[data-pt-strip-guide="1"]');
+    if (!guide || guide.x1 == null || guide.y1 == null || guide.x2 == null || guide.y2 == null) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    var d =
+      'M ' + Number(guide.x1) + ' ' + Number(guide.y1) +
+      ' L ' + Number(guide.x2) + ' ' + Number(guide.y2);
+    if (!el) {
+      el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      el.setAttribute('data-pt-strip-guide', '1');
+      el.setAttribute('class', 'lab-pigtail-strip-guide');
+      el.setAttribute('fill', 'none');
+      svg.appendChild(el);
+    }
+    el.setAttribute('d', d);
+  }
+
+  function clearStripGuideLine() {
+    setStripGuideLine(null);
+  }
+
+  /**
+   * Project onto fiber polyline with NO tip extrapolation.
+   * u is clamped to each segment [0,1] so empty space past the tip never hits.
+   */
+  function projectOntoFiberStrict(pts, wx, wy) {
+    if (!pts || pts.length < 2) {
+      return { x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: Infinity, onSegment: false };
+    }
+    var total = polylineLength(pts);
+    var best = null;
+    var acc = 0;
+    var i;
+    for (i = 1; i < pts.length; i++) {
+      var ax = pts[i - 1].x;
+      var ay = pts[i - 1].y;
+      var bx = pts[i].x;
+      var by = pts[i].y;
+      var segDx = bx - ax;
+      var segDy = by - ay;
+      var segLen = Math.sqrt(segDx * segDx + segDy * segDy);
+      var segLen2 = segLen * segLen;
+      var u = segLen2 > 0 ? ((wx - ax) * segDx + (wy - ay) * segDy) / segLen2 : 0;
+      var uClamped = Math.max(0, Math.min(1, u));
+      var px = ax + segDx * uClamped;
+      var py = ay + segDy * uClamped;
+      var perp = dist2(wx, wy, px, py);
+      var along = acc + uClamped * segLen;
+      var cand = {
+        x: px,
+        y: py,
+        rot: fiberPathTangentRotDeg(segDx, segDy),
+        dist: along,
+        t: total > 0 ? along / total : 0,
+        perpDist: perp,
+        onSegment: u >= -0.001 && u <= 1.001,
+      };
+      if (!best || perp < best.perpDist) best = cand;
+      acc += segLen;
+    }
+    return best || {
+      x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: Infinity, onSegment: false,
+    };
+  }
+
+  function polylineAxisBounds(pts) {
+    var minX = Infinity;
+    var maxX = -Infinity;
+    var minY = Infinity;
+    var maxY = -Infinity;
+    var i;
+    for (i = 0; i < (pts || []).length; i++) {
+      var p = pts[i];
+      if (!p) continue;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (!isFinite(minX)) {
+      return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+    }
+    return { minX: minX, maxX: maxX, minY: minY, maxY: maxY };
+  }
+
+  function peelDirsFromPath(pts) {
+    var tip = pts[0];
+    var inner = pts.length > 1 ? pts[1] : tip;
+    var dx = tip.x - inner.x;
+    var dy = tip.y - inner.y;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    return { peelUx: dx / len, peelUy: dy / len };
+  }
+
+  function hitFromZone(p, pts, proj, zoneStart, zoneEnd, thr, wx, wy, stage, layer) {
+    if (proj.dist < zoneStart - 0.5 || proj.dist > zoneEnd + 0.5) return null;
+    var zonePts = slicePolylineByDistance(pts, zoneStart, zoneEnd);
+    var b = polylineAxisBounds(zonePts);
+    if (wx < b.minX - thr || wx > b.maxX + thr) return null;
+    if (wy < b.minY - thr || wy > b.maxY + thr) return null;
+    var dirs = peelDirsFromPath(pts);
+    return {
+      id: p.id,
+      stage: stage,
+      layer: layer,
+      x: proj.x,
+      y: proj.y,
+      rot: proj.rot,
+      peelUx: dirs.peelUx,
+      peelUy: dirs.peelUy,
+      perpDist: proj.perpDist,
+      along: proj.dist,
+      baselinePx: stripCommittedPx(p),
+    };
+  }
+
+  /**
+   * Notch must sit on the *remaining* unstripped material:
+   * - Jacket (yellow): inland of already-stripped tip length
+   * - Buffer: on the exposed tip region after jacket is gone
+   */
+  function notchIntersectsUnstrippedFiber(p, wx, wy, thresholdPx) {
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
+    thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
+    if (!p) return null;
+    var stage = Number(p.stripStage) || 0;
+    if (stage >= 2) return null;
+    var pts = fiberSleevePathPoints(p);
+    if (!pts || pts.length < 2) return null;
+    var total = polylineLength(pts);
+    var tipZone = stage >= 1 ? STRIP_TIP_ZONE_PX * 1.25 : STRIP_TIP_ZONE_PX;
+    var minRemain = 8;
+    var exposed = stripCommittedPx(p);
+
+    var proj = projectOntoFiberStrict(pts, wx, wy);
+    if (!proj || !proj.onSegment) return null;
+    if (proj.perpDist > thr) return null;
+    if (proj.dist < -0.01) return null;
+
+    /* Remaining yellow jacket starts at the current strip frontier. */
+    var jacketStart = Math.min(exposed, Math.max(0, total - minRemain));
+    var jacketEnd = Math.min(total - minRemain, jacketStart + tipZone);
+    if (jacketEnd > jacketStart + 1) {
+      var jacketHit = hitFromZone(
+        p, pts, proj, jacketStart, jacketEnd, thr, wx, wy, 0, 'jacket'
+      );
+      if (jacketHit) return jacketHit;
+    }
+
+    /* Buffer / acrylate strip only on already-exposed tip after jacket removal. */
+    if (stage >= 1 && exposed > 1) {
+      var bufEnd = Math.min(exposed, tipZone);
+      if (bufEnd > 1) {
+        var bufHit = hitFromZone(p, pts, proj, 0, bufEnd, thr, wx, wy, 1, 'buffer');
+        if (bufHit) return bufHit;
+      }
+    }
+
+    return null;
+  }
+
   function findStripTarget(clientX, clientY, thresholdPx) {
     var world = clientToWorld(clientX, clientY);
-    var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_CLAMP_PROX_PX;
+    return findStripTargetAtWorld(world.x, world.y, thresholdPx);
+  }
+
+  /**
+   * Precision probe: world cutting-notch must intersect the pigtail line segment
+   * (distance < 15px) and lie within the unstripped tip zone — not empty space.
+   */
+  function findStripTargetAtWorld(wx, wy, thresholdPx) {
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
+    thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
     var best = null;
     var bestD = thr + 1;
     var i;
     for (i = 0; i < pigtails.length; i++) {
-      var p = pigtails[i];
-      if (!p) continue;
-      var stage = p.stripStage || 0;
-      if (stage >= 2) continue;
-      var pts = fiberSleevePathPoints(p);
-      if (!pts || pts.length < 2) continue;
-      var proj = projectOntoFiberPath(pts, world.x, world.y);
-      if (proj.perpDist > thr || proj.dist > STRIP_TIP_ZONE_PX) continue;
-      if (proj.perpDist < bestD) {
-        var tip = pts[0];
-        var inner = pts[1];
-        var dx = tip.x - inner.x;
-        var dy = tip.y - inner.y;
-        var len = Math.sqrt(dx * dx + dy * dy) || 1;
-        bestD = proj.perpDist;
-        best = {
-          id: p.id,
-          stage: stage,
-          x: proj.x,
-          y: proj.y,
-          rot: proj.rot,
-          peelUx: dx / len,
-          peelUy: dy / len,
-          perpDist: proj.perpDist,
-        };
+      var hit = notchIntersectsUnstrippedFiber(pigtails[i], wx, wy, thr);
+      if (!hit) continue;
+      if (hit.perpDist < bestD) {
+        bestD = hit.perpDist;
+        best = hit;
       }
     }
     return best;
@@ -657,9 +989,28 @@
   function setStripPeel(id, peel) {
     var p = findPigtail(id);
     if (!p) return;
+    var stage = Number(p.stripStage) || 0;
+    if (stage >= 2) return;
     var n = Number(peel);
     if (!isFinite(n)) n = 0;
     p.stripPeel = Math.max(0, Math.min(1, n));
+    updateStripVisuals(p);
+  }
+
+  /**
+   * Progressive strip: grow committed exposed length from the tip (never shrinks).
+   */
+  function setStripLengthPx(id, px) {
+    var p = findPigtail(id);
+    if (!p) return;
+    if ((Number(p.stripStage) || 0) >= 2) return;
+    var n = Number(px);
+    if (!isFinite(n) || n < 0) n = 0;
+    var pts = fiberSleevePathPoints(p);
+    var maxLen = Math.max(0, polylineLength(pts) - 8);
+    n = Math.min(n, maxLen);
+    p.stripLengthPx = Math.max(stripCommittedPx(p), n);
+    syncStripStageFromLength(p);
     updateStripVisuals(p);
   }
 
@@ -667,39 +1018,90 @@
     var p = findPigtail(id);
     if (!p) return;
     p.stripPeel = 0;
+    /* Keep stripLengthPx — incomplete peels still leave progressive progress. */
+    syncStripStageFromLength(p);
     updateStripVisuals(p);
   }
 
   function commitStripStage(id) {
     var p = findPigtail(id);
     if (!p) return false;
-    var stage = p.stripStage || 0;
+    var stage = Number(p.stripStage) || 0;
+    /* Allow strip 1 (jacket) then strip 2 (buffer) — never lock after first use. */
     if (stage >= 2) return false;
     p.stripStage = stage + 1;
     p.stripPeel = 0;
+    if (p.stripStage === 1) {
+      p.stripLengthPx = Math.max(stripCommittedPx(p), STRIP_JACKET_PX);
+    } else if (p.stripStage === 2) {
+      p.stripLengthPx = Math.max(stripCommittedPx(p), STRIP_JACKET_PX + STRIP_BUFFER_PX);
+    }
+    syncStripStageFromLength(p);
     rebuildLayer();
     pushHistory();
     updateInspector();
+    setStatus(
+      p.stripStage === 1
+        ? 'SC Pigtail · jacket stripped · clamp remaining jacket or buffer'
+        : 'SC Pigtail · buffer stripped · bare glass exposed'
+    );
     return true;
   }
 
   function updateStripVisuals(p) {
     if (!layer || !p) return;
+    replacePigtailFiberSvg(p);
     var peel = p.stripPeel || 0;
-    var stage = p.stripStage || 0;
-    var fiber = layer.querySelector('[data-pt-fiber="' + p.id + '"]');
-    if (fiber) {
-      fiber.classList.toggle('is-strip-peeling', peel > 0.02);
-      fiber.style.setProperty('--strip-peel', peel.toFixed(3));
-    }
     var tail = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (tail) {
       tail.classList.toggle('is-strip-peeling', peel > 0.02);
       tail.style.setProperty('--strip-peel', peel.toFixed(3));
     }
-    if (stage < 2) return;
-    if (fiber) fiber.classList.add('is-strip-stage2');
-    if (tail) tail.classList.add('is-strip-stage2');
+  }
+
+  function replacePigtailFiberSvg(p) {
+    if (!layer || !p) return;
+    var svg = layer.querySelector('.lab-pigtail-svg');
+    if (!svg) return;
+    function isFiberNode(n) {
+      if (!n || n.nodeType !== 1) return false;
+      return (
+        n.getAttribute('data-pt-drag') === p.id ||
+        n.getAttribute('data-pt-fiber') === p.id ||
+        n.getAttribute('data-pt-fiber-stripped') === p.id ||
+        n.getAttribute('data-pt-ghost') === p.id ||
+        n.getAttribute('data-pt-laser') === p.id
+      );
+    }
+    var child = svg.firstChild;
+    var first = null;
+    while (child) {
+      if (isFiberNode(child)) {
+        first = child;
+        break;
+      }
+      child = child.nextSibling;
+    }
+    var insertBefore = null;
+    if (first) {
+      var cur = first;
+      while (cur && isFiberNode(cur)) {
+        var next = cur.nextSibling;
+        svg.removeChild(cur);
+        cur = next;
+      }
+      insertBefore = cur;
+    }
+    var temp = document.createElement('div');
+    temp.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg">' + buildPigtailFiberSvg(p) + '</svg>';
+    var wrap = temp.firstChild;
+    if (!wrap) return;
+    while (wrap.firstChild) {
+      var node = wrap.firstChild;
+      wrap.removeChild(node);
+      if (insertBefore) svg.insertBefore(node, insertBefore);
+      else svg.appendChild(node);
+    }
   }
 
   function findBareTipProximity(clientX, clientY, thresholdPx) {
@@ -893,6 +1295,7 @@
       hasSleeve: false,
       stripStage: 0,
       stripPeel: 0,
+      stripLengthPx: 0,
       drawLockRot: horizRot,
     };
     pigtails.push(item);
@@ -2009,27 +2412,7 @@
       '<feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>' +
       '</defs>';
     pigtails.forEach(function (p) {
-      var path = fiberPath(p);
-      var ghost = ghostPreviewPath(p);
-      var bad = p.connector.mismatch;
-      var sel = selection.id === p.id ? ' is-selected' : '';
-      var stripStage = p.stripStage || 0;
-      var stripCls =
-        (stripStage >= 1 ? ' is-strip-stage1' : '') +
-        (stripStage >= 2 ? ' is-strip-stage2' : '') +
-        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '');
-      html +=
-        '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + path +
-        '" fill="none" />' +
-        '<path class="lab-pigtail-fiber' + (bad ? ' is-mismatch' : '') + sel + stripCls +
-        '" data-pt-fiber="' + p.id + '" d="' + path + '" fill="none" ' +
-        'style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />' +
-        (ghost
-          ? '<path class="lab-pigtail-fiber-ghost" data-pt-ghost="' + p.id +
-            '" d="' + ghost + '" fill="none" />'
-          : '') +
-        '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + path +
-        '" fill="none" />';
+      html += buildPigtailFiberSvg(p);
     });
     html += '</svg>';
 
@@ -2090,47 +2473,32 @@
 
   function updateFiberPath(p) {
     if (!layer) return;
-    var d = fiberPath(p);
-    var ghostD = ghostPreviewPath(p);
-    var path = layer.querySelector('[data-pt-fiber="' + p.id + '"]');
-    var hit = layer.querySelector('.lab-pigtail-fiber-hit[data-pt-drag="' + p.id + '"]');
-    var laser = layer.querySelector('[data-pt-laser="' + p.id + '"]');
-    var ghostEl = layer.querySelector('[data-pt-ghost="' + p.id + '"]');
-    if (path) path.setAttribute('d', d);
-    if (hit) hit.setAttribute('d', d);
-    if (laser) laser.setAttribute('d', d);
-    if (ghostD) {
-      if (ghostEl) {
-        ghostEl.setAttribute('d', ghostD);
-      } else if (path && path.parentNode) {
-        var g = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        g.setAttribute('class', 'lab-pigtail-fiber-ghost');
-        g.setAttribute('data-pt-ghost', p.id);
-        g.setAttribute('d', ghostD);
-        g.setAttribute('fill', 'none');
-        path.parentNode.insertBefore(g, path.nextSibling);
-      }
-    } else if (ghostEl && ghostEl.parentNode) {
-      ghostEl.parentNode.removeChild(ghostEl);
-    }
+    replacePigtailFiberSvg(p);
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (aBtn) aBtn.setAttribute('style', connectorStyle(p));
-    if (bBtn) bBtn.setAttribute('style', tailStyle(p));
+    if (bBtn) {
+      var stripStage = p.stripStage || 0;
+      bBtn.setAttribute(
+        'style',
+        tailStyle(p) + ';--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';'
+      );
+      bBtn.classList.toggle('is-strip-stage1', stripStage >= 1);
+      bBtn.classList.toggle('is-strip-stage2', stripStage >= 2);
+    }
     var sleeve = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
     if (p.hasSleeve) {
       if (sleeve) {
         sleeve.setAttribute('style', sleeveStyle(p));
       } else {
-        var node = layer.querySelector('[data-pt-node="' + p.id + '"]');
-        if (node) {
-          var wrap = document.createElement('div');
-          wrap.className = 'lab-pigtail-sleeve lab-sleeve-tube';
-          wrap.setAttribute('data-pt-sleeve', p.id);
-          wrap.setAttribute('style', sleeveStyle(p));
-          wrap.setAttribute('title', 'Sleeve 60mm');
-          wrap.innerHTML = '';
-          node.appendChild(wrap);
+        var hostNode = layer.querySelector('[data-pt-node="' + p.id + '"]');
+        if (hostNode) {
+          var wrapEl = document.createElement('div');
+          wrapEl.className = 'lab-pigtail-sleeve lab-sleeve-tube';
+          wrapEl.setAttribute('data-pt-sleeve', p.id);
+          wrapEl.setAttribute('style', sleeveStyle(p));
+          wrapEl.setAttribute('title', 'Sleeve 60mm');
+          hostNode.appendChild(wrapEl);
         }
       }
     } else if (sleeve && sleeve.parentNode) {
@@ -2936,9 +3304,13 @@
       FtthLab.hitTestPigtailAtClient = hitTestPigtailAtClient;
       FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
       FtthLab.findPigtailStripTarget = findStripTarget;
+      FtthLab.findPigtailStripTargetAtWorld = findStripTargetAtWorld;
       FtthLab.setPigtailStripPeel = setStripPeel;
+      FtthLab.setPigtailStripLengthPx = setStripLengthPx;
       FtthLab.clearPigtailStripPeel = clearStripPeel;
       FtthLab.commitPigtailStripStage = commitStripStage;
+      FtthLab.setPigtailStripGuide = setStripGuideLine;
+      FtthLab.clearPigtailStripGuide = clearStripGuideLine;
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {
@@ -2990,6 +3362,7 @@
     findBareTipProximity: findBareTipProximity,
     findStripTarget: findStripTarget,
     setStripPeel: setStripPeel,
+    setStripLengthPx: setStripLengthPx,
     clearStripPeel: clearStripPeel,
     commitStripStage: commitStripStage,
     hitTestPigtailAtClient: hitTestPigtailAtClient,

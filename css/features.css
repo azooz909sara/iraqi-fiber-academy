@@ -76,8 +76,41 @@
 }
 
 .feature-card__open-btn--soon {
-  cursor: default;
-  opacity: 0.85;
+  cursor: not-allowed;
+  opacity: 0.72;
+  background: linear-gradient(135deg, #64748b, #475569);
+  color: #e2e8f0;
+  border: none;
+}
+
+.feature-card__open-btn--soon:hover {
+  filter: none;
+  transform: none;
+}
+
+.feature-card__soon-badge {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0b1220;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  box-shadow: 0 4px 14px rgba(245, 158, 11, 0.25);
+}
+
+.feature-card--dev {
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.feature-card--dev::before {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  transform: scaleX(1);
 }
 
 .feature-card__lock-badge {

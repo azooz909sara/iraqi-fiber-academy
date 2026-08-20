@@ -2943,6 +2943,32 @@ body.lab-pcord-linking .lab-pcord-fiber {
   filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
 }
 
+.lab-pigtail-fiber--jacket {
+  stroke: #facc15;
+  stroke-width: 2.15;
+}
+
+.lab-pigtail-fiber--buffer {
+  stroke: #93c5fd;
+  stroke-width: 1.65;
+}
+
+.lab-pigtail-fiber--bare {
+  stroke: rgba(226, 232, 240, 0.78);
+  stroke-width: 1.15;
+}
+
+.lab-pigtail-strip-guide {
+  stroke: #38bdf8;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-dasharray: 5 4;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.45));
+}
+
 .lab-pigtail-fiber-ghost {
   stroke: #fde68a;
   stroke-width: 1.85;
@@ -3068,16 +3094,6 @@ body.lab-pcord-linking .lab-pcord-fiber {
   box-shadow:
     0 0 3px rgba(255, 255, 255, 0.65),
     0 0 1px rgba(148, 163, 184, 0.8);
-}
-
-.lab-pigtail-fiber.is-strip-stage1 {
-  stroke: #93c5fd;
-  stroke-width: 1.65;
-}
-
-.lab-pigtail-fiber.is-strip-stage2 {
-  stroke: #e2e8f0;
-  stroke-width: 1.25;
 }
 
 .lab-pigtail-fiber.is-strip-peeling {
@@ -3271,8 +3287,8 @@ body.lab-pigtail-dragging {
 
 .lab-stripper {
   position: absolute;
-  width: 400px;
-  height: 400px;
+  width: 500px;
+  height: 500px;
   /* Empty clip padding must not steal clicks from splitters / cords / etc. */
   pointer-events: none;
   cursor: grab;
@@ -3294,8 +3310,8 @@ body.lab-pigtail-dragging {
 
 .lab-stripper__art {
   display: block;
-  width: 400px;
-  height: 400px;
+  width: 500px;
+  height: 500px;
   pointer-events: none;
 }
 

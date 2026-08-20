@@ -18,7 +18,8 @@
   /* Tool art size (unrotated bitmap). Canvas is a larger square so 360° rotation never clips. */
   var TOOL_H = 239;
   var TOOL_W = Math.round(ASSEMBLED_NATURAL_W * TOOL_H / IMG_NATURAL_H);
-  var CANVAS_SIZE = 400;
+  /* Tall enough for jaw art + vertical laser beam above the teeth. */
+  var CANVAS_SIZE = 500;
   var STRIPPER_W = CANVAS_SIZE;
   var STRIPPER_H = CANVAS_SIZE;
   /* Screw / jaw pivot sits at the square canvas center — DOM (s.x, s.y) maps here. */
@@ -31,10 +32,33 @@
   var HIT_TOP = Math.round(
     PIVOT_Y - ((IMG_PIVOT_LEFT_Y + IMG_PIVOT_RIGHT_Y) / 2) * TOOL_H / IMG_NATURAL_H
   );
+  /*
+   * CFS-3 jaw geometry (tool-local −Y from screw / pivot):
+   * Extreme tip ≈ full tip offset; cutting notches sit mid-blade (deep insertion),
+   * matching the real CFS-3 holes — NOT the absolute tip.
+   */
+  var IMG_PIVOT_Y_AVG = (IMG_PIVOT_LEFT_Y + IMG_PIVOT_RIGHT_Y) / 2;
+  function naturalYToPivotOffset(natY) {
+    return (IMG_PIVOT_Y_AVG - natY) * TOOL_H / IMG_NATURAL_H;
+  }
+  /** Distance from screw center up to extreme jaw tip (local −Y). */
+  var JAW_TIP_OFFSET_Y = naturalYToPivotOffset(0);
+  var JAW_Y_OFFSET = JAW_TIP_OFFSET_Y;
+  /*
+   * Mid-blade notches (fraction of tip→pivot). Calibrated so the fiber seats
+   * through the stripping holes (user red-arrow line), not above the tip.
+   * Jacket hole nearest tip · buffer mid · coating furthest toward pivot.
+   */
+  var NOTCH_OFFSET_JACKET = JAW_TIP_OFFSET_Y * 0.44;
+  var NOTCH_OFFSET_BUFFER = JAW_TIP_OFFSET_Y * 0.36;
+  var NOTCH_OFFSET_COATING = JAW_TIP_OFFSET_Y * 0.28;
+  /** Fixed vertical laser length from the active notch (local −Y). */
+  var LASER_GUIDE_LEN = 180;
   var JAW_CLOSED_DEG = 0;
   var JAW_OPEN_DEG = 12;
   var DRAG_THRESHOLD_PX = 3;
-  var CLAMP_PROX_PX = 44;
+  /** Notch-centered clamp radius (world px) — must sit on fiber, not empty air. */
+  var CLAMP_PROX_PX = 15;
   var PEEL_JACKET_PX = 42;
   var PEEL_BUFFER_PX = 26;
   var HISTORY_MAX = 40;
@@ -79,16 +103,126 @@
     return null;
   }
 
-  function findStripTarget(clientX, clientY) {
+  /** Active CFS-3 hole for strip stage: 0 jacket · 1 buffer · 2 coating. */
+  function notchOffsetForStage(stage) {
+    var st = stage || 0;
+    if (st >= 2) return NOTCH_OFFSET_COATING;
+    if (st >= 1) return NOTCH_OFFSET_BUFFER;
+    return NOTCH_OFFSET_JACKET;
+  }
+
+  /** World position of the cutting-notch center (not tip, not pivot). */
+  function notchWorldPos(s, stage) {
+    var off = notchOffsetForStage(stage);
+    return {
+      x: s.x,
+      y: s.y - off,
+    };
+  }
+
+  /** Place stripper so the selected notch sits exactly on the fiber clamp point. */
+  function alignStripperNotchToFiber(s, fiberX, fiberY, stage) {
+    var off = notchOffsetForStage(stage);
+    s.x = fiberX;
+    s.y = fiberY + off;
+    s.rot = 0;
+  }
+
+  function clearStripGuide() {
+    var changed = false;
+    strippers.forEach(function (s) {
+      if (s.laserGuide) {
+        s.laserGuide = false;
+        s.laserGuideStage = 0;
+        changed = true;
+        paintStripperNode(s);
+      }
+    });
+    if (global.FtthLab && typeof FtthLab.clearPigtailStripGuide === 'function') {
+      FtthLab.clearPigtailStripGuide();
+    }
+    return changed;
+  }
+
+  /**
+   * Probe SC pigtail from the cutting-notch world point.
+   * Prefer the notch matching the pigtail's current strip stage so strip 2 works.
+   */
+  function findStripTarget(clientX, clientY, s) {
+    var thr = CLAMP_PROX_PX;
+    if (s && global.FtthLab && typeof FtthLab.findPigtailStripTargetAtWorld === 'function') {
+      var order = [0, 1];
+      if (s.laserGuideStage === 1) order = [1, 0];
+      var best = null;
+      var oi;
+      for (oi = 0; oi < order.length; oi++) {
+        var st = order[oi];
+        var notch = notchWorldPos(s, st);
+        var hit = FtthLab.findPigtailStripTargetAtWorld(notch.x, notch.y, thr);
+        if (!hit) continue;
+        if (hit.stage === st) return hit;
+        if (!best) best = hit;
+      }
+      return best;
+    }
     if (global.FtthLab && typeof FtthLab.findPigtailStripTarget === 'function') {
-      return FtthLab.findPigtailStripTarget(clientX, clientY, CLAMP_PROX_PX);
+      return FtthLab.findPigtailStripTarget(clientX, clientY, thr);
     }
     return null;
+  }
+
+  /**
+   * Enable/disable vertical notch laser when the cutting hole is near an SC pigtail.
+   */
+  function refreshStripGuide(s, clientX, clientY, lockedTarget) {
+    if (!s) return;
+    var target = lockedTarget || null;
+    if (!target) {
+      target = findStripTarget(clientX, clientY, s);
+    }
+    var on = !!target;
+    var stage = target && typeof target.stage === 'number' ? target.stage : 0;
+    if (s.laserGuide === on && s.laserGuideStage === stage) {
+      if (on) paintStripperNode(s);
+      return;
+    }
+    s.laserGuide = on;
+    s.laserGuideStage = stage;
+    paintStripperNode(s);
+    if (!on && global.FtthLab && typeof FtthLab.clearPigtailStripGuide === 'function') {
+      FtthLab.clearPigtailStripGuide();
+    }
+  }
+
+  /** Vertical dotted laser from the cutting-notch gap (local tool coords). */
+  function drawJawLaserGuide(ctx, s) {
+    if (!s || !s.laserGuide) return;
+    var notchY = -notchOffsetForStage(s.laserGuideStage || 0);
+    var hot = s.jawState === 'clamped';
+    ctx.save();
+    ctx.strokeStyle = hot ? '#f87171' : '#4ade80';
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = 'round';
+    ctx.setLineDash([5, 4]);
+    ctx.shadowColor = hot ? 'rgba(248, 113, 113, 0.55)' : 'rgba(74, 222, 128, 0.55)';
+    ctx.shadowBlur = 4;
+    ctx.beginPath();
+    /* Origin = notch centerline (below extreme tip); direction = straight up (−Y). */
+    ctx.moveTo(0, notchY);
+    ctx.lineTo(0, notchY - LASER_GUIDE_LEN);
+    ctx.stroke();
+    ctx.restore();
   }
 
   function setStripPeel(pigtailId, peel) {
     if (global.FtthLab && typeof FtthLab.setPigtailStripPeel === 'function') {
       FtthLab.setPigtailStripPeel(pigtailId, peel);
+    }
+  }
+
+  function setStripLengthPx(pigtailId, px) {
+    if (global.FtthLab && typeof FtthLab.setPigtailStripLengthPx === 'function') {
+      FtthLab.setPigtailStripLengthPx(pigtailId, px);
     }
   }
 
@@ -431,6 +565,8 @@
     ctx.restore();
 
     drawCentralScrew(ctx, 0, 0, scale);
+    /* Laser after jaws/screw, still in pivot-local space: X=0, −Y up from teeth. */
+    drawJawLaserGuide(ctx, s);
     ctx.restore();
   }
 
@@ -506,6 +642,8 @@
       y: typeof y === 'number' ? Math.round(y) : 0,
       rot: 0,
       jawState: 'open',
+      laserGuide: false,
+      laserGuideStage: 0,
     };
     strippers.push(item);
     selection = { kind: 'stripper', id: item.id };
@@ -577,10 +715,11 @@
         if (!s) return;
         selectStripper(id, { skipRebuild: true });
 
+        /* Always animate jaws shut; strip action only if notch is on fiber. */
         clampJaws(s, node);
         playClampSnip();
 
-        var target = findStripTarget(e.clientX, e.clientY);
+        var target = findStripTarget(e.clientX, e.clientY, s);
         if (target) {
           startPeelSession(e, s, target, node);
           return;
@@ -601,6 +740,7 @@
     node.classList.add('is-dragging');
     document.body.classList.add('lab-stripper-dragging');
     try { node.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    refreshStripGuide(s, e.clientX, e.clientY, null);
 
     function endDrag(ev) {
       window.removeEventListener('pointermove', onMove);
@@ -610,6 +750,7 @@
       node.classList.remove('is-dragging');
       document.body.classList.remove('lab-stripper-dragging');
       openJaws(s, node);
+      clearStripGuide();
     }
 
     function onMove(ev) {
@@ -620,6 +761,7 @@
       s.x = Math.round(ox + dx);
       s.y = Math.round(oy + dy);
       updateStripperPosition(s, node);
+      refreshStripGuide(s, ev.clientX, ev.clientY, null);
     }
 
     function onUp(ev) {
@@ -634,18 +776,25 @@
   }
 
   function startPeelSession(e, s, target, node) {
-    s.x = target.x;
-    s.y = target.y;
-    s.rot = 0;
+    /* Snap cutting notch (not pivot) onto the fiber clamp point */
+    alignStripperNotchToFiber(s, target.x, target.y, target.stage);
+    s.laserGuideStage = target.stage || 0;
+    s.laserGuide = true;
     updateStripperNode(s, node);
+    refreshStripGuide(s, e.clientX, e.clientY, target);
     document.body.classList.add('lab-stripper-peeling');
     try { node.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 
     var peelUx = target.peelUx;
     var peelUy = target.peelUy;
     var stage = target.stage;
-    var threshold = stage === 0 ? PEEL_JACKET_PX : PEEL_BUFFER_PX;
+    var layerKind = target.layer || (stage === 0 ? 'jacket' : 'buffer');
+    var notchOff = notchOffsetForStage(stage);
+    var threshold = layerKind === 'jacket' ? PEEL_JACKET_PX : PEEL_BUFFER_PX;
     var startWorld = clientToWorld(e.clientX, e.clientY);
+    var baselinePx = typeof target.baselinePx === 'number'
+      ? target.baselinePx
+      : 0;
     var peelAccum = 0;
     var lastFragment = 0;
     var completed = false;
@@ -657,16 +806,24 @@
       try { node.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
       openJaws(s, node);
       document.body.classList.remove('lab-stripper-peeling');
+      /* Keep progressive strip length; only clear ephemeral peel animation. */
       clearStripPeel(target.id);
-      if (completed) {
-        spawnDebris(s.x, s.y, stage, peelUx, peelUy);
+      clearStripGuide();
+      if (completed || peelAccum > 4) {
+        if (completed) {
+          spawnDebris(s.x, s.y - notchOff, stage, peelUx, peelUy);
+        }
         pushHistory();
-        var label = stage === 0
-          ? 'Outer jacket stripped · buffer coating exposed'
-          : 'Buffer stripped · bare glass core exposed';
-        setStatus('CFS-3 · ' + label);
+        if (completed) {
+          var label = layerKind === 'jacket'
+            ? 'Outer jacket stripped · clamp remaining jacket to peel further'
+            : 'Buffer stripped · bare glass core exposed';
+          setStatus('CFS-3 · ' + label);
+        } else {
+          setStatus('CFS-3 · strip length +' + Math.round(peelAccum) + 'px · clamp remaining jacket to continue');
+        }
       } else {
-        setStatus('CFS-3 · peel incomplete · clamp and drag toward fiber tip');
+        setStatus('CFS-3 · peel incomplete · clamp remaining jacket and drag toward fiber tip');
       }
       rebuildLayer();
     }
@@ -679,10 +836,24 @@
       if (along < 0) along = 0;
       peelAccum = Math.max(peelAccum, along);
       var peelNorm = Math.min(1, peelAccum / threshold);
+      /* Additive: grow committed strip length from this session's baseline. */
+      setStripLengthPx(target.id, baselinePx + peelAccum);
       setStripPeel(target.id, peelNorm);
-      s.x = target.x + peelUx * peelAccum * 0.35;
-      s.y = target.y + peelUy * peelAccum * 0.35;
+      /* Keep the active notch seated on the fiber while peeling */
+      alignStripperNotchToFiber(
+        s,
+        target.x + peelUx * peelAccum * 0.35,
+        target.y + peelUy * peelAccum * 0.35,
+        stage
+      );
       updateStripperPosition(s, node);
+      paintStripperNode(s, node);
+      refreshStripGuide(s, ev.clientX, ev.clientY, {
+        id: target.id,
+        stage: stage,
+        x: target.x + peelUx * peelAccum * 0.5,
+        y: target.y + peelUy * peelAccum * 0.5,
+      });
       if (peelNorm - lastFragment >= 0.22) {
         lastFragment = peelNorm;
         spawnPeelFragment(
@@ -695,7 +866,11 @@
         );
       }
       if (peelAccum >= threshold && !completed) {
-        completed = commitStripStage(target.id);
+        completed = true;
+        if (layerKind === 'buffer') {
+          commitStripStage(target.id);
+        }
+        /* Jacket length is progressive via setStripLengthPx; stage auto-unlocks at STRIP_JACKET_PX. */
       }
     }
 

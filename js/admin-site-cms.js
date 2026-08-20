@@ -145,20 +145,38 @@
     }
   }
 
+  var MAX_SIM_ICON_BYTES = 512000;
+
+  function simIconPreviewHtml(meta) {
+    if (meta && meta.iconType === 'image' && meta.icon) {
+      return (
+        '<img src="' +
+        String(meta.icon).replace(/"/g, '&quot;') +
+        '" alt="" />'
+      );
+    }
+    return escapeHtml((meta && meta.icon) || '◆');
+  }
+
   /* ---------- Simulators ---------- */
   function renderSimulatorEditors() {
     var host = $('cmsSimulatorsGrid');
     if (!host || !window.PlatformSimulators) return;
     var catalog = window.PlatformSimulators.getCatalog();
     var meta = window.PlatformSimulators.getSimulatorMeta();
+    var defaults = window.PlatformSimulators.defaultSimulatorMeta();
     host.innerHTML = catalog
       .map(function (sim) {
         var m = meta[sim.id] || {};
+        var d = defaults[sim.id] || {};
         return (
           '<article class="cms-sim-card" data-sim-editor="' +
           escapeHtml(sim.id) +
           '">' +
           '<div class="cms-sim-card__head">' +
+          '<div class="cms-sim-card__icon" data-sim-icon-preview aria-hidden="true">' +
+          simIconPreviewHtml(m) +
+          '</div>' +
           '<div><strong>' +
           escapeHtml(m.title || sim.label) +
           '</strong><code>' +
@@ -173,6 +191,20 @@
           '<textarea class="admin-field__input admin-field__textarea" data-sim-desc rows="4">' +
           escapeHtml(m.description || '') +
           '</textarea></label>' +
+          '<div class="admin-field">' +
+          '<span class="admin-field__label">أيقونة المحاكي</span>' +
+          '<input type="hidden" data-sim-icon-value />' +
+          '<input type="hidden" data-sim-icon-type />' +
+          '<input type="hidden" data-sim-icon-default value="' +
+          escapeHtml(d.icon || '◆') +
+          '" />' +
+          '<div class="cms-sim-icon-actions">' +
+          '<label class="cms-file-btn">رفع أيقونة مخصصة (PNG / SVG / WebP)' +
+          '<input type="file" data-sim-icon-file accept="image/png,image/svg+xml,image/webp,image/jpeg" hidden /></label>' +
+          '<button class="admin-btn admin-btn--ghost" type="button" data-sim-icon-reset>استعادة الافتراضي</button>' +
+          '</div>' +
+          '<span class="admin-field__hint">تُعرض الأيقونة على بطاقة المحاكي في الصفحة الرئيسية. الحد الأقصى ~500 كيلوبايت.</span>' +
+          '</div>' +
           '<button class="admin-btn admin-btn--primary" type="button" data-sim-save="' +
           escapeHtml(sim.id) +
           '">حفظ البطاقة</button>' +
@@ -180,18 +212,64 @@
         );
       })
       .join('');
+
+    host.querySelectorAll('[data-sim-editor]').forEach(function (card) {
+      var simId = card.getAttribute('data-sim-editor');
+      var m = meta[simId] || {};
+      var iconValue = card.querySelector('[data-sim-icon-value]');
+      var iconType = card.querySelector('[data-sim-icon-type]');
+      if (iconValue) iconValue.value = m.icon || '';
+      if (iconType) iconType.value = m.iconType === 'image' ? 'image' : 'emoji';
+    });
+  }
+
+  function updateSimIconPreview(card) {
+    if (!card) return;
+    var preview = card.querySelector('[data-sim-icon-preview]');
+    var iconValue = card.querySelector('[data-sim-icon-value]');
+    var iconType = card.querySelector('[data-sim-icon-type]');
+    if (!preview || !iconValue || !iconType) return;
+    var meta = {
+      icon: iconValue.value,
+      iconType: iconType.value === 'image' ? 'image' : 'emoji',
+    };
+    preview.innerHTML = simIconPreviewHtml(meta);
+  }
+
+  function resetSimIcon(card) {
+    if (!card) return;
+    var iconValue = card.querySelector('[data-sim-icon-value]');
+    var iconType = card.querySelector('[data-sim-icon-type]');
+    var iconDefault = card.querySelector('[data-sim-icon-default]');
+    if (!iconValue || !iconType) return;
+    iconValue.value = iconDefault ? iconDefault.value : '◆';
+    iconType.value = 'emoji';
+    var fileInput = card.querySelector('[data-sim-icon-file]');
+    if (fileInput) fileInput.value = '';
+    updateSimIconPreview(card);
   }
 
   function saveSimulatorCard(id, card) {
     var title = card.querySelector('[data-sim-title]');
     var desc = card.querySelector('[data-sim-desc]');
+    var iconValue = card.querySelector('[data-sim-icon-value]');
+    var iconType = card.querySelector('[data-sim-icon-type]');
     var current = window.PlatformSimulators.getSimulatorMeta()[id] || {};
+    var icon = iconValue ? iconValue.value : current.icon;
+    var type = iconType && iconType.value === 'image' ? 'image' : 'emoji';
+    if (!icon) {
+      var defaults = window.PlatformSimulators.defaultSimulatorMeta();
+      icon = (defaults[id] && defaults[id].icon) || '◆';
+      type = 'emoji';
+    } else if (type === 'image' && icon.indexOf('data:') !== 0 && current.iconType === 'image') {
+      icon = current.icon || icon;
+    }
     var patch = {};
     patch[id] = {
       title: title ? title.value : current.title,
       description: desc ? desc.value : current.description,
-      icon: current.icon,
-      iconType: current.iconType,
+      icon: icon,
+      iconType: type,
     };
     window.PlatformSimulators.saveSimulatorMeta(patch);
     toast('تم حفظ بطاقة المحاكي');
@@ -1036,6 +1114,12 @@
         if (editor) saveSimulatorCard(simSave.getAttribute('data-sim-save'), editor);
         return;
       }
+      var simIconReset = e.target.closest ? e.target.closest('[data-sim-icon-reset]') : null;
+      if (simIconReset) {
+        var resetCard = simIconReset.closest('[data-sim-editor]');
+        if (resetCard) resetSimIcon(resetCard);
+        return;
+      }
       if (e.target.closest && e.target.closest('[data-article-add]')) {
         openArticleModal(null);
         return;
@@ -1156,6 +1240,25 @@
     });
 
     document.addEventListener('change', function (e) {
+      var simIconFile = e.target.closest ? e.target.closest('[data-sim-icon-file]') : null;
+      if (simIconFile && simIconFile.files && simIconFile.files[0]) {
+        var file = simIconFile.files[0];
+        var card = simIconFile.closest('[data-sim-editor]');
+        if (!card) return;
+        if (file.size > MAX_SIM_ICON_BYTES) {
+          toast('حجم الأيقونة كبير جداً — الحد الأقصى 500 كيلوبايت', true);
+          simIconFile.value = '';
+          return;
+        }
+        readFileAsDataUrl(file, function (url) {
+          var iconValue = card.querySelector('[data-sim-icon-value]');
+          var iconType = card.querySelector('[data-sim-icon-type]');
+          if (iconValue) iconValue.value = url;
+          if (iconType) iconType.value = 'image';
+          updateSimIconPreview(card);
+        });
+        return;
+      }
       if (e.target.id === 'articleEditorImageFile' && e.target.files && e.target.files[0]) {
         readFileAsDataUrl(e.target.files[0], function (url) {
           $('articleEditorImageData').value = url;

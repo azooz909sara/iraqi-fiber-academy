@@ -279,8 +279,11 @@
     };
   }
 
+  var COMING_SOON_MSG = 'هذا المحاكي قيد التطوير حالياً — سيتوفر قريباً';
+  var COMING_SOON_BADGE = 'قريباً — قيد التطوير';
+
   function defaultPlatformSettings() {
-    return { freeSimulatorIds: [], freeTrialDays: 0 };
+    return { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
   }
 
   function getPlatformSettings() {
@@ -288,6 +291,7 @@
     var base = defaultPlatformSettings();
     if (!parsed || typeof parsed !== 'object') return base;
     base.freeSimulatorIds = normalizeSimulatorIds(parsed.freeSimulatorIds);
+    base.comingSoonSimulatorIds = normalizeSimulatorIds(parsed.comingSoonSimulatorIds);
     var days = Number(parsed.freeTrialDays);
     base.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
     return base;
@@ -296,6 +300,7 @@
   function savePlatformSettings(patch) {
     var next = Object.assign(defaultPlatformSettings(), getPlatformSettings(), patch || {});
     next.freeSimulatorIds = normalizeSimulatorIds(next.freeSimulatorIds);
+    next.comingSoonSimulatorIds = normalizeSimulatorIds(next.comingSoonSimulatorIds);
     var days = Number(next.freeTrialDays);
     next.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
     try {
@@ -313,6 +318,10 @@
 
   function isGloballyFreeSimulator(simulatorId) {
     return getPlatformSettings().freeSimulatorIds.indexOf(String(simulatorId || '')) !== -1;
+  }
+
+  function isSimulatorUnderDevelopment(simulatorId) {
+    return getPlatformSettings().comingSoonSimulatorIds.indexOf(String(simulatorId || '')) !== -1;
   }
 
   function trialExpiryMs(user) {
@@ -534,10 +543,51 @@
     return 'index.html?' + qs + '#plans';
   }
 
+  function showSimulatorDevLock(simulatorId) {
+    var id = String(simulatorId || '');
+    var sim = findSimulator(id);
+    var title = (sim && sim.label) || id || 'المحاكي';
+    var existing = document.getElementById('ifa-sim-dev-lock');
+    if (existing) {
+      existing.hidden = false;
+      existing.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('ifa-sim-dev-lock-active');
+      return;
+    }
+    var overlay = document.createElement('div');
+    overlay.id = 'ifa-sim-dev-lock';
+    overlay.className = 'ifa-sim-dev-lock';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.setAttribute('aria-labelledby', 'ifa-sim-dev-lock-title');
+    overlay.innerHTML =
+      '<div class="ifa-sim-dev-lock__backdrop" aria-hidden="true"></div>' +
+      '<div class="ifa-sim-dev-lock__card">' +
+      '<span class="ifa-sim-dev-lock__badge">' +
+      escapeHtml(COMING_SOON_BADGE) +
+      '</span>' +
+      '<h2 class="ifa-sim-dev-lock__title" id="ifa-sim-dev-lock-title">' +
+      escapeHtml(title) +
+      '</h2>' +
+      '<p class="ifa-sim-dev-lock__message">' +
+      escapeHtml(COMING_SOON_MSG) +
+      '</p>' +
+      '<div class="ifa-sim-dev-lock__actions">' +
+      '<a class="ifa-sim-dev-lock__btn ifa-sim-dev-lock__btn--primary" href="index.html#simulators">العودة إلى المحاكيات</a>' +
+      '</div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+    document.body.classList.add('ifa-sim-dev-lock-active');
+  }
+
   function enforceSimulatorPageAccess() {
-    if (isAdminPreviewContext()) return;
     var id = currentSimulatorIdFromLocation();
     if (!id) return;
+    if (isSimulatorUnderDevelopment(id) && !isAdminPreviewContext()) {
+      showSimulatorDevLock(id);
+      return;
+    }
+    if (isAdminPreviewContext()) return;
     if (viewerCanAccess(id)) return;
     showPaywallNotice(PAYWALL_TOAST_MSG);
     global.location.replace(paywallRedirectUrl(id));
@@ -545,6 +595,10 @@
 
   function interceptSimulatorLaunch(simulatorId, href) {
     var id = String(simulatorId || '');
+    if (isSimulatorUnderDevelopment(id) && !isAdminPreviewContext()) {
+      showPaywallNotice(COMING_SOON_MSG);
+      return false;
+    }
     var openHref = withPreviewQuery(href || (findSimulator(id) && findSimulator(id).href) || '');
     if (viewerCanAccess(id)) {
       if (!openHref) {
@@ -611,6 +665,7 @@
       : access.simulatorIds.slice();
     return normalizeSimulatorIds(ids).filter(function (id) {
       if (id === current) return false;
+      if (isSimulatorUnderDevelopment(id)) return false;
       var sim = findSimulator(id);
       return !!(sim && sim.href);
     });
@@ -771,9 +826,14 @@
     cards.forEach(function (card) {
       var id = card.getAttribute('data-simulator-id') || '';
       var href = card.getAttribute('data-simulator-href') || (findSimulator(id) && findSimulator(id).href) || '';
-      card.classList.remove('feature-card--locked');
+      var underDev = isSimulatorUnderDevelopment(id);
+      card.classList.remove('feature-card--locked', 'feature-card--dev');
       card.classList.add('feature-card--unlocked');
       card.removeAttribute('data-simulator-locked');
+      card.removeAttribute('data-simulator-dev');
+
+      var existingSoon = card.querySelector('.feature-card__soon-badge');
+      if (existingSoon) existingSoon.remove();
 
       var accessEl = card.querySelector('[data-simulator-access]');
       if (!accessEl) {
@@ -781,6 +841,31 @@
         accessEl.className = 'feature-card__access';
         accessEl.setAttribute('data-simulator-access', '');
         card.appendChild(accessEl);
+      }
+
+      if (underDev) {
+        card.classList.add('feature-card--dev');
+        card.classList.remove('feature-card--unlocked');
+        card.setAttribute('data-simulator-dev', '1');
+        var soonBadge = document.createElement('span');
+        soonBadge.className = 'feature-card__soon-badge';
+        soonBadge.textContent = COMING_SOON_BADGE;
+        card.insertBefore(soonBadge, card.firstChild);
+        if (isAdminPreviewContext()) {
+          var previewHref = withPreviewQuery(href);
+          accessEl.innerHTML =
+            '<a class="feature-card__open-btn" href="' +
+            escapeHtml(previewHref || '#simulators') +
+            '" data-simulator-launch="' +
+            escapeHtml(id) +
+            '">معاينة (المسؤول)</a>';
+        } else {
+          accessEl.innerHTML =
+            '<button type="button" class="feature-card__open-btn feature-card__open-btn--soon" disabled aria-disabled="true" data-simulator-launch="' +
+            escapeHtml(id) +
+            '">قيد التطوير</button>';
+        }
+        return;
       }
 
       var allowed = viewerCanAccess(id);
@@ -983,6 +1068,9 @@
     getPlatformSettings: getPlatformSettings,
     savePlatformSettings: savePlatformSettings,
     isGloballyFreeSimulator: isGloballyFreeSimulator,
+    isSimulatorUnderDevelopment: isSimulatorUnderDevelopment,
+    COMING_SOON_BADGE: COMING_SOON_BADGE,
+    COMING_SOON_MSG: COMING_SOON_MSG,
     hasActiveTrial: hasActiveTrial,
     viewerCanAccess: viewerCanAccess,
     resolveViewerAccess: resolveViewerAccess,

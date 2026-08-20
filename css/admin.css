@@ -1994,6 +1994,14 @@
   object-fit: contain;
 }
 
+.cms-sim-icon-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
 .cms-icon-row {
   display: flex;
   flex-wrap: wrap;

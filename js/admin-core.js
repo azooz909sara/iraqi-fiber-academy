@@ -208,6 +208,7 @@
   function bindPlatformSettingsForm() {
     var form = document.getElementById('platformSettingsForm');
     var list = document.getElementById('settingsFreeSimulators');
+    var comingSoonList = document.getElementById('settingsComingSoonSimulators');
     var daysInput = document.getElementById('settingsFreeTrialDays');
     var statusEl = document.getElementById('settingsSaveStatus');
     if (!form || !window.PlatformSimulators) return;
@@ -219,20 +220,28 @@
     var settings =
       typeof window.PlatformSimulators.getPlatformSettings === 'function'
         ? window.PlatformSimulators.getPlatformSettings()
-        : { freeSimulatorIds: [], freeTrialDays: 0 };
+        : { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
     var selected = {};
     (settings.freeSimulatorIds || []).forEach(function (id) {
       selected[id] = true;
     });
-    if (list) {
-      list.innerHTML = catalog
+    var comingSoonSelected = {};
+    (settings.comingSoonSimulatorIds || []).forEach(function (id) {
+      comingSoonSelected[id] = true;
+    });
+
+    function renderChecklist(host, name, selectedMap) {
+      if (!host) return;
+      host.innerHTML = catalog
         .map(function (sim) {
           return (
             '<label>' +
-            '<input type="checkbox" name="freeSimulator" value="' +
+            '<input type="checkbox" name="' +
+            name +
+            '" value="' +
             String(sim.id).replace(/"/g, '') +
             '"' +
-            (selected[sim.id] ? ' checked' : '') +
+            (selectedMap[sim.id] ? ' checked' : '') +
             ' />' +
             '<span>' +
             String(sim.label || sim.id) +
@@ -244,6 +253,9 @@
         })
         .join('');
     }
+
+    renderChecklist(list, 'freeSimulator', selected);
+    renderChecklist(comingSoonList, 'comingSoonSimulator', comingSoonSelected);
     if (daysInput) daysInput.value = String(settings.freeTrialDays || 0);
 
     form.addEventListener('submit', function (e) {
@@ -252,17 +264,24 @@
       form.querySelectorAll('input[name="freeSimulator"]:checked').forEach(function (input) {
         if (input.value) ids.push(input.value);
       });
+      var comingSoonIds = [];
+      form.querySelectorAll('input[name="comingSoonSimulator"]:checked').forEach(function (input) {
+        if (input.value) comingSoonIds.push(input.value);
+      });
       var days = daysInput ? Number(daysInput.value) : 0;
       var saved = window.PlatformSimulators.savePlatformSettings({
         freeSimulatorIds: ids,
+        comingSoonSimulatorIds: comingSoonIds,
         freeTrialDays: isFinite(days) && days > 0 ? days : 0,
       });
       if (statusEl) {
         statusEl.textContent =
           'تم الحفظ — تجربة ' +
           (saved.freeTrialDays || 0) +
-          ' يوم، ومحاكيات مجانية: ' +
-          (saved.freeSimulatorIds.length || 0);
+          ' يوم، مجاني: ' +
+          (saved.freeSimulatorIds.length || 0) +
+          '، قيد التطوير: ' +
+          (saved.comingSoonSimulatorIds.length || 0);
       }
     });
   }
