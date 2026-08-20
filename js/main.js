@@ -212,5 +212,56 @@
       }
       alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });
+
+    if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+      window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+    }
+
+    function refreshSimulatorPublicState() {
+      if (
+        window.PlatformSimulators &&
+        typeof window.PlatformSimulators.isSimulatorUnderDevelopment === 'function' &&
+        typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function'
+      ) {
+        window.PlatformSimulators.applyPublicSimulatorGates();
+      }
+      if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+        window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+      }
+    }
+
+    window.addEventListener('ifa:platform-settings-changed', refreshSimulatorPublicState);
+
+    function readShowcaseIntervalMs() {
+      if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.getRotateMs === 'function') {
+        return window.PlatformSimulatorShowcase.getRotateMs();
+      }
+      try {
+        var raw = JSON.parse(localStorage.getItem('ifa_simulator_showcase') || '{}');
+        var sec = Number(raw._intervalSeconds);
+        if (!isFinite(sec) || sec < 2) sec = 5;
+        if (sec > 60) sec = 60;
+        return Math.round(sec) * 1000;
+      } catch (err) {
+        return 5000;
+      }
+    }
+
+    function restartShowcaseRotation() {
+      if (!window.PlatformSimulatorShowcase) return;
+      if (typeof window.PlatformSimulatorShowcase.restartShowcaseTimer === 'function') {
+        window.PlatformSimulatorShowcase.restartShowcaseTimer();
+        return;
+      }
+      if (typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+        window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+      }
+    }
+
+    window.addEventListener('ifa:simulator-showcase-changed', restartShowcaseRotation);
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'ifa_simulator_showcase') restartShowcaseRotation();
+      if (e.key === 'ifa_platform_settings') refreshSimulatorPublicState();
+    });
   });
 })();

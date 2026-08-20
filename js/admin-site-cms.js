@@ -277,6 +277,328 @@
     reloadSitePreview();
   }
 
+  var MAX_SHOWCASE_IMAGE_BYTES = 900000;
+
+  function isSimUnderDevelopment(simId) {
+    if (!window.PlatformSimulators) return false;
+    return window.PlatformSimulators.isSimulatorUnderDevelopment(simId);
+  }
+
+  function setSimUnderDevelopment(simId, underDev) {
+    if (!window.PlatformSimulators) return;
+    var settings = window.PlatformSimulators.getPlatformSettings();
+    var ids = (settings.comingSoonSimulatorIds || []).slice();
+    var idx = ids.indexOf(simId);
+    if (underDev && idx === -1) ids.push(simId);
+    if (!underDev && idx !== -1) ids.splice(idx, 1);
+    window.PlatformSimulators.savePlatformSettings({ comingSoonSimulatorIds: ids });
+  }
+
+  function renderSimulatorShowcaseManager() {
+    var host = $('cmsSimulatorShowcaseList');
+    if (!host || !window.PlatformSimulators || !window.PlatformSimulatorShowcase) return;
+
+    var catalog = window.PlatformSimulators.getCatalog();
+    var showcaseMeta = window.PlatformSimulatorShowcase.getShowcaseMeta();
+    var cardMeta = window.PlatformSimulators.getSimulatorMeta();
+    var defaults = window.PlatformSimulators.defaultSimulatorMeta();
+
+    host.innerHTML = catalog
+      .map(function (sim) {
+        var sm = showcaseMeta[sim.id] || window.PlatformSimulatorShowcase.defaultShowcaseEntry();
+        var cm = cardMeta[sim.id] || {};
+        var d = defaults[sim.id] || {};
+        var underDev = isSimUnderDevelopment(sim.id);
+        var displayTitle = sm.title || cm.title || sim.label;
+        var displayDesc = sm.description || cm.description || sim.description || '';
+        var preview = sm.showcaseImage
+          ? '<img class="cms-showcase-card__preview-img" src="' +
+            String(sm.showcaseImage).replace(/"/g, '&quot;') +
+            '" alt="" />'
+          : '<div class="cms-showcase-card__preview-empty">معاينة افتراضية — ' +
+            escapeHtml(sim.label) +
+            '</div>';
+
+        return (
+          '<article class="cms-showcase-card" data-showcase-editor="' +
+          escapeHtml(sim.id) +
+          '">' +
+          '<header class="cms-showcase-card__head">' +
+          '<div><strong>' +
+          escapeHtml(displayTitle) +
+          '</strong><code>' +
+          escapeHtml(sim.id) +
+          '</code></div>' +
+          (underDev
+            ? '<span class="cms-showcase-card__badge cms-showcase-card__badge--soon">قيد التطوير</span>'
+            : sm.visibleInShowcase !== false
+              ? '<span class="cms-showcase-card__badge cms-showcase-card__badge--live">في العرض</span>'
+              : '<span class="cms-showcase-card__badge">مخفي</span>') +
+          '</header>' +
+          '<div class="cms-showcase-card__body">' +
+          '<div class="cms-showcase-card__preview-wrap">' +
+          '<span class="cms-showcase-card__preview-label">صورة العرض (Showcase)</span>' +
+          '<div class="cms-showcase-card__preview">' +
+          preview +
+          '</div>' +
+          '<label class="cms-file-btn cms-file-btn--block">رفع صورة العرض<input type="file" data-showcase-image-file="' +
+          escapeHtml(sim.id) +
+          '" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden /></label>' +
+          '<input type="hidden" data-showcase-image value="" />' +
+          '<button type="button" class="admin-btn admin-btn--ghost" data-showcase-image-clear>إزالة الصورة</button>' +
+          '</div>' +
+          '<div class="cms-showcase-card__fields">' +
+          '<div class="cms-showcase-card__icon-block">' +
+          '<span class="admin-field__label">أيقونة بطاقة الشبكة</span>' +
+          '<div class="cms-sim-card__icon cms-showcase-card__icon-preview" data-sim-icon-preview aria-hidden="true">' +
+          simIconPreviewHtml(cm) +
+          '</div>' +
+          '<input type="hidden" data-sim-icon-value />' +
+          '<input type="hidden" data-sim-icon-type />' +
+          '<input type="hidden" data-sim-icon-default value="' +
+          escapeHtml(d.icon || '◆') +
+          '" />' +
+          '<div class="cms-sim-icon-actions">' +
+          '<label class="cms-file-btn">رفع أيقونة مخصصة (PNG / SVG / WebP)' +
+          '<input type="file" data-sim-icon-file accept="image/png,image/svg+xml,image/webp,image/jpeg" hidden /></label>' +
+          '<button class="admin-btn admin-btn--ghost" type="button" data-sim-icon-reset>استعادة الافتراضي</button>' +
+          '</div>' +
+          '<span class="admin-field__hint">تُعرض على بطاقة المحاكي في شبكة «المحاكيات» بالصفحة الرئيسية.</span>' +
+          '</div>' +
+          '<label class="admin-field"><span class="admin-field__label">العنوان (بطاقة + عرض الدوران)</span>' +
+          '<input class="admin-field__input" data-showcase-title value="' +
+          escapeHtml(sm.title || cm.title || '') +
+          '" placeholder="' +
+          escapeHtml(sim.label) +
+          '" /></label>' +
+          '<label class="admin-field"><span class="admin-field__label">الوصف (بطاقة + عرض الدوران)</span>' +
+          '<textarea class="admin-field__input admin-field__textarea" data-showcase-desc rows="4" placeholder="وصف يظهر في البطاقة ومعاينة الدوران">' +
+          escapeHtml(sm.description || cm.description || '') +
+          '</textarea></label>' +
+          '<label class="admin-field admin-field--inline">' +
+          '<input type="checkbox" data-showcase-under-dev ' +
+          (underDev ? 'checked' : '') +
+          ' />' +
+          '<span class="admin-field__label">قيد التطوير (Under Development)</span></label>' +
+          '<label class="admin-field admin-field--inline">' +
+          '<input type="checkbox" data-showcase-visible ' +
+          (sm.visibleInShowcase !== false ? 'checked' : '') +
+          ' />' +
+          '<span class="admin-field__label">إظهار في دوران العرض (Showcase Rotation)</span></label>' +
+          '</div></div></article>'
+        );
+      })
+      .join('');
+
+    host.querySelectorAll('[data-showcase-editor]').forEach(function (card) {
+      var simId = card.getAttribute('data-showcase-editor');
+      var sm = showcaseMeta[simId] || {};
+      var cm = cardMeta[simId] || {};
+      var imageInput = card.querySelector('[data-showcase-image]');
+      if (imageInput) imageInput.value = sm.showcaseImage || '';
+      var iconValue = card.querySelector('[data-sim-icon-value]');
+      var iconType = card.querySelector('[data-sim-icon-type]');
+      if (iconValue) iconValue.value = cm.icon || '';
+      if (iconType) iconType.value = cm.iconType === 'image' ? 'image' : 'emoji';
+    });
+  }
+
+  function collectShowcaseFromCard(card) {
+    var simId = card.getAttribute('data-showcase-editor');
+    var titleEl = card.querySelector('[data-showcase-title]');
+    var descEl = card.querySelector('[data-showcase-desc]');
+    var imageEl = card.querySelector('[data-showcase-image]');
+    var visibleEl = card.querySelector('[data-showcase-visible]');
+    var underDevEl = card.querySelector('[data-showcase-under-dev]');
+    return {
+      id: simId,
+      title: titleEl ? titleEl.value : '',
+      description: descEl ? descEl.value : '',
+      showcaseImage: imageEl ? imageEl.value : '',
+      visibleInShowcase: !!(visibleEl && visibleEl.checked),
+      underDevelopment: !!(underDevEl && underDevEl.checked),
+    };
+  }
+
+  function collectShowcaseIconFromCard(card, simId, current) {
+    var iconValue = card.querySelector('[data-sim-icon-value]');
+    var iconType = card.querySelector('[data-sim-icon-type]');
+    var icon = iconValue ? iconValue.value : (current && current.icon) || '';
+    var type = iconType && iconType.value === 'image' ? 'image' : 'emoji';
+    if (!icon) {
+      var defaults = window.PlatformSimulators.defaultSimulatorMeta();
+      icon = (defaults[simId] && defaults[simId].icon) || '◆';
+      type = 'emoji';
+    } else if (type === 'image' && icon.indexOf('data:') !== 0 && current && current.iconType === 'image') {
+      icon = current.icon || icon;
+    }
+    return { icon: icon, iconType: type };
+  }
+
+  function saveAllSimulatorShowcaseCards() {
+    var host = $('cmsSimulatorShowcaseList');
+    if (!host || !window.PlatformSimulatorShowcase || !window.PlatformSimulators) return false;
+
+    var cards = host.querySelectorAll('[data-showcase-editor]');
+    if (!cards.length) return false;
+
+    var showcasePatch = {};
+    var metaPatch = {};
+    var comingSoonIds = [];
+    var cardMeta = window.PlatformSimulators.getSimulatorMeta();
+
+    cards.forEach(function (card) {
+      var data = collectShowcaseFromCard(card);
+      var simId = data.id;
+      if (!simId) return;
+
+      showcasePatch[simId] = {
+        title: data.title,
+        description: data.description,
+        showcaseImage: data.showcaseImage,
+        visibleInShowcase: data.visibleInShowcase,
+      };
+
+      var iconData = collectShowcaseIconFromCard(card, simId, cardMeta[simId] || {});
+      metaPatch[simId] = {
+        title: data.title,
+        description: data.description,
+        icon: iconData.icon,
+        iconType: iconData.iconType,
+      };
+
+      if (data.underDevelopment) comingSoonIds.push(simId);
+    });
+
+    window.PlatformSimulatorShowcase.saveShowcaseMeta(showcasePatch);
+    window.PlatformSimulators.saveSimulatorMeta(metaPatch);
+    window.PlatformSimulators.savePlatformSettings({ comingSoonSimulatorIds: comingSoonIds });
+
+    var status = $('cmsSimulatorsSaveAllStatus');
+    if (status) {
+      status.textContent =
+        'تم الحفظ — ' +
+        cards.length +
+        ' محاكيات · قيد التطوير: ' +
+        comingSoonIds.length;
+    }
+    toast('تم حفظ جميع إعدادات المحاكيات');
+    renderSimulatorShowcaseManager();
+    reloadSitePreview();
+    return true;
+  }
+
+  function saveSimulatorShowcaseCard(simId, card) {
+    if (!window.PlatformSimulatorShowcase || !window.PlatformSimulators) return;
+    var data = collectShowcaseFromCard(card);
+    var patch = {};
+    patch[simId] = {
+      title: data.title,
+      description: data.description,
+      showcaseImage: data.showcaseImage,
+      visibleInShowcase: data.visibleInShowcase,
+    };
+    window.PlatformSimulatorShowcase.saveShowcaseMeta(patch);
+
+    var iconData = collectShowcaseIconFromCard(
+      card,
+      simId,
+      window.PlatformSimulators.getSimulatorMeta()[simId] || {}
+    );
+    var metaPatch = {};
+    metaPatch[simId] = {
+      title: data.title,
+      description: data.description,
+      icon: iconData.icon,
+      iconType: iconData.iconType,
+    };
+    window.PlatformSimulators.saveSimulatorMeta(metaPatch);
+    setSimUnderDevelopment(simId, data.underDevelopment);
+    toast('تم حفظ إعدادات المحاكي');
+    renderSimulatorShowcaseManager();
+    reloadSitePreview();
+  }
+
+  function bindSimulatorShowcaseManager() {
+    var host = $('cmsSimulatorShowcaseList');
+    var intervalForm = $('cmsShowcaseSettingsForm');
+    var intervalInput = $('cmsShowcaseInterval');
+    if (!host) return;
+
+    if (window.PlatformSimulatorShowcase && intervalInput) {
+      intervalInput.value = String(window.PlatformSimulatorShowcase.getIntervalSeconds());
+    }
+
+    if (intervalForm && window.PlatformSimulatorShowcase) {
+      intervalForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var saved = window.PlatformSimulatorShowcase.saveIntervalSeconds(
+          intervalInput && intervalInput.value
+        );
+        if (intervalInput) intervalInput.value = String(saved._intervalSeconds);
+        var status = $('cmsShowcaseIntervalStatus');
+        if (status) {
+          status.textContent = 'تم الحفظ — دوران كل ' + saved._intervalSeconds + ' ثانية';
+        }
+        toast('تم حفظ سرعة عرض المحاكيات');
+        reloadSitePreview();
+      });
+    }
+
+    renderSimulatorShowcaseManager();
+
+    var saveAllBtn = $('cmsSimulatorsSaveAll');
+    if (saveAllBtn && !saveAllBtn.dataset.bound) {
+      saveAllBtn.dataset.bound = '1';
+      saveAllBtn.addEventListener('click', function () {
+        saveAllSimulatorShowcaseCards();
+      });
+    }
+
+    host.addEventListener('click', function (e) {
+      var clearBtn = e.target.closest ? e.target.closest('[data-showcase-image-clear]') : null;
+      if (clearBtn) {
+        var clearCard = clearBtn.closest('[data-showcase-editor]');
+        if (!clearCard) return;
+        var hidden = clearCard.querySelector('[data-showcase-image]');
+        if (hidden) hidden.value = '';
+        var fileInput = clearCard.querySelector('[data-showcase-image-file]');
+        if (fileInput) fileInput.value = '';
+        var previewBox = clearCard.querySelector('.cms-showcase-card__preview');
+        if (previewBox) {
+          previewBox.innerHTML =
+            '<div class="cms-showcase-card__preview-empty">معاينة افتراضية</div>';
+        }
+      }
+    });
+
+    host.addEventListener('change', function (e) {
+      var fileInput = e.target.closest ? e.target.closest('[data-showcase-image-file]') : null;
+      if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
+      var file = fileInput.files[0];
+      if (file.size > MAX_SHOWCASE_IMAGE_BYTES) {
+        toast('حجم صورة العرض كبير جداً', true);
+        fileInput.value = '';
+        return;
+      }
+      var simId = fileInput.getAttribute('data-showcase-image-file');
+      readFileAsDataUrl(file, function (url) {
+        var card = host.querySelector('[data-showcase-editor="' + simId + '"]');
+        if (!card) return;
+        var hidden = card.querySelector('[data-showcase-image]');
+        if (hidden) hidden.value = url;
+        var previewBox = card.querySelector('.cms-showcase-card__preview');
+        if (previewBox) {
+          previewBox.innerHTML =
+            '<img class="cms-showcase-card__preview-img" src="' +
+            String(url).replace(/"/g, '&quot;') +
+            '" alt="" />';
+        }
+        fileInput.value = '';
+      });
+    });
+  }
+
   /* ---------- Landing page statistics ---------- */
   function renderStatsEditor() {
     if (!window.PlatformStats) return;
@@ -1500,9 +1822,15 @@
   }
 
   function bind() {
-    if (!$('cmsSimulatorsGrid') && !$('cmsStatsForm') && !$('cmsHeroSlideshowForm')) return;
+    if (
+      !$('cmsSimulatorShowcaseList') &&
+      !$('cmsShowcaseSettingsForm') &&
+      !$('cmsStatsForm') &&
+      !$('cmsHeroSlideshowForm')
+    )
+      return;
 
-    renderSimulatorEditors();
+    bindSimulatorShowcaseManager();
     bindStatsEditor();
     bindHeroSlideshowEditor();
     renderArticlesTable();
@@ -1511,15 +1839,10 @@
     initRichEditor();
 
     document.addEventListener('click', function (e) {
-      var simSave = e.target.closest ? e.target.closest('[data-sim-save]') : null;
-      if (simSave) {
-        var editor = simSave.closest('[data-sim-editor]');
-        if (editor) saveSimulatorCard(simSave.getAttribute('data-sim-save'), editor);
-        return;
-      }
       var simIconReset = e.target.closest ? e.target.closest('[data-sim-icon-reset]') : null;
       if (simIconReset) {
-        var resetCard = simIconReset.closest('[data-sim-editor]');
+        var resetCard =
+          simIconReset.closest('[data-showcase-editor]') || simIconReset.closest('[data-sim-editor]');
         if (resetCard) resetSimIcon(resetCard);
         return;
       }
@@ -1646,7 +1969,8 @@
       var simIconFile = e.target.closest ? e.target.closest('[data-sim-icon-file]') : null;
       if (simIconFile && simIconFile.files && simIconFile.files[0]) {
         var file = simIconFile.files[0];
-        var card = simIconFile.closest('[data-sim-editor]');
+        var card =
+          simIconFile.closest('[data-showcase-editor]') || simIconFile.closest('[data-sim-editor]');
         if (!card) return;
         if (file.size > MAX_SIM_ICON_BYTES) {
           toast('حجم الأيقونة كبير جداً — الحد الأقصى 500 كيلوبايت', true);
@@ -1724,7 +2048,10 @@
     }
 
     window.renderAdminSiteCms = function () {
-      renderSimulatorEditors();
+      if (window.PlatformSimulatorShowcase && $('cmsShowcaseInterval')) {
+        $('cmsShowcaseInterval').value = String(window.PlatformSimulatorShowcase.getIntervalSeconds());
+      }
+      renderSimulatorShowcaseManager();
       renderStatsEditor();
       renderHeroSlideshowEditor();
       renderArticlesTable();

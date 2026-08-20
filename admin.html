@@ -42,6 +42,12 @@
         </svg>
         إدارة المستخدمين
       </a>
+      <a href="#site-stats" class="admin-nav__link" data-section="site-stats">
+        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M18 20V10M12 20V4M6 20v-6"/>
+        </svg>
+        إدارة الإحصائيات
+      </a>
       <a href="#instructors" class="admin-nav__link" data-section="instructors">
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -61,16 +67,19 @@
         </svg>
         الباقات والأسعار
       </a>
-      <a href="#simulators" class="admin-nav__link" data-section="simulators" data-site-parent>
+      <a href="#site-simulator-showcase" class="admin-nav__link" data-section="site-simulator-showcase" data-site-parent>
         <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
         </svg>
         إدارة موقعي
       </a>
       <div class="admin-nav__sub" data-site-subnav>
-        <a href="#simulators" class="admin-nav__sublink" data-section="simulators">المحاكيات والعرض</a>
+        <a href="#site-simulator-showcase" class="admin-nav__sublink" data-section="site-simulator-showcase">إدارة المحاكيات</a>
         <a href="#site-hero-slideshow" class="admin-nav__sublink" data-section="site-hero-slideshow">الصفحة الرئيسية</a>
-        <a href="#site-stats" class="admin-nav__sublink" data-section="site-stats">إدارة الإحصائيات</a>
+        <a href="#site-articles" class="admin-nav__sublink" data-section="site-articles">المقالات التقنية</a>
+        <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
+        <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
+        <a href="#site-preview" class="admin-nav__sublink" data-section="site-preview">معاينة الموقع</a>
       </div>
 
       <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
@@ -756,14 +765,28 @@
         </div>
       </div>
 
-      <section class="admin-panel admin-view" id="simulators" data-admin-view="simulators" aria-labelledby="simulatorsHeading" hidden>
+      <section class="admin-panel admin-view" id="site-simulator-showcase" data-admin-view="site-simulator-showcase" aria-labelledby="simulatorShowcaseHeading" hidden>
         <div class="admin-panel__header">
           <div>
-            <h2 class="admin-panel__title" id="simulatorsHeading">المحاكيات</h2>
-            <p class="admin-panel__desc">تحرير عنوان ووصف وأيقونة بطاقات المحاكيات الستة — يُحفظ في ifa_simulators_meta</p>
+            <h2 class="admin-panel__title" id="simulatorShowcaseHeading">إدارة المحاكيات</h2>
+            <p class="admin-panel__desc">تحكم موحّد لكل محاكي: بطاقة الشبكة، عرض الدوران، الصور، النصوص، حالة «قيد التطوير»، وسرعة التنقل</p>
           </div>
         </div>
-        <div class="cms-sim-grid" id="cmsSimulatorsGrid"></div>
+        <form class="admin-settings-form cms-showcase-settings" id="cmsShowcaseSettingsForm">
+          <label class="admin-field">
+            <span class="admin-field__label">سرعة التنقل بين المحاكيات (بالثواني) — Simulator Transition Interval</span>
+            <input class="admin-field__input cms-stats-input" id="cmsShowcaseInterval" type="number" min="2" max="60" step="1" value="5" inputmode="numeric" lang="en" dir="ltr" required />
+          </label>
+          <div class="admin-settings-form__actions">
+            <button class="admin-btn admin-btn--primary" type="submit">حفظ سرعة العرض</button>
+            <p class="admin-panel__meta" id="cmsShowcaseIntervalStatus" role="status"></p>
+          </div>
+        </form>
+        <div class="cms-showcase-manager" id="cmsSimulatorShowcaseList" aria-live="polite"></div>
+        <div class="cms-showcase-save-all">
+          <button class="admin-btn admin-btn--primary admin-btn--lg" type="button" id="cmsSimulatorsSaveAll">حفظ التغييرات</button>
+          <p class="admin-panel__meta" id="cmsSimulatorsSaveAllStatus" role="status"></p>
+        </div>
       </section>
 
       <section class="admin-panel admin-view" id="site-stats" data-admin-view="site-stats" aria-labelledby="siteStatsHeading" hidden>
@@ -1119,6 +1142,7 @@
 
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
+  <script src="js/platform-simulator-showcase.js"></script>
   <script src="js/articles.js"></script>
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>

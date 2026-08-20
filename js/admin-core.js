@@ -13,19 +13,29 @@
     var topbarSubtitle = document.querySelector('.admin-topbar__subtitle');
 
     var SITE_VIEWS = {
-      simulators: true,
-      'site-stats': true,
+      'site-simulator-showcase': true,
       'site-hero-slideshow': true,
+      'site-articles': true,
+      'site-faq': true,
+      'site-testimonials': true,
+      'site-preview': true,
     };
 
     var VIEW_META = {
       overview: { title: 'نظرة عامة', subtitle: 'أكاديمية الفايبر العراقية — نظرة عامة على المنصة' },
       users: { title: 'إدارة المستخدمين', subtitle: 'عرض وإدارة حسابات الطلاب' },
+      'site-stats': { title: 'إدارة الإحصائيات', subtitle: 'Website Statistics — أرقام قسم الإحصائيات على الصفحة الرئيسية' },
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
-      simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات والعرض — بطاقات المحاكي ومعاينة الدوران' },
-      'site-stats': { title: 'إدارة موقعي', subtitle: 'إدارة الإحصائيات' },
+      'site-simulator-showcase': {
+        title: 'إدارة موقعي',
+        subtitle: 'إدارة المحاكيات — بطاقات الشبكة وعرض الدوران',
+      },
+      simulators: {
+        title: 'إدارة موقعي',
+        subtitle: 'إدارة المحاكيات — بطاقات الشبكة وعرض الدوران',
+      },
       'site-hero-slideshow': { title: 'إدارة موقعي', subtitle: 'الصفحة الرئيسية — Homepage' },
       'site-articles': { title: 'المقالات التقنية', subtitle: 'إضافة وتعديل المقالات المعروضة في الصفحة الرئيسية' },
       'site-faq': { title: 'الأسئلة الشائعة', subtitle: 'إدارة الأسئلة والأجوبة في الصفحة الرئيسية' },
@@ -46,6 +56,7 @@
 
     function showAdminView(sectionId) {
       var id = VIEW_META[sectionId] ? sectionId : 'overview';
+      if (id === 'simulators') id = 'site-simulator-showcase';
       document.querySelectorAll('[data-admin-view]').forEach(function (view) {
         view.hidden = view.getAttribute('data-admin-view') !== id;
       });
