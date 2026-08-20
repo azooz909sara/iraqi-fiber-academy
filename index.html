@@ -425,17 +425,27 @@
     <div class="container">
       <div class="footer__grid">
         <div class="footer__brand">
-          <div class="footer__logo"><img class="footer__logo-img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" /><span class="footer__logo-text">أكاديمية الفايبر العراقية</span></div>
-          <p class="footer__desc">منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
-          <div class="footer__social">
-            <a href="#" class="footer__social-link" aria-label="تويتر">𝕏</a>
-            <a href="#" class="footer__social-link" aria-label="لينكدإن">in</a>
-            <a href="#" class="footer__social-link" aria-label="يوتيوب">▶</a>
-            <a href="#" class="footer__social-link" aria-label="تيليجرام">✈</a>
+          <div class="footer__logo">
+            <img class="footer__logo-img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
+            <span class="footer__logo-text">أكاديمية الفايبر العراقية</span>
           </div>
+          <p class="footer__desc" id="footerDesc" data-footer-desc>منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
+          <div class="footer__social" id="footerSocial" data-footer-social aria-label="روابط التواصل"></div>
         </div>
-        <div class="footer__column"><h4 class="footer__column-title">المنصة</h4><ul class="footer__links"><li><a href="#hero">الرئيسية</a></li><li><a href="#courses">الكورسات التعليمية</a></li><li><a href="#simulators">المحاكيات</a></li><li><a href="#pricing">الباقات</a></li><li><a href="#articles">المقالات التقنية</a></li><li><a href="#faq">الأسئلة الشائعة</a></li></ul></div>
-        <div class="footer__column"><h4 class="footer__column-title">الدعم</h4><ul class="footer__links"><li><a href="#faq">الأسئلة الشائعة</a></li><li><a href="#">مركز المساعدة</a></li><li><a href="#">تواصل معنا</a></li></ul></div>
+        <div class="footer__column">
+          <h4 class="footer__column-title">الدعم</h4>
+          <ul class="footer__links">
+            <li><a href="#faq">الأسئلة الشائعة</a></li>
+            <li><a href="#">مركز المساعدة</a></li>
+            <li><a href="#">تواصل معنا</a></li>
+          </ul>
+        </div>
+        <div class="footer__column">
+          <h4 class="footer__column-title">لوحات التحكم</h4>
+          <ul class="footer__links">
+            <li><a href="#" data-join-instructor>انضم إلينا كمدرب</a></li>
+          </ul>
+        </div>
       </div>
       <div class="footer__bottom">
         <p class="footer__copyright">© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.</p>
@@ -535,6 +545,7 @@
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
   <script src="js/platform-stats.js"></script>
+  <script src="js/platform-footer.js"></script>
   <script src="js/platform-hero-slideshow.js"></script>
   <script>
     (function bootPublicCms() {

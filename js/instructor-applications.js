@@ -223,7 +223,55 @@
       }
     }
     saveApprovedMap(map);
+    if (status === 'approved') {
+      syncInstructorUserAccount(found);
+    }
     return found;
+  }
+
+  function syncInstructorUserAccount(app) {
+    if (!app || !app.email) return;
+    var email = normalizeEmail(app.email);
+    if (global.AdminUsers && typeof global.AdminUsers.findUserByEmail === 'function') {
+      var user = global.AdminUsers.findUserByEmail(email);
+      if (user && typeof global.AdminUsers.updateUser === 'function') {
+        global.AdminUsers.updateUser(user.id, {
+          role: 'instructor',
+          name: app.fullName || user.name,
+        });
+      } else if (typeof global.AdminUsers.addUser === 'function') {
+        try {
+          global.AdminUsers.addUser({
+            name: app.fullName || email.split('@')[0],
+            email: email,
+            role: 'instructor',
+          });
+        } catch (err) {
+          /* user may already exist */
+        }
+      }
+    }
+    try {
+      var raw = localStorage.getItem('ifa_auth_user');
+      if (raw) {
+        var auth = JSON.parse(raw);
+        if (auth && normalizeEmail(auth.email) === email && global.IFAAuth && typeof global.IFAAuth.setLocalAuthUser === 'function') {
+          global.IFAAuth.setLocalAuthUser({
+            email: email,
+            name: app.fullName || auth.name,
+            isInstructor: true,
+            role: 'instructor',
+          });
+        }
+      }
+    } catch (err2) {
+      /* ignore */
+    }
+    try {
+      global.dispatchEvent(new CustomEvent('ifa:instructor-status-changed', { detail: app }));
+    } catch (err3) {
+      /* ignore */
+    }
   }
 
   function approveApplication(id) {

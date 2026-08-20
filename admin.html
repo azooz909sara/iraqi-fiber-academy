@@ -80,6 +80,7 @@
         <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
         <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
         <a href="#site-preview" class="admin-nav__sublink" data-section="site-preview">معاينة الموقع</a>
+        <a href="#site-footer" class="admin-nav__sublink" data-section="site-footer">إعدادات التذييل</a>
       </div>
 
       <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
@@ -895,6 +896,55 @@
         </div>
       </section>
 
+      <section class="admin-panel admin-view" id="site-footer" data-admin-view="site-footer" aria-labelledby="siteFooterHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="siteFooterHeading">إعدادات التذييل (Footer Settings)</h2>
+            <p class="admin-panel__desc">وصف العلامة التجارية، حجم الخط، اللون، وروابط التواصل الاجتماعي</p>
+          </div>
+        </div>
+        <form class="admin-settings-form cms-footer-form" id="cmsFooterForm">
+          <div class="cms-footer-editor">
+            <div class="cms-footer-editor__fields">
+              <label class="admin-field">
+                <span class="admin-field__label">وصف الأكاديمية</span>
+                <textarea class="admin-field__input admin-field__textarea" id="cmsFooterDescText" rows="4" data-footer-field="text"></textarea>
+              </label>
+              <div class="admin-form-grid">
+                <label class="admin-field">
+                  <span class="admin-field__label">حجم الخط (rem)</span>
+                  <input class="admin-field__input" id="cmsFooterDescSize" type="number" min="0.65" max="1.5" step="0.05" data-footer-field="fontSize" dir="ltr" lang="en" />
+                </label>
+                <label class="admin-field">
+                  <span class="admin-field__label">لون النص</span>
+                  <input class="admin-field__input cms-footer-color" id="cmsFooterDescColor" type="color" data-footer-field="color" />
+                </label>
+              </div>
+              <fieldset class="admin-field cms-footer-social-fieldset">
+                <legend class="admin-field__label">روابط التواصل (تُخفى الأيقونة إذا كان الحقل فارغاً)</legend>
+                <div class="cms-footer-social-grid" id="cmsFooterSocialFields"></div>
+              </fieldset>
+            </div>
+            <aside class="cms-footer-editor__preview" aria-label="معاينة التذييل">
+              <span class="cms-footer-editor__preview-label">معاينة مباشرة</span>
+              <div class="cms-footer-preview-card">
+                <div class="footer__logo cms-footer-preview-card__logo">
+                  <img class="footer__logo-img" src="images/logo.png" alt="" width="42" height="42" />
+                  <span class="footer__logo-text">أكاديمية الفايبر العراقية</span>
+                </div>
+                <p class="footer__desc" id="cmsFooterDescPreview" data-footer-desc></p>
+                <div class="footer__social" id="cmsFooterSocialPreview" data-footer-social></div>
+              </div>
+            </aside>
+          </div>
+          <div class="admin-settings-form__actions">
+            <button class="admin-btn admin-btn--primary" type="submit">حفظ إعدادات التذييل</button>
+            <button class="admin-btn admin-btn--ghost" type="button" id="cmsFooterReset">استعادة الافتراضي</button>
+            <p class="admin-panel__meta" id="cmsFooterSaveStatus" role="status"></p>
+          </div>
+        </form>
+      </section>
+
       <section class="admin-panel admin-view admin-panel--site-preview" id="site-preview" data-admin-view="site-preview" aria-labelledby="sitePreviewHeading" hidden>
         <h2 class="visually-hidden" id="sitePreviewHeading">معاينة الموقع</h2>
         <iframe id="site-preview-frame" class="admin-site-iframe" src="index.html?mode=admin-preview" title="معاينة الموقع المباشر"></iframe>
@@ -1147,6 +1197,7 @@
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
   <script src="js/platform-stats.js"></script>
+  <script src="js/platform-footer.js"></script>
   <script src="js/platform-hero-slideshow.js"></script>
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>

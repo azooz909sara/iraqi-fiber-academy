@@ -232,6 +232,15 @@
 
     window.addEventListener('ifa:platform-settings-changed', refreshSimulatorPublicState);
 
+    if (window.PlatformFooter && typeof window.PlatformFooter.applyFooter === 'function') {
+      window.PlatformFooter.applyFooter(document);
+    }
+    window.addEventListener('ifa:platform-footer-changed', function () {
+      if (window.PlatformFooter && typeof window.PlatformFooter.applyFooter === 'function') {
+        window.PlatformFooter.applyFooter(document);
+      }
+    });
+
     function readShowcaseIntervalMs() {
       if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.getRotateMs === 'function') {
         return window.PlatformSimulatorShowcase.getRotateMs();

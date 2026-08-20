@@ -19,6 +19,7 @@
       'site-faq': true,
       'site-testimonials': true,
       'site-preview': true,
+      'site-footer': true,
     };
 
     var VIEW_META = {
@@ -41,6 +42,7 @@
       'site-faq': { title: 'الأسئلة الشائعة', subtitle: 'إدارة الأسئلة والأجوبة في الصفحة الرئيسية' },
       'site-testimonials': { title: 'آراء المستخدمين', subtitle: 'إدارة آراء وتقييمات المستخدمين' },
       'site-preview': { title: 'معاينة الموقع', subtitle: 'معاينة الموقع المباشر' },
+      'site-footer': { title: 'إدارة موقعي', subtitle: 'Footer Settings — وصف العلامة وروابط التواصل' },
       settings: { title: 'الإعدادات', subtitle: 'إعدادات النظام' },
     };
 

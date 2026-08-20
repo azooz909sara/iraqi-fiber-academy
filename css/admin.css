@@ -2660,3 +2660,54 @@
 .admin-modal.quill-fullscreen-mode .cms-rich-body {
   min-height: 50vh;
 }
+
+.cms-footer-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.cms-footer-editor__preview-label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 0.65rem;
+}
+
+.cms-footer-preview-card {
+  background: var(--color-bg-secondary, #0f172a);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  padding: 1.25rem;
+}
+
+.cms-footer-preview-card__logo {
+  margin-bottom: 1rem;
+}
+
+.cms-footer-social-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.cms-footer-social-fieldset {
+  margin-top: 0.5rem;
+}
+
+.cms-footer-color {
+  padding: 0.15rem;
+  height: 42px;
+}
+
+@media (max-width: 900px) {
+  .cms-footer-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .cms-footer-social-grid {
+    grid-template-columns: 1fr;
+  }
+}

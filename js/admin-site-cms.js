@@ -599,6 +599,150 @@
     });
   }
 
+  /* ---------- Footer settings ---------- */
+  var FOOTER_SOCIAL_LABELS = {
+    youtube: 'YouTube',
+    linkedin: 'LinkedIn',
+    email: 'البريد الإلكتروني (Email)',
+    phone: 'رقم الهاتف (Phone)',
+    facebook: 'Facebook',
+    instagram: 'Instagram',
+    telegram: 'Telegram',
+    whatsapp: 'WhatsApp',
+  };
+
+  function collectFooterDraftFromForm() {
+    var social = {};
+    if (window.PlatformFooter && window.PlatformFooter.SOCIAL_ORDER) {
+      window.PlatformFooter.SOCIAL_ORDER.forEach(function (item) {
+        var input = $('cmsFooterSocial_' + item.id);
+        social[item.id] = input ? input.value : '';
+      });
+    }
+    return {
+      description: {
+        text: $('cmsFooterDescText') ? $('cmsFooterDescText').value : '',
+        fontSize: $('cmsFooterDescSize') ? $('cmsFooterDescSize').value : 0.9,
+        color: $('cmsFooterDescColor') ? $('cmsFooterDescColor').value : '#94a3b8',
+      },
+      social: social,
+    };
+  }
+
+  function syncFooterLivePreview() {
+    if (!window.PlatformFooter) return;
+    var incoming = collectFooterDraftFromForm();
+    var base = window.PlatformFooter.getFooterSettings();
+    var previewSettings = {
+      description: Object.assign({}, base.description, incoming.description),
+      social: Object.assign({}, base.social),
+    };
+    previewSettings.description.fontSize = parseFloat(incoming.description.fontSize) || base.description.fontSize;
+    window.PlatformFooter.SOCIAL_ORDER.forEach(function (item) {
+      previewSettings.social[item.id] = window.PlatformFooter.normalizeSocialUrl(
+        item.id,
+        incoming.social[item.id] || ''
+      );
+    });
+
+    var descPreview = $('cmsFooterDescPreview');
+    if (descPreview) {
+      descPreview.textContent =
+        String(previewSettings.description.text || '').trim() || window.PlatformFooter.DEFAULT_DESCRIPTION;
+      descPreview.style.fontSize = String(previewSettings.description.fontSize || 0.9) + 'rem';
+      descPreview.style.color = previewSettings.description.color || '#94a3b8';
+    }
+    var socialPreview = $('cmsFooterSocialPreview');
+    if (socialPreview && typeof window.PlatformFooter.buildSocialHtml === 'function') {
+      socialPreview.innerHTML = window.PlatformFooter.buildSocialHtml(previewSettings);
+    }
+  }
+
+  function renderFooterSocialFields(settings) {
+    var host = $('cmsFooterSocialFields');
+    if (!host || !window.PlatformFooter) return;
+    var social = (settings && settings.social) || {};
+    host.innerHTML = window.PlatformFooter.SOCIAL_ORDER.map(function (item) {
+      return (
+        '<label class="admin-field cms-footer-social-field">' +
+        '<span class="admin-field__label">' +
+        escapeHtml(FOOTER_SOCIAL_LABELS[item.id] || item.label) +
+        '</span>' +
+        '<input class="admin-field__input" id="cmsFooterSocial_' +
+        escapeHtml(item.id) +
+        '" type="text" dir="ltr" placeholder="https://..." value="' +
+        escapeHtml(social[item.id] || '') +
+        '" />' +
+        '</label>'
+      );
+    }).join('');
+  }
+
+  function loadFooterEditorForm() {
+    if (!window.PlatformFooter) return;
+    var settings = window.PlatformFooter.getFooterSettings();
+    if ($('cmsFooterDescText')) $('cmsFooterDescText').value = settings.description.text;
+    if ($('cmsFooterDescSize')) $('cmsFooterDescSize').value = String(settings.description.fontSize);
+    if ($('cmsFooterDescColor')) $('cmsFooterDescColor').value = settings.description.color;
+    renderFooterSocialFields(settings);
+    syncFooterLivePreview();
+  }
+
+  function bindFooterEditor() {
+    var form = $('cmsFooterForm');
+    if (!form || !window.PlatformFooter) return;
+
+    loadFooterEditorForm();
+
+    if (!form.dataset.bound) {
+      form.dataset.bound = '1';
+
+      form.addEventListener('input', function (e) {
+        if (
+          e.target.id === 'cmsFooterDescText' ||
+          e.target.id === 'cmsFooterDescSize' ||
+          e.target.id === 'cmsFooterDescColor' ||
+          (e.target.id && e.target.id.indexOf('cmsFooterSocial_') === 0)
+        ) {
+          syncFooterLivePreview();
+        }
+      });
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        var draft = collectFooterDraftFromForm();
+        var saved = window.PlatformFooter.saveFooterSettings(draft);
+        loadFooterEditorForm();
+        var status = $('cmsFooterSaveStatus');
+        if (status) status.textContent = 'تم حفظ إعدادات التذييل';
+        toast('تم حفظ إعدادات التذييل');
+        reloadSitePreview();
+      });
+
+      var resetBtn = $('cmsFooterReset');
+      if (resetBtn) {
+        resetBtn.addEventListener('click', function () {
+          if (!window.confirm('استعادة إعدادات التذييل الافتراضية؟')) return;
+          var emptySocial = {};
+          window.PlatformFooter.SOCIAL_ORDER.forEach(function (item) {
+            emptySocial[item.id] = '';
+          });
+          window.PlatformFooter.saveFooterSettings({
+            description: {
+              text: window.PlatformFooter.DEFAULT_DESCRIPTION,
+              fontSize: 0.9,
+              color: '#94a3b8',
+            },
+            social: emptySocial,
+          });
+          loadFooterEditorForm();
+          toast('تمت استعادة الإعدادات الافتراضية');
+          reloadSitePreview();
+        });
+      }
+    }
+  }
+
   /* ---------- Landing page statistics ---------- */
   function renderStatsEditor() {
     if (!window.PlatformStats) return;
@@ -1826,13 +1970,15 @@
       !$('cmsSimulatorShowcaseList') &&
       !$('cmsShowcaseSettingsForm') &&
       !$('cmsStatsForm') &&
-      !$('cmsHeroSlideshowForm')
+      !$('cmsHeroSlideshowForm') &&
+      !$('cmsFooterForm')
     )
       return;
 
     bindSimulatorShowcaseManager();
     bindStatsEditor();
     bindHeroSlideshowEditor();
+    bindFooterEditor();
     renderArticlesTable();
     renderFaqTable();
     renderTestimonialsTable();
@@ -2054,6 +2200,7 @@
       renderSimulatorShowcaseManager();
       renderStatsEditor();
       renderHeroSlideshowEditor();
+      loadFooterEditorForm();
       renderArticlesTable();
       renderFaqTable();
       renderTestimonialsTable();
