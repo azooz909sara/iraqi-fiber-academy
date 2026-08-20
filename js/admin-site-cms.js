@@ -375,6 +375,309 @@
     );
   }
 
+  /* ---------- Hero content slider ---------- */
+  var heroSlidesDraft = [];
+
+  function loadHeroSlidesDraft() {
+    if (!window.PlatformHeroSlideshow) {
+      heroSlidesDraft = [];
+      return;
+    }
+    var config = window.PlatformHeroSlideshow.getConfig();
+    heroSlidesDraft = config.slides.length
+      ? config.slides.slice()
+      : window.PlatformHeroSlideshow.defaultSlides().slice();
+  }
+
+  function collectHeroSlideFromCard(card) {
+    var id = card.getAttribute('data-hero-slide-id');
+    var existing = null;
+    heroSlidesDraft.forEach(function (s) {
+      if (s.id === id) existing = s;
+    });
+    var imageInput = card.querySelector('[data-hero-field="image"]');
+    var visualTypeSelect = card.querySelector('[data-hero-field="visualType"]');
+    return window.PlatformHeroSlideshow.normalizeSlide({
+      id: id,
+      visualType: visualTypeSelect ? visualTypeSelect.value : 'image',
+      image: imageInput ? imageInput.value : existing && existing.image,
+      title: card.querySelector('[data-hero-field="title"]') && card.querySelector('[data-hero-field="title"]').value,
+      description:
+        card.querySelector('[data-hero-field="description"]') &&
+        card.querySelector('[data-hero-field="description"]').value,
+      buttonText:
+        card.querySelector('[data-hero-field="buttonText"]') &&
+        card.querySelector('[data-hero-field="buttonText"]').value,
+      buttonHref:
+        card.querySelector('[data-hero-field="buttonHref"]') &&
+        card.querySelector('[data-hero-field="buttonHref"]').value,
+      secondaryButtonText:
+        card.querySelector('[data-hero-field="secondaryButtonText"]') &&
+        card.querySelector('[data-hero-field="secondaryButtonText"]').value,
+      secondaryButtonHref:
+        card.querySelector('[data-hero-field="secondaryButtonHref"]') &&
+        card.querySelector('[data-hero-field="secondaryButtonHref"]').value,
+      textColor:
+        card.querySelector('[data-hero-field="textColor"]') &&
+        card.querySelector('[data-hero-field="textColor"]').value,
+      bgTint:
+        card.querySelector('[data-hero-field="bgTint"]') && card.querySelector('[data-hero-field="bgTint"]').value,
+      badge: card.querySelector('[data-hero-field="badge"]') && card.querySelector('[data-hero-field="badge"]').value,
+      showTrust: !!(card.querySelector('[data-hero-field="showTrust"]') && card.querySelector('[data-hero-field="showTrust"]').checked),
+    });
+  }
+
+  function syncHeroSlidesDraftFromDom() {
+    var list = $('cmsHeroSlidesList');
+    if (!list) return;
+    heroSlidesDraft = [];
+    list.querySelectorAll('[data-hero-slide-id]').forEach(function (card) {
+      heroSlidesDraft.push(collectHeroSlideFromCard(card));
+    });
+  }
+
+  function renderHeroSlideshowEditor() {
+    if (!window.PlatformHeroSlideshow) return;
+    var config = window.PlatformHeroSlideshow.getConfig();
+    var interval = $('cmsHeroInterval');
+    if (interval) interval.value = String(config.intervalSeconds);
+    if (!heroSlidesDraft.length) loadHeroSlidesDraft();
+    renderHeroSlidesList();
+  }
+
+  function renderHeroSlideCard(slide, index, total) {
+    var preview = slide.image
+      ? '<img class="cms-hero-editor__preview" src="' + String(slide.image).replace(/"/g, '&quot;') + '" alt="" />'
+      : '<div class="cms-hero-editor__preview cms-hero-editor__preview--empty">بدون صورة — مخطط الشبكة</div>';
+    return (
+      '<article class="cms-hero-editor-card" data-hero-slide-id="' +
+      escapeHtml(slide.id) +
+      '">' +
+      '<header class="cms-hero-editor-card__head">' +
+      '<strong>شريحة #' +
+      (index + 1) +
+      '</strong>' +
+      '<div class="cms-hero-editor-card__order">' +
+      '<button type="button" class="admin-btn admin-btn--ghost" data-hero-slide-up="' +
+      escapeHtml(slide.id) +
+      '" ' +
+      (index === 0 ? 'disabled' : '') +
+      '>↑</button>' +
+      '<button type="button" class="admin-btn admin-btn--ghost" data-hero-slide-down="' +
+      escapeHtml(slide.id) +
+      '" ' +
+      (index === total - 1 ? 'disabled' : '') +
+      '>↓</button>' +
+      '<button type="button" class="admin-btn admin-btn--danger" data-hero-slide-remove="' +
+      escapeHtml(slide.id) +
+      '">حذف</button>' +
+      '</div></header>' +
+      '<div class="cms-hero-editor-card__body">' +
+      '<div class="cms-hero-editor-card__media">' +
+      preview +
+      '<label class="cms-file-btn">رفع صورة<input type="file" data-hero-slide-file="' +
+      escapeHtml(slide.id) +
+      '" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden /></label>' +
+      '<input type="hidden" data-hero-field="image" value="" />' +
+      '</div>' +
+      '<div class="cms-hero-editor-card__fields">' +
+      '<label class="admin-field"><span class="admin-field__label">نوع المرئي</span>' +
+      '<select class="admin-field__input" data-hero-field="visualType">' +
+      '<option value="image"' +
+      (slide.visualType === 'image' ? ' selected' : '') +
+      '>صورة مرفوعة</option>' +
+      '<option value="network"' +
+      (slide.visualType === 'network' ? ' selected' : '') +
+      '>مخطط شبكة FTTH</option>' +
+      '</select></label>' +
+      '<label class="admin-field"><span class="admin-field__label">شارة علوية (Badge)</span>' +
+      '<input class="admin-field__input" data-hero-field="badge" value="' +
+      escapeHtml(slide.badge || '') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">العنوان (Title)</span>' +
+      '<input class="admin-field__input" data-hero-field="title" value="' +
+      escapeHtml(slide.title || '') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">الوصف (Description)</span>' +
+      '<textarea class="admin-field__input admin-field__textarea" data-hero-field="description" rows="3">' +
+      escapeHtml(slide.description || '') +
+      '</textarea></label>' +
+      '<div class="admin-form-grid">' +
+      '<label class="admin-field"><span class="admin-field__label">نص الزر الرئيسي</span>' +
+      '<input class="admin-field__input" data-hero-field="buttonText" value="' +
+      escapeHtml(slide.buttonText || '') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">رابط الزر الرئيسي</span>' +
+      '<input class="admin-field__input" data-hero-field="buttonHref" value="' +
+      escapeHtml(slide.buttonHref || '') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">نص الزر الثانوي</span>' +
+      '<input class="admin-field__input" data-hero-field="secondaryButtonText" value="' +
+      escapeHtml(slide.secondaryButtonText || '') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">رابط الزر الثانوي</span>' +
+      '<input class="admin-field__input" data-hero-field="secondaryButtonHref" value="' +
+      escapeHtml(slide.secondaryButtonHref || '') +
+      '" /></label>' +
+      '</div>' +
+      '<div class="admin-form-grid">' +
+      '<label class="admin-field"><span class="admin-field__label">لون النص</span>' +
+      '<input class="admin-field__input" type="color" data-hero-field="textColor" value="' +
+      escapeHtml(slide.textColor || '#ffffff') +
+      '" /></label>' +
+      '<label class="admin-field"><span class="admin-field__label">لون الخلفية (Tint)</span>' +
+      '<input class="admin-field__input" type="color" data-hero-field="bgTint" value="' +
+      escapeHtml(slide.bgTint || '#0b1220') +
+      '" /></label>' +
+      '</div>' +
+      '<label class="admin-field admin-field--inline">' +
+      '<input type="checkbox" data-hero-field="showTrust" ' +
+      (slide.showTrust ? 'checked' : '') +
+      ' />' +
+      '<span class="admin-field__label">إظهار نقاط الثقة (Trust badges)</span></label>' +
+      '</div></div></article>'
+    );
+  }
+
+  function renderHeroSlidesList() {
+    var list = $('cmsHeroSlidesList');
+    if (!list) return;
+    if (!heroSlidesDraft.length) {
+      list.innerHTML = '<p class="admin-empty-cell">لا توجد شرائح — أضف شريحة جديدة أو استعد الافتراضي.</p>';
+      return;
+    }
+    list.innerHTML = heroSlidesDraft
+      .map(function (slide, index) {
+        return renderHeroSlideCard(slide, index, heroSlidesDraft.length);
+      })
+      .join('');
+    list.querySelectorAll('[data-hero-slide-id]').forEach(function (card) {
+      var id = card.getAttribute('data-hero-slide-id');
+      var slide = null;
+      heroSlidesDraft.forEach(function (s) {
+        if (s.id === id) slide = s;
+      });
+      var imageInput = card.querySelector('[data-hero-field="image"]');
+      if (imageInput && slide) imageInput.value = slide.image || '';
+    });
+  }
+
+  function moveHeroSlide(id, dir) {
+    syncHeroSlidesDraftFromDom();
+    var idx = -1;
+    heroSlidesDraft.forEach(function (s, i) {
+      if (s.id === id) idx = i;
+    });
+    var next = idx + dir;
+    if (idx < 0 || next < 0 || next >= heroSlidesDraft.length) return;
+    var tmp = heroSlidesDraft[idx];
+    heroSlidesDraft[idx] = heroSlidesDraft[next];
+    heroSlidesDraft[next] = tmp;
+    renderHeroSlidesList();
+  }
+
+  function saveHeroSlideshowFromForm() {
+    if (!window.PlatformHeroSlideshow) return;
+    syncHeroSlidesDraftFromDom();
+    var saved = window.PlatformHeroSlideshow.saveConfig({
+      intervalSeconds: $('cmsHeroInterval') && $('cmsHeroInterval').value,
+      slides: heroSlidesDraft,
+    });
+    heroSlidesDraft = saved.slides.slice();
+    renderHeroSlidesList();
+    var status = $('cmsHeroSlideshowSaveStatus');
+    if (status) {
+      status.textContent = 'تم الحفظ — ' + saved.slides.length + ' شريحة · كل ' + saved.intervalSeconds + ' ثانية';
+    }
+    toast('تم حفظ عرض البطل');
+    reloadSitePreview();
+  }
+
+  function resetHeroSlideshow() {
+    if (!window.confirm('استعادة الشرائح الافتراضية؟ سيتم استبدال جميع الشرائح الحالية.')) return;
+    heroSlidesDraft = window.PlatformHeroSlideshow.defaultSlides().slice();
+    renderHeroSlidesList();
+    toast('تمت استعادة الشرائح الافتراضية — اضغط حفظ لتطبيقها');
+  }
+
+  function bindHeroSlideshowEditor() {
+    var form = $('cmsHeroSlideshowForm');
+    if (!form || !window.PlatformHeroSlideshow) return;
+    renderHeroSlideshowEditor();
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      saveHeroSlideshowFromForm();
+    });
+    var resetBtn = $('cmsHeroSlideshowReset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function () {
+        resetHeroSlideshow();
+      });
+    }
+    var addBtn = $('cmsHeroAddSlide');
+    if (addBtn) {
+      addBtn.addEventListener('click', function () {
+        syncHeroSlidesDraftFromDom();
+        if (heroSlidesDraft.length >= window.PlatformHeroSlideshow.MAX_SLIDES) {
+          toast('الحد الأقصى ' + window.PlatformHeroSlideshow.MAX_SLIDES + ' شرائح', true);
+          return;
+        }
+        heroSlidesDraft.push(window.PlatformHeroSlideshow.blankSlide());
+        renderHeroSlidesList();
+      });
+    }
+
+    form.addEventListener('click', function (e) {
+      var up = e.target.closest ? e.target.closest('[data-hero-slide-up]') : null;
+      if (up) {
+        moveHeroSlide(up.getAttribute('data-hero-slide-up'), -1);
+        return;
+      }
+      var down = e.target.closest ? e.target.closest('[data-hero-slide-down]') : null;
+      if (down) {
+        moveHeroSlide(down.getAttribute('data-hero-slide-down'), 1);
+        return;
+      }
+      var removeBtn = e.target.closest ? e.target.closest('[data-hero-slide-remove]') : null;
+      if (removeBtn) {
+        syncHeroSlidesDraftFromDom();
+        var removeId = removeBtn.getAttribute('data-hero-slide-remove');
+        heroSlidesDraft = heroSlidesDraft.filter(function (s) {
+          return s.id !== removeId;
+        });
+        renderHeroSlidesList();
+      }
+    });
+
+    form.addEventListener('change', function (e) {
+      var fileInput = e.target.closest ? e.target.closest('[data-hero-slide-file]') : null;
+      if (!fileInput || !fileInput.files || !fileInput.files[0]) return;
+      var file = fileInput.files[0];
+      if (file.size > window.PlatformHeroSlideshow.MAX_IMAGE_BYTES) {
+        toast('حجم الصورة كبير جداً', true);
+        fileInput.value = '';
+        return;
+      }
+      var slideId = fileInput.getAttribute('data-hero-slide-file');
+      readFileAsDataUrl(file, function (url) {
+        var card = form.querySelector('[data-hero-slide-id="' + slideId + '"]');
+        if (!card) return;
+        var hidden = card.querySelector('[data-hero-field="image"]');
+        var visual = card.querySelector('[data-hero-field="visualType"]');
+        if (hidden) hidden.value = url;
+        if (visual) visual.value = 'image';
+        heroSlidesDraft.forEach(function (s) {
+          if (s.id === slideId) {
+            s.image = url;
+            s.visualType = 'image';
+          }
+        });
+        renderHeroSlidesList();
+        fileInput.value = '';
+      });
+    });
+  }
+
   /* ---------- Rich editor / image engine ---------- */
   function clearImageSelection() {
     if (selectedEditorImage) {
@@ -1197,10 +1500,11 @@
   }
 
   function bind() {
-    if (!$('cmsSimulatorsGrid') && !$('cmsStatsForm')) return;
+    if (!$('cmsSimulatorsGrid') && !$('cmsStatsForm') && !$('cmsHeroSlideshowForm')) return;
 
     renderSimulatorEditors();
     bindStatsEditor();
+    bindHeroSlideshowEditor();
     renderArticlesTable();
     renderFaqTable();
     renderTestimonialsTable();
@@ -1422,6 +1726,7 @@
     window.renderAdminSiteCms = function () {
       renderSimulatorEditors();
       renderStatsEditor();
+      renderHeroSlideshowEditor();
       renderArticlesTable();
       renderFaqTable();
       renderTestimonialsTable();

@@ -66,7 +66,7 @@
   </header>
 
   <main>
-    <section class="hero" id="hero">
+    <section class="hero hero--content-slider" id="hero">
       <div class="hero__bg">
         <div class="hero__glow"></div>
         <div class="hero__glow hero__glow--secondary"></div>
@@ -77,23 +77,18 @@
           <div class="fiber-line-animated"></div>
         </div>
       </div>
-      <div class="container hero__inner">
-        <div class="hero__content fade-in">
-          <div class="hero__badge"><span class="hero__badge-dot"></span> منصة تدريبية تفاعلية</div>
-          <h1 class="hero__title">تعلّم <span class="hero__title-highlight">شبكات FTTH</span><br>والألياف الضوئية عملياً</h1>
-          <p class="hero__description">أكاديمية الفايبر العراقية توفر لك بيئة محاكاة واقعية لتصميم وتركيب وصيانة شبكات الألياف الضوئية — من الأساسيات حتى الاحتراف، بدون مخاطر ميدانية.</p>
-          <div class="hero__actions">
-            <a href="#pricing" class="btn btn--primary">ابدأ التدريب الآن</a>
-            <a href="simulator.html" class="btn btn--outline">Try Simulator</a>
-          </div>
-          <div class="hero__trust">
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>محاكاة واقعية 100%</span></div>
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>شهادات معتمدة</span></div>
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>دعم فني متواصل</span></div>
-          </div>
+      <div class="hero-content-slider" id="heroSlideshow" aria-roledescription="carousel" aria-label="Hero content slider">
+        <div class="hero-content-slider__track" id="heroSlideshowSlides"></div>
+        <div class="hero-content-slider__controls" id="heroSlideshowControls" hidden>
+          <button type="button" class="hero-slideshow__toggle" id="heroSlideshowToggle" aria-pressed="false" aria-label="إيقاف العرض مؤقتاً">
+            <span class="hero-slideshow__toggle-icon" aria-hidden="true">❚❚</span>
+            <span class="hero-slideshow__toggle-text">إيقاف</span>
+          </button>
+          <div class="hero-slideshow__dots" id="heroSlideshowDots" role="tablist" aria-label="اختيار الشريحة"></div>
         </div>
-        <div class="hero__visual fade-in">
-          <div class="hero__visual-card">
+      </div>
+      <template id="heroNetworkTemplate">
+        <div class="hero__visual-card">
             <div class="hero__network" aria-label="FTTH Simulator — شبكة معدات الألياف الضوئية">
               <div class="hero__network-grid" aria-hidden="true"></div>
               <svg class="hero__network-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -264,9 +259,8 @@
             </div>
             <div class="hero__float-badge hero__float-badge--1">OTDR Readout</div>
             <div class="hero__float-badge hero__float-badge--2">FTH Simulator</div>
-          </div>
         </div>
-      </div>
+      </template>
     </section>
 
     <section class="stats" id="stats">
@@ -561,6 +555,7 @@
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
   <script src="js/platform-stats.js"></script>
+  <script src="js/platform-hero-slideshow.js"></script>
   <script>
     (function bootPublicCms() {
       function run() {
@@ -570,6 +565,9 @@
           if (typeof loadPublicTestimonials === 'function') loadPublicTestimonials();
           if (window.PlatformStats && typeof window.PlatformStats.loadPublicStats === 'function') {
             window.PlatformStats.loadPublicStats();
+          }
+          if (window.PlatformHeroSlideshow && typeof window.PlatformHeroSlideshow.mountHeroSlideshow === 'function') {
+            window.PlatformHeroSlideshow.mountHeroSlideshow();
           }
         } catch (err) {
           console.error('[CMS public boot]', err);

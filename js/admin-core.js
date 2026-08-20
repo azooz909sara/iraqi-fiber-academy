@@ -15,6 +15,7 @@
     var SITE_VIEWS = {
       simulators: true,
       'site-stats': true,
+      'site-hero-slideshow': true,
       'site-articles': true,
       'site-faq': true,
       'site-testimonials': true,
@@ -29,6 +30,7 @@
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
       simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات — محتوى البطاقات والأيقونات' },
       'site-stats': { title: 'إدارة موقعي', subtitle: 'إدارة الإحصائيات (Website Statistics)' },
+      'site-hero-slideshow': { title: 'إدارة موقعي', subtitle: 'عرض البطل — Hero Slideshow' },
       'site-articles': { title: 'إدارة موقعي', subtitle: 'المقالات التقنية' },
       'site-faq': { title: 'إدارة موقعي', subtitle: 'الأسئلة الشائعة' },
       'site-testimonials': { title: 'إدارة موقعي', subtitle: 'آراء المستخدمين' },
