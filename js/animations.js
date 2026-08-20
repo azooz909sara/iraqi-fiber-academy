@@ -30,30 +30,70 @@
   var statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
   var countersAnimated = false;
 
+  function formatCounterValue(value, suffix) {
+    if (window.PlatformStats && typeof window.PlatformStats.formatStatNumber === 'function') {
+      return window.PlatformStats.formatStatNumber(value) + (suffix || '');
+    }
+    var n = Math.round(Number(value) || 0);
+    var formatted = n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+    return formatted + (suffix || '');
+  }
+
   function animateCounter(element) {
     var target = parseInt(element.getAttribute('data-target'), 10);
+    if (!isFinite(target)) return;
     var duration = 2000;
     var startTime = performance.now();
-    var isPercentage = element.closest('.stat-card').querySelector('.stat-card__label').textContent.includes('%');
+    var suffix = element.getAttribute('data-stat-suffix') || '';
+    var isPercentage =
+      suffix === '%' ||
+      element.getAttribute('data-stat-key') === 'satisfactionRate';
 
     function updateCounter(currentTime) {
       var progress = Math.min((currentTime - startTime) / duration, 1);
       var current = Math.floor((1 - Math.pow(1 - progress, 3)) * target);
-      element.textContent = isPercentage ? current + '%' : (current >= 1000 ? current.toLocaleString('ar-SA') : current);
+      element.textContent = formatCounterValue(current, isPercentage ? '%' : '');
       if (progress < 1) requestAnimationFrame(updateCounter);
-      else element.textContent = isPercentage ? target + '%' : (target >= 1000 ? target.toLocaleString('ar-SA') : target);
+      else element.textContent = formatCounterValue(target, isPercentage ? '%' : '');
     }
 
     requestAnimationFrame(updateCounter);
   }
+
+  function startStatCounters() {
+    statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
+    if (!statNumbers.length || countersAnimated) return;
+    countersAnimated = true;
+    Array.prototype.forEach.call(statNumbers, animateCounter);
+  }
+
+  function resetStatCounters() {
+    countersAnimated = false;
+    statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
+    Array.prototype.forEach.call(statNumbers, function (el) {
+      el.textContent = '0';
+    });
+  }
+
+  window.addEventListener('ifa:platform-stats-changed', function () {
+    if (window.PlatformStats && typeof window.PlatformStats.applyLandingStats === 'function') {
+      window.PlatformStats.applyLandingStats(document);
+    }
+    resetStatCounters();
+    if (statsSection) {
+      var rect = statsSection.getBoundingClientRect();
+      if (rect.top < window.innerHeight && rect.bottom > 0) {
+        startStatCounters();
+      }
+    }
+  });
 
   var statsSection = document.getElementById('stats');
   if (statsSection) {
     var statsObserver = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
         if (entry.isIntersecting && !countersAnimated) {
-          countersAnimated = true;
-          Array.prototype.forEach.call(statNumbers, animateCounter);
+          startStatCounters();
           statsObserver.unobserve(entry.target);
         }
       });

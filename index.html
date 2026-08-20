@@ -272,10 +272,10 @@
     <section class="stats" id="stats">
       <div class="container">
         <div class="stats__grid">
-          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" data-target="2500">0</div><div class="stat-card__label">طالب مسجّل</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" data-target="15000">0</div><div class="stat-card__label">كيلومتر محاكى</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" data-target="48">0</div><div class="stat-card__label">مشروع تدريبي</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" data-target="98">0</div><div class="stat-card__label">% رضا الطلاب</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="enrolledStudents" data-target="2500">0</div><div class="stat-card__label">طالب مسجّل</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="simulatedKilometers" data-target="15000">0</div><div class="stat-card__label">كيلومتر محاكى</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="trainingProjects" data-target="48">0</div><div class="stat-card__label">مشروع تدريبي</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="satisfactionRate" data-target="98" data-stat-suffix="%">0</div><div class="stat-card__label">% رضا الطلاب</div></div>
         </div>
       </div>
     </section>
@@ -560,6 +560,7 @@
   <script src="js/articles.js"></script>
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
+  <script src="js/platform-stats.js"></script>
   <script>
     (function bootPublicCms() {
       function run() {
@@ -567,6 +568,9 @@
           if (typeof loadPublicArticles === 'function') loadPublicArticles();
           if (typeof loadPublicFAQs === 'function') loadPublicFAQs();
           if (typeof loadPublicTestimonials === 'function') loadPublicTestimonials();
+          if (window.PlatformStats && typeof window.PlatformStats.loadPublicStats === 'function') {
+            window.PlatformStats.loadPublicStats();
+          }
         } catch (err) {
           console.error('[CMS public boot]', err);
         }

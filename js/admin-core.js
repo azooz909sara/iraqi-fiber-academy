@@ -14,6 +14,7 @@
 
     var SITE_VIEWS = {
       simulators: true,
+      'site-stats': true,
       'site-articles': true,
       'site-faq': true,
       'site-testimonials': true,
@@ -27,6 +28,7 @@
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
       simulators: { title: 'إدارة موقعي', subtitle: 'المحاكيات — محتوى البطاقات والأيقونات' },
+      'site-stats': { title: 'إدارة موقعي', subtitle: 'إدارة الإحصائيات (Website Statistics)' },
       'site-articles': { title: 'إدارة موقعي', subtitle: 'المقالات التقنية' },
       'site-faq': { title: 'إدارة موقعي', subtitle: 'الأسئلة الشائعة' },
       'site-testimonials': { title: 'إدارة موقعي', subtitle: 'آراء المستخدمين' },

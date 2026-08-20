@@ -277,6 +277,104 @@
     reloadSitePreview();
   }
 
+  /* ---------- Landing page statistics ---------- */
+  function renderStatsEditor() {
+    if (!window.PlatformStats) return;
+    var stats = window.PlatformStats.getStats();
+    var enrolled = $('cmsStatEnrolledStudents');
+    var km = $('cmsStatSimulatedKm');
+    var projects = $('cmsStatTrainingProjects');
+    var satisfaction = $('cmsStatSatisfaction');
+    if (enrolled) enrolled.value = String(stats.enrolledStudents);
+    if (km) km.value = String(stats.simulatedKilometers);
+    if (projects) projects.value = String(stats.trainingProjects);
+    if (satisfaction) satisfaction.value = String(stats.satisfactionRate);
+    renderStatsPreview(stats);
+  }
+
+  function renderStatsPreview(stats) {
+    var host = $('cmsStatsPreview');
+    if (!host || !window.PlatformStats) return;
+    var s = stats || window.PlatformStats.getStats();
+    var fmt = window.PlatformStats.formatStatNumber;
+    host.innerHTML =
+      '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
+      escapeHtml(fmt(s.enrolledStudents)) +
+      '</span><span class="cms-stats-preview__label">طالب مسجّل</span></div>' +
+      '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
+      escapeHtml(fmt(s.simulatedKilometers)) +
+      '</span><span class="cms-stats-preview__label">كيلومتر محاكى</span></div>' +
+      '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
+      escapeHtml(fmt(s.trainingProjects)) +
+      '</span><span class="cms-stats-preview__label">مشروع تدريبي</span></div>' +
+      '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
+      escapeHtml(fmt(s.satisfactionRate)) +
+      '%</span><span class="cms-stats-preview__label">رضا الطلاب</span></div>';
+  }
+
+  function saveStatsFromForm() {
+    if (!window.PlatformStats) return;
+    var saved = window.PlatformStats.saveStats({
+      enrolledStudents: $('cmsStatEnrolledStudents') && $('cmsStatEnrolledStudents').value,
+      simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
+      trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
+      satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
+    });
+    renderStatsPreview(saved);
+    var status = $('cmsStatsSaveStatus');
+    if (status) {
+      status.textContent =
+        'تم الحفظ — طلاب: ' +
+        window.PlatformStats.formatStatNumber(saved.enrolledStudents) +
+        ' · كم: ' +
+        window.PlatformStats.formatStatNumber(saved.simulatedKilometers);
+    }
+    toast('تم حفظ إحصائيات الموقع');
+    reloadSitePreview();
+  }
+
+  function resetStatsToDefaults() {
+    if (!window.PlatformStats) return;
+    if (!window.confirm('استعادة الإحصائيات الافتراضية؟')) return;
+    var defaults = window.PlatformStats.DEFAULTS;
+    window.PlatformStats.saveStats(defaults);
+    renderStatsEditor();
+    toast('تمت استعادة الإحصائيات الافتراضية');
+    reloadSitePreview();
+  }
+
+  function bindStatsEditor() {
+    var form = $('cmsStatsForm');
+    if (!form || !window.PlatformStats) return;
+    renderStatsEditor();
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      saveStatsFromForm();
+    });
+    var resetBtn = $('cmsStatsReset');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', function () {
+        resetStatsToDefaults();
+      });
+    }
+    ['cmsStatEnrolledStudents', 'cmsStatSimulatedKm', 'cmsStatTrainingProjects', 'cmsStatSatisfaction'].forEach(
+      function (id) {
+        var el = $(id);
+        if (!el) return;
+        el.addEventListener('input', function () {
+          renderStatsPreview(
+            window.PlatformStats.normalizeStats({
+              enrolledStudents: $('cmsStatEnrolledStudents') && $('cmsStatEnrolledStudents').value,
+              simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
+              trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
+              satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
+            })
+          );
+        });
+      }
+    );
+  }
+
   /* ---------- Rich editor / image engine ---------- */
   function clearImageSelection() {
     if (selectedEditorImage) {
@@ -1099,9 +1197,10 @@
   }
 
   function bind() {
-    if (!$('cmsSimulatorsGrid')) return;
+    if (!$('cmsSimulatorsGrid') && !$('cmsStatsForm')) return;
 
     renderSimulatorEditors();
+    bindStatsEditor();
     renderArticlesTable();
     renderFaqTable();
     renderTestimonialsTable();
@@ -1322,6 +1421,7 @@
 
     window.renderAdminSiteCms = function () {
       renderSimulatorEditors();
+      renderStatsEditor();
       renderArticlesTable();
       renderFaqTable();
       renderTestimonialsTable();

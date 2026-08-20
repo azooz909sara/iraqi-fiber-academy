@@ -202,6 +202,8 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  font-variant-numeric: lining-nums tabular-nums;
+  unicode-bidi: isolate;
 }
 
 .stat-card__label { font-size: 0.95rem; color: var(--color-text-secondary); margin-top: 0.5rem; }

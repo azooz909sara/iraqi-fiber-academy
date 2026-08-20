@@ -69,6 +69,7 @@
       </a>
       <div class="admin-nav__sub" data-site-subnav>
         <a href="#simulators" class="admin-nav__sublink" data-section="simulators">المحاكيات</a>
+        <a href="#site-stats" class="admin-nav__sublink" data-section="site-stats">إدارة الإحصائيات</a>
         <a href="#site-articles" class="admin-nav__sublink" data-section="site-articles">المقالات التقنية</a>
         <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
         <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
@@ -768,6 +769,42 @@
         <div class="cms-sim-grid" id="cmsSimulatorsGrid"></div>
       </section>
 
+      <section class="admin-panel admin-view" id="site-stats" data-admin-view="site-stats" aria-labelledby="siteStatsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="siteStatsHeading">إدارة الإحصائيات</h2>
+            <p class="admin-panel__desc">Website Statistics — تتحكم في أرقام قسم الإحصائيات على الصفحة الرئيسية (أرقام إنجليزية فقط)</p>
+          </div>
+        </div>
+        <form class="admin-settings-form cms-stats-form" id="cmsStatsForm">
+          <div class="cms-stats-grid">
+            <label class="admin-field">
+              <span class="admin-field__label">الطلاب المسجّلون (Enrolled Students)</span>
+              <input class="admin-field__input cms-stats-input" id="cmsStatEnrolledStudents" type="number" min="0" max="99999999" step="1" inputmode="numeric" lang="en" dir="ltr" required />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">الكيلومترات المحاكاة (Simulated Kilometers)</span>
+              <input class="admin-field__input cms-stats-input" id="cmsStatSimulatedKm" type="number" min="0" max="999999999" step="1" inputmode="numeric" lang="en" dir="ltr" required />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">المشاريع التدريبية (Training Projects)</span>
+              <input class="admin-field__input cms-stats-input" id="cmsStatTrainingProjects" type="number" min="0" max="9999999" step="1" inputmode="numeric" lang="en" dir="ltr" required />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">نسبة رضا الطلاب (Student Satisfaction %)</span>
+              <input class="admin-field__input cms-stats-input" id="cmsStatSatisfaction" type="number" min="0" max="100" step="1" inputmode="numeric" lang="en" dir="ltr" required />
+              <span class="admin-field__hint">قيمة من 0 إلى 100 — تُعرض على الموقع مع علامة %</span>
+            </label>
+          </div>
+          <div class="cms-stats-preview" id="cmsStatsPreview" aria-live="polite"></div>
+          <div class="admin-settings-form__actions">
+            <button class="admin-btn admin-btn--primary" type="submit">حفظ الإحصائيات</button>
+            <button class="admin-btn admin-btn--ghost" type="button" id="cmsStatsReset">استعادة الافتراضي</button>
+            <p class="admin-panel__meta" id="cmsStatsSaveStatus" role="status"></p>
+          </div>
+        </form>
+      </section>
+
       <section class="admin-panel admin-view" id="site-articles" data-admin-view="site-articles" aria-labelledby="siteArticlesHeading" hidden>
         <div class="admin-panel__header">
           <div>
@@ -1066,6 +1103,7 @@
   <script src="js/articles.js"></script>
   <script src="js/faq.js"></script>
   <script src="js/testimonials.js"></script>
+  <script src="js/platform-stats.js"></script>
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
