@@ -3271,9 +3271,10 @@ body.lab-pigtail-dragging {
 
 .lab-stripper {
   position: absolute;
-  width: 91px;
-  height: 239px;
-  pointer-events: auto;
+  width: 400px;
+  height: 400px;
+  /* Empty clip padding must not steal clicks from splitters / cords / etc. */
+  pointer-events: none;
   cursor: grab;
   user-select: none;
   touch-action: none;
@@ -3293,9 +3294,27 @@ body.lab-pigtail-dragging {
 
 .lab-stripper__art {
   display: block;
-  width: 91px;
-  height: 239px;
+  width: 400px;
+  height: 400px;
   pointer-events: none;
+}
+
+/* Tight hitbox aligned to the visual tool — only this receives pointer events */
+.lab-stripper__hit {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 1;
+}
+
+.lab-stripper.is-dragging .lab-stripper__hit,
+.lab-stripper.is-clamped .lab-stripper__hit {
+  cursor: grabbing;
 }
 
 .lab-stripper.is-selected {

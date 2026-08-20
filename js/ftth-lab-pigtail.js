@@ -2035,6 +2035,7 @@
 
     pigtails.forEach(function (p) {
       var selected = selection.id === p.id ? ' is-selected' : '';
+      var stripStage = p.stripStage || 0;
       html +=
         '<div class="lab-pigtail' + selected + '" data-pt-node="' + p.id + '">' +
         '<button type="button" class="lab-pigtail__conn lab-pcord__end ' +

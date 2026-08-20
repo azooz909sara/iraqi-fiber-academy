@@ -205,6 +205,7 @@
     if (target.closest('.lab-cas-cassette') || target.closest('.lab-spl-node')) return false;
     if (target.closest('.lab-pcord')) return false;
     if (target.closest('.lab-pigtail')) return false;
+    if (target.closest('.lab-stripper') || target.closest('.lab-stripper__hit')) return false;
     if (target.closest('.lab-sleeve-free') || target.closest('[data-sleeve-id]')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;

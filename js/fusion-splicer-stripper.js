@@ -15,10 +15,22 @@
   var IMG_PIVOT_RIGHT_Y = 193.1;
   var ASSEMBLED_NATURAL_W =
     (IMG_PIVOT_LEFT_X - IMG_LEFT_EDGE) + (IMG_RIGHT_EDGE - IMG_PIVOT_RIGHT_X);
-  var STRIPPER_H = 239;
-  var STRIPPER_W = Math.round(ASSEMBLED_NATURAL_W * STRIPPER_H / IMG_NATURAL_H);
-  var PIVOT_X = STRIPPER_W / 2;
-  var PIVOT_Y = ((IMG_PIVOT_LEFT_Y + IMG_PIVOT_RIGHT_Y) / 2) * STRIPPER_H / IMG_NATURAL_H;
+  /* Tool art size (unrotated bitmap). Canvas is a larger square so 360° rotation never clips. */
+  var TOOL_H = 239;
+  var TOOL_W = Math.round(ASSEMBLED_NATURAL_W * TOOL_H / IMG_NATURAL_H);
+  var CANVAS_SIZE = 400;
+  var STRIPPER_W = CANVAS_SIZE;
+  var STRIPPER_H = CANVAS_SIZE;
+  /* Screw / jaw pivot sits at the square canvas center — DOM (s.x, s.y) maps here. */
+  var PIVOT_X = CANVAS_SIZE / 2;
+  var PIVOT_Y = CANVAS_SIZE / 2;
+  /* Interactive footprint = visual tool art only (not the oversized clip canvas). */
+  var HIT_W = TOOL_W;
+  var HIT_H = TOOL_H;
+  var HIT_LEFT = Math.round(PIVOT_X - TOOL_W / 2);
+  var HIT_TOP = Math.round(
+    PIVOT_Y - ((IMG_PIVOT_LEFT_Y + IMG_PIVOT_RIGHT_Y) / 2) * TOOL_H / IMG_NATURAL_H
+  );
   var JAW_CLOSED_DEG = 0;
   var JAW_OPEN_DEG = 12;
   var DRAG_THRESHOLD_PX = 3;
@@ -364,25 +376,25 @@
     if (!canvas || !canvas.getContext) return;
     var ctx = canvas.getContext('2d');
     var dpr = window.devicePixelRatio || 1;
-    var cw = Math.round(STRIPPER_W * dpr);
-    var ch = Math.round(STRIPPER_H * dpr);
+    var cw = Math.round(CANVAS_SIZE * dpr);
+    var ch = Math.round(CANVAS_SIZE * dpr);
     if (canvas.width !== cw || canvas.height !== ch) {
       canvas.width = cw;
       canvas.height = ch;
-      canvas.style.width = STRIPPER_W + 'px';
-      canvas.style.height = STRIPPER_H + 'px';
+      canvas.style.width = CANVAS_SIZE + 'px';
+      canvas.style.height = CANVAS_SIZE + 'px';
     }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, STRIPPER_W, STRIPPER_H);
+    ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
 
     if (!imagesReady || !stripperLeftImg || !stripperRightImg) {
       ctx.fillStyle = 'rgba(15, 20, 28, 0.04)';
-      ctx.fillRect(0, 0, STRIPPER_W, STRIPPER_H);
+      ctx.fillRect(0, 0, CANVAS_SIZE, CANVAS_SIZE);
       return;
     }
 
-    var scaleX = STRIPPER_W / IMG_NATURAL_W;
-    var scaleY = STRIPPER_H / IMG_NATURAL_H;
+    var scaleX = TOOL_W / IMG_NATURAL_W;
+    var scaleY = TOOL_H / IMG_NATURAL_H;
     var scale = Math.min(scaleX, scaleY);
     var plx = IMG_PIVOT_LEFT_X * scaleX;
     var ply = IMG_PIVOT_LEFT_Y * scaleY;
@@ -391,38 +403,34 @@
     var screwX = PIVOT_X;
     var screwY = PIVOT_Y;
     var spreadRad = getJawSpreadRad(s);
-    var rot = typeof s.rot === 'number' ? s.rot * Math.PI / 180 : 0;
-
-    ctx.save();
-    if (rot) {
-      ctx.translate(screwX, screwY);
-      ctx.rotate(rot);
-      ctx.translate(-screwX, -screwY);
-    }
+    /* Strict vertical lock: jaws up, handles down — never follow fiber tangent. */
+    var rot = 0;
 
     ctx.save();
     ctx.translate(screwX, screwY);
+    if (rot) ctx.rotate(rot);
+
+    ctx.save();
     ctx.rotate(-spreadRad);
     ctx.translate(-plx, -ply);
     ctx.drawImage(
       stripperLeftImg,
       0, 0, IMG_NATURAL_W, IMG_NATURAL_H,
-      0, 0, STRIPPER_W, STRIPPER_H
+      0, 0, TOOL_W, TOOL_H
     );
     ctx.restore();
 
     ctx.save();
-    ctx.translate(screwX, screwY);
     ctx.rotate(spreadRad);
     ctx.translate(-prx, -pry);
     ctx.drawImage(
       stripperRightImg,
       0, 0, IMG_NATURAL_W, IMG_NATURAL_H,
-      0, 0, STRIPPER_W, STRIPPER_H
+      0, 0, TOOL_W, TOOL_H
     );
     ctx.restore();
 
-    drawCentralScrew(ctx, screwX, screwY, scale);
+    drawCentralScrew(ctx, 0, 0, scale);
     ctx.restore();
   }
 
@@ -449,8 +457,19 @@
       Math.round(s.y - STRIPPER_H / 2) + 'px" ' +
       'title="CFS-3 Fiber Optic Stripper · clamp + peel">' +
       '<canvas class="lab-stripper__art" aria-hidden="true"></canvas>' +
+      '<button type="button" class="lab-stripper__hit" aria-label="CFS-3 Fiber Optic Stripper" ' +
+      'style="left:' + HIT_LEFT + 'px;top:' + HIT_TOP + 'px;width:' + HIT_W + 'px;height:' + HIT_H + 'px"></button>' +
       '</div>'
     );
+  }
+
+  /** True only when the pointer is over the visual tool footprint (not empty canvas padding). */
+  function isClientOnStripperHit(node, clientX, clientY) {
+    if (!node) return false;
+    var hit = node.querySelector('.lab-stripper__hit');
+    if (!hit) return false;
+    var r = hit.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
   }
 
   function rebuildLayer() {
@@ -536,7 +555,10 @@
 
   function bindLayerEvents(host) {
     host.querySelectorAll('[data-stripper-node]').forEach(function (node) {
-      node.addEventListener('click', function (e) {
+      var hit = node.querySelector('.lab-stripper__hit') || node;
+
+      hit.addEventListener('click', function (e) {
+        if (!isClientOnStripperHit(node, e.clientX, e.clientY)) return;
         e.stopPropagation();
         selectStripper(node.getAttribute('data-stripper-node'), { skipRebuild: true });
         host.querySelectorAll('.lab-stripper.is-selected').forEach(function (el) {
@@ -545,8 +567,9 @@
         node.classList.add('is-selected');
       });
 
-      node.addEventListener('pointerdown', function (e) {
+      hit.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
+        if (!isClientOnStripperHit(node, e.clientX, e.clientY)) return;
         e.preventDefault();
         e.stopPropagation();
         var id = node.getAttribute('data-stripper-node');
@@ -613,7 +636,7 @@
   function startPeelSession(e, s, target, node) {
     s.x = target.x;
     s.y = target.y;
-    s.rot = target.rot;
+    s.rot = 0;
     updateStripperNode(s, node);
     document.body.classList.add('lab-stripper-peeling');
     try { node.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
