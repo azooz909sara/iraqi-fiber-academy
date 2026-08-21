@@ -5604,7 +5604,6 @@
     try {
       var isFs = isAppFullscreen();
       var buttons = [
-        document.getElementById('btn-fullscreen-map'),
         document.getElementById('btn-fullscreen'),
       ].filter(Boolean);
       buttons.forEach(function (btn) {
@@ -5677,7 +5676,6 @@
 
   function bindFullscreenButton() {
     var buttons = [
-      document.getElementById('btn-fullscreen-map'),
       document.getElementById('btn-fullscreen'),
     ].filter(function (btn) { return btn && btn.dataset.ftthFsBound !== '1'; });
     if (!buttons.length && document.documentElement.dataset.ftthFsChangeBound === '1') return;
@@ -14037,7 +14035,6 @@
 
     var zi = document.getElementById('btn-zoom-in');
     var zo = document.getElementById('btn-zoom-out');
-    var zr = document.getElementById('btn-zoom-reset');
     /* Same multiplicative notch + animation pipeline as mouse-wheel (deltaMode===1). */
     if (zi) zi.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
@@ -14046,11 +14043,6 @@
     if (zo) zo.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
       applyAnimatedMapZoom(0.96, pivot.x, pivot.y);
-    });
-    if (zr) zr.addEventListener('click', function () {
-      Sim.zoom = clampMapZoom(1);
-      centerMapInViewport();
-      applyMapTransform();
     });
 
     var clr = document.getElementById('btn-clear');

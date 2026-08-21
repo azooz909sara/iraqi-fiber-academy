@@ -1442,10 +1442,6 @@ body.simulator-page-active #toolbox {
   cursor: grabbing;
 }
 
-.map-viewport .grid-controls {
-  pointer-events: auto;
-}
-
 /* ─── Residential blocks ─── */
 .map-zone--residential {
   background-color: var(--map-residential);
@@ -6222,10 +6218,6 @@ body.ftth-fake-fullscreen-active .workspace-container {
 body.ftth-fake-fullscreen-active #city-canvas {
   min-width: 0 !important;
   min-height: 0 !important;
-}
-#simulator-container.is-fullscreen .grid-controls,
-body.ftth-fake-fullscreen-active .grid-controls {
-  z-index: 650;
 }
 body.ftth-fake-fullscreen-active {
   overflow: hidden !important;

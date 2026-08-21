@@ -237,41 +237,6 @@
     #canvas-wrapper.is-panning {
       cursor: grabbing;
     }
-    .grid-controls {
-      position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
-      bottom: auto;
-      z-index: 600;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      background: rgba(26, 35, 50, 0.92);
-      border: 1px solid rgba(0, 229, 255, 0.15);
-      border-radius: 10px;
-      padding: 6px;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-      pointer-events: auto;
-    }
-    .grid-ctrl-btn {
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 7px;
-      border: 1px solid rgba(0, 229, 255, 0.12);
-      background: #111827;
-      color: #94a3b8;
-      font-size: 15px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .grid-ctrl-btn:hover { color: #00e5ff; border-color: rgba(0, 229, 255, 0.4); background: #1e2a3a; }
-    .grid-ctrl-btn.active { color: #39ff14; border-color: rgba(57, 255, 20, 0.4); }
-    .grid-ctrl-divider { height: 1px; background: rgba(0, 229, 255, 0.1); margin: 2px 0; }
-    #zoom-label { font-size: 9px; font-family: 'Cascadia Code', Consolas, monospace; color: #64748b; text-align: center; padding: 2px 0; }
 
     .map-layer-toggles { pointer-events: auto; }
     .map-layer-btn {
@@ -439,12 +404,6 @@
     #simulator-container.is-fullscreen #toggle-toolbox,
     #simulator-container.is-fullscreen #toggle-eval {
       display: flex;
-    }
-
-    #simulator-container:fullscreen .grid-controls,
-    #simulator-container.is-fullscreen .grid-controls,
-    body.ftth-fake-fullscreen-active .grid-controls {
-      z-index: 650;
     }
 
     #canvas-wrapper,
@@ -786,12 +745,6 @@
       <div id="virtual-city-view" class="simulator-view simulator-view--virtual flex flex-col flex-1 min-h-0" style="display:block">
 
       <div id="canvas-wrapper" class="map-viewport map-container flex-1 relative">
-        <!-- Fullscreen + reset zoom (zoom +/- moved to action bar) -->
-        <div class="grid-controls" id="grid-controls" aria-label="Map controls">
-          <button id="btn-fullscreen-map" type="button" class="grid-ctrl-btn" title="Fullscreen (keep Toolbox visible)" aria-label="Fullscreen">🖥️</button>
-          <div class="grid-ctrl-divider"></div>
-          <button id="btn-zoom-reset" type="button" class="grid-ctrl-btn" title="Reset Zoom" aria-label="Reset Zoom">⟲</button>
-        </div>
 
         <div id="canvas-zoom-inner" class="workspace-container map-canvas-inner">
           <div id="city-canvas" class="map-canvas relative" style="overflow: visible;">
