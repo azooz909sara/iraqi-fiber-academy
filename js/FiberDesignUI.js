@@ -874,6 +874,231 @@
     ].join('');
   }
 
+  function hexToRgb(hex) {
+    if (!hex) return [255, 255, 255];
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) {
+      h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    }
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+
+  function formatMatrixCellText(row, col) {
+    var rawVal = row[col.key];
+    var val = !isBlankMatrixValue(rawVal) ? String(rawVal) : '';
+    if (col.key === 'fat_id' && val) {
+      var num = val.match(/(\d+)/);
+      val = num ? num[1] : val;
+    }
+    if (col.colorCell && isBlankMatrixValue(rawVal)) return '';
+    if (col.tubeCell) {
+      var tubeSrc = row.tube_color || rawVal;
+      return isBlankMatrixValue(tubeSrc) ? '' : String(tubeSrc);
+    }
+    if (col.fiberCell) {
+      var fiberSrc = row.fiber_color || rawVal;
+      return isBlankMatrixValue(fiberSrc) ? '' : String(fiberSrc);
+    }
+    return val;
+  }
+
+  function getMatrixCellPdfColors(srcRow, col) {
+    var defaultText = [15, 23, 42];
+    var defaultFill = [255, 255, 255];
+
+    if (col.colorCell) {
+      var raw = srcRow[col.key];
+      if (isBlankMatrixValue(raw)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var key = String(raw).trim().toLowerCase();
+      var bg = FIBER_COLOR_CSS[key];
+      if (!bg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(bg),
+        textColor: (key === 'white' || key === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.tubeCell) {
+      var tubeSrc = srcRow.tube_color || srcRow[col.key];
+      if (isBlankMatrixValue(tubeSrc)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var tKey = String(tubeSrc).trim().toLowerCase();
+      var tBg = FIBER_COLOR_CSS[tKey];
+      if (!tBg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(tBg),
+        textColor: (tKey === 'white' || tKey === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.fiberCell) {
+      var fiberSrc = srcRow.fiber_color || srcRow[col.key];
+      if (isBlankMatrixValue(fiberSrc)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var fKey = String(fiberSrc).trim().toLowerCase();
+      var fBg = FIBER_COLOR_CSS[fKey];
+      if (!fBg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(fBg),
+        textColor: (fKey === 'white' || fKey === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.key === 'fiber_type') {
+      var typeVal = String(srcRow.fiber_type || '').toLowerCase();
+      if (typeVal === 'main') {
+        return { fillColor: defaultFill, textColor: hexToRgb('#166534'), fontStyle: 'bold' };
+      }
+      if (typeVal === 'expansion') {
+        return { fillColor: defaultFill, textColor: hexToRgb('#1d4ed8'), fontStyle: 'bold' };
+      }
+    }
+    return null;
+  }
+
+  function chunkMatrixRowsForPdfExport(rows, boundaryKeys) {
+    if (!rows || !rows.length) return [];
+    var keys = boundaryKeys && boundaryKeys.length ? boundaryKeys : ['m_cable_id'];
+    var chunks = [];
+    var current = [];
+    var prevKey = null;
+    var i;
+    for (i = 0; i < rows.length; i++) {
+      var key = groupKeyForRow(rows[i], keys);
+      if (current.length && key !== prevKey) {
+        chunks.push(current);
+        current = [];
+      }
+      current.push(rows[i]);
+      prevKey = key;
+    }
+    if (current.length) chunks.push(current);
+    return chunks;
+  }
+
+  function refinePdfChunkSizes(chunks, isRing) {
+    if (isRing || !chunks || !chunks.length) return chunks || [];
+    var maxRows = 30;
+    var refined = [];
+    var ci;
+    for (ci = 0; ci < chunks.length; ci++) {
+      var chunk = chunks[ci];
+      if (chunk.length <= maxRows) {
+        refined.push(chunk);
+        continue;
+      }
+      var subChunks = chunkMatrixRowsForPdfExport(
+        chunk,
+        ['m_cable_id', 'closure_id', 's_cable_id']
+      );
+      var si;
+      for (si = 0; si < subChunks.length; si++) {
+        if (subChunks[si].length <= maxRows) {
+          refined.push(subChunks[si]);
+        } else {
+          refined = refined.concat(chunkMatrixRowsForPdfExport(
+            subChunks[si],
+            ['m_cable_id', 'closure_id', 's_cable_id', 'fat_id']
+          ));
+        }
+      }
+    }
+    return refined;
+  }
+
+  function getMatrixPdfChunkBoundaryKeys(isRing) {
+    if (isRing) return ['ring_block_id'];
+    return ['m_cable_id', 'closure_id'];
+  }
+
+  function buildAutoTableBodyWithRowspan(annotated, columns) {
+    var body = [];
+    var ri;
+    for (ri = 0; ri < annotated.length; ri++) {
+      var row = annotated[ri];
+      var line = [];
+      var ci;
+      for (ci = 0; ci < columns.length; ci++) {
+        var col = columns[ci];
+        if (row['_skip_' + col.key]) continue;
+        var text = formatMatrixCellText(row, col);
+        var rs = row['_rs_' + col.key] || 1;
+        if (rs > 1) {
+          line.push({ content: text, rowSpan: rs });
+        } else {
+          line.push(text);
+        }
+      }
+      body.push(line);
+    }
+    return body;
+  }
+
+  function applyMatrixPdfCellStyles(data, columns, annotated) {
+    if (data.section !== 'body') return;
+    var col = columns[data.column.index];
+    if (!col) return;
+    var srcRow = annotated[data.row.index];
+    if (!srcRow) return;
+    var colors = getMatrixCellPdfColors(srcRow, col);
+    if (colors) {
+      data.cell.styles.fillColor = colors.fillColor;
+      data.cell.styles.textColor = colors.textColor;
+      if (colors.fontStyle) data.cell.styles.fontStyle = colors.fontStyle;
+      return;
+    }
+    if (data.row.index % 2 === 1) {
+      data.cell.styles.fillColor = [248, 250, 252];
+    }
+  }
+
+  function buildMatrixAutoTableOptions(columns, margin) {
+    return {
+      margin: margin,
+      theme: 'grid',
+      tableWidth: 'auto',
+      rowPageBreak: 'avoid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 7,
+        cellPadding: 1.4,
+        overflow: 'linebreak',
+        valign: 'middle',
+        lineColor: [148, 163, 184],
+        lineWidth: 0.1,
+        textColor: [15, 23, 42],
+        fillColor: [255, 255, 255],
+      },
+      headStyles: {
+        fillColor: [226, 232, 240],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 6.5,
+        halign: 'left',
+      },
+    };
+  }
+
+  function buildMatrixPdfFilename(isRing) {
+    var prefix = isRing ? 'ring-fiber-design' : 'fiber-design-matrix';
+    var stamp = new Date();
+    var y = stamp.getFullYear();
+    var m = stamp.getMonth() + 1;
+    var d = stamp.getDate();
+    var hh = stamp.getHours();
+    var mm = stamp.getMinutes();
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+    return prefix + '-' + y + pad2(m) + pad2(d) + '-' + pad2(hh) + pad2(mm) + '.pdf';
+  }
+
   function buildMatrixPrintDocument(rows) {
     var summary = getMatrixFilterSummary();
     var stamp = new Date();
@@ -910,50 +1135,91 @@
 
   function exportMatrixPdf() {
     try {
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        window.alert('PDF export libraries failed to load. Please refresh the page and try again.');
+        return;
+      }
       var rows = getCurrentMatrixRows();
-      var html = buildMatrixPrintDocument(rows);
-      var iframe = document.createElement('iframe');
-      iframe.setAttribute('title', 'Fiber Design Matrix Print');
-      iframe.setAttribute('aria-hidden', 'true');
-      iframe.style.cssText =
-        'position:fixed;right:0;bottom:0;width:0;height:0;border:0;opacity:0;pointer-events:none;';
-      document.body.appendChild(iframe);
+      var isRing = activeMatrixTab === 'ring';
+      var columns = isRing ? RING_MATRIX_COLUMNS : MATRIX_COLUMNS;
+      var rowspanKeys = isRing ? RING_ROWSPAN_GROUP_KEYS : ROWSPAN_GROUP_KEYS;
+      var title = isRing
+        ? 'Ring Fiber Design (OLT to Cabinets)'
+        : 'Fiber Design Matrix';
+      var summary = getMatrixFilterSummary();
+      var stampText = new Date().toLocaleString();
+      var boundaryKeys = getMatrixPdfChunkBoundaryKeys(isRing);
+      var chunks = refinePdfChunkSizes(
+        chunkMatrixRowsForPdfExport(rows, boundaryKeys),
+        isRing
+      );
+      var headers = columns.map(function (col) { return col.label; });
+      var margin = { top: 14, right: 8, bottom: 8, left: 8 };
+      var tableBaseOptions = buildMatrixAutoTableOptions(columns, margin);
 
-      var win = iframe.contentWindow;
-      var doc = iframe.contentDocument || (win && win.document);
-      if (!doc || !win) {
-        iframe.remove();
-        window.alert('Unable to open the print preview for PDF export.');
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      var pageW = doc.internal.pageSize.getWidth();
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, margin.left, 10);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(51, 65, 85);
+      var meta = isRing
+        ? ('Generated: ' + stampText +
+          '  |  Rule: 1 tube / cabinet  |  Main S1 + Backup S2  |  Rows: ' +
+          String((rows && rows.length) || 0))
+        : ('Generated: ' + stampText +
+          '  |  Cabinet: ' + summary.cabinet +
+          '  |  Closure: ' + summary.closure +
+          '  |  Sort: ' + summary.sort +
+          '  |  Rows: ' + String((rows && rows.length) || 0));
+      doc.text(meta, margin.left, 14.5, { maxWidth: pageW - margin.left - margin.right });
+
+      if (!chunks.length) {
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(
+          isRing ? 'No OLT feeder to cabinet allocations found.' : 'No splice rows for the current filters.',
+          margin.left,
+          22
+        );
+        doc.save(buildMatrixPdfFilename(isRing));
         return;
       }
 
-      doc.open();
-      doc.write(html);
-      doc.close();
+      if (typeof doc.autoTable !== 'function') {
+        window.alert('PDF table plugin failed to load. Please refresh the page and try again.');
+        return;
+      }
 
-      var printed = false;
-      function runPrint() {
-        if (printed) return;
-        printed = true;
-        try {
-          win.focus();
-          win.print();
-        } catch (err) {
-          console.error('[FiberDesignUI] exportMatrixPdf print failed:', err);
-          window.alert('Print dialog could not be opened. Please try again.');
-        } finally {
-          setTimeout(function () {
-            if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-          }, 1500);
+      var chunkIdx;
+      var tableStartY = 18;
+      for (chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+        if (chunkIdx > 0) {
+          doc.addPage();
+          tableStartY = margin.top;
         }
+        var chunkRows = chunks[chunkIdx];
+        var annotated = applyRowspanMetadata(chunkRows.slice(), rowspanKeys);
+        var body = buildAutoTableBodyWithRowspan(annotated, columns);
+
+        doc.autoTable(Object.assign({}, tableBaseOptions, {
+          head: [headers],
+          body: body,
+          startY: tableStartY,
+          showHead: 'everyPage',
+          didParseCell: function (data) {
+            applyMatrixPdfCellStyles(data, columns, annotated);
+          },
+        }));
       }
 
-      if (doc.readyState === 'complete') {
-        setTimeout(runPrint, 50);
-      } else {
-        iframe.onload = function () { setTimeout(runPrint, 50); };
-        setTimeout(runPrint, 300);
-      }
+      doc.save(buildMatrixPdfFilename(isRing));
     } catch (e) {
       console.error('[FiberDesignUI] exportMatrixPdf EXCEPTION:', e.message || e);
       window.alert('Failed to export Fiber Design Matrix PDF.');
