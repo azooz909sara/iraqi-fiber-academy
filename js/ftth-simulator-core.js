@@ -22,6 +22,9 @@
 
   var Sim = {
     activeCityId: 'training_city_1',
+    coordinateMode: 'geographic',
+    uploadedMapLayout: null,
+    uploadedMapImage: null,
     selectedTool: null,
     selectedCableSpec: null,
     cableDraftFrom: null,
@@ -171,6 +174,7 @@
 
   var CELL = {
     BUILD: 'build', STREET: 'street', SIDEWALK: 'sidewalk',
+    CANVAS: 'canvas',
     ITPC: 'itpc', PARK: 'park', POI: 'poi', RES_BLOCK: 'res_block',
   };
 
@@ -5302,6 +5306,11 @@
       satLayer.style.width = w + 'px';
       satLayer.style.height = h + 'px';
     }
+    var gridOverlay = document.getElementById('image-map-grid-overlay');
+    if (gridOverlay) {
+      gridOverlay.style.width = w + 'px';
+      gridOverlay.style.height = h + 'px';
+    }
 
     var svg = getGlobalDrawingLayer();
     if (svg) {
@@ -8081,6 +8090,7 @@
   }
 
   function isDrawableSurfaceXY(x, y) {
+    if (isCanvas2dCoordinateMode()) return true;
     var cell = workspaceXYToCell(x, y);
     var t = getCellType(cell.col, cell.row);
     return t === CELL.SIDEWALK || t === CELL.STREET;
@@ -9746,7 +9756,14 @@
     return { cfg: cfg, cols: cols, rows: rows, cellSize: cfg.cellSize, cells: cells };
   }
 
+  function isCanvas2dCoordinateMode() {
+    return Sim.coordinateMode === 'canvas2d';
+  }
+
   function generateLayout(cityId) {
+    if (cityId === 'uploaded_map' && Sim.uploadedMapLayout) {
+      return Sim.uploadedMapLayout;
+    }
     if (cityId === 'training_city_2') return generateCity2();
     if (cityId === 'training_city_3') return generateCity3();
     return generateCity1();
@@ -9797,6 +9814,9 @@
     }
     bindDragDropCleanup();
     bindToolboxDragPreview();
+    if (global.FTTHImageMapProject?.onCityRendered) {
+      global.FTTHImageMapProject.onCityRendered();
+    }
   }
 
   function onWorkspaceGridDrop(e) {
@@ -9895,6 +9915,7 @@
   }
 
   function canPlaceVirtual(type, col, row) {
+    if (isCanvas2dCoordinateMode()) return true;
     var t = getCellType(col, row);
     if (type === 'olt') return t === CELL.ITPC;
     if (SIDEWALK_TOOLS[type]) return t === CELL.SIDEWALK;
@@ -14038,6 +14059,9 @@
   }
 
   function clearWorkspace() {
+    if (global.FTTHImageMapProject?.onWorkspaceCleared) {
+      global.FTTHImageMapProject.onWorkspaceCleared();
+    }
     Sim.nodes = [];
     Sim.connections = [];
     Sim.excavationPaths = [];
@@ -14059,10 +14083,11 @@
   }
 
   function serializeProjectState() {
-    return {
+    var payload = {
       version: 1,
       savedAt: new Date().toISOString(),
       layout: Sim.activeCityId,
+      coordinateMode: Sim.coordinateMode || 'geographic',
       zoom: Sim.zoom,
       panX: Sim.panX,
       panY: Sim.panY,
@@ -14075,6 +14100,10 @@
         activeCableKind: Sim.ui.activeCableKind || 'distribution',
       },
     };
+    if (global.FTTHImageMapProject?.extendSerialize) {
+      global.FTTHImageMapProject.extendSerialize(payload);
+    }
+    return payload;
   }
 
   function restoreProjectState(payload) {
@@ -14099,6 +14128,11 @@
       if (payload.ui.cableCapacity) Sim.ui.cableCapacity = JSON.parse(JSON.stringify(payload.ui.cableCapacity));
       if (payload.ui.splitterVariant) Sim.ui.splitterVariant = payload.ui.splitterVariant;
       if (payload.ui.activeCableKind) Sim.ui.activeCableKind = payload.ui.activeCableKind;
+    }
+    if (payload.coordinateMode) Sim.coordinateMode = payload.coordinateMode;
+    else if (payload.layout !== 'uploaded_map') Sim.coordinateMode = 'geographic';
+    if (global.FTTHImageMapProject?.restoreFromProject) {
+      global.FTTHImageMapProject.restoreFromProject(payload);
     }
     renderVirtualCity();
     syncAllCablePathsToTrenches();
