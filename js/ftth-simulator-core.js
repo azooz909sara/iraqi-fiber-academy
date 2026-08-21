@@ -179,10 +179,10 @@
   };
 
   var HOME_COUNTS = [4, 6, 7, 8, 10, 12, 15, 18, 24, 32, 48, 64];
-  var SIDEWALK_TOOLS = { handhole: 1, fat_handhole: 1, fdt: 1 };
+  var SIDEWALK_TOOLS = { handhole: 1, fat_handhole: 1, fdt: 1, olt: 1 };
 
   var EQUIPMENT = [
-    { id: 'olt', label: 'OLT / ITPC Exchange', icon: '📡', color: '#7c3aed', itpcOnly: true },
+    { id: 'olt', label: 'OLT / ITPC Exchange', icon: '🏛️', color: '#7c3aed', visual: 'olt' },
     { id: 'fdt', label: 'FDT', icon: 'FDT', color: '#f59e0b', visual: 'fdt' },
     { id: 'closure', label: 'Closure', icon: '🟥', color: '#ef4444', visual: 'closure', nestOnly: true },
   ];
@@ -4735,6 +4735,7 @@
     if (item.visual === 'fat_pole') return fatPoleIconHtml(s);
     if (item.visual === 'closure') return closureIconSvg(s);
     if (item.visual === 'fdt') return fdtCabinetGlyphHtml(s);
+    if (item.visual === 'olt') return oltBuildingGlyphHtml(s);
     if (item.visual === 'excav') return excavationToolIconSvg(item.routeKind, s);
     if (item.visual === 'excav_pen') return excavationPenIconSvg(s);
     if (item.visual === 'splitter') return splitterIconSvg(item.variant || '1x8', s);
@@ -9239,6 +9240,12 @@
       '<div class="fdt-body"><div class="fdt-door"></div><span class="fdt-label">FDT</span></div></div>';
   }
 
+  function oltBuildingGlyphHtml(size) {
+    var s = size || iconBaseSize('olt') || 28;
+    return '<div class="olt-building-glyph" style="width:' + s + 'px;height:' + s + 'px" aria-hidden="true">' +
+      '<span class="olt-glyph" role="img" aria-label="OLT">🏛️</span></div>';
+  }
+
   function greenTriangleIconSvg(size, classExtra) {
     var s = size || iconBaseSize('handhole');
     var extra = classExtra ? ' ' + classExtra : '';
@@ -9585,7 +9592,9 @@
     } else if (node.type === 'olt') {
       layers.push(
         '<div class="placed-node__glyph-anchor">' +
-          '<div class="placed-node__layer placed-node__layer--base placed-node__layer--olt"><span class="olt-glyph">OLT</span></div>' +
+          '<div class="placed-node__layer placed-node__layer--base placed-node__layer--olt">' +
+            oltBuildingGlyphHtml(sz()) +
+          '</div>' +
         '</div>'
       );
     }
@@ -9917,7 +9926,6 @@
   function canPlaceVirtual(type, col, row) {
     if (isCanvas2dCoordinateMode()) return true;
     var t = getCellType(col, row);
-    if (type === 'olt') return t === CELL.ITPC;
     if (SIDEWALK_TOOLS[type]) return t === CELL.SIDEWALK;
     return false;
   }
@@ -10389,7 +10397,7 @@
       return false;
     }
     if (!canPlaceVirtual(type, col, row)) {
-      updateStatus('Placement Error: sidewalk / ITPC only', true);
+      updateStatus('Placement Error: sidewalk only', true);
       return false;
     }
     addNode(type, col, row, variant, dropPt);
@@ -11822,7 +11830,7 @@
     }
     Sim.moveNodeId = nodeId;
     selectNode(nodeId);
-    updateStatus('Move mode — click destination sidewalk/ITPC cell');
+    updateStatus('Move mode — click destination sidewalk cell');
   }
 
   function toggleNodeLock(nodeId) {

@@ -10108,10 +10108,27 @@ body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
   shape-rendering: geometricPrecision;
 }
 
-.placed-node__layer--olt .olt-glyph {
-  font-size: 8px;
-  font-weight: 800;
-  color: #e9d5ff;
+.placed-node__layer--olt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.olt-building-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.placed-node__layer--olt .olt-glyph,
+.olt-building-glyph .olt-glyph {
+  display: block;
+  font-size: 1.35em;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 /* LM_Holes — As-Built GIS glyphs */
