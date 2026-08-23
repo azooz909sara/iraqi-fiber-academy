@@ -64,8 +64,7 @@
   var DRAG_THRESHOLD_PX = 3;
   /** Notch-centered clamp radius (world px) — must sit on fiber, not empty air. */
   var CLAMP_PROX_PX = 15;
-  var PEEL_JACKET_PX = 42;
-  var PEEL_BUFFER_PX = 26;
+  var PEEL_FRAGMENT_PX = 20;
   var HISTORY_MAX = 40;
 
   var layer = null;
@@ -242,6 +241,20 @@
     if (global.FtthLab && typeof FtthLab.clearPigtailStripPeel === 'function') {
       FtthLab.clearPigtailStripPeel(pigtailId);
     }
+  }
+
+  function applyStripDrag(pigtailId, wx, wy, layerKind, session) {
+    if (global.FtthLab && typeof FtthLab.applyPigtailStripDrag === 'function') {
+      return FtthLab.applyPigtailStripDrag(pigtailId, wx, wy, layerKind, session);
+    }
+    return null;
+  }
+
+  function applyStripDrag(pigtailId, wx, wy, layerKind, session) {
+    if (global.FtthLab && typeof FtthLab.applyPigtailStripDrag === 'function') {
+      return FtthLab.applyPigtailStripDrag(pigtailId, wx, wy, layerKind, session);
+    }
+    return null;
   }
 
   function captureSnapshot() {
@@ -783,28 +796,30 @@
   }
 
   function startPeelSession(e, s, target, node) {
-    /* Snap cutting notch (not pivot) onto the fiber clamp point */
-    alignStripperNotchToFiber(s, target.x, target.y, target.stage);
-    s.laserGuideStage = target.stage || 0;
+    var stage = target.stage || 0;
+    var layerKind = target.layer || (stage === 0 ? 'jacket' : 'buffer');
+    var notchOff = notchOffsetForStage(stage);
+    alignStripperNotchToFiber(s, target.x, target.y, stage);
+    s.laserGuideStage = stage;
     s.laserGuide = true;
     updateStripperNode(s, node);
     refreshStripGuide(s, e.clientX, e.clientY, target);
     document.body.classList.add('lab-stripper-peeling');
     try { node.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
 
-    var peelUx = target.peelUx;
-    var peelUy = target.peelUy;
-    var stage = target.stage;
-    var layerKind = target.layer || (stage === 0 ? 'jacket' : 'buffer');
-    var notchOff = notchOffsetForStage(stage);
-    var threshold = layerKind === 'jacket' ? PEEL_JACKET_PX : PEEL_BUFFER_PX;
-    var startWorld = clientToWorld(e.clientX, e.clientY);
-    var baselinePx = typeof target.baselinePx === 'number'
-      ? target.baselinePx
-      : 0;
-    var peelAccum = 0;
-    var lastFragment = 0;
-    var completed = false;
+    var zoom = getZoom() || 1;
+    var sx = e.clientX;
+    var sy = e.clientY;
+    var ox = s.x;
+    var oy = s.y;
+    var session = {
+      startAlong: target.along,
+      baseJacketTo: typeof target.jacketTo === 'number' ? target.jacketTo : 0,
+      baseBareTo: typeof target.bareTo === 'number' ? target.bareTo : 0,
+    };
+    var maxPeeled = 0;
+    var lastFragmentPx = 0;
+    var moved = false;
 
     function endPeel(ev) {
       window.removeEventListener('pointermove', onMove);
@@ -813,71 +828,57 @@
       try { node.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
       openJaws(s, node);
       document.body.classList.remove('lab-stripper-peeling');
-      /* Keep progressive strip length; only clear ephemeral peel animation. */
       clearStripPeel(target.id);
       clearStripGuide();
-      if (completed || peelAccum > 4) {
-        if (completed) {
-          spawnDebris(s.x, s.y - notchOff, stage, peelUx, peelUy);
-        }
+      if (maxPeeled > 4) {
+        spawnDebris(s.x, s.y - notchOff, stage, target.peelUx, target.peelUy);
         pushHistory();
-        if (completed) {
-          var label = layerKind === 'jacket'
-            ? 'Outer jacket stripped · clamp remaining jacket to peel further'
-            : 'Buffer stripped · bare glass core exposed';
-          setStatus('CFS-3 · ' + label);
+        if (layerKind === 'jacket') {
+          setStatus('CFS-3 · jacket stripped ' + Math.round(maxPeeled) + 'px · clamp buffer notch to peel coating');
         } else {
-          setStatus('CFS-3 · strip length +' + Math.round(peelAccum) + 'px · clamp remaining jacket to continue');
+          setStatus('CFS-3 · buffer stripped ' + Math.round(maxPeeled) + 'px · bare glass exposed at tip');
         }
       } else {
-        setStatus('CFS-3 · peel incomplete · clamp remaining jacket and drag toward fiber tip');
+        setStatus('CFS-3 · peel incomplete · clamp on fiber and drag toward tip');
       }
       rebuildLayer();
     }
 
     function onMove(ev) {
-      var w = clientToWorld(ev.clientX, ev.clientY);
-      var dx = w.x - startWorld.x;
-      var dy = w.y - startWorld.y;
-      var along = dx * peelUx + dy * peelUy;
-      if (along < 0) along = 0;
-      peelAccum = Math.max(peelAccum, along);
-      var peelNorm = Math.min(1, peelAccum / threshold);
-      /* Additive: grow committed strip length from this session's baseline. */
-      setStripLengthPx(target.id, baselinePx + peelAccum);
-      setStripPeel(target.id, peelNorm);
-      /* Keep the active notch seated on the fiber while peeling */
-      alignStripperNotchToFiber(
-        s,
-        target.x + peelUx * peelAccum * 0.35,
-        target.y + peelUy * peelAccum * 0.35,
-        stage
-      );
+      var dx = (ev.clientX - sx) / zoom;
+      var dy = (ev.clientY - sy) / zoom;
+      if (!moved && Math.abs(dx) < DRAG_THRESHOLD_PX && Math.abs(dy) < DRAG_THRESHOLD_PX) return;
+      moved = true;
+      s.x = Math.round(ox + dx);
+      s.y = Math.round(oy + dy);
       updateStripperPosition(s, node);
       paintStripperNode(s, node);
-      refreshStripGuide(s, ev.clientX, ev.clientY, {
-        id: target.id,
-        stage: stage,
-        x: target.x + peelUx * peelAccum * 0.5,
-        y: target.y + peelUy * peelAccum * 0.5,
-      });
-      if (peelNorm - lastFragment >= 0.22) {
-        lastFragment = peelNorm;
-        spawnPeelFragment(
-          target.x + peelUx * peelAccum * 0.5,
-          target.y + peelUy * peelAccum * 0.5,
-          stage,
-          peelUx,
-          peelUy,
-          peelNorm
-        );
-      }
-      if (peelAccum >= threshold && !completed) {
-        completed = true;
-        if (layerKind === 'buffer') {
-          commitStripStage(target.id);
+
+      var notch = notchWorldPos(s, stage);
+      var result = applyStripDrag(target.id, notch.x, notch.y, layerKind, session);
+      if (result && result.ok) {
+        maxPeeled = Math.max(maxPeeled, result.peeled || 0);
+        var peelUx = result.peelUx != null ? result.peelUx : target.peelUx;
+        var peelUy = result.peelUy != null ? result.peelUy : target.peelUy;
+        refreshStripGuide(s, ev.clientX, ev.clientY, {
+          id: target.id,
+          stage: stage,
+          x: result.proj.x,
+          y: result.proj.y,
+        });
+        if (maxPeeled - lastFragmentPx >= PEEL_FRAGMENT_PX) {
+          lastFragmentPx = maxPeeled;
+          spawnPeelFragment(
+            result.proj.x,
+            result.proj.y,
+            stage,
+            peelUx,
+            peelUy,
+            Math.min(1, maxPeeled / 80)
+          );
         }
-        /* Jacket length is progressive via setStripLengthPx; stage auto-unlocks at STRIP_JACKET_PX. */
+      } else {
+        refreshStripGuide(s, ev.clientX, ev.clientY, target);
       }
     }
 

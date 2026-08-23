@@ -37,12 +37,10 @@
   var SLEEVE_MOUNT_PROX_PX = 25;
   var SLEEVE_EJECT_PULL_PX = 14;
   var STRIP_CLAMP_PROX_PX = 15;
-  var STRIP_TIP_ZONE_PX = 96;
-  /** Match CFS-3 peel thresholds — exposed length advances from tip toward connector. */
-  var STRIP_JACKET_PX = 42;
-  var STRIP_BUFFER_PX = 26;
   /** Hard max distance from cutting notch to fiber centerline for clamp/strip. */
   var STRIP_NOTCH_HIT_PX = 15;
+  /** Ephemeral peel animation scale (px dragged per full peel = 1). */
+  var STRIP_PEEL_ANIM_PX = 18;
   /** Bare tip zone for cleaver V-groove alignment. */
   var CLEAVE_TIP_ZONE_PX = 52;
   var CLEAVE_HIT_PX = 20;
@@ -330,8 +328,9 @@
       if (p.stripStage < 0) p.stripStage = 0;
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
+      ensureFiberStrip(p);
       p.cleaved = !!p.cleaved;
-      syncStripLength(p);
+      syncStripStageFromFiberStrip(p);
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
       }
@@ -629,42 +628,101 @@
     return 'Jacketed · peel outer sheath';
   }
 
-  /** Committed stripped length from tip (ignores ephemeral peel animation). */
+  /**
+   * Layered strip state from tip (arc-length px on fiberSleevePathPoints):
+   *   [0, bareTo) bare glass · [bareTo, jacketTo) buffer · [jacketTo, total) jacket
+   */
+  function ensureFiberStrip(p) {
+    if (!p) return null;
+    if (!p.fiberStrip || typeof p.fiberStrip !== 'object') {
+      p.fiberStrip = { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null };
+    }
+    var fs = p.fiberStrip;
+    if (typeof fs.jacketTo !== 'number' || !isFinite(fs.jacketTo)) {
+      fs.jacketTo = Number(p.stripLengthPx) || 0;
+    }
+    if (typeof fs.bareTo !== 'number' || !isFinite(fs.bareTo)) {
+      var st = Number(p.stripStage) || 0;
+      fs.bareTo = st >= 2 ? fs.jacketTo : 0;
+    }
+    if (typeof fs.peel !== 'number' || !isFinite(fs.peel)) {
+      fs.peel = Number(p.stripPeel) || 0;
+    }
+    if (fs.jacketTo < 0) fs.jacketTo = 0;
+    if (fs.bareTo < 0) fs.bareTo = 0;
+    if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    return fs;
+  }
+
+  function maxStripLenPx(p) {
+    var pts = fiberSleevePathPoints(p);
+    return Math.max(0, polylineLength(pts) - 8);
+  }
+
+  function syncStripStageFromFiberStrip(p) {
+    if (!p) return;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    var j = fs.jacketTo || 0;
+    var b = fs.bareTo || 0;
+    if (j < 0.5) {
+      p.stripStage = 0;
+    } else if (b >= j - 0.5) {
+      p.stripStage = 2;
+    } else {
+      p.stripStage = 1;
+    }
+    p.stripLengthPx = j;
+    p.stripPeel = fs.peel || 0;
+  }
+
+  /** Committed jacket strip length from tip (ignores ephemeral peel animation). */
   function stripCommittedPx(p) {
     if (!p) return 0;
-    var n = Number(p.stripLengthPx);
+    ensureFiberStrip(p);
+    var n = Number(p.fiberStrip.jacketTo);
     return isFinite(n) && n > 0 ? n : 0;
   }
 
-  /** How many px from the cleaved tip are currently stripped (jacket/buffer removed). */
+  /** How many px from the cleaved tip have jacket removed. */
   function stripExposedFromTipPx(p) {
     return stripCommittedPx(p);
   }
 
-  function syncStripStageFromLength(p) {
-    if (!p) return;
-    var len = stripCommittedPx(p);
-    if (len >= STRIP_JACKET_PX + STRIP_BUFFER_PX - 0.5) {
-      p.stripStage = 2;
-    } else if (len >= STRIP_JACKET_PX - 0.5) {
-      if ((p.stripStage || 0) < 1) p.stripStage = 1;
-    }
+  function stripBareFromTipPx(p) {
+    if (!p) return 0;
+    ensureFiberStrip(p);
+    var n = Number(p.fiberStrip.bareTo);
+    return isFinite(n) && n > 0 ? n : 0;
   }
 
-  function syncStripLength(p) {
-    if (!p) return;
-    /* Keep committed length; stage follows length for jacket→buffer unlock. */
-    if (!isFinite(Number(p.stripLengthPx)) || p.stripLengthPx < 0) p.stripLengthPx = 0;
-    syncStripStageFromLength(p);
-  }
-
-  /** Visual kind for the tip-side segment: buffer coating or bare glass. */
+  /** Visual kind for the tip-side segment when only jacket is partially removed. */
   function stripExposedKind(p) {
-    var stage = p.stripStage || 0;
-    if (stage >= 2) return 'bare';
-    if (stage >= 1) return 'buffer';
-    if (stripCommittedPx(p) > 0.5 || (p.stripPeel || 0) > 0.02) return 'buffer';
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    if ((fs.bareTo || 0) >= (fs.jacketTo || 0) - 0.5 && (fs.jacketTo || 0) > 0.5) return 'bare';
+    if ((fs.jacketTo || 0) > 0.5) return 'buffer';
+    if ((fs.peel || 0) > 0.02) return 'buffer';
     return null;
+  }
+
+  function stripHitFromProj(p, pts, proj, stage, layer, thr) {
+    var fs = ensureFiberStrip(p);
+    var dirs = peelDirsFromPath(pts);
+    return {
+      id: p.id,
+      stage: stage,
+      layer: layer,
+      x: proj.x,
+      y: proj.y,
+      rot: proj.rot,
+      peelUx: dirs.peelUx,
+      peelUy: dirs.peelUy,
+      perpDist: proj.perpDist,
+      along: proj.dist,
+      jacketTo: fs.jacketTo || 0,
+      bareTo: fs.bareTo || 0,
+    };
   }
 
   function svgPathFromPoints(pts) {
@@ -755,35 +813,64 @@
     var fullPath = svgPathFromPoints(fullPts) || fiberPath(p);
     var bad = p.connector.mismatch;
     var sel = selection.id === p.id ? ' is-selected' : '';
-    var exposed = stripExposedFromTipPx(p);
-    var kind = stripExposedKind(p);
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    var jacketTo = fs.jacketTo || 0;
+    var bareTo = fs.bareTo || 0;
+    var peel = fs.peel || 0;
+    var peelLayer = fs.peelLayer;
     var total = polylineLength(fullPts);
     var html =
       '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
       '" fill="none" />';
 
-    if (kind && exposed > 1 && total > exposed + 1) {
-      var cut = Math.max(0, total - exposed);
-      var jacketPts = slicePolylineByDistance(fullPts, 0, cut);
-      var tipPts = slicePolylineByDistance(fullPts, cut, total);
+    function peelStyle(layerName) {
+      if (peel <= 0.02 || peelLayer !== layerName) return '';
+      return ' style="--strip-peel:' + peel.toFixed(3) + ';"';
+    }
+
+    function peelClass(layerName) {
+      return peel > 0.02 && peelLayer === layerName ? ' is-strip-peeling' : '';
+    }
+
+    if (jacketTo > 0.5 && total > jacketTo + 0.5) {
+      var dJacketEnd = Math.max(0, total - jacketTo);
+      var dBareEnd = Math.max(dJacketEnd, total - bareTo);
+      var jacketPts = slicePolylineByDistance(fullPts, 0, dJacketEnd);
       var jacketD = svgPathFromPoints(jacketPts);
-      var tipD = svgPathFromPoints(tipPts);
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
-        (bad ? ' is-mismatch' : '') + sel +
+        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + jacketD +
-        '" fill="none" />' +
-        '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + kind +
-        (bad ? ' is-mismatch' : '') +
-        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '') +
-        '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="stripped" d="' + tipD +
-        '" fill="none" style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />';
+        '" fill="none"' + peelStyle('jacket') + ' />';
+
+      if (bareTo > 0.5 && bareTo < jacketTo - 0.5) {
+        var bufferPts = slicePolylineByDistance(fullPts, dJacketEnd, dBareEnd);
+        var barePts = slicePolylineByDistance(fullPts, dBareEnd, total);
+        html +=
+          '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' +
+          (bad ? ' is-mismatch' : '') + peelClass('buffer') +
+          '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="buffer" d="' +
+          svgPathFromPoints(bufferPts) + '" fill="none"' + peelStyle('buffer') + ' />' +
+          '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare' +
+          (bad ? ' is-mismatch' : '') + peelClass('bare') +
+          '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
+          svgPathFromPoints(barePts) + '" fill="none"' + peelStyle('bare') + ' />';
+      } else {
+        var tipPts = slicePolylineByDistance(fullPts, dJacketEnd, total);
+        var tipKind = stripExposedKind(p) || 'buffer';
+        html +=
+          '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + tipKind +
+          (bad ? ' is-mismatch' : '') + peelClass('buffer') +
+          '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="stripped" d="' +
+          svgPathFromPoints(tipPts) + '" fill="none"' + peelStyle('buffer') + ' />';
+      }
     } else {
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
-        (bad ? ' is-mismatch' : '') + sel +
+        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath +
-        '" fill="none" style="--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" />';
+        '" fill="none"' + peelStyle('jacket') + ' />';
     }
 
     var ghost = ghostPreviewPath(p);
@@ -898,71 +985,112 @@
     return { peelUx: dx / len, peelUy: dy / len };
   }
 
-  function hitFromZone(p, pts, proj, zoneStart, zoneEnd, thr, wx, wy, stage, layer) {
-    if (proj.dist < zoneStart - 0.5 || proj.dist > zoneEnd + 0.5) return null;
-    var zonePts = slicePolylineByDistance(pts, zoneStart, zoneEnd);
-    var b = polylineAxisBounds(zonePts);
-    if (wx < b.minX - thr || wx > b.maxX + thr) return null;
-    if (wy < b.minY - thr || wy > b.maxY + thr) return null;
-    var dirs = peelDirsFromPath(pts);
-    return {
-      id: p.id,
-      stage: stage,
-      layer: layer,
-      x: proj.x,
-      y: proj.y,
-      rot: proj.rot,
-      peelUx: dirs.peelUx,
-      peelUy: dirs.peelUy,
-      perpDist: proj.perpDist,
-      along: proj.dist,
-      baselinePx: stripCommittedPx(p),
-    };
-  }
-
   /**
-   * Notch must sit on the *remaining* unstripped material:
-   * - Jacket (yellow): inland of already-stripped tip length
-   * - Buffer: on the exposed tip region after jacket is gone
+   * Notch must sit on remaining unstripped material:
+   * - Jacket: anywhere inland on the yellow jacket
+   * - Buffer: on exposed coating between bareTo and jacketTo
    */
   function notchIntersectsUnstrippedFiber(p, wx, wy, thresholdPx) {
     var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
     thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
     if (!p) return null;
-    var stage = Number(p.stripStage) || 0;
-    if (stage >= 2) return null;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    if ((fs.bareTo || 0) >= (fs.jacketTo || 0) - 0.5 && (fs.jacketTo || 0) > 0.5) return null;
+
     var pts = fiberSleevePathPoints(p);
     if (!pts || pts.length < 2) return null;
     var total = polylineLength(pts);
-    var tipZone = stage >= 1 ? STRIP_TIP_ZONE_PX * 1.25 : STRIP_TIP_ZONE_PX;
     var minRemain = 8;
-    var exposed = stripCommittedPx(p);
+    var jacketTo = fs.jacketTo || 0;
+    var bareTo = fs.bareTo || 0;
 
     var proj = projectOntoFiberStrict(pts, wx, wy);
     if (!proj || !proj.onSegment) return null;
     if (proj.perpDist > thr) return null;
     if (proj.dist < -0.01) return null;
 
-    /* Remaining yellow jacket starts at the current strip frontier. */
-    var jacketStart = Math.min(exposed, Math.max(0, total - minRemain));
-    var jacketEnd = Math.min(total - minRemain, jacketStart + tipZone);
-    if (jacketEnd > jacketStart + 1) {
-      var jacketHit = hitFromZone(
-        p, pts, proj, jacketStart, jacketEnd, thr, wx, wy, 0, 'jacket'
-      );
-      if (jacketHit) return jacketHit;
+    if (proj.dist >= jacketTo - 0.5 && proj.dist <= total - minRemain) {
+      return stripHitFromProj(p, pts, proj, 0, 'jacket', thr);
     }
 
-    /* Buffer / acrylate strip only on already-exposed tip after jacket removal. */
-    if (stage >= 1 && exposed > 1) {
-      var bufEnd = Math.min(exposed, tipZone);
-      if (bufEnd > 1) {
-        var bufHit = hitFromZone(p, pts, proj, 0, bufEnd, thr, wx, wy, 1, 'buffer');
-        if (bufHit) return bufHit;
-      }
+    if (jacketTo > 1 && proj.dist >= bareTo - 0.5 && proj.dist < jacketTo - 0.5) {
+      return stripHitFromProj(p, pts, proj, 1, 'buffer', thr);
     }
 
     return null;
+  }
+
+  function projectPigtailStripNotch(id, wx, wy) {
+    var p = findPigtail(id);
+    if (!p) return null;
+    var pts = fiberSleevePathPoints(p);
+    if (!pts || pts.length < 2) return null;
+    var proj = projectOntoFiberStrict(pts, wx, wy);
+    if (!proj) return null;
+    var dirs = peelDirsFromPath(pts);
+    return {
+      dist: proj.dist,
+      x: proj.x,
+      y: proj.y,
+      rot: proj.rot,
+      perpDist: proj.perpDist,
+      onSegment: proj.onSegment,
+      peelUx: dirs.peelUx,
+      peelUy: dirs.peelUy,
+    };
+  }
+
+  /**
+   * Apply a clamp-and-drag strip from the cutting-notch world position.
+   * Stripped length grows tip-ward as proj.dist decreases from session.startAlong.
+   */
+  function applyStripDragFromNotch(id, wx, wy, layerKind, session) {
+    var p = findPigtail(id);
+    if (!p || !session) return null;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    if (layerKind === 'buffer' && (fs.jacketTo || 0) < 0.5) return null;
+    if ((Number(p.stripStage) || 0) >= 2 && layerKind === 'buffer') return null;
+
+    var pts = fiberSleevePathPoints(p);
+    if (!pts || pts.length < 2) return null;
+    var proj = projectOntoFiberStrict(pts, wx, wy);
+    if (!proj || !proj.onSegment || proj.perpDist > STRIP_NOTCH_HIT_PX + 0.01) return null;
+
+    var maxLen = maxStripLenPx(p);
+    var peeled = Math.max(0, session.startAlong - proj.dist);
+    var animPx = layerKind === 'buffer' ? STRIP_PEEL_ANIM_PX * 0.85 : STRIP_PEEL_ANIM_PX;
+
+    if (layerKind === 'jacket') {
+      var newJacket = Math.min(maxLen, session.baseJacketTo + peeled);
+      if (newJacket + 0.01 < fs.jacketTo) return null;
+      fs.jacketTo = Math.max(fs.jacketTo, newJacket);
+      if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+      fs.peelLayer = 'jacket';
+      fs.peel = Math.min(1, peeled / animPx);
+    } else if (layerKind === 'buffer') {
+      if (proj.dist >= fs.jacketTo - 0.5) return null;
+      var newBare = Math.min(fs.jacketTo, session.baseBareTo + peeled);
+      if (newBare + 0.01 < fs.bareTo) return null;
+      fs.bareTo = Math.max(fs.bareTo, newBare);
+      fs.peelLayer = 'buffer';
+      fs.peel = Math.min(1, peeled / animPx);
+    } else {
+      return null;
+    }
+
+    syncStripStageFromFiberStrip(p);
+    updateStripVisuals(p);
+    return {
+      ok: true,
+      proj: proj,
+      peeled: peeled,
+      jacketTo: fs.jacketTo,
+      bareTo: fs.bareTo,
+      peelUx: peelDirsFromPath(pts).peelUx,
+      peelUy: peelDirsFromPath(pts).peelUy,
+    };
   }
 
   function findStripTarget(clientX, clientY, thresholdPx) {
@@ -971,8 +1099,7 @@
   }
 
   /**
-   * Precision probe: world cutting-notch must intersect the pigtail line segment
-   * (distance < 15px) and lie within the unstripped tip zone — not empty space.
+   * Precision probe: world cutting-notch must intersect unstripped jacket or buffer.
    */
   function findStripTargetAtWorld(wx, wy, thresholdPx) {
     var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
@@ -1056,73 +1183,94 @@
   function setStripPeel(id, peel) {
     var p = findPigtail(id);
     if (!p) return;
-    var stage = Number(p.stripStage) || 0;
-    if (stage >= 2) return;
+    ensureFiberStrip(p);
+    if ((Number(p.stripStage) || 0) >= 2 && (p.fiberStrip.peelLayer || '') !== 'jacket') return;
     var n = Number(peel);
     if (!isFinite(n)) n = 0;
-    p.stripPeel = Math.max(0, Math.min(1, n));
+    p.fiberStrip.peel = Math.max(0, Math.min(1, n));
+    syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
-  /**
-   * Progressive strip: grow committed exposed length from the tip (never shrinks).
-   */
+  /** Legacy hook — sets jacket frontier length from tip. */
   function setStripLengthPx(id, px) {
     var p = findPigtail(id);
     if (!p) return;
+    ensureFiberStrip(p);
     if ((Number(p.stripStage) || 0) >= 2) return;
     var n = Number(px);
     if (!isFinite(n) || n < 0) n = 0;
-    var pts = fiberSleevePathPoints(p);
-    var maxLen = Math.max(0, polylineLength(pts) - 8);
-    n = Math.min(n, maxLen);
-    p.stripLengthPx = Math.max(stripCommittedPx(p), n);
-    syncStripStageFromLength(p);
+    n = Math.min(n, maxStripLenPx(p));
+    p.fiberStrip.jacketTo = Math.max(p.fiberStrip.jacketTo || 0, n);
+    if (p.fiberStrip.bareTo > p.fiberStrip.jacketTo) {
+      p.fiberStrip.bareTo = p.fiberStrip.jacketTo;
+    }
+    syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
   function clearStripPeel(id) {
     var p = findPigtail(id);
     if (!p) return;
-    p.stripPeel = 0;
-    /* Keep stripLengthPx — incomplete peels still leave progressive progress. */
-    syncStripStageFromLength(p);
+    ensureFiberStrip(p);
+    p.fiberStrip.peel = 0;
+    p.fiberStrip.peelLayer = null;
+    syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
+  /** Stage is derived from fiberStrip frontiers — no fixed-length snap. */
   function commitStripStage(id) {
     var p = findPigtail(id);
     if (!p) return false;
-    var stage = Number(p.stripStage) || 0;
-    /* Allow strip 1 (jacket) then strip 2 (buffer) — never lock after first use. */
-    if (stage >= 2) return false;
-    p.stripStage = stage + 1;
-    p.stripPeel = 0;
-    if (p.stripStage === 1) {
-      p.stripLengthPx = Math.max(stripCommittedPx(p), STRIP_JACKET_PX);
-    } else if (p.stripStage === 2) {
-      p.stripLengthPx = Math.max(stripCommittedPx(p), STRIP_JACKET_PX + STRIP_BUFFER_PX);
-    }
-    syncStripStageFromLength(p);
+    ensureFiberStrip(p);
+    syncStripStageFromFiberStrip(p);
+    p.fiberStrip.peel = 0;
+    p.fiberStrip.peelLayer = null;
     rebuildLayer();
     pushHistory();
     updateInspector();
+    var stage = p.stripStage || 0;
     setStatus(
-      p.stripStage === 1
-        ? 'SC Pigtail · jacket stripped · clamp remaining jacket or buffer'
-        : 'SC Pigtail · buffer stripped · bare glass exposed'
+      stage >= 2
+        ? 'SC Pigtail · buffer stripped · bare glass exposed'
+        : stage >= 1
+          ? 'SC Pigtail · jacket stripped · clamp buffer to peel coating'
+          : 'SC Pigtail · jacket peel in progress'
     );
     return true;
   }
 
   function updateStripVisuals(p) {
     if (!layer || !p) return;
+    ensureFiberStrip(p);
     replacePigtailFiberSvg(p);
-    var peel = p.stripPeel || 0;
+    var peel = p.fiberStrip.peel || 0;
+    var peelLayer = p.fiberStrip.peelLayer;
     var tail = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (tail) {
       tail.classList.toggle('is-strip-peeling', peel > 0.02);
       tail.style.setProperty('--strip-peel', peel.toFixed(3));
+      var stage = p.stripStage || 0;
+      tail.classList.toggle('is-strip-stage1', stage >= 1);
+      tail.classList.toggle('is-strip-stage2', stage >= 2);
+      var jacketEl = tail.querySelector('.lab-pigtail__jacket');
+      var bufferEl = tail.querySelector('.lab-pigtail__buffer');
+      var cleaveEl = tail.querySelector('.lab-pigtail__cleave');
+      if (jacketEl) {
+        jacketEl.classList.toggle('is-strip-removed', stage >= 1);
+        jacketEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'jacket');
+      }
+      if (bufferEl) {
+        bufferEl.classList.toggle('is-strip-exposed', stage >= 1);
+        bufferEl.classList.toggle('is-strip-jacketed', stage < 1);
+        bufferEl.classList.toggle('is-strip-removed', stage >= 2);
+        bufferEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'buffer');
+      }
+      if (cleaveEl) {
+        cleaveEl.classList.toggle('is-strip-bare', stage >= 2);
+        cleaveEl.classList.toggle('is-strip-buffered', stage === 1);
+      }
     }
   }
 
@@ -1363,6 +1511,7 @@
       stripStage: 0,
       stripPeel: 0,
       stripLengthPx: 0,
+      fiberStrip: { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null },
       drawLockRot: horizRot,
     };
     pigtails.push(item);
@@ -3378,6 +3527,8 @@
       FtthLab.setPigtailStripLengthPx = setStripLengthPx;
       FtthLab.clearPigtailStripPeel = clearStripPeel;
       FtthLab.commitPigtailStripStage = commitStripStage;
+      FtthLab.projectPigtailStripNotch = projectPigtailStripNotch;
+      FtthLab.applyPigtailStripDrag = applyStripDragFromNotch;
       FtthLab.setPigtailStripGuide = setStripGuideLine;
       FtthLab.clearPigtailStripGuide = clearStripGuideLine;
       FtthLab.findPigtailCleavTargetAtWorld = findCleavTargetAtWorld;
