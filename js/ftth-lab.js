@@ -813,6 +813,22 @@
     setStatus(msg);
   }
 
+  function showToast(msg, durationMs) {
+    var old = document.getElementById('lab-toast');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var t = document.createElement('div');
+    t.id = 'lab-toast';
+    t.className = 'file-menu-toast lab-file-menu-toast lab-lab-toast';
+    t.setAttribute('role', 'status');
+    t.setAttribute('aria-live', 'polite');
+    t.textContent = msg || '';
+    document.body.appendChild(t);
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(function () {
+      if (t.parentNode) t.parentNode.removeChild(t);
+    }, typeof durationMs === 'number' ? durationMs : 2200);
+  }
+
   function setBudget(text) {
     var chip = $('lab-hud-budget');
     if (chip) chip.textContent = text || 'Power budget · —';
@@ -1827,6 +1843,7 @@
     },
     centerWorldInView: centerWorldInView,
     showAlert: showAlert,
+    showToast: showToast,
     setBudget: setBudget,
     refreshPowerBudget: refreshPowerBudget,
     /** Clamp uniform node scale used by OPM / VFL / splitter resize. */

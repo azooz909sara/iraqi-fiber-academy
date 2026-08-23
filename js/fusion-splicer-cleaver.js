@@ -10,6 +10,27 @@
 
   var CLEAVER_W = (global.FiberCleaver && FiberCleaver.BASE_W) || 480;
   var CLEAVER_H = (global.FiberCleaver && FiberCleaver.BASE_H) || 340;
+  /** Must match `.lab-cleaver { transform: scale(...) }` in ftth-lab.css */
+  var CLEAVER_VISUAL_SCALE = 0.35;
+  var CLEAVER_LOCAL_CX = CLEAVER_W / 2;
+  var CLEAVER_LOCAL_CY = CLEAVER_H / 2;
+  /*
+   * V-groove + blade in fiber-cleaver art (480×340 local px).
+   * Calibrated to slider-rail channel and blade-cartridge center.
+   */
+  var GROOVE_NAT_Y = 142;
+  var GROOVE_NAT_X1 = 25;
+  var GROOVE_NAT_X2 = 455;
+  var BLADE_NAT_X = 175;
+  var BLADE_NAT_Y = 142;
+  /** Perpendicular tolerance — fiber must overlap groove centerline. */
+  var CLEAVE_HIT_PX = 8;
+  /** Point-to-line hit radius: blade drop → pigtail polyline. */
+  var BLADE_HIT_RADIUS_PX = 20;
+  /** Magnetic snap radius for V-groove seating (Phase 1). */
+  var CLEAVER_SNAP_PX = 36;
+  /** Pull distance before undocking a seated fiber. */
+  var CLEAVER_UNDOCK_PX = 18;
 
   var layer = null;
   var cleavers = [];
@@ -40,6 +61,209 @@
     return JSON.parse(JSON.stringify(v == null ? null : v));
   }
 
+  function dist2(ax, ay, bx, by) {
+    var dx = ax - bx;
+    var dy = ay - by;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  /** Map cleaver art local coords to lab world space (includes CSS scale). */
+  function localToWorld(c, localX, localY) {
+    return {
+      x: c.x + (localX - CLEAVER_LOCAL_CX) * CLEAVER_VISUAL_SCALE,
+      y: c.y + (localY - CLEAVER_LOCAL_CY) * CLEAVER_VISUAL_SCALE,
+    };
+  }
+
+  /** Horizontal V-groove segment in world space. */
+  function grooveWorldSegment(c) {
+    var a = localToWorld(c, GROOVE_NAT_X1, GROOVE_NAT_Y);
+    var b = localToWorld(c, GROOVE_NAT_X2, GROOVE_NAT_Y);
+    return { x1: a.x, y1: a.y, x2: b.x, y2: b.y };
+  }
+
+  /** Blade intersection point in world space. */
+  function bladeWorldPos(c) {
+    return localToWorld(c, BLADE_NAT_X, BLADE_NAT_Y);
+  }
+
+  /** Blade drop point where the cartridge meets the V-groove (world space). */
+  function bladeDropPoint(c) {
+    return bladeWorldPos(c);
+  }
+
+  /**
+   * Exact world Y of the rubber V-groove centerline (horizontal channel).
+   * All fiber snap/seat logic must use this value.
+   */
+  function grooveWorldY(c) {
+    return c.y + (GROOVE_NAT_Y - CLEAVER_LOCAL_CY) * CLEAVER_VISUAL_SCALE;
+  }
+
+  /** World offset from cleaver center to groove centerline Y. */
+  function grooveCenterOffsetY() {
+    return (GROOVE_NAT_Y - CLEAVER_LOCAL_CY) * CLEAVER_VISUAL_SCALE;
+  }
+
+  /** World offset from cleaver center to blade X. */
+  function bladeCenterOffsetX() {
+    return (BLADE_NAT_X - CLEAVER_LOCAL_CX) * CLEAVER_VISUAL_SCALE;
+  }
+
+  /** Export groove + blade geometry for pigtail snap (Phase 1 API). */
+  function getCleaverGrooveWorld(c) {
+    if (!c) return null;
+    var grooveY = grooveWorldY(c);
+    var groove = grooveWorldSegment(c);
+    return {
+      id: c.id,
+      open: !c.clamped,
+      x: c.x,
+      y: c.y,
+      grooveY: grooveY,
+      groove: groove,
+      blade: bladeWorldPos(c),
+      dockedPigtailId: c.dockedPigtailId || null,
+    };
+  }
+
+  function listOpenCleaverGrooves() {
+    var out = [];
+    var i;
+    for (i = 0; i < cleavers.length; i++) {
+      if (!cleavers[i].clamped) out.push(getCleaverGrooveWorld(cleavers[i]));
+    }
+    return out;
+  }
+
+  /**
+   * Find nearest open cleaver groove to a world point (tip or cursor).
+   * Returns snap point clamped to groove span.
+   */
+  function findCleaverGrooveNear(wx, wy, radiusPx) {
+    var thr = typeof radiusPx === 'number' ? radiusPx : CLEAVER_SNAP_PX;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < cleavers.length; i++) {
+      var c = cleavers[i];
+      if (!c || c.clamped) continue;
+      var groove = grooveWorldSegment(c);
+      var gx1 = Math.min(groove.x1, groove.x2);
+      var gx2 = Math.max(groove.x1, groove.x2);
+      var gy = grooveWorldY(c);
+      var snapX = Math.max(gx1, Math.min(gx2, wx));
+      var d = dist2(wx, wy, snapX, gy);
+      if (d <= thr && d < bestD) {
+        bestD = d;
+        best = {
+          cleaverId: c.id,
+          groove: groove,
+          grooveY: gy,
+          blade: bladeWorldPos(c),
+          snapX: snapX,
+          snapY: gy,
+          dist: d,
+        };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Position cleaver so blade + groove centerline catch the fiber tip.
+   * Returns the seated snap point on the groove.
+   */
+  function alignCleaverBladeToPoint(c, tipX, tipY) {
+    if (!c) return null;
+    var groove = grooveWorldSegment(c);
+    var gx1 = Math.min(groove.x1, groove.x2);
+    var gx2 = Math.max(groove.x1, groove.x2);
+    var snapX = Math.max(gx1, Math.min(gx2, tipX));
+    c.x = Math.round(snapX - bladeCenterOffsetX());
+    c.y = Math.round(tipY - grooveCenterOffsetY());
+    var gy = grooveWorldY(c);
+    return { snapX: snapX, snapY: gy, grooveY: gy };
+  }
+
+  function setCleaverDockedPigtail(cleaverId, pigtailId) {
+    var c = findCleaver(cleaverId);
+    if (!c) return;
+    c.dockedPigtailId = pigtailId || null;
+  }
+
+  function clearCleaverDockState(c) {
+    if (!c) return;
+    if (c.dockedPigtailId && global.FtthLab &&
+        typeof FtthLab.clearPigtailCleaverSnap === 'function') {
+      FtthLab.clearPigtailCleaverSnap(c.dockedPigtailId);
+    } else if (c.dockedPigtailId && global.FtthLab &&
+        typeof FtthLab.clearPigtailCleaverDock === 'function') {
+      FtthLab.clearPigtailCleaverDock(c.dockedPigtailId);
+    }
+    c.dockedPigtailId = null;
+  }
+
+  /** Secondary snap: align cleaver to bare tip while dragging the tool. */
+  function refreshCleaverFiberSnap(c, node) {
+    if (!c || c.clamped) {
+      if (global.FtthLab && typeof FtthLab.clearCleaverGuideLine === 'function') {
+        FtthLab.clearCleaverGuideLine();
+      }
+      return;
+    }
+    var groove = grooveWorldSegment(c);
+    var gy = grooveWorldY(c);
+    var blade = bladeWorldPos(c);
+    var tip = null;
+    if (global.FtthLab && typeof FtthLab.findPigtailBareTipNearWorld === 'function') {
+      tip = FtthLab.findPigtailBareTipNearWorld(blade.x, gy, CLEAVER_SNAP_PX);
+      if (!tip) {
+        var midX = (Math.min(groove.x1, groove.x2) + Math.max(groove.x1, groove.x2)) * 0.5;
+        tip = FtthLab.findPigtailBareTipNearWorld(midX, gy, CLEAVER_SNAP_PX);
+      }
+    }
+    if (tip) {
+      var snap = alignCleaverBladeToPoint(c, tip.x, tip.y);
+      updateCleaverPosition(c, node);
+      if (global.FtthLab && typeof FtthLab.snapPigtailToCleaverGroove === 'function') {
+        FtthLab.snapPigtailToCleaverGroove(tip.id, c.id, snap.snapX, snap.grooveY, { quiet: true });
+      } else if (global.FtthLab && typeof FtthLab.dockPigtailToCleaver === 'function') {
+        FtthLab.dockPigtailToCleaver(tip.id, c.id, snap.snapX, snap.grooveY, { quiet: true });
+      }
+      c.dockedPigtailId = tip.id;
+      if (global.FtthLab && typeof FtthLab.setCleaverGuideLine === 'function') {
+        FtthLab.setCleaverGuideLine(groove, true);
+      }
+      return;
+    }
+    if (c.dockedPigtailId) {
+      clearCleaverDockState(c);
+    }
+    if (global.FtthLab && typeof FtthLab.setCleaverGuideLine === 'function') {
+      FtthLab.setCleaverGuideLine(groove, false);
+    }
+  }
+
+  /**
+   * Point-to-line cleave on clamp — blade drop vs pigtail polyline (no snap required).
+   * Arm stays clamped whether or not a fiber is hit.
+   */
+  function tryPerformCleave(c) {
+    if (!c || !global.FtthLab || typeof FtthLab.commitPigtailCleaveAtBlade !== 'function') {
+      return false;
+    }
+    var blade = bladeDropPoint(c);
+    var ok = FtthLab.commitPigtailCleaveAtBlade(blade.x, blade.y, {
+      hitRadius: BLADE_HIT_RADIUS_PX,
+    });
+    if (ok) {
+      clearCleaverDockState(c);
+      setStatus('Fiber Cleaver · cleaved 90°');
+    }
+    return ok;
+  }
+
   function assemblyMarkup() {
     if (global.FiberCleaver && typeof FiberCleaver.assemblyMarkup === 'function') {
       return FiberCleaver.assemblyMarkup();
@@ -68,6 +292,10 @@
     if (!snap) return;
     historyLocked = true;
     cleavers = cloneJson(snap.cleavers) || [];
+    cleavers.forEach(function (c) {
+      if (!c) return;
+      c.dockedPigtailId = c.dockedPigtailId || null;
+    });
     seq = snap.seq || 0;
     selection = { kind: 'none', id: null };
     rebuildLayer();
@@ -153,6 +381,7 @@
       x: typeof x === 'number' ? Math.round(x) : 0,
       y: typeof y === 'number' ? Math.round(y) : 0,
       clamped: false,
+      dockedPigtailId: null,
     };
     cleavers.push(item);
     selection = { kind: 'cleaver', id: item.id };
@@ -167,6 +396,9 @@
   }
 
   function removeCleaver(id) {
+    if (global.FtthLab && typeof FtthLab.undockPigtailsFromCleaver === 'function') {
+      FtthLab.undockPigtailsFromCleaver(id);
+    }
     cleavers = cleavers.filter(function (c) { return c.id !== id; });
     if (selection.id === id) selection = { kind: 'none', id: null };
     rebuildLayer();
@@ -212,6 +444,7 @@
       c.x = Math.round(ox + dx);
       c.y = Math.round(oy + dy);
       updateCleaverPosition(c, node);
+      refreshCleaverFiberSnap(c, node);
     }
 
     function onUp(ev) {
@@ -225,11 +458,25 @@
       if (!moved) {
         var root = node.querySelector('[data-cleaver-root]') || node.querySelector('.fiber-cleaver');
         if (root && global.FiberCleaver && typeof FiberCleaver.toggleClamp === 'function') {
+          var wasOpen = !c.clamped;
           c.clamped = FiberCleaver.toggleClamp(root);
+          syncCleaverWidget(node, c);
+          if (c.clamped && wasOpen) {
+            if (!tryPerformCleave(c)) {
+              setStatus('Fiber Cleaver clamped');
+            }
+          } else {
+            setStatus(c.clamped ? 'Fiber Cleaver clamped' : 'Fiber Cleaver open');
+          }
           pushHistory();
-          setStatus(c.clamped ? 'Fiber Cleaver clamped' : 'Fiber Cleaver open');
         }
       } else {
+        if (c.dockedPigtailId && global.FtthLab &&
+            typeof FtthLab.finalizePigtailCleaverDock === 'function') {
+          FtthLab.finalizePigtailCleaverDock(c.dockedPigtailId);
+        } else if (global.FtthLab && typeof FtthLab.clearCleaverGuideLine === 'function') {
+          FtthLab.clearCleaverGuideLine();
+        }
         pushHistory();
       }
     }
@@ -447,6 +694,32 @@
     ensureLayer();
     rebuildLayer();
     pushHistory();
+    registerCleaverApis();
+  }
+
+  function registerCleaverApis() {
+    if (!global.FtthLab) return;
+    FtthLab.getCleaverGrooveWorld = function (id) {
+      return getCleaverGrooveWorld(findCleaver(id));
+    };
+    FtthLab.getCleaverGrooveY = function (id) {
+      var c = findCleaver(id);
+      return c ? grooveWorldY(c) : null;
+    };
+    FtthLab.listOpenCleaverGrooves = listOpenCleaverGrooves;
+    FtthLab.findCleaverGrooveNear = findCleaverGrooveNear;
+    FtthLab.alignCleaverToFiberTip = function (cleaverId, tipX, tipY) {
+      var c = findCleaver(cleaverId);
+      if (!c || c.clamped) return null;
+      var snap = alignCleaverBladeToPoint(c, tipX, tipY);
+      var node = layer && layer.querySelector('[data-cleaver-node="' + cleaverId + '"]');
+      updateCleaverPosition(c, node);
+      return snap;
+    };
+    FtthLab.setCleaverDockedPigtail = setCleaverDockedPigtail;
+    FtthLab.cleaverSnapRadiusPx = function () {
+      return CLEAVER_SNAP_PX;
+    };
   }
 
   var tool = {

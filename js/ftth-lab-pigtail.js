@@ -36,15 +36,22 @@
   var PIGTAIL_CATENARY_SLACK = 1.12;
   var SLEEVE_MOUNT_PROX_PX = 25;
   var SLEEVE_EJECT_PULL_PX = 14;
-  var STRIP_CLAMP_PROX_PX = 15;
+  var STRIP_CLAMP_PROX_PX = 6;
   /** Hard max distance from cutting notch to fiber centerline for clamp/strip. */
-  var STRIP_NOTCH_HIT_PX = 15;
+  var STRIP_NOTCH_HIT_PX = 6;
   /** Ephemeral peel animation scale (px dragged per full peel = 1). */
   var STRIP_PEEL_ANIM_PX = 18;
   /** Bare tip zone for cleaver V-groove alignment. */
   var CLEAVE_TIP_ZONE_PX = 52;
-  var CLEAVE_HIT_PX = 20;
+  var CLEAVE_HIT_PX = 8;
   var CLEAVE_WASTE_PX = 16;
+  var CLEAVE_MIN_CUT_PX = 2;
+  /** Perpendicular hit radius: blade drop point → pigtail polyline (cleaver cut). */
+  var BLADE_HIT_RADIUS_PX = 20;
+  /** Magnetic V-groove snap radius (Phase 1 — seating only). */
+  var CLEAVER_SNAP_PX = 36;
+  /** Pull distance before releasing a seated fiber from the cleaver groove. */
+  var CLEAVER_UNDOCK_PX = 18;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
   var ORTHO_FILLET_R = 16;
   var ORTHO_TURN_PX = 10;
@@ -329,7 +336,13 @@
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
       ensureFiberStrip(p);
+      clampStripFrontiersToPath(p);
       p.cleaved = !!p.cleaved;
+      p.isCleaved = !!(p.isCleaved || p.cleaved);
+      p.cleaved = p.isCleaved;
+      if (typeof p.cleaveAngle !== 'number') {
+        p.cleaveAngle = p.isCleaved ? 90 : 0;
+      }
       syncStripStageFromFiberStrip(p);
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
@@ -338,6 +351,11 @@
       else p.route = p.pathHistory.slice();
       p.routeMode = p.routeMode === 'gravity' ? 'gravity' : 'snake';
       p.snake = null;
+      p.isSnappedToCleaver = !!p.isSnappedToCleaver;
+      if (!p.isSnappedToCleaver || !p.snappedCleaverId) {
+        p.isSnappedToCleaver = false;
+        p.snappedCleaverId = null;
+      }
     });
     seq = snap.seq || 0;
     selection = { kind: 'none', id: null };
@@ -656,7 +674,58 @@
 
   function maxStripLenPx(p) {
     var pts = fiberSleevePathPoints(p);
-    return Math.max(0, polylineLength(pts) - 8);
+    return Math.max(0, polylineLength(pts));
+  }
+
+  var STRIP_TIP_EPS = 0.05;
+  /** When bareTo is within this many px of jacketTo, treat buffer as fully stripped. */
+  var STRIP_BUFFER_COMPLETE_PX = 1;
+
+  function isBareStripComplete(fs) {
+    if (!fs) return false;
+    var j = fs.jacketTo || 0;
+    var b = fs.bareTo || 0;
+    return j > STRIP_TIP_EPS && b >= j - STRIP_BUFFER_COMPLETE_PX;
+  }
+
+  function snapBareToJacket(fs) {
+    if (!fs) return;
+    fs.bareTo = fs.jacketTo || 0;
+  }
+
+  function snapBareIfComplete(fs) {
+    if (isBareStripComplete(fs)) {
+      snapBareToJacket(fs);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Keep strip frontiers valid against the live fiber polyline (tip-anchored arc-length).
+   * Call whenever geometry changes — extend, route, or cleave.
+   */
+  function clampStripFrontiersToPath(p) {
+    if (!p) return;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    var maxLen = maxStripLenPx(p);
+    if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
+    if (fs.jacketTo > maxLen) fs.jacketTo = maxLen;
+    if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    if (fs.bareTo > maxLen) fs.bareTo = maxLen;
+    syncStripStageFromFiberStrip(p);
+  }
+
+  /** Reconcile locked render length with measured sleeve-path arc length. */
+  function syncPigtailFiberLength(p) {
+    if (!p) return;
+    var pts = fiberSleevePathPoints(p);
+    var measured = polylineLength(pts);
+    if (isFinite(measured) && measured > 0) {
+      p.fixedLength = Math.max(40, measured);
+    }
+    clampStripFrontiersToPath(p);
   }
 
   function syncStripStageFromFiberStrip(p) {
@@ -665,10 +734,11 @@
     var fs = p.fiberStrip;
     var j = fs.jacketTo || 0;
     var b = fs.bareTo || 0;
-    if (j < 0.5) {
+    if (j < STRIP_TIP_EPS) {
       p.stripStage = 0;
-    } else if (b >= j - 0.5) {
+    } else if (b >= j - STRIP_BUFFER_COMPLETE_PX) {
       p.stripStage = 2;
+      snapBareToJacket(fs);
     } else {
       p.stripStage = 1;
     }
@@ -700,7 +770,7 @@
   function stripExposedKind(p) {
     ensureFiberStrip(p);
     var fs = p.fiberStrip;
-    if ((fs.bareTo || 0) >= (fs.jacketTo || 0) - 0.5 && (fs.jacketTo || 0) > 0.5) return 'bare';
+    if (isBareStripComplete(fs)) return 'bare';
     if ((fs.jacketTo || 0) > 0.5) return 'buffer';
     if ((fs.peel || 0) > 0.02) return 'buffer';
     return null;
@@ -808,6 +878,18 @@
     return pts;
   }
 
+  /** Map tip-anchored sleeve arc-length to the render polyline (includes boot segment). */
+  function stripArcOnRenderPath(p, sleeveDistFromTip) {
+    var d = Number(sleeveDistFromTip);
+    if (!isFinite(d) || d <= 0) return 0;
+    var sleevePts = fiberSleevePathPoints(p);
+    var renderPts = fiberRenderPathPoints(p);
+    var sleeveLen = polylineLength(sleevePts);
+    var renderLen = polylineLength(renderPts);
+    if (sleeveLen < STRIP_TIP_EPS) return 0;
+    return Math.min(renderLen, d * (renderLen / sleeveLen));
+  }
+
   function buildPigtailFiberSvg(p) {
     var fullPts = fiberRenderPathPoints(p);
     var fullPath = svgPathFromPoints(fullPts) || fiberPath(p);
@@ -815,8 +897,14 @@
     var sel = selection.id === p.id ? ' is-selected' : '';
     ensureFiberStrip(p);
     var fs = p.fiberStrip;
-    var jacketTo = fs.jacketTo || 0;
-    var bareTo = fs.bareTo || 0;
+    var jacketTo = Math.max(0, fs.jacketTo || 0);
+    var bareTo = Math.max(0, fs.bareTo || 0);
+    var bareComplete = isBareStripComplete(fs);
+    if (bareComplete) {
+      bareTo = jacketTo;
+    }
+    var jacketRender = stripArcOnRenderPath(p, jacketTo);
+    var bareRender = stripArcOnRenderPath(p, bareTo);
     var peel = fs.peel || 0;
     var peelLayer = fs.peelLayer;
     var total = polylineLength(fullPts);
@@ -833,9 +921,9 @@
       return peel > 0.02 && peelLayer === layerName ? ' is-strip-peeling' : '';
     }
 
-    if (jacketTo > 0.5 && total > jacketTo + 0.5) {
-      var dJacketEnd = Math.max(0, total - jacketTo);
-      var dBareEnd = Math.max(dJacketEnd, total - bareTo);
+    if (jacketRender > STRIP_TIP_EPS && total > jacketRender + STRIP_TIP_EPS) {
+      var dJacketEnd = Math.max(0, total - jacketRender);
+      var dBareEnd = Math.max(dJacketEnd, total - bareRender);
       var jacketPts = slicePolylineByDistance(fullPts, 0, dJacketEnd);
       var jacketD = svgPathFromPoints(jacketPts);
       html +=
@@ -844,26 +932,42 @@
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + jacketD +
         '" fill="none"' + peelStyle('jacket') + ' />';
 
-      if (bareTo > 0.5 && bareTo < jacketTo - 0.5) {
+      var bufferGap = jacketRender - bareRender;
+      var bufferSplit = !bareComplete &&
+        bareRender > STRIP_TIP_EPS &&
+        bufferGap >= STRIP_BUFFER_COMPLETE_PX;
+      if (bufferSplit) {
         var bufferPts = slicePolylineByDistance(fullPts, dJacketEnd, dBareEnd);
-        var barePts = slicePolylineByDistance(fullPts, dBareEnd, total);
-        html +=
-          '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' +
-          (bad ? ' is-mismatch' : '') + peelClass('buffer') +
-          '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="buffer" d="' +
-          svgPathFromPoints(bufferPts) + '" fill="none"' + peelStyle('buffer') + ' />' +
-          '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare' +
-          (bad ? ' is-mismatch' : '') + peelClass('bare') +
-          '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
-          svgPathFromPoints(barePts) + '" fill="none"' + peelStyle('bare') + ' />';
-      } else {
+        var bufferLen = polylineLength(bufferPts);
+        if (bufferLen < STRIP_BUFFER_COMPLETE_PX) {
+          bufferSplit = false;
+        } else {
+          var barePts = slicePolylineByDistance(fullPts, dBareEnd, total);
+          html +=
+            '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' +
+            (bad ? ' is-mismatch' : '') + peelClass('buffer') +
+            '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="buffer" d="' +
+            svgPathFromPoints(bufferPts) + '" fill="none"' + peelStyle('buffer') + ' />' +
+            '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+            (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
+            (bad ? ' is-mismatch' : '') + peelClass('bare') +
+            '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
+            svgPathFromPoints(barePts) + '" fill="none"' + peelStyle('bare') + ' />';
+        }
+      }
+      if (!bufferSplit) {
         var tipPts = slicePolylineByDistance(fullPts, dJacketEnd, total);
-        var tipKind = stripExposedKind(p) || 'buffer';
+        var tipBare = bareComplete || (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX &&
+          jacketRender > STRIP_TIP_EPS);
+        var tipKind = tipBare ? 'bare' : (stripExposedKind(p) || 'buffer');
         html +=
           '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + tipKind +
-          (bad ? ' is-mismatch' : '') + peelClass('buffer') +
-          '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="stripped" d="' +
-          svgPathFromPoints(tipPts) + '" fill="none"' + peelStyle('buffer') + ' />';
+          (tipBare ? ' lab-pigtail-fiber--bare-tip' : '') +
+          (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
+          (bad ? ' is-mismatch' : '') + peelClass(tipBare ? 'bare' : 'buffer') +
+          '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="' +
+          (tipBare ? 'bare' : 'stripped') + '" d="' +
+          svgPathFromPoints(tipPts) + '" fill="none"' + peelStyle(tipBare ? 'bare' : 'buffer') + ' />';
       }
     } else {
       html +=
@@ -910,6 +1014,209 @@
 
   function clearStripGuideLine() {
     setStripGuideLine(null);
+  }
+
+  function setCleaverGuideLine(guide, seated) {
+    var host = ensureLayer();
+    if (!host) return;
+    var svg = host.querySelector('.lab-pigtail-svg');
+    if (!svg) return;
+    var el = svg.querySelector('[data-pt-cleaver-guide="1"]');
+    if (!guide || guide.x1 == null || guide.y1 == null || guide.x2 == null || guide.y2 == null) {
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+      return;
+    }
+    var d =
+      'M ' + Number(guide.x1) + ' ' + Number(guide.y1) +
+      ' L ' + Number(guide.x2) + ' ' + Number(guide.y2);
+    if (!el) {
+      el = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      el.setAttribute('data-pt-cleaver-guide', '1');
+      el.setAttribute('fill', 'none');
+      svg.appendChild(el);
+    }
+    el.setAttribute(
+      'class',
+      'lab-pigtail-cleaver-guide' + (seated ? ' is-seated' : ' is-approach')
+    );
+    el.setAttribute('d', d);
+  }
+
+  function clearCleaverGuideLine() {
+    setCleaverGuideLine(null, false);
+  }
+
+  function updateCleaverSnapVisual(p) {
+    if (!layer || !p) return;
+    var btn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
+    if (btn) btn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
+  }
+
+  function clearCleaverSnap(p, opts) {
+    opts = opts || {};
+    if (!p) return;
+    var cleaverId = p.snappedCleaverId;
+    p.isSnappedToCleaver = false;
+    p.snappedCleaverId = null;
+    if (cleaverId && global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
+      FtthLab.setCleaverDockedPigtail(cleaverId, null);
+    }
+    updateCleaverSnapVisual(p);
+    if (!opts.skipGuide) clearCleaverGuideLine();
+  }
+
+  /**
+   * Lock bare tip on groove centerline: exact groove Y + 0° horizontal rotation.
+   */
+  function lockTipInCleaverGroove(p, cleaverId, snapX, grooveY) {
+    p.bx = Math.round(snapX);
+    p.by = Math.round(grooveY);
+    if (usesOrthoRoute(p)) {
+      ensurePathHistory(p);
+      var hist = p.pathHistory;
+      var inlandX = snapX - Math.max(ORTHO_MIN_SEG, 16);
+      if (!hist.length) {
+        hist.push({ x: inlandX, y: grooveY });
+      } else {
+        var last = hist[hist.length - 1];
+        if (Math.abs(last.y - grooveY) > 0.5) {
+          hist.push({ x: last.x, y: grooveY });
+        }
+        last = hist[hist.length - 1];
+        if (Math.abs(last.x - snapX) < ORTHO_MIN_SEG) {
+          hist[hist.length - 1] = { x: inlandX, y: grooveY };
+        }
+      }
+      p.pathHistory = hist;
+      syncPathAlias(p);
+      if (p.snake) {
+        p.snake.axis = 'h';
+        p.snake.ghost = null;
+      }
+    }
+    p.isSnappedToCleaver = true;
+    p.snappedCleaverId = cleaverId;
+  }
+
+  function snapPigtailToCleaverGroove(p, cleaverId, snapX, grooveY, opts) {
+    opts = opts || {};
+    if (!p || p.cleaved || p.isCleaved) return false;
+    if ((Number(p.stripStage) || 0) < 2) return false;
+    if (p.tail && p.tail.attached) return false;
+    lockTipInCleaverGroove(p, cleaverId, snapX, grooveY);
+    if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
+      FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
+    }
+    if (global.FtthLab && typeof FtthLab.getCleaverGrooveWorld === 'function') {
+      var info = FtthLab.getCleaverGrooveWorld(cleaverId);
+      if (info && info.groove) setCleaverGuideLine(info.groove, true);
+    }
+    updateCleaverSnapVisual(p);
+    if (!opts.quiet) {
+      setStatus('SC Pigtail · fiber magnetically seated in cleaver V-groove');
+    }
+    return true;
+  }
+
+  function findCleaverGrooveSnapForTip(p, tipX, tipY) {
+    if (!global.FtthLab || typeof FtthLab.findCleaverGrooveNear !== 'function') return null;
+    if (!p || p.cleaved || p.isCleaved) return null;
+    if ((Number(p.stripStage) || 0) < 2) return null;
+    if (p.tail && p.tail.attached) return null;
+    return FtthLab.findCleaverGrooveNear(tipX, tipY, CLEAVER_SNAP_PX);
+  }
+
+  /**
+   * Magnetic snap while dragging bare tip (End B) near an open cleaver groove.
+   */
+  function applyCleaverSnapDuringTailDrag(p, worldX, worldY) {
+    if (!p || p.cleaved || p.isCleaved) return false;
+    if ((Number(p.stripStage) || 0) < 2) return false;
+    if (p.tail && p.tail.attached) return false;
+
+    if (p.isSnappedToCleaver && p.snappedCleaverId) {
+      var info = global.FtthLab && typeof FtthLab.getCleaverGrooveWorld === 'function'
+        ? FtthLab.getCleaverGrooveWorld(p.snappedCleaverId)
+        : null;
+      if (!info || !info.open) {
+        clearCleaverSnap(p);
+        return false;
+      }
+      var pull = dist2(worldX, worldY, p.bx, p.by);
+      if (pull > CLEAVER_UNDOCK_PX) {
+        clearCleaverSnap(p);
+        setStatus('SC Pigtail · released from cleaver groove');
+        return false;
+      }
+      var gx1 = Math.min(info.groove.x1, info.groove.x2);
+      var gx2 = Math.max(info.groove.x1, info.groove.x2);
+      var grooveY = typeof info.grooveY === 'number' ? info.grooveY : info.groove.y1;
+      var snapX = Math.max(gx1, Math.min(gx2, worldX));
+      lockTipInCleaverGroove(p, p.snappedCleaverId, snapX, grooveY);
+      setCleaverGuideLine(info.groove, true);
+      return true;
+    }
+
+    var snap = findCleaverGrooveSnapForTip(p, p.bx, p.by);
+    if (!snap) {
+      clearCleaverGuideLine();
+      return false;
+    }
+    if (snap.dist <= CLEAVER_SNAP_PX) {
+      var gy = typeof snap.grooveY === 'number' ? snap.grooveY : snap.snapY;
+      snapPigtailToCleaverGroove(p, snap.cleaverId, snap.snapX, gy, { quiet: true });
+      setCleaverGuideLine(snap.groove, true);
+      return true;
+    }
+    setCleaverGuideLine(snap.groove, false);
+    return false;
+  }
+
+  /** Bare stripped tip probe for cleaver secondary snap. */
+  function findBareTipNearWorld(wx, wy, radiusPx) {
+    var thr = typeof radiusPx === 'number' ? radiusPx : CLEAVER_SNAP_PX;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p || p.cleaved || p.isCleaved) continue;
+      if ((Number(p.stripStage) || 0) < 2) continue;
+      if (p.tail && p.tail.attached) continue;
+      var d = dist2(wx, wy, p.bx, p.by);
+      if (d <= thr && d < bestD) {
+        bestD = d;
+        best = { id: p.id, x: p.bx, y: p.by, dist: d };
+      }
+    }
+    return best;
+  }
+
+  function undockPigtailsFromCleaver(cleaverId) {
+    var changed = false;
+    pigtails.forEach(function (p) {
+      if (p.isSnappedToCleaver && p.snappedCleaverId === cleaverId) {
+        clearCleaverSnap(p, { skipGuide: true });
+        changed = true;
+      }
+    });
+    if (changed) clearCleaverGuideLine();
+    if (changed) rebuildLayer();
+  }
+
+  function finalizePigtailCleaverDock(pigtailId) {
+    var p = findPigtail(pigtailId);
+    if (!p || !p.isSnappedToCleaver || !p.snappedCleaverId) {
+      clearCleaverGuideLine();
+      return;
+    }
+    var info = global.FtthLab && typeof FtthLab.getCleaverGrooveWorld === 'function'
+      ? FtthLab.getCleaverGrooveWorld(p.snappedCleaverId)
+      : null;
+    if (info && info.groove) setCleaverGuideLine(info.groove, true);
+    updateFiberPath(p);
+    pushHistory();
+    setStatus('SC Pigtail · fiber magnetically seated in cleaver V-groove');
   }
 
   /**
@@ -995,26 +1302,29 @@
     thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
     if (!p) return null;
     ensureFiberStrip(p);
+    clampStripFrontiersToPath(p);
     var fs = p.fiberStrip;
-    if ((fs.bareTo || 0) >= (fs.jacketTo || 0) - 0.5 && (fs.jacketTo || 0) > 0.5) return null;
 
     var pts = fiberSleevePathPoints(p);
     if (!pts || pts.length < 2) return null;
     var total = polylineLength(pts);
-    var minRemain = 8;
     var jacketTo = fs.jacketTo || 0;
     var bareTo = fs.bareTo || 0;
+    var maxStrip = total;
+    var hasJacketRemain = jacketTo < maxStrip - STRIP_TIP_EPS;
+    var hasBufferRemain = jacketTo > STRIP_TIP_EPS && bareTo < jacketTo - STRIP_BUFFER_COMPLETE_PX;
+    if (!hasJacketRemain && !hasBufferRemain) return null;
 
     var proj = projectOntoFiberStrict(pts, wx, wy);
     if (!proj || !proj.onSegment) return null;
     if (proj.perpDist > thr) return null;
     if (proj.dist < -0.01) return null;
 
-    if (proj.dist >= jacketTo - 0.5 && proj.dist <= total - minRemain) {
+    if (hasJacketRemain && proj.dist >= jacketTo - STRIP_TIP_EPS && proj.dist <= maxStrip + STRIP_TIP_EPS) {
       return stripHitFromProj(p, pts, proj, 0, 'jacket', thr);
     }
 
-    if (jacketTo > 1 && proj.dist >= bareTo - 0.5 && proj.dist < jacketTo - 0.5) {
+    if (hasBufferRemain && proj.dist >= bareTo - STRIP_TIP_EPS && proj.dist < jacketTo - STRIP_BUFFER_COMPLETE_PX) {
       return stripHitFromProj(p, pts, proj, 1, 'buffer', thr);
     }
 
@@ -1042,38 +1352,110 @@
   }
 
   /**
+   * Arc-length from tip for an active peel — clamps to tip (0) when dragged past the end.
+   */
+  function peelAlongDistForSession(pts, wx, wy, session) {
+    if (!pts || !session) return 0;
+    var proj = projectOntoFiberStrict(pts, wx, wy);
+    if (!proj) return 0;
+    var along = Math.max(0, proj.dist);
+    if (!isFinite(along)) along = 0;
+    if (along <= STRIP_TIP_EPS) return 0;
+    if (!proj.onSegment && along < (session.startAlong || 0) + 2) {
+      return along;
+    }
+    if (along > session.startAlong + STRIP_TIP_EPS) {
+      along = session.startAlong;
+    }
+    return along;
+  }
+
+  function peelAcceptsNotch(proj, session) {
+    if (!proj || !session) return false;
+    if (proj.perpDist <= STRIP_NOTCH_HIT_PX + 2) return true;
+    if (proj.dist <= Math.max(3, (session.startAlong || 0) * 0.2)) return true;
+    return false;
+  }
+
+  /**
+   * Commit the full clamped segment when the peel session ends or the tool passes the tip.
+   */
+  function commitStripPeelSession(id, layerKind, session) {
+    var p = findPigtail(id);
+    if (!p || !session) return;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    var maxLen = maxStripLenPx(p);
+    var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
+    if (layerKind === 'jacket') {
+      fs.jacketTo = Math.min(maxLen, Math.max(fs.jacketTo || 0, clampAlong));
+      if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    } else if (layerKind === 'buffer') {
+      var cap = Math.min(fs.jacketTo || 0, clampAlong);
+      fs.bareTo = Math.min(fs.jacketTo || 0, Math.max(fs.bareTo || 0, cap));
+      snapBareToJacket(fs);
+    }
+    fs.peel = 0;
+    fs.peelLayer = null;
+    syncStripStageFromFiberStrip(p);
+    updateStripVisuals(p);
+  }
+
+  /**
    * Apply a clamp-and-drag strip from the cutting-notch world position.
-   * Stripped length grows tip-ward as proj.dist decreases from session.startAlong.
+   * Frontier = session.startAlong − notchAlong (arc-length from tip); completes at clamp point.
    */
   function applyStripDragFromNotch(id, wx, wy, layerKind, session) {
     var p = findPigtail(id);
     if (!p || !session) return null;
     ensureFiberStrip(p);
+    clampStripFrontiersToPath(p);
     var fs = p.fiberStrip;
-    if (layerKind === 'buffer' && (fs.jacketTo || 0) < 0.5) return null;
-    if ((Number(p.stripStage) || 0) >= 2 && layerKind === 'buffer') return null;
+    if (layerKind === 'buffer' && (fs.jacketTo || 0) < STRIP_TIP_EPS) return null;
 
     var pts = fiberSleevePathPoints(p);
     if (!pts || pts.length < 2) return null;
+
+    var along = peelAlongDistForSession(pts, wx, wy, session);
     var proj = projectOntoFiberStrict(pts, wx, wy);
-    if (!proj || !proj.onSegment || proj.perpDist > STRIP_NOTCH_HIT_PX + 0.01) return null;
+    if (!proj || !peelAcceptsNotch(proj, session)) {
+      if (along <= STRIP_TIP_EPS) {
+        commitStripPeelSession(id, layerKind, session);
+        proj = projectOntoFiberStrict(pts, pts[0].x, pts[0].y);
+        return {
+          ok: true,
+          proj: proj,
+          peeled: session.startAlong,
+          jacketTo: fs.jacketTo,
+          bareTo: fs.bareTo,
+          peelUx: peelDirsFromPath(pts).peelUx,
+          peelUy: peelDirsFromPath(pts).peelUy,
+          completed: true,
+        };
+      }
+      return null;
+    }
 
     var maxLen = maxStripLenPx(p);
-    var peeled = Math.max(0, session.startAlong - proj.dist);
+    var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
+    var targetFrontier = Math.max(0, clampAlong - along);
+    var peeled = clampAlong - targetFrontier;
     var animPx = layerKind === 'buffer' ? STRIP_PEEL_ANIM_PX * 0.85 : STRIP_PEEL_ANIM_PX;
 
     if (layerKind === 'jacket') {
-      var newJacket = Math.min(maxLen, session.baseJacketTo + peeled);
-      if (newJacket + 0.01 < fs.jacketTo) return null;
-      fs.jacketTo = Math.max(fs.jacketTo, newJacket);
+      var newJacket = Math.min(maxLen, Math.max(fs.jacketTo || 0, targetFrontier));
+      if (newJacket + STRIP_TIP_EPS < fs.jacketTo) return null;
+      fs.jacketTo = newJacket;
       if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
       fs.peelLayer = 'jacket';
       fs.peel = Math.min(1, peeled / animPx);
     } else if (layerKind === 'buffer') {
-      if (proj.dist >= fs.jacketTo - 0.5) return null;
-      var newBare = Math.min(fs.jacketTo, session.baseBareTo + peeled);
-      if (newBare + 0.01 < fs.bareTo) return null;
-      fs.bareTo = Math.max(fs.bareTo, newBare);
+      var newBare = Math.min(fs.jacketTo || 0, Math.max(fs.bareTo || 0, targetFrontier));
+      if (newBare + STRIP_TIP_EPS < fs.bareTo) return null;
+      fs.bareTo = newBare;
+      if (along <= STRIP_TIP_EPS || isBareStripComplete(fs)) {
+        snapBareToJacket(fs);
+      }
       fs.peelLayer = 'buffer';
       fs.peel = Math.min(1, peeled / animPx);
     } else {
@@ -1090,6 +1472,7 @@
       bareTo: fs.bareTo,
       peelUx: peelDirsFromPath(pts).peelUx,
       peelUy: peelDirsFromPath(pts).peelUy,
+      completed: along <= STRIP_TIP_EPS,
     };
   }
 
@@ -1119,7 +1502,170 @@
   }
 
   /**
-   * Cleaver V-groove probe: bare stripped tip near (wx, wy).
+   * Intersect a polyline with vertical line x = cutX; pick crossing nearest nearY.
+   */
+  function intersectPolylineWithVertical(pts, cutX, nearY) {
+    if (!pts || pts.length < 2) return null;
+    var best = null;
+    var bestDy = Infinity;
+    var i;
+    for (i = 0; i < pts.length - 1; i++) {
+      var ax = pts[i].x;
+      var ay = pts[i].y;
+      var bx = pts[i + 1].x;
+      var by = pts[i + 1].y;
+      var minx = Math.min(ax, bx) - 0.5;
+      var maxx = Math.max(ax, bx) + 0.5;
+      if (cutX < minx || cutX > maxx) continue;
+      var y;
+      var t = 0;
+      if (Math.abs(bx - ax) < 0.001) {
+        if (Math.abs(ax - cutX) > 0.5) continue;
+        y = ay;
+      } else {
+        t = (cutX - ax) / (bx - ax);
+        if (t < -0.001 || t > 1.001) continue;
+        y = ay + t * (by - ay);
+      }
+      var dy = Math.abs(y - nearY);
+      if (dy < bestDy) {
+        bestDy = dy;
+        best = { x: cutX, y: y, segIndex: i, t: t };
+      }
+    }
+    return best;
+  }
+
+  function trimOrthoPathAtCut(p, fullPts, cut) {
+    if (!p || !fullPts || !cut) return;
+    var newHist = [];
+    var i;
+    for (i = 1; i <= cut.segIndex; i++) {
+      newHist.push({ x: fullPts[i].x, y: fullPts[i].y });
+    }
+    var cutPt = { x: cut.x, y: cut.y };
+    if (!newHist.length) {
+      p.pathHistory = [];
+    } else {
+      var last = newHist[newHist.length - 1];
+      if (dist2(last.x, last.y, cutPt.x, cutPt.y) >= ORTHO_MIN_SEG) {
+        newHist.push(cutPt);
+      } else {
+        newHist[newHist.length - 1] = cutPt;
+      }
+      p.pathHistory = newHist;
+    }
+    syncPathAlias(p);
+    if (p.snake) {
+      p.snake.axis = 'h';
+      p.snake.ghost = null;
+    }
+  }
+
+  /**
+   * Truncate visible fiber at blade X — discard the tip-side (right) excess.
+   */
+  function truncateFiberAtBladeX(p, bladeX, bladeY) {
+    if (!p) return null;
+    var cutPt;
+    if (usesOrthoRoute(p)) {
+      var full = orthoPolyline(p);
+      var cut = intersectPolylineWithVertical(full, bladeX, bladeY);
+      if (cut) {
+        cutPt = { x: cut.x, y: cut.y };
+        trimOrthoPathAtCut(p, full, cut);
+      } else {
+        var sleevePts = fiberSleevePathPoints(p);
+        var proj = projectOntoFiberStrict(sleevePts, bladeX, bladeY);
+        cutPt = { x: bladeX, y: proj.y };
+        trimOrthoPathAtCut(p, full, {
+          x: cutPt.x,
+          y: cutPt.y,
+          segIndex: Math.max(0, full.length - 2),
+          t: 1,
+        });
+      }
+    } else {
+      var pts = fiberSleevePathPoints(p);
+      var proj2 = projectOntoFiberStrict(pts, bladeX, bladeY);
+      cutPt = { x: bladeX, y: proj2.y };
+    }
+    p.bx = Math.round(cutPt.x);
+    p.by = Math.round(cutPt.y);
+    return cutPt;
+  }
+
+  /**
+   * Point-to-line hit test: perpendicular distance from blade drop to pigtail polyline.
+   * Requires fully stripped bare glass (stripStage === 2).
+   */
+  function findPigtailBladeHit(bladeX, bladeY, hitRadiusPx) {
+    var thr = typeof hitRadiusPx === 'number' ? hitRadiusPx : BLADE_HIT_RADIUS_PX;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p || p.cleaved || p.isCleaved) continue;
+      if ((Number(p.stripStage) || 0) !== 2) continue;
+      if (p.tail && p.tail.attached) continue;
+      var pts = fiberSleevePathPoints(p);
+      if (!pts || pts.length < 2) continue;
+      var proj = projectOntoFiberStrict(pts, bladeX, bladeY);
+      if (!proj || proj.perpDist > thr) continue;
+      if (proj.perpDist < bestD) {
+        bestD = proj.perpDist;
+        best = {
+          id: p.id,
+          x: proj.x,
+          y: proj.y,
+          rot: proj.rot,
+          perpDist: proj.perpDist,
+          along: proj.dist,
+        };
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Distance-based cleave at blade drop — ignores magnetic snap / groove docking.
+   */
+  function commitCleaveAtBlade(bladeX, bladeY, opts) {
+    opts = opts || {};
+    var radius = typeof opts.hitRadius === 'number' ? opts.hitRadius : BLADE_HIT_RADIUS_PX;
+    var hit = findPigtailBladeHit(bladeX, bladeY, radius);
+    if (!hit) return false;
+    var p = findPigtail(hit.id);
+    if (!p) return false;
+    var pts = fiberSleevePathPoints(p);
+    if (!pts || pts.length < 2) return false;
+    if (hit.along < CLEAVE_MIN_CUT_PX) return false;
+    if (polylineLength(pts) < hit.along + 6) return false;
+
+    truncateFiberAtBladeX(p, bladeX, bladeY);
+    ensureFiberStrip(p);
+    clampStripFrontiersToPath(p);
+    p.isCleaved = true;
+    p.cleaved = true;
+    p.cleaveAngle = 90;
+    p.cleaveFaceRot = 90;
+    clearCleaverSnap(p, { skipGuide: true });
+    clearCleaverGuideLine();
+    updateFiberPath(p);
+    rebuildLayer();
+    pushHistory();
+    updateInspector();
+    refreshBudget();
+    setStatus('SC Pigtail · fiber cleaved · perpendicular end face');
+    if (global.FtthLab && typeof FtthLab.showToast === 'function') {
+      FtthLab.showToast('تم القص 90°');
+    }
+    return true;
+  }
+
+  /**
+   * Cleaver V-groove probe: bare stripped tip seated on groove under blade.
    */
   function findCleavTargetAtWorld(wx, wy, thresholdPx) {
     var thr = typeof thresholdPx === 'number' ? thresholdPx : CLEAVE_HIT_PX;
@@ -1129,7 +1675,7 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (!p || p.cleaved) continue;
+      if (!p || p.cleaved || p.isCleaved) continue;
       if ((Number(p.stripStage) || 0) < 2) continue;
       if (p.tail && p.tail.attached) continue;
       var pts = fiberSleevePathPoints(p);
@@ -1146,6 +1692,7 @@
           y: proj.y,
           rot: proj.rot,
           perpDist: proj.perpDist,
+          along: proj.dist,
           wastePx: CLEAVE_WASTE_PX,
         };
       }
@@ -1153,30 +1700,62 @@
     return best;
   }
 
-  /** Commit a precision cleave — removes waste stub, marks 90° end face. */
+  /**
+   * Groove + blade alignment — fiber must lie on the horizontal channel under the blade.
+   */
+  function findCleavTargetInGroove(groove, blade, thresholdPx) {
+    if (!groove || !blade) return null;
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : CLEAVE_HIT_PX;
+    thr = Math.min(thr, CLEAVE_HIT_PX);
+    var gx1 = Math.min(groove.x1, groove.x2);
+    var gx2 = Math.max(groove.x1, groove.x2);
+    var gy = (groove.y1 + groove.y2) * 0.5;
+    if (Math.abs(blade.y - gy) > thr) return null;
+    if (blade.x < gx1 - thr || blade.x > gx2 + thr) return null;
+    var hit = findCleavTargetAtWorld(blade.x, blade.y, thr);
+    if (!hit) return null;
+    if (hit.x < gx1 - thr || hit.x > gx2 + thr) return null;
+    if (Math.abs(hit.y - gy) > thr) return null;
+    return hit;
+  }
+
+  /** Commit a precision cleave — slice at blade point, flat 90° end face. */
   function commitCleave(id, opts) {
     opts = opts || {};
     var p = findPigtail(id);
-    if (!p || p.cleaved) return false;
+    if (!p || p.cleaved || p.isCleaved) return false;
     if ((Number(p.stripStage) || 0) < 2) return false;
-    var wastePx = typeof opts.wastePx === 'number' ? opts.wastePx : CLEAVE_WASTE_PX;
     var pts = fiberSleevePathPoints(p);
+    if (!pts || pts.length < 2) return false;
     var total = polylineLength(pts);
-    if (total < wastePx + 6) return false;
-    var newTip = pointAtPathDistance(pts, wastePx);
+    var cutDist;
+    if (typeof opts.cutX === 'number' && typeof opts.cutY === 'number') {
+      var proj = projectOntoFiberStrict(pts, opts.cutX, opts.cutY);
+      if (!proj || !proj.onSegment) return false;
+      if (proj.perpDist > CLEAVE_HIT_PX) return false;
+      if (proj.dist > CLEAVE_TIP_ZONE_PX) return false;
+      cutDist = proj.dist;
+    } else {
+      cutDist = typeof opts.wastePx === 'number' ? opts.wastePx : CLEAVE_WASTE_PX;
+    }
+    if (cutDist < CLEAVE_MIN_CUT_PX) return false;
+    if (total < cutDist + 6) return false;
+    var newTip = pointAtPathDistance(pts, cutDist);
     p.bx = newTip.x;
     p.by = newTip.y;
+    p.isCleaved = true;
     p.cleaved = true;
-    if (typeof opts.cleaveFaceRot === 'number') p.cleaveFaceRot = opts.cleaveFaceRot;
-    if (typeof p.fixedLength === 'number') {
-      p.fixedLength = Math.max(24, p.fixedLength - wastePx);
-    }
+    p.cleaveAngle = typeof opts.cleaveAngle === 'number' ? opts.cleaveAngle : 90;
+    p.cleaveFaceRot = typeof opts.cleaveFaceRot === 'number' ? opts.cleaveFaceRot : p.cleaveAngle;
     updateFiberPath(p);
     rebuildLayer();
     pushHistory();
     updateInspector();
     refreshBudget();
     setStatus('SC Pigtail · fiber cleaved · perpendicular end face');
+    if (global.FtthLab && typeof FtthLab.showToast === 'function') {
+      FtthLab.showToast('تم القص 90°');
+    }
     return true;
   }
 
@@ -1197,7 +1776,7 @@
     var p = findPigtail(id);
     if (!p) return;
     ensureFiberStrip(p);
-    if ((Number(p.stripStage) || 0) >= 2) return;
+    clampStripFrontiersToPath(p);
     var n = Number(px);
     if (!isFinite(n) || n < 0) n = 0;
     n = Math.min(n, maxStripLenPx(p));
@@ -1241,37 +1820,47 @@
     return true;
   }
 
+  function syncTailStripDom(p, tail) {
+    if (!p || !tail) return;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    var peel = fs.peel || 0;
+    var peelLayer = fs.peelLayer;
+    var j = fs.jacketTo || 0;
+    var bareComplete = isBareStripComplete(fs);
+    var jacketStripped = j > STRIP_TIP_EPS;
+    var stage = p.stripStage || 0;
+
+    tail.classList.toggle('is-strip-peeling', peel > 0.02);
+    tail.style.setProperty('--strip-peel', peel.toFixed(3));
+    tail.classList.toggle('is-strip-stage1', jacketStripped);
+    tail.classList.toggle('is-strip-stage2', bareComplete);
+
+    var jacketEl = tail.querySelector('.lab-pigtail__jacket');
+    var bufferEl = tail.querySelector('.lab-pigtail__buffer');
+    var cleaveEl = tail.querySelector('.lab-pigtail__cleave');
+    if (jacketEl) {
+      jacketEl.classList.toggle('is-strip-removed', jacketStripped);
+      jacketEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'jacket');
+    }
+    if (bufferEl) {
+      bufferEl.classList.toggle('is-strip-exposed', jacketStripped && !bareComplete);
+      bufferEl.classList.toggle('is-strip-jacketed', !jacketStripped);
+      bufferEl.classList.toggle('is-strip-removed', bareComplete);
+      bufferEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'buffer');
+    }
+    if (cleaveEl) {
+      cleaveEl.classList.toggle('is-strip-bare', bareComplete);
+      cleaveEl.classList.toggle('is-strip-buffered', jacketStripped && !bareComplete);
+    }
+  }
+
   function updateStripVisuals(p) {
     if (!layer || !p) return;
     ensureFiberStrip(p);
     replacePigtailFiberSvg(p);
-    var peel = p.fiberStrip.peel || 0;
-    var peelLayer = p.fiberStrip.peelLayer;
     var tail = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
-    if (tail) {
-      tail.classList.toggle('is-strip-peeling', peel > 0.02);
-      tail.style.setProperty('--strip-peel', peel.toFixed(3));
-      var stage = p.stripStage || 0;
-      tail.classList.toggle('is-strip-stage1', stage >= 1);
-      tail.classList.toggle('is-strip-stage2', stage >= 2);
-      var jacketEl = tail.querySelector('.lab-pigtail__jacket');
-      var bufferEl = tail.querySelector('.lab-pigtail__buffer');
-      var cleaveEl = tail.querySelector('.lab-pigtail__cleave');
-      if (jacketEl) {
-        jacketEl.classList.toggle('is-strip-removed', stage >= 1);
-        jacketEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'jacket');
-      }
-      if (bufferEl) {
-        bufferEl.classList.toggle('is-strip-exposed', stage >= 1);
-        bufferEl.classList.toggle('is-strip-jacketed', stage < 1);
-        bufferEl.classList.toggle('is-strip-removed', stage >= 2);
-        bufferEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'buffer');
-      }
-      if (cleaveEl) {
-        cleaveEl.classList.toggle('is-strip-bare', stage >= 2);
-        cleaveEl.classList.toggle('is-strip-buffered', stage === 1);
-      }
-    }
+    syncTailStripDom(p, tail);
   }
 
   function replacePigtailFiberSvg(p) {
@@ -1513,6 +2102,8 @@
       stripLengthPx: 0,
       fiberStrip: { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null },
       drawLockRot: horizRot,
+      isSnappedToCleaver: false,
+      snappedCleaverId: null,
     };
     pigtails.push(item);
     selectPigtail(item.id);
@@ -2483,6 +3074,7 @@
       len += dist2(poly[i - 1].x, poly[i - 1].y, poly[i].x, poly[i].y);
     }
     p.fixedLength = Math.max(40, len);
+    clampStripFrontiersToPath(p);
   }
 
   function usesOrthoRoute(p) {
@@ -2582,7 +3174,9 @@
 
   function tailStyle(p) {
     var rot;
-    if (usesOrthoRoute(p)) {
+    if (p.isSnappedToCleaver) {
+      rot = 0;
+    } else if (usesOrthoRoute(p)) {
       var pts = orthoPolyline(p);
       if (pts.length >= 2) {
         var a = pts[pts.length - 2];
@@ -2619,6 +3213,7 @@
     var host = ensureLayer();
     if (!host) return;
     pigtails.forEach(syncAttached);
+    pigtails.forEach(syncPigtailFiberLength);
 
     var html =
       '<svg class="lab-pigtail-svg" aria-hidden="true">' +
@@ -2634,7 +3229,14 @@
 
     pigtails.forEach(function (p) {
       var selected = selection.id === p.id ? ' is-selected' : '';
+      ensureFiberStrip(p);
+      var fs = p.fiberStrip;
+      var j = fs.jacketTo || 0;
+      var bareComplete = isBareStripComplete(fs);
+      var jacketStripped = j > STRIP_TIP_EPS;
       var stripStage = p.stripStage || 0;
+      var peel = fs.peel || 0;
+      var peelLayer = fs.peelLayer;
       html +=
         '<div class="lab-pigtail' + selected + '" data-pt-node="' + p.id + '">' +
         '<button type="button" class="lab-pigtail__conn lab-pcord__end ' +
@@ -2651,25 +3253,26 @@
         '</button>' +
         '<button type="button" class="lab-pigtail__tail' +
         (p.tail.attached ? ' is-attached' : '') +
-        (stripStage >= 1 ? ' is-strip-stage1' : '') +
-        (stripStage >= 2 ? ' is-strip-stage2' : '') +
-        ((p.stripPeel || 0) > 0 ? ' is-strip-peeling' : '') +
+        (p.isSnappedToCleaver ? ' is-cleaver-docked' : '') +
+        (jacketStripped ? ' is-strip-stage1' : '') +
+        (bareComplete ? ' is-strip-stage2' : '') +
+        (peel > 0.02 ? ' is-strip-peeling' : '') +
         '" data-pt-id="' + p.id + '" data-pt-end="B" style="' + tailStyle(p) +
-        ';--strip-peel:' + (p.stripPeel || 0).toFixed(3) + ';" ' +
+        ';--strip-peel:' + peel.toFixed(3) + ';" ' +
         'title="Bare fiber · ' + stripStageLabel(stripStage) + '" aria-label="Bare fiber tail">' +
         '<span class="lab-pigtail__jacket' +
-        (stripStage >= 1 ? ' is-strip-removed' : '') +
-        ((p.stripPeel || 0) > 0 && stripStage === 0 ? ' is-strip-peeling' : '') +
+        (jacketStripped ? ' is-strip-removed' : '') +
+        (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') +
         '" aria-hidden="true"></span>' +
         '<span class="lab-pigtail__buffer' +
-        (stripStage >= 1 ? ' is-strip-exposed' : ' is-strip-jacketed') +
-        (stripStage >= 2 ? ' is-strip-removed' : '') +
-        ((p.stripPeel || 0) > 0 && stripStage === 1 ? ' is-strip-peeling' : '') +
+        (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed') +
+        (bareComplete ? ' is-strip-removed' : '') +
+        (peel > 0.02 && peelLayer === 'buffer' ? ' is-strip-peeling' : '') +
         '" aria-hidden="true"></span>' +
         '<span class="lab-pigtail__cleave' +
-        (stripStage >= 2 ? ' is-strip-bare' : '') +
-        (stripStage === 1 ? ' is-strip-buffered' : '') +
-        (p.cleaved ? ' is-cleaved' : '') +
+        (bareComplete ? ' is-strip-bare' : '') +
+        (jacketStripped && !bareComplete ? ' is-strip-buffered' : '') +
+        (p.cleaved || p.isCleaved ? ' is-cleaved' : '') +
         '" aria-hidden="true"></span>' +
         '<span class="lab-vfl-exit-flare lab-vfl-exit-flare--tail" aria-hidden="true">' +
         '<i class="lab-vfl-exit-flare__aura"></i>' +
@@ -2685,11 +3288,18 @@
 
     host.innerHTML = html;
     bindLayerEvents(host);
+    pigtails.forEach(function (p) {
+      if (!p.isSnappedToCleaver || !p.snappedCleaverId) return;
+      if (!global.FtthLab || typeof FtthLab.getCleaverGrooveWorld !== 'function') return;
+      var dockInfo = FtthLab.getCleaverGrooveWorld(p.snappedCleaverId);
+      if (dockInfo && dockInfo.groove) setCleaverGuideLine(dockInfo.groove, true);
+    });
     reapplyStoredVflGlow();
   }
 
   function updateFiberPath(p) {
     if (!layer) return;
+    syncPigtailFiberLength(p);
     replacePigtailFiberSvg(p);
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
@@ -2702,6 +3312,7 @@
       );
       bBtn.classList.toggle('is-strip-stage1', stripStage >= 1);
       bBtn.classList.toggle('is-strip-stage2', stripStage >= 2);
+      bBtn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
     }
     var sleeve = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
     if (p.hasSleeve) {
@@ -3030,6 +3641,8 @@
             moveTipGravity(p, 'B', world.x, world.y);
           }
 
+          applyCleaverSnapDuringTailDrag(p, world.x, world.y);
+
           var hit = hitTestTailTarget(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
           updateFiberPath(p);
@@ -3045,7 +3658,19 @@
           if (snakeMode) endOrthoSnake(p);
           else p.snake = null;
 
-          if (!p.tail.attached) {
+          if (p.isSnappedToCleaver && p.snappedCleaverId) {
+            var dockInfo = global.FtthLab && typeof FtthLab.getCleaverGrooveWorld === 'function'
+              ? FtthLab.getCleaverGrooveWorld(p.snappedCleaverId)
+              : null;
+            if (dockInfo && dockInfo.groove) {
+              setCleaverGuideLine(dockInfo.groove, true);
+            }
+            setStatus('SC Pigtail · fiber magnetically seated in cleaver V-groove');
+          } else {
+            clearCleaverGuideLine();
+          }
+
+          if (!p.tail.attached && !p.isSnappedToCleaver) {
             var hit = hitTestTailTarget(ev.clientX, ev.clientY);
             if (hit) {
               attachTail(p, hit);
@@ -3307,7 +3932,9 @@
       '<p class="lab-pcord-attach">' +
       (p.tail.attached
         ? 'Tail → ' + p.tail.attached.label
-        : 'Tail · free · dock on splice / termination') +
+        : (p.isSnappedToCleaver
+          ? 'Tail · magnetically seated in cleaver V-groove'
+          : 'Tail · free · dock on splice / termination')) +
       '</p>' +
       '<div class="lab-spl-sheet">' +
       '<div><span>Type</span><strong class="' +
@@ -3315,7 +3942,10 @@
       '</strong></div>' +
       '<div><span>Ends</span><strong>SC · Bare</strong></div>' +
       '<div><span>Strip</span><strong>' + stripStageLabel(p.stripStage || 0) + '</strong></div>' +
-      '<div><span>Cleave</span><strong>' + (p.cleaved ? '90° face · ready to splice' : 'Not cleaved') + '</strong></div>' +
+      '<div><span>Cleave</span><strong>' +
+      (p.isCleaved || p.cleaved
+        ? (p.cleaveAngle || 90) + '° face · ready to splice'
+        : 'Not cleaved') + '</strong></div>' +
       '<div><span>IL</span><strong>' +
       (p.connector.attached ? loss.toFixed(2) + ' dB' : '—') +
       '</strong></div>' +
@@ -3529,10 +4159,33 @@
       FtthLab.commitPigtailStripStage = commitStripStage;
       FtthLab.projectPigtailStripNotch = projectPigtailStripNotch;
       FtthLab.applyPigtailStripDrag = applyStripDragFromNotch;
+      FtthLab.commitPigtailStripPeelSession = commitStripPeelSession;
       FtthLab.setPigtailStripGuide = setStripGuideLine;
       FtthLab.clearPigtailStripGuide = clearStripGuideLine;
       FtthLab.findPigtailCleavTargetAtWorld = findCleavTargetAtWorld;
+      FtthLab.findPigtailCleavTargetInGroove = findCleavTargetInGroove;
+      FtthLab.findPigtailBladeHit = findPigtailBladeHit;
       FtthLab.commitPigtailCleave = commitCleave;
+      FtthLab.commitPigtailCleaveAtBlade = commitCleaveAtBlade;
+      FtthLab.bladeHitRadiusPx = function () { return BLADE_HIT_RADIUS_PX; };
+      FtthLab.findPigtailBareTipNearWorld = findBareTipNearWorld;
+      FtthLab.snapPigtailToCleaverGroove = function (id, cleaverId, snapX, grooveY, opts) {
+        var pig = findPigtail(id);
+        if (!pig) return false;
+        var ok = snapPigtailToCleaverGroove(pig, cleaverId, snapX, grooveY, opts);
+        if (ok) updateFiberPath(pig);
+        return ok;
+      };
+      FtthLab.dockPigtailToCleaver = FtthLab.snapPigtailToCleaverGroove;
+      FtthLab.clearPigtailCleaverSnap = function (id) {
+        var pig = findPigtail(id);
+        if (pig) clearCleaverSnap(pig);
+      };
+      FtthLab.clearPigtailCleaverDock = FtthLab.clearPigtailCleaverSnap;
+      FtthLab.undockPigtailsFromCleaver = undockPigtailsFromCleaver;
+      FtthLab.setCleaverGuideLine = setCleaverGuideLine;
+      FtthLab.clearCleaverGuideLine = clearCleaverGuideLine;
+      FtthLab.finalizePigtailCleaverDock = finalizePigtailCleaverDock;
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {

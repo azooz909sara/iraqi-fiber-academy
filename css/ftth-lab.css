@@ -82,6 +82,18 @@ body.lab-page {
   z-index: 13000;
 }
 
+.lab-lab-toast {
+  padding: 0.65rem 1.15rem;
+  border-radius: 0.5rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ecfdf5;
+  background: rgba(6, 78, 59, 0.92);
+  border: 1px solid rgba(52, 211, 153, 0.55);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
 .lab-header {
   display: flex;
   align-items: center;
@@ -2914,7 +2926,8 @@ body.lab-pcord-linking .lab-pcord-fiber {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 4;
+  /* Above cleaver base (7) so bare fiber reads inside the V-groove */
+  z-index: 8;
   overflow: visible;
 }
 
@@ -2925,6 +2938,7 @@ body.lab-pcord-linking .lab-pcord-fiber {
   height: 100%;
   overflow: visible;
   pointer-events: none;
+  z-index: 1;
 }
 
 .lab-pigtail-fiber-hit {
@@ -2960,6 +2974,17 @@ body.lab-pcord-linking .lab-pcord-fiber {
   stroke-width: 1.15;
 }
 
+/* Terminal bare segment at cleaved tip — flat end, no round-cap blue bleed */
+.lab-pigtail-fiber--bare-tip {
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+
+.lab-pigtail-fiber--cleaved {
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+
 .lab-pigtail-strip-guide {
   stroke: #38bdf8;
   stroke-width: 1.35;
@@ -2969,6 +2994,29 @@ body.lab-pcord-linking .lab-pcord-fiber {
   pointer-events: none;
   opacity: 0.9;
   filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.45));
+}
+
+.lab-pigtail-cleaver-guide {
+  stroke: #4ade80;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 6 4;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgba(74, 222, 128, 0.55));
+}
+
+.lab-pigtail-cleaver-guide.is-approach {
+  stroke: #38bdf8;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.45));
+}
+
+.lab-pigtail__tail.is-cleaver-docked .lab-pigtail__cleave.is-strip-bare {
+  box-shadow:
+    0 0 0 2px rgba(74, 222, 128, 0.9),
+    0 0 12px rgba(74, 222, 128, 0.5);
 }
 
 .lab-pigtail-fiber-ghost {
@@ -3262,7 +3310,8 @@ body.lab-pigtail-dragging {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 7;
+  /* Above pigtail fiber (8) so stripper stays visible when overlapping */
+  z-index: 9;
   overflow: visible;
 }
 
@@ -3270,7 +3319,7 @@ body.lab-pigtail-dragging {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 8;
+  z-index: 10;
   overflow: visible;
 }
 
@@ -3427,6 +3476,11 @@ body.lab-stripper-dragging,
 body.lab-stripper-peeling {
   user-select: none;
   cursor: grabbing;
+}
+
+body.lab-stripper-dragging .lab-stripper-layer,
+body.lab-stripper-peeling .lab-stripper-layer {
+  z-index: 16;
 }
 
 /* ── Fiber Cleaver — golden master (FiberCleaver.js.html) ── */
@@ -3661,9 +3715,19 @@ body.lab-stripper-peeling {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 9;
+  /* Default below pigtail fiber so bare glass sits in the V-groove */
+  z-index: 7;
   overflow: visible;
   transform-style: preserve-3d;
+}
+
+/* Clamped arm swings over the seated fiber */
+.lab-cleaver-layer:has(.cleaver-arm.clamped) {
+  z-index: 10;
+}
+
+body.lab-cleaver-dragging .lab-cleaver-layer {
+  z-index: 16;
 }
 
 .lab-cleaver {

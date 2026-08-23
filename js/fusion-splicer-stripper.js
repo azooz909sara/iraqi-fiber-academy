@@ -50,20 +50,26 @@
   var JAW_TIP_OFFSET_Y = naturalYToPivotOffset(0);
   var JAW_Y_OFFSET = JAW_TIP_OFFSET_Y;
   /*
-   * Mid-blade notches (fraction of tip→pivot). Calibrated so the fiber seats
-   * through the stripping holes (user red-arrow line), not above the tip.
-   * Jacket hole nearest tip · buffer mid · coating furthest toward pivot.
+   * Mid-blade notches — natural Y in stripper-left.png (843px art).
+   * Calibrated to the painted stripping holes; scaled at probe time.
    */
-  var NOTCH_OFFSET_JACKET = JAW_TIP_OFFSET_Y * 0.44;
-  var NOTCH_OFFSET_BUFFER = JAW_TIP_OFFSET_Y * 0.36;
-  var NOTCH_OFFSET_COATING = JAW_TIP_OFFSET_Y * 0.28;
+  var NOTCH_NAT_Y_JACKET = 92;
+  var NOTCH_NAT_Y_BUFFER = 118;
+  var NOTCH_NAT_Y_COATING = 142;
+  var NOTCH_OFFSET_JACKET = naturalYToPivotOffset(NOTCH_NAT_Y_JACKET);
+  var NOTCH_OFFSET_BUFFER = naturalYToPivotOffset(NOTCH_NAT_Y_BUFFER);
+  var NOTCH_OFFSET_COATING = naturalYToPivotOffset(NOTCH_NAT_Y_COATING);
+  /** Must match `.lab-stripper { transform: scale(...) }` in ftth-lab.css */
+  var STRIPPER_VISUAL_SCALE = 0.65;
+  /** Fine-tune world probe Y (− = probe moves down / screen +Y toward fiber) */
+  var NOTCH_HIT_Y_ADJUST = -24;
   /** Fixed vertical laser length from the active notch (local −Y). */
   var LASER_GUIDE_LEN = 180;
   var JAW_CLOSED_DEG = 0;
   var JAW_OPEN_DEG = 12;
   var DRAG_THRESHOLD_PX = 3;
-  /** Notch-centered clamp radius (world px) — must sit on fiber, not empty air. */
-  var CLAMP_PROX_PX = 15;
+  /** Notch-centered clamp radius (world px) — must overlap fiber centerline. */
+  var CLAMP_PROX_PX = 6;
   var PEEL_FRAGMENT_PX = 20;
   var HISTORY_MAX = 40;
 
@@ -107,7 +113,7 @@
     return null;
   }
 
-  /** Active CFS-3 hole for strip stage: 0 jacket · 1 buffer · 2 coating. */
+  /** Active CFS-3 hole for strip stage: 0 jacket · 1 buffer · 2 coating (unscaled art px). */
   function notchOffsetForStage(stage) {
     var st = stage || 0;
     if (st >= 2) return NOTCH_OFFSET_COATING;
@@ -115,9 +121,14 @@
     return NOTCH_OFFSET_JACKET;
   }
 
+  /** World-space offset from pivot to notch — includes CSS visual scale. */
+  function scaledNotchOffsetPx(stage) {
+    return notchOffsetForStage(stage) * STRIPPER_VISUAL_SCALE + NOTCH_HIT_Y_ADJUST;
+  }
+
   /** World position of the cutting-notch center (not tip, not pivot). */
   function notchWorldPos(s, stage) {
-    var off = notchOffsetForStage(stage);
+    var off = scaledNotchOffsetPx(stage);
     return {
       x: s.x,
       y: s.y - off,
@@ -126,7 +137,7 @@
 
   /** Place stripper so the selected notch sits exactly on the fiber clamp point. */
   function alignStripperNotchToFiber(s, fiberX, fiberY, stage) {
-    var off = notchOffsetForStage(stage);
+    var off = scaledNotchOffsetPx(stage);
     s.x = fiberX;
     s.y = fiberY + off;
     s.rot = 0;
@@ -250,11 +261,10 @@
     return null;
   }
 
-  function applyStripDrag(pigtailId, wx, wy, layerKind, session) {
-    if (global.FtthLab && typeof FtthLab.applyPigtailStripDrag === 'function') {
-      return FtthLab.applyPigtailStripDrag(pigtailId, wx, wy, layerKind, session);
+  function commitStripPeel(pigtailId, layerKind, session) {
+    if (global.FtthLab && typeof FtthLab.commitPigtailStripPeelSession === 'function') {
+      FtthLab.commitPigtailStripPeelSession(pigtailId, layerKind, session);
     }
-    return null;
   }
 
   function captureSnapshot() {
@@ -820,6 +830,7 @@
     var maxPeeled = 0;
     var lastFragmentPx = 0;
     var moved = false;
+    var peelCompleted = false;
 
     function endPeel(ev) {
       window.removeEventListener('pointermove', onMove);
@@ -828,6 +839,9 @@
       try { node.releasePointerCapture(ev.pointerId); } catch (err2) { /* ignore */ }
       openJaws(s, node);
       document.body.classList.remove('lab-stripper-peeling');
+      if (moved && peelCompleted) {
+        commitStripPeel(target.id, layerKind, session);
+      }
       clearStripPeel(target.id);
       clearStripGuide();
       if (maxPeeled > 4) {
@@ -856,8 +870,12 @@
 
       var notch = notchWorldPos(s, stage);
       var result = applyStripDrag(target.id, notch.x, notch.y, layerKind, session);
+      if (!result || !result.ok) {
+        result = applyStripDrag(target.id, target.x, target.y, layerKind, session);
+      }
       if (result && result.ok) {
         maxPeeled = Math.max(maxPeeled, result.peeled || 0);
+        if (result.completed) peelCompleted = true;
         var peelUx = result.peelUx != null ? result.peelUx : target.peelUx;
         var peelUy = result.peelUy != null ? result.peelUy : target.peelUy;
         refreshStripGuide(s, ev.clientX, ev.clientY, {
