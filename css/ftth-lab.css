@@ -483,6 +483,7 @@ body.lab-page {
   width: 20000px;
   height: 20000px;
   transform-origin: 0 0;
+  transform-style: preserve-3d;
   /* Do NOT keep permanent will-change — it caches a low-res bitmap under scale() */
 }
 
@@ -522,6 +523,7 @@ body.lab-page {
   inset: 0;
   width: 100%;
   height: 100%;
+  transform-style: preserve-3d;
   /* Tools mount DOM / SVG layers here */
 }
 
@@ -3401,6 +3403,373 @@ body.lab-stripper-dragging,
 body.lab-stripper-peeling {
   user-select: none;
   cursor: grabbing;
+}
+
+/* ── Fiber Cleaver — golden master (FiberCleaver.js.html) ── */
+.fiber-cleaver {
+  position: relative;
+  width: 480px;
+  height: 340px;
+  background: linear-gradient(180deg, #181b22 0%, #11141a 40%, #0a0c10 100%);
+  border-radius: 8px;
+  border: 2px solid #2a2d35;
+  box-shadow:
+    0 15px 40px rgba(0, 0, 0, 0.8),
+    inset 0 2px 2px rgba(255, 255, 255, 0.05),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  user-select: none;
+  perspective: 1200px;
+  transform-style: preserve-3d;
+  box-sizing: border-box;
+  overflow: visible;
+  flex-shrink: 0;
+}
+
+.slider-rail {
+  position: absolute;
+  top: 110px;
+  left: -15px;
+  width: 320px;
+  height: 65px;
+  background: linear-gradient(180deg, #1c1f26 0%, #15181e 50%, #101217 100%);
+  border-radius: 4px;
+  border: 1px solid #000;
+  border-top: 1px solid #333;
+  box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+}
+
+.slider-rail::before {
+  content: '';
+  width: 100%;
+  height: 8px;
+  background: #0a0c10;
+  border-bottom: 1px solid #333;
+  border-top: 1px solid #000;
+}
+
+.blade-cartridge {
+  position: absolute;
+  top: 112px;
+  left: 150px;
+  width: 50px;
+  height: 60px;
+  background: linear-gradient(135deg, #2a2d35 0%, #181b22 100%);
+  border-radius: 4px;
+  border: 1px solid #444;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+}
+
+.blade-cartridge::after {
+  content: '+';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  background: #aaa;
+  border-radius: 50%;
+  color: #333;
+  font-size: 14px;
+  line-height: 16px;
+  text-align: center;
+  font-weight: bold;
+  border: 1px solid #555;
+}
+
+.fiber-anvil {
+  position: absolute;
+  top: 120px;
+  right: 60px;
+  width: 80px;
+  height: 45px;
+  background: #222;
+  border: 1px solid #111;
+  border-radius: 4px;
+}
+
+.fiber-anvil-pads {
+  position: absolute;
+  top: -5px;
+  right: 10px;
+  width: 15px;
+  height: 55px;
+  background: #000;
+  border-left: 2px solid #555;
+  border-right: 2px solid #555;
+}
+
+.fiber-anvil-pads.left {
+  right: 55px;
+}
+
+.warning-sticker {
+  position: absolute;
+  bottom: 30px;
+  left: 30px;
+  width: 200px;
+  height: 70px;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  padding: 8px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.warning-text {
+  font-size: 11px;
+  color: #d32f2f;
+  font-weight: 800;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.cleaver-arm {
+  position: absolute;
+  top: -125px;
+  right: 65px;
+  width: 70px;
+  height: 140px;
+  transform-style: preserve-3d;
+  transform-origin: bottom center;
+  transform: translateZ(5px) rotateX(0deg);
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 5;
+}
+
+.cleaver-arm.clamped {
+  transform: translateZ(5px) rotateX(180deg);
+}
+
+.arm-body {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100px;
+  background: linear-gradient(90deg, #111 0%, #1a1c22 50%, #0a0c10 100%);
+  border-radius: 4px;
+  border: 1px solid #000;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+}
+
+.arm-silver-head {
+  position: absolute;
+  top: 0;
+  left: -10px;
+  width: 90px;
+  height: 45px;
+  background: linear-gradient(180deg, #e0e0e0 0%, #a0a0a0 100%);
+  border-radius: 4px 4px 0 0;
+  border: 1px solid #777;
+  border-bottom: 2px solid #555;
+  box-shadow: 0 -2px 5px rgba(255, 255, 255, 0.3) inset, 0 5px 10px rgba(0, 0, 0, 0.5);
+}
+
+.arm-magnet {
+  position: absolute;
+  bottom: 5px;
+  left: 10px;
+  width: 70px;
+  height: 14px;
+  background: linear-gradient(180deg, #f5f5f5, #dcdcdc);
+  border: 1px solid #888;
+  border-radius: 2px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.arm-inner-detail {
+  position: absolute;
+  top: 10px;
+  left: 15px;
+  width: 40px;
+  height: 60px;
+  background: #0a0c10;
+  border: 1px solid #222;
+  border-radius: 2px;
+}
+
+.status-indicator {
+  position: absolute;
+  bottom: 30px;
+  right: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #111;
+  padding: 5px 10px;
+  border-radius: 4px;
+  border: 1px solid #222;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #444;
+  border: 1px solid #111;
+}
+
+.fiber-cleaver.is-clamped .status-dot {
+  background: #4CAF50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.8);
+}
+
+.status-label {
+  font-size: 10px;
+  color: #666;
+  font-weight: bold;
+}
+
+.fiber-cleaver.is-clamped .status-label {
+  color: #4CAF50;
+}
+
+/* Simulator 3D environment — preserve hinge math, fix depth under world scale() */
+.lab-cleaver-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  overflow: visible;
+  transform-style: preserve-3d;
+}
+
+.lab-cleaver {
+  position: absolute;
+  pointer-events: none;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  z-index: 9;
+  transform-style: preserve-3d;
+}
+
+.lab-cleaver .fiber-cleaver {
+  background: transparent;
+  pointer-events: none;
+}
+
+.lab-cleaver .fiber-cleaver::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 8px;
+  border: 2px solid #2a2d35;
+  background: linear-gradient(180deg, #181b22 0%, #11141a 40%, #0a0c10 100%);
+  box-shadow:
+    0 15px 40px rgba(0, 0, 0, 0.8),
+    inset 0 2px 2px rgba(255, 255, 255, 0.05),
+    inset 0 -4px 8px rgba(0, 0, 0, 0.6);
+  transform: translateZ(0);
+  z-index: 0;
+  pointer-events: none;
+}
+
+.lab-cleaver .fiber-cleaver > * {
+  position: absolute;
+}
+
+.lab-cleaver .cleaver-arm {
+  transform: translateZ(5px) rotateX(0deg);
+}
+
+.lab-cleaver .cleaver-arm.clamped {
+  transform: translateZ(5px) rotateX(180deg);
+}
+
+.lab-cleaver.is-dragging,
+.lab-cleaver.is-selected {
+  z-index: 15;
+}
+
+.lab-cleaver:active,
+.lab-cleaver.is-dragging {
+  cursor: grabbing;
+}
+
+.lab-cleaver__body {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  transform-style: preserve-3d;
+}
+
+.lab-cleaver__hit {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.lab-cleaver.is-dragging .lab-cleaver__hit,
+.lab-cleaver:active .lab-cleaver__hit {
+  cursor: grabbing;
+}
+
+.lab-cleaver.is-selected .fiber-cleaver {
+  outline: 2px solid rgba(56, 189, 248, 0.85);
+  outline-offset: 2px;
+}
+
+body.lab-cleaver-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.lab-tool__mark--cleaver {
+  width: 1.35rem;
+  height: 1.05rem;
+  border-radius: 0.2rem;
+  background: #242424;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+  position: relative;
+}
+
+.lab-tool__mark--cleaver::before {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 50%;
+  height: 1px;
+  transform: translateY(-50%);
+  background: rgba(200, 205, 212, 0.85);
+}
+
+.lab-tool__mark--cleaver::after {
+  content: "";
+  position: absolute;
+  top: 14%;
+  right: 18%;
+  width: 0.28rem;
+  height: 0.62rem;
+  border-radius: 0.06rem;
+  background: linear-gradient(180deg, #e2e8f0, #94a3b8);
+  border: 1px solid #4b5563;
+}
+
+.lab-pigtail__cleave.is-cleaved {
+  width: 7px;
+  height: 2px;
+  border-radius: 0;
+  transform: rotate(90deg);
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.98), rgba(203, 213, 225, 0.9));
+  box-shadow:
+    0 0 4px rgba(255, 255, 255, 0.75),
+    0 0 1px rgba(148, 163, 184, 0.9);
 }
 
 .lab-splice-point.is-plug-target,

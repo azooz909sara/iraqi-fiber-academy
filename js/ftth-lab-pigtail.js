@@ -43,6 +43,10 @@
   var STRIP_BUFFER_PX = 26;
   /** Hard max distance from cutting notch to fiber centerline for clamp/strip. */
   var STRIP_NOTCH_HIT_PX = 15;
+  /** Bare tip zone for cleaver V-groove alignment. */
+  var CLEAVE_TIP_ZONE_PX = 52;
+  var CLEAVE_HIT_PX = 20;
+  var CLEAVE_WASTE_PX = 16;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
   var ORTHO_FILLET_R = 16;
   var ORTHO_TURN_PX = 10;
@@ -326,6 +330,7 @@
       if (p.stripStage < 0) p.stripStage = 0;
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
+      p.cleaved = !!p.cleaved;
       syncStripLength(p);
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
@@ -984,6 +989,68 @@
       }
     }
     return best;
+  }
+
+  /**
+   * Cleaver V-groove probe: bare stripped tip near (wx, wy).
+   */
+  function findCleavTargetAtWorld(wx, wy, thresholdPx) {
+    var thr = typeof thresholdPx === 'number' ? thresholdPx : CLEAVE_HIT_PX;
+    thr = Math.min(thr, CLEAVE_HIT_PX);
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p || p.cleaved) continue;
+      if ((Number(p.stripStage) || 0) < 2) continue;
+      if (p.tail && p.tail.attached) continue;
+      var pts = fiberSleevePathPoints(p);
+      if (!pts || pts.length < 2) continue;
+      var proj = projectOntoFiberStrict(pts, wx, wy);
+      if (!proj || !proj.onSegment) continue;
+      if (proj.dist > CLEAVE_TIP_ZONE_PX) continue;
+      if (proj.perpDist > thr) continue;
+      if (proj.perpDist < bestD) {
+        bestD = proj.perpDist;
+        best = {
+          id: p.id,
+          x: proj.x,
+          y: proj.y,
+          rot: proj.rot,
+          perpDist: proj.perpDist,
+          wastePx: CLEAVE_WASTE_PX,
+        };
+      }
+    }
+    return best;
+  }
+
+  /** Commit a precision cleave — removes waste stub, marks 90° end face. */
+  function commitCleave(id, opts) {
+    opts = opts || {};
+    var p = findPigtail(id);
+    if (!p || p.cleaved) return false;
+    if ((Number(p.stripStage) || 0) < 2) return false;
+    var wastePx = typeof opts.wastePx === 'number' ? opts.wastePx : CLEAVE_WASTE_PX;
+    var pts = fiberSleevePathPoints(p);
+    var total = polylineLength(pts);
+    if (total < wastePx + 6) return false;
+    var newTip = pointAtPathDistance(pts, wastePx);
+    p.bx = newTip.x;
+    p.by = newTip.y;
+    p.cleaved = true;
+    if (typeof opts.cleaveFaceRot === 'number') p.cleaveFaceRot = opts.cleaveFaceRot;
+    if (typeof p.fixedLength === 'number') {
+      p.fixedLength = Math.max(24, p.fixedLength - wastePx);
+    }
+    updateFiberPath(p);
+    rebuildLayer();
+    pushHistory();
+    updateInspector();
+    refreshBudget();
+    setStatus('SC Pigtail · fiber cleaved · perpendicular end face');
+    return true;
   }
 
   function setStripPeel(id, peel) {
@@ -2453,6 +2520,7 @@
         '<span class="lab-pigtail__cleave' +
         (stripStage >= 2 ? ' is-strip-bare' : '') +
         (stripStage === 1 ? ' is-strip-buffered' : '') +
+        (p.cleaved ? ' is-cleaved' : '') +
         '" aria-hidden="true"></span>' +
         '<span class="lab-vfl-exit-flare lab-vfl-exit-flare--tail" aria-hidden="true">' +
         '<i class="lab-vfl-exit-flare__aura"></i>' +
@@ -3098,6 +3166,7 @@
       '</strong></div>' +
       '<div><span>Ends</span><strong>SC · Bare</strong></div>' +
       '<div><span>Strip</span><strong>' + stripStageLabel(p.stripStage || 0) + '</strong></div>' +
+      '<div><span>Cleave</span><strong>' + (p.cleaved ? '90° face · ready to splice' : 'Not cleaved') + '</strong></div>' +
       '<div><span>IL</span><strong>' +
       (p.connector.attached ? loss.toFixed(2) + ' dB' : '—') +
       '</strong></div>' +
@@ -3311,6 +3380,8 @@
       FtthLab.commitPigtailStripStage = commitStripStage;
       FtthLab.setPigtailStripGuide = setStripGuideLine;
       FtthLab.clearPigtailStripGuide = clearStripGuideLine;
+      FtthLab.findPigtailCleavTargetAtWorld = findCleavTargetAtWorld;
+      FtthLab.commitPigtailCleave = commitCleave;
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {

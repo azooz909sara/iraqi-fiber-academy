@@ -206,6 +206,7 @@
     if (target.closest('.lab-pcord')) return false;
     if (target.closest('.lab-pigtail')) return false;
     if (target.closest('.lab-stripper') || target.closest('.lab-stripper__hit')) return false;
+    if (target.closest('.lab-cleaver') || target.closest('.lab-cleaver__hit')) return false;
     if (target.closest('.lab-sleeve-free') || target.closest('[data-sleeve-id]')) return false;
     if (target.closest('.lab-cpl') || target.closest('.lab-cpl-port')) return false;
     if (target.closest('.lab-vfl')) return false;
@@ -400,6 +401,8 @@
     'patch-cord': 'FIBER JUMPERS',
     'sc-pigtail': 'FIBER JUMPERS',
     'splice-sleeve': 'FUSION SPLICING',
+    'cfs-stripper': 'FUSION SPLICING',
+    'fiber-cleaver': 'FUSION SPLICING',
     'fiber-spool': 'FIBER JUMPERS',
     'bend-jig': 'FIBER JUMPERS',
     'sc-coupler': 'ADAPTERS',
