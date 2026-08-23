@@ -16,11 +16,15 @@
   var CLEAVER_LOCAL_CY = CLEAVER_H / 2;
   /*
    * V-groove + blade in fiber-cleaver art (480×340 local px).
-   * Calibrated to slider-rail channel and blade-cartridge center.
+   * Slider-rail (.slider-rail) = black ruler groove; anvil pads begin at local X 340.
    */
+  var RULER_RAIL_LEFT_NAT = -15;
+  var RULER_RAIL_WIDTH_NAT = 320;
+  /** Right edge of black ruler — jacket stop / clamp pad boundary (art px). */
+  var RULER_STOP_NAT_X = RULER_RAIL_LEFT_NAT + RULER_RAIL_WIDTH_NAT;
   var GROOVE_NAT_Y = 142;
-  var GROOVE_NAT_X1 = 25;
-  var GROOVE_NAT_X2 = 455;
+  var GROOVE_NAT_X1 = RULER_RAIL_LEFT_NAT;
+  var GROOVE_NAT_X2 = RULER_STOP_NAT_X;
   var BLADE_NAT_X = 175;
   var BLADE_NAT_Y = 142;
   /** Perpendicular tolerance — fiber must overlap groove centerline. */
@@ -92,6 +96,42 @@
     return bladeWorldPos(c);
   }
 
+  /** World position of the ruler stop wall (jacket may not cross right of this X). */
+  function rulerStopWorldPos(c) {
+    return localToWorld(c, RULER_STOP_NAT_X, GROOVE_NAT_Y);
+  }
+
+  /** Ruler slot + blade geometry for pigtail seating (world space). */
+  function getCleaverRulerStopWorld(c) {
+    if (!c) return null;
+    var grooveY = grooveWorldY(c);
+    var slotLeft = localToWorld(c, RULER_RAIL_LEFT_NAT, GROOVE_NAT_Y);
+    var rulerStop = rulerStopWorldPos(c);
+    var blade = bladeWorldPos(c);
+    var groove = grooveWorldSegment(c);
+    return {
+      cleaverId: c.id,
+      id: c.id,
+      open: !c.clamped,
+      grooveY: grooveY,
+      rulerStopX: rulerStop.x,
+      rulerStopY: rulerStop.y,
+      slotX1: slotLeft.x,
+      slotX2: rulerStop.x,
+      bladeX: blade.x,
+      bladeY: blade.y,
+      groove: groove,
+      slot: {
+        x1: slotLeft.x,
+        y1: grooveY,
+        x2: rulerStop.x,
+        y2: grooveY,
+      },
+      blade: blade,
+      rulerStop: rulerStop,
+    };
+  }
+
   /**
    * Exact world Y of the rubber V-groove centerline (horizontal channel).
    * All fiber snap/seat logic must use this value.
@@ -113,16 +153,23 @@
   /** Export groove + blade geometry for pigtail snap (Phase 1 API). */
   function getCleaverGrooveWorld(c) {
     if (!c) return null;
-    var grooveY = grooveWorldY(c);
-    var groove = grooveWorldSegment(c);
+    var ruler = getCleaverRulerStopWorld(c);
+    if (!ruler) return null;
     return {
       id: c.id,
-      open: !c.clamped,
+      open: ruler.open,
       x: c.x,
       y: c.y,
-      grooveY: grooveY,
-      groove: groove,
-      blade: bladeWorldPos(c),
+      grooveY: ruler.grooveY,
+      groove: ruler.groove,
+      slot: ruler.slot,
+      rulerStopX: ruler.rulerStopX,
+      rulerStopY: ruler.rulerStopY,
+      slotX1: ruler.slotX1,
+      slotX2: ruler.slotX2,
+      blade: ruler.blade,
+      bladeX: ruler.bladeX,
+      bladeY: ruler.bladeY,
       dockedPigtailId: c.dockedPigtailId || null,
     };
   }
@@ -444,7 +491,12 @@
       c.x = Math.round(ox + dx);
       c.y = Math.round(oy + dy);
       updateCleaverPosition(c, node);
-      refreshCleaverFiberSnap(c, node);
+      if (c.dockedPigtailId && global.FtthLab &&
+          typeof FtthLab.refreshPigtailCleaverSlot === 'function') {
+        FtthLab.refreshPigtailCleaverSlot(c.dockedPigtailId, c.id);
+      } else {
+        refreshCleaverFiberSnap(c, node);
+      }
     }
 
     function onUp(ev) {
@@ -695,12 +747,23 @@
     rebuildLayer();
     pushHistory();
     registerCleaverApis();
+    liftPigtailLayerAboveCleaver();
+  }
+
+  function liftPigtailLayerAboveCleaver() {
+    var mount = document.getElementById('lab-2d-mount');
+    if (!mount) return;
+    var pigLayer = mount.querySelector('[data-lab-pigtail-layer]');
+    if (pigLayer) mount.appendChild(pigLayer);
   }
 
   function registerCleaverApis() {
     if (!global.FtthLab) return;
     FtthLab.getCleaverGrooveWorld = function (id) {
       return getCleaverGrooveWorld(findCleaver(id));
+    };
+    FtthLab.getCleaverRulerStopWorld = function (id) {
+      return getCleaverRulerStopWorld(findCleaver(id));
     };
     FtthLab.getCleaverGrooveY = function (id) {
       var c = findCleaver(id);
