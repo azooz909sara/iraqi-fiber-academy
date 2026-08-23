@@ -20,8 +20,6 @@
   var TOOL_W = Math.round(ASSEMBLED_NATURAL_W * TOOL_H / IMG_NATURAL_H);
   /* Tall enough for jaw art + vertical laser beam above the teeth. */
   var CANVAS_SIZE = 500;
-  var STRIPPER_W = CANVAS_SIZE;
-  var STRIPPER_H = CANVAS_SIZE;
   /* Screw / jaw pivot sits at the square canvas center — DOM (s.x, s.y) maps here. */
   var PIVOT_X = CANVAS_SIZE / 2;
   var PIVOT_Y = CANVAS_SIZE / 2;
@@ -32,6 +30,13 @@
   var HIT_TOP = Math.round(
     PIVOT_Y - ((IMG_PIVOT_LEFT_Y + IMG_PIVOT_RIGHT_Y) / 2) * TOOL_H / IMG_NATURAL_H
   );
+  /* Tight lab wrapper — hugs tool art; pivot (s.x, s.y) maps inside this box. */
+  var WRAPPER_W = HIT_W;
+  var WRAPPER_H = HIT_H;
+  var WRAPPER_PIVOT_X = PIVOT_X - HIT_LEFT;
+  var WRAPPER_PIVOT_Y = PIVOT_Y - HIT_TOP;
+  var STRIPPER_W = WRAPPER_W;
+  var STRIPPER_H = WRAPPER_H;
   /*
    * CFS-3 jaw geometry (tool-local −Y from screw / pivot):
    * Extreme tip ≈ full tip offset; cutting notches sit mid-blade (deep insertion),
@@ -589,12 +594,12 @@
     var clamped = s.jawState === 'clamped' ? ' is-clamped' : '';
     return (
       '<div class="lab-stripper' + selected + clamped + '" data-stripper-node="' + s.id + '" ' +
-      'style="left:' + Math.round(s.x - STRIPPER_W / 2) + 'px;top:' +
-      Math.round(s.y - STRIPPER_H / 2) + 'px" ' +
+      'style="left:' + Math.round(s.x - WRAPPER_PIVOT_X) + 'px;top:' +
+      Math.round(s.y - WRAPPER_PIVOT_Y) + 'px;width:' + WRAPPER_W + 'px;height:' + WRAPPER_H + 'px" ' +
       'title="CFS-3 Fiber Optic Stripper · clamp + peel">' +
-      '<canvas class="lab-stripper__art" aria-hidden="true"></canvas>' +
-      '<button type="button" class="lab-stripper__hit" aria-label="CFS-3 Fiber Optic Stripper" ' +
-      'style="left:' + HIT_LEFT + 'px;top:' + HIT_TOP + 'px;width:' + HIT_W + 'px;height:' + HIT_H + 'px"></button>' +
+      '<canvas class="lab-stripper__art" aria-hidden="true" ' +
+      'style="left:' + (-HIT_LEFT) + 'px;top:' + (-HIT_TOP) + 'px"></canvas>' +
+      '<button type="button" class="lab-stripper__hit" aria-label="CFS-3 Fiber Optic Stripper"></button>' +
       '</div>'
     );
   }
@@ -621,8 +626,10 @@
   function updateStripperPosition(s, node) {
     if (!node) node = layer && layer.querySelector('[data-stripper-node="' + s.id + '"]');
     if (!node) return;
-    node.style.left = Math.round(s.x - STRIPPER_W / 2) + 'px';
-    node.style.top = Math.round(s.y - STRIPPER_H / 2) + 'px';
+    node.style.left = Math.round(s.x - WRAPPER_PIVOT_X) + 'px';
+    node.style.top = Math.round(s.y - WRAPPER_PIVOT_Y) + 'px';
+    node.style.width = WRAPPER_W + 'px';
+    node.style.height = WRAPPER_H + 'px';
   }
 
   function updateStripperNode(s, node, opts) {

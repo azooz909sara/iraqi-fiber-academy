@@ -3289,14 +3289,18 @@ body.lab-pigtail-dragging {
 
 .lab-stripper {
   position: absolute;
-  width: 500px;
-  height: 500px;
-  /* Empty clip padding must not steal clicks from splitters / cords / etc. */
+  /* width/height set inline per tool art footprint (≈91×239px) */
+  overflow: visible;
   pointer-events: none;
   cursor: grab;
   user-select: none;
   touch-action: none;
   z-index: 9;
+  transform: scale(0.65);
+  transform-origin: 50% 50%;
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 
 .lab-stripper.is-dragging,
@@ -3311,18 +3315,24 @@ body.lab-pigtail-dragging {
 }
 
 .lab-stripper__art {
+  position: absolute;
   display: block;
   width: 500px;
   height: 500px;
   pointer-events: none;
 }
 
-/* Tight hitbox aligned to the visual tool — only this receives pointer events */
+/* Tight hitbox — fills the wrapper exactly (visual tool footprint only) */
 .lab-stripper__hit {
   position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
   margin: 0;
   padding: 0;
-  border: 0;
+  border: none;
+  outline: none;
+  box-shadow: none;
   background: transparent;
   cursor: grab;
   pointer-events: auto;
@@ -3330,13 +3340,27 @@ body.lab-pigtail-dragging {
   z-index: 1;
 }
 
+.lab-stripper__hit:hover,
+.lab-stripper__hit:active,
+.lab-stripper__hit:focus,
+.lab-stripper__hit:focus-visible {
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
 .lab-stripper.is-dragging .lab-stripper__hit,
 .lab-stripper.is-clamped .lab-stripper__hit {
   cursor: grabbing;
 }
 
-.lab-stripper.is-selected {
-  filter: drop-shadow(0 0 6px rgba(56, 189, 248, 0.45));
+.lab-stripper.is-selected,
+.lab-stripper.is-dragging,
+.lab-stripper.is-clamped,
+.lab-stripper:active {
+  border: none;
+  outline: none;
+  box-shadow: none;
 }
 
 .lab-tool__mark--stripper {
@@ -3649,6 +3673,8 @@ body.lab-stripper-peeling {
   user-select: none;
   touch-action: none;
   z-index: 9;
+  transform: scale(0.35);
+  transform-origin: 50% 50%;
   transform-style: preserve-3d;
 }
 
