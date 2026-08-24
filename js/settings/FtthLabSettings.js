@@ -142,6 +142,12 @@
         guideText: 'Route a patch cord through the slot and set bend angle θ in properties.',
       },
       {
+        id: 'fiber-cleaver', toolKey: 'fiber-cleaver', categoryId: 'test',
+        label: 'Fiber Cleaver', sublabel: 'Precision cleave · V-groove', markClass: 'cleaver', icon: '',
+        guideText: 'Seat bare fiber in the V-groove and clamp to cleave.',
+        specs: { bareGlassLengthAfterCutPx: 16 },
+      },
+      {
         id: 'patchcord', toolKey: 'patchcord', categoryId: 'termination',
         label: 'Patch Cord', sublabel: 'A ↔ B same click-drag rules', markClass: 'pcord', icon: '',
         guideText: 'Drag both ends · SC/UPC or SC/APC · meter mode in properties.',
@@ -261,6 +267,16 @@
         });
       }
       return { losses: losses };
+    }
+
+    if (toolKey === 'fiber-cleaver') {
+      var bareLen = Number(
+        specs.bareGlassLengthAfterCutPx != null
+          ? specs.bareGlassLengthAfterCutPx
+          : factorySpecs.bareGlassLengthAfterCutPx
+      );
+      if (!isFinite(bareLen) || bareLen < 1) bareLen = 16;
+      return { bareGlassLengthAfterCutPx: Math.round(bareLen) };
     }
 
     return specs;

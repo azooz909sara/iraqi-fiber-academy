@@ -119,6 +119,23 @@
       });
       html += '</div></div>';
     }
+    if (item.toolKey === 'fiber-cleaver') {
+      var bareGlassLen = (item.specs && item.specs.bareGlassLengthAfterCutPx != null)
+        ? item.specs.bareGlassLengthAfterCutPx
+        : 16;
+      html +=
+        '<div class="lab-settings-cms__specs">' +
+          '<p class="lab-settings-cms__specs-title">Cleaver cut geometry</p>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Cleaved bare glass length (px)</span>' +
+            '<input type="range" min="4" max="80" step="1" value="' + escapeAttr(String(bareGlassLen)) + '" ' +
+              'data-lab-spec="bareGlassLengthAfterCutPx" data-tool-key="fiber-cleaver" ' +
+              'oninput="this.nextElementSibling.textContent=this.value+\' px\'">' +
+            '<output style="display:block;margin-top:4px;font-size:12px;color:#94a3b8">' +
+              escapeHtml(String(bareGlassLen)) + ' px</output>' +
+          '</label>' +
+        '</div>';
+    }
     return html;
   }
 

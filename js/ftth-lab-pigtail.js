@@ -46,14 +46,9 @@
   var CLEAVE_HIT_PX = 8;
   var CLEAVE_WASTE_PX = 16;
   var CLEAVE_MIN_CUT_PX = 2;
-  /** Perpendicular hit radius: blade drop point → pigtail polyline (cleaver cut). */
   var BLADE_HIT_RADIUS_PX = 20;
-  /** Magnetic V-groove snap radius (fiber → cleaver ruler slot). */
+  /** Dropzone highlight radius (fiber tip → cleaver groove). Snap occurs on release only. */
   var CLEAVER_SNAP_PX = 40;
-  /** Inward pull (left) before releasing a seated fiber from the cleaver slot. */
-  var CLEAVER_RELEASE_PULL_PX = 52;
-  /** Drag follow while slot-locked — lower = more tactile resistance. */
-  var CLEAVER_SLOT_FOLLOW = 0.34;
   /** Jacket frontier must not cross ruler stop beyond this tolerance (world px). */
   var RULER_WALL_EPS = 0.75;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
@@ -340,14 +335,23 @@
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
       ensureFiberStrip(p);
-      clampStripFrontiersToPath(p);
       p.cleaved = !!p.cleaved;
       p.isCleaved = !!(p.isCleaved || p.cleaved);
       p.cleaved = p.isCleaved;
       if (typeof p.cleaveAngle !== 'number') {
         p.cleaveAngle = p.isCleaved ? 90 : 0;
       }
-      syncStripStageFromFiberStrip(p);
+      if (p.isCleaved) {
+        restoreCleavedStripLock(p);
+      } else {
+        p.cleavedStripLock = null;
+      }
+      if ((Number(p.stripStage) || 0) >= 2 || p.stripFrontierLock) {
+        restorePermanentStripFrontier(p);
+      } else {
+        p.stripFrontierLock = null;
+        clampStripFrontiersToPath(p);
+      }
       if (!Array.isArray(p.pathHistory)) {
         p.pathHistory = Array.isArray(p.route) ? cloneJson(p.route) : [];
       }
@@ -674,12 +678,219 @@
     if (fs.jacketTo < 0) fs.jacketTo = 0;
     if (fs.bareTo < 0) fs.bareTo = 0;
     if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    enforceFullStripBareFrontier(p);
     return fs;
+  }
+
+  function isFullyStrippedPigtail(p) {
+    if (!p) return false;
+    if (p.isCleaved || p.cleaved) return true;
+    return (Number(p.stripStage) || 0) >= 2;
+  }
+
+  /** Stage 2 / cleaved: zero buffer gap — bare glass runs tip → jacket frontier. */
+  function enforceFullStripBareFrontier(p) {
+    if (!p || !isFullyStrippedPigtail(p) || !p.fiberStrip) return false;
+    snapBareToJacket(p.fiberStrip);
+    return true;
   }
 
   function maxStripLenPx(p) {
     var pts = fiberSleevePathPoints(p);
     return Math.max(0, polylineLength(pts));
+  }
+
+  /** Admin-configurable bare glass length remaining after cleave (FtthLabSettings). */
+  function getBareGlassLengthAfterCutPx() {
+    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
+      var item = FtthLabSettings.getItem('fiber-cleaver');
+      if (item && item.specs) {
+        var n = Number(item.specs.bareGlassLengthAfterCutPx);
+        if (isFinite(n) && n >= 1) return Math.round(n);
+      }
+    }
+    return CLEAVE_WASTE_PX;
+  }
+
+  function restoreCleavedStripLock(p) {
+    if (!p || !(p.isCleaved || p.cleaved)) return;
+    ensureFiberStrip(p);
+    if (!p.cleavedStripLock) {
+      var boundary = getJacketBoundaryWorld(p);
+      p.cleavedStripLock = {
+        jacketTo: p.fiberStrip.jacketTo || 0,
+        bareTo: p.fiberStrip.bareTo || 0,
+        jacketBoundaryX: boundary ? boundary.x : null,
+        rulerStopX: p.cleaverSlotAnchorX != null ? p.cleaverSlotAnchorX : null,
+      };
+    }
+    var lock = p.cleavedStripLock;
+    var maxLen = maxStripLenPx(p);
+    var j = lock.jacketTo;
+    if (!isFinite(j) || j < STRIP_TIP_EPS) j = STRIP_TIP_EPS;
+    if (isFinite(maxLen) && maxLen >= 0 && j > maxLen) j = maxLen;
+    p.fiberStrip.jacketTo = j;
+    p.fiberStrip.bareTo = j;
+    p.fiberStrip.peel = 0;
+    p.fiberStrip.peelLayer = null;
+    lock.jacketTo = j;
+    lock.bareTo = j;
+    syncStripStageFromFiberStrip(p);
+    enforceFullStripBareFrontier(p);
+    lockPermanentStripFrontier(p);
+  }
+
+  /** Persist stage-2 strip arc-lengths — survives cleaver undock and free drag. */
+  function lockPermanentStripFrontier(p) {
+    if (!p) return;
+    ensureFiberStrip(p);
+    if (!isFullyStrippedPigtail(p) && (Number(p.stripStage) || 0) < 2) return;
+    enforceFullStripBareFrontier(p);
+    var fs = p.fiberStrip;
+    p.stripFrontierLock = {
+      jacketTo: fs.jacketTo || 0,
+      bareTo: fs.bareTo || 0,
+      stripStage: 2,
+    };
+  }
+
+  function restorePermanentStripFrontier(p) {
+    if (!p) return false;
+    if (p.isCleaved || p.cleaved) {
+      restoreCleavedStripLock(p);
+      lockPermanentStripFrontier(p);
+      return true;
+    }
+    if ((Number(p.stripStage) || 0) >= 2 && !p.stripFrontierLock) {
+      lockPermanentStripFrontier(p);
+    }
+    if (!p.stripFrontierLock) return false;
+    ensureFiberStrip(p);
+    var lock = p.stripFrontierLock;
+    var fs = p.fiberStrip;
+    var maxLen = maxStripLenPx(p);
+    var j = lock.jacketTo;
+    if (!isFinite(j) || j < STRIP_TIP_EPS) j = STRIP_TIP_EPS;
+    if (isFinite(maxLen) && maxLen >= 0 && j > maxLen) j = maxLen;
+    fs.jacketTo = j;
+    fs.bareTo = j;
+    fs.peel = 0;
+    fs.peelLayer = null;
+    p.stripStage = 2;
+    p.stripLengthPx = j;
+    lock.jacketTo = j;
+    lock.bareTo = j;
+    enforceFullStripBareFrontier(p);
+    return true;
+  }
+
+  /** Binary-search jacketTo so the yellow jacket frontier lands on a fixed world X. */
+  function pinJacketBoundaryToWorldX(p, targetX) {
+    if (!p || targetX == null || !isFinite(targetX)) return;
+    ensureFiberStrip(p);
+    var maxLen = maxStripLenPx(p);
+    if (!isFinite(maxLen) || maxLen <= 0) return;
+    var lo = STRIP_TIP_EPS;
+    var hi = maxLen;
+    var iter;
+    for (iter = 0; iter < 28; iter++) {
+      var mid = (lo + hi) * 0.5;
+      p.fiberStrip.jacketTo = mid;
+      p.fiberStrip.bareTo = mid;
+      var boundary = getJacketBoundaryWorld(p);
+      if (!boundary || !isFinite(boundary.x)) break;
+      if (Math.abs(boundary.x - targetX) <= RULER_WALL_EPS) {
+        p.fiberStrip.bareTo = mid;
+        return;
+      }
+      if (boundary.x > targetX) lo = mid;
+      else hi = mid;
+    }
+    p.fiberStrip.bareTo = p.fiberStrip.jacketTo;
+  }
+
+  function captureCleaveStripAnchor(p, cleaverId) {
+    ensureFiberStrip(p);
+    var boundary = getJacketBoundaryWorld(p);
+    var rulerStopX = p.cleaverSlotAnchorX;
+    if (rulerStopX == null && cleaverId) {
+      var slot = getCleaverSlotGeometry(cleaverId);
+      if (slot && slot.rulerStopX != null) rulerStopX = slot.rulerStopX;
+    }
+    if (rulerStopX == null && boundary) rulerStopX = boundary.x;
+    return {
+      preJacketTo: p.fiberStrip.jacketTo || 0,
+      preBareTo: p.fiberStrip.bareTo || 0,
+      jacketBoundaryX: boundary ? boundary.x : null,
+      rulerStopX: rulerStopX,
+    };
+  }
+
+  /** Keep yellow jacket on ruler wall while docked; preserve arc-lengths when free. */
+  function enforceCleavedJacketWall(p) {
+    if (!p || !(p.isCleaved || p.cleaved) || !p.cleavedStripLock) return;
+    if (!p.isSnappedToCleaver) {
+      enforceFullStripBareFrontier(p);
+      return;
+    }
+    var lock = p.cleavedStripLock;
+    var wallX = lock.rulerStopX != null ? lock.rulerStopX : lock.jacketBoundaryX;
+    if (wallX == null) return;
+    if (lock.jacketBoundaryX != null) {
+      pinJacketBoundaryToWorldX(p, lock.jacketBoundaryX);
+    } else {
+      p.fiberStrip.jacketTo = lock.jacketTo;
+      p.fiberStrip.bareTo = lock.bareTo;
+    }
+    enforceRulerWall(p, wallX);
+    lock.jacketTo = p.fiberStrip.jacketTo;
+    lock.bareTo = p.fiberStrip.jacketTo;
+    var boundary = getJacketBoundaryWorld(p);
+    if (boundary) lock.jacketBoundaryX = boundary.x;
+    enforceFullStripBareFrontier(p);
+  }
+
+  function lockCleavedStripGeometry(p, bareLenPx, opts) {
+    opts = opts || {};
+    if (!p) return;
+    ensureFiberStrip(p);
+    var bareLen = typeof bareLenPx === 'number' ? bareLenPx : getBareGlassLengthAfterCutPx();
+    bareLen = Math.max(CLEAVE_MIN_CUT_PX, bareLen);
+    var maxLen = maxStripLenPx(p);
+    if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
+
+    var jacketTo;
+    if (typeof opts.preJacketTo === 'number') {
+      var removed = typeof opts.removedFromTip === 'number' ? opts.removedFromTip : 0;
+      jacketTo = Math.max(bareLen, opts.preJacketTo - removed);
+    } else {
+      jacketTo = p.fiberStrip.jacketTo || 0;
+    }
+    jacketTo = Math.min(jacketTo, maxLen);
+    p.fiberStrip.jacketTo = jacketTo;
+    p.fiberStrip.bareTo = jacketTo;
+    p.fiberStrip.peel = 0;
+    p.fiberStrip.peelLayer = null;
+
+    var lock = {
+      jacketTo: jacketTo,
+      bareTo: jacketTo,
+    };
+    if (opts.jacketBoundaryX != null) lock.jacketBoundaryX = opts.jacketBoundaryX;
+    if (opts.rulerStopX != null) lock.rulerStopX = opts.rulerStopX;
+    p.cleavedStripLock = lock;
+
+    var pinX = lock.jacketBoundaryX != null ? lock.jacketBoundaryX : lock.rulerStopX;
+    if (pinX != null) {
+      pinJacketBoundaryToWorldX(p, pinX);
+      lock.jacketTo = p.fiberStrip.jacketTo;
+      lock.bareTo = p.fiberStrip.jacketTo;
+      enforceRulerWall(p, pinX);
+    }
+
+    enforceFullStripBareFrontier(p);
+    syncStripStageFromFiberStrip(p);
+    lockPermanentStripFrontier(p);
   }
 
   var STRIP_TIP_EPS = 0.05;
@@ -713,6 +924,10 @@
   function clampStripFrontiersToPath(p) {
     if (!p) return;
     ensureFiberStrip(p);
+    if (p.isCleaved || p.cleaved || (Number(p.stripStage) || 0) >= 2 || p.stripFrontierLock) {
+      restorePermanentStripFrontier(p);
+      return;
+    }
     var fs = p.fiberStrip;
     var maxLen = maxStripLenPx(p);
     if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
@@ -737,6 +952,20 @@
     if (!p) return;
     ensureFiberStrip(p);
     var fs = p.fiberStrip;
+    if (p.isCleaved || p.cleaved) {
+      snapBareToJacket(fs);
+      p.stripStage = 2;
+      p.stripLengthPx = fs.jacketTo || 0;
+      p.stripPeel = fs.peel || 0;
+      return;
+    }
+    if (p.stripFrontierLock && (Number(p.stripStage) || 0) >= 2) {
+      snapBareToJacket(fs);
+      p.stripStage = 2;
+      p.stripLengthPx = fs.jacketTo || 0;
+      p.stripPeel = fs.peel || 0;
+      return;
+    }
     var j = fs.jacketTo || 0;
     var b = fs.bareTo || 0;
     if (j < STRIP_TIP_EPS) {
@@ -744,6 +973,7 @@
     } else if (b >= j - STRIP_BUFFER_COMPLETE_PX) {
       p.stripStage = 2;
       snapBareToJacket(fs);
+      lockPermanentStripFrontier(p);
     } else {
       p.stripStage = 1;
     }
@@ -774,6 +1004,7 @@
   /** Visual kind for the tip-side segment when only jacket is partially removed. */
   function stripExposedKind(p) {
     ensureFiberStrip(p);
+    if (isFullyStrippedPigtail(p)) return 'bare';
     var fs = p.fiberStrip;
     if (isBareStripComplete(fs)) return 'bare';
     if ((fs.jacketTo || 0) > 0.5) return 'buffer';
@@ -901,10 +1132,12 @@
     var bad = p.connector.mismatch;
     var sel = selection.id === p.id ? ' is-selected' : '';
     ensureFiberStrip(p);
+    enforceFullStripBareFrontier(p);
     var fs = p.fiberStrip;
     var jacketTo = Math.max(0, fs.jacketTo || 0);
     var bareTo = Math.max(0, fs.bareTo || 0);
-    var bareComplete = isBareStripComplete(fs);
+    var fullyStripped = isFullyStrippedPigtail(p);
+    var bareComplete = fullyStripped || isBareStripComplete(fs);
     if (bareComplete) {
       bareTo = jacketTo;
     }
@@ -915,7 +1148,7 @@
     var total = polylineLength(fullPts);
     var html =
       '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
-      '" fill="none" />';
+      '" fill="none" stroke="transparent" />';
 
     function peelStyle(layerName) {
       if (peel <= 0.02 || peelLayer !== layerName) return '';
@@ -938,7 +1171,7 @@
         '" fill="none"' + peelStyle('jacket') + ' />';
 
       var bufferGap = jacketRender - bareRender;
-      var bufferSplit = !bareComplete &&
+      var bufferSplit = !fullyStripped && !bareComplete &&
         bareRender > STRIP_TIP_EPS &&
         bufferGap >= STRIP_BUFFER_COMPLETE_PX;
       if (bufferSplit) {
@@ -962,8 +1195,8 @@
       }
       if (!bufferSplit) {
         var tipPts = slicePolylineByDistance(fullPts, dJacketEnd, total);
-        var tipBare = bareComplete || (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX &&
-          jacketRender > STRIP_TIP_EPS);
+        var tipBare = fullyStripped || bareComplete ||
+          (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX && jacketRender > STRIP_TIP_EPS);
         var tipKind = tipBare ? 'bare' : (stripExposedKind(p) || 'buffer');
         html +=
           '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + tipKind +
@@ -1145,9 +1378,15 @@
   }
 
   function bareTipSpanX(bladeX, rulerStopX) {
+    var wallX = rulerStopX;
+    var blade = bladeX;
+    if (!isFinite(wallX) || !isFinite(blade)) {
+      return { minX: wallX, maxX: blade };
+    }
+    /* Bare zone: jacket wall (left/smaller X) → blade/anvil (right/larger X). */
     return {
-      minX: Math.min(bladeX, rulerStopX),
-      maxX: Math.max(bladeX, rulerStopX),
+      minX: Math.min(wallX, blade),
+      maxX: Math.max(wallX, blade),
     };
   }
 
@@ -1180,6 +1419,24 @@
   }
 
   /**
+   * Shift whole tail so yellow jacket frontier (jacketTo) meets the ruler stop wall.
+   */
+  function alignJacketToRulerWall(p, slot) {
+    if (!p || !slot || slot.rulerStopX == null || slot.grooveY == null) return false;
+    var grooveY = slot.grooveY;
+    var rulerStopX = slot.rulerStopX;
+    p.by = grooveY;
+    flattenOrthoForCleaverSlot(p, p.bx, grooveY);
+    var boundary = getJacketBoundaryWorld(p);
+    if (boundary) {
+      translateTailGeometry(p, rulerStopX - boundary.x, 0);
+    }
+    enforceRulerWall(p, rulerStopX);
+    p.by = Math.round(grooveY);
+    return true;
+  }
+
+  /**
    * Pin jacket frontier on ruler stop; bare glass may extend toward blade only.
    */
   function pinJacketToRulerWall(p, slot, desiredTipX) {
@@ -1189,35 +1446,32 @@
     var bladeX = slot.bladeX;
     if (rulerStopX == null || grooveY == null || bladeX == null) return false;
 
+    if (!alignJacketToRulerWall(p, slot)) return false;
+
     var span = bareTipSpanX(bladeX, rulerStopX);
+    if (span.maxX - span.minX < ORTHO_MIN_SEG) return false;
     var tipX = Math.max(span.minX, Math.min(span.maxX, desiredTipX));
-    p.by = grooveY;
     p.bx = tipX;
     flattenOrthoForCleaverSlot(p, tipX, grooveY);
 
     var iter;
-    for (iter = 0; iter < 10; iter++) {
+    for (iter = 0; iter < 12; iter++) {
       var boundary = getJacketBoundaryWorld(p);
       var err = boundary.x - rulerStopX;
       if (Math.abs(err) < RULER_WALL_EPS) break;
-      p.bx -= err * 0.88;
-      p.bx = Math.max(span.minX, Math.min(span.maxX, p.bx));
-      flattenOrthoForCleaverSlot(p, p.bx, grooveY);
+      translateTailGeometry(p, -err, 0);
+      p.bx = tipX;
+      flattenOrthoForCleaverSlot(p, tipX, grooveY);
     }
     enforceRulerWall(p, rulerStopX);
-    p.bx = Math.round(p.bx);
+    p.bx = Math.round(tipX);
     p.by = Math.round(grooveY);
     return true;
   }
 
-  /** Seat fiber in ruler slot — jacket locked at wall, bare tip slides toward blade. */
-  function seatFiberInCleaverSlot(p, cleaverId, desiredTipX) {
-    var slot = getCleaverSlotGeometry(cleaverId);
-    if (!slot || !pinJacketToRulerWall(p, slot, desiredTipX)) return false;
-    p.isSnappedToCleaver = true;
-    p.snappedCleaverId = cleaverId;
-    p.cleaverSlotAnchorX = slot.rulerStopX;
-    return true;
+  /** Seat fiber in ruler slot — jacket locked at wall, bare tip toward blade. */
+  function seatFiberInCleaverSlot(p, cleaverId) {
+    return seatFiberOnCleaverDrop(p, cleaverId);
   }
 
   function refreshPigtailCleaverSlot(pigtailId, cleaverId) {
@@ -1253,14 +1507,13 @@
       FtthLab.setCleaverDockedPigtail(cleaverId, null);
     }
     updateCleaverSnapVisual(p);
+    restorePermanentStripFrontier(p);
     if (!opts.skipGuide) clearCleaverGuideLine();
+    clearCleaverDropzoneHighlight();
   }
 
-  function lockTipInCleaverGroove(p, cleaverId, snapX, grooveY) {
-    seatFiberInCleaverSlot(p, cleaverId, snapX);
-    if (grooveY != null) {
-      p.by = Math.round(grooveY);
-    }
+  function lockTipInCleaverGroove(p, cleaverId) {
+    seatFiberInCleaverSlot(p, cleaverId);
   }
 
   function snapPigtailToCleaverGroove(p, cleaverId, snapX, grooveY, opts) {
@@ -1268,7 +1521,7 @@
     if (!p || p.cleaved || p.isCleaved) return false;
     if ((Number(p.stripStage) || 0) < 2) return false;
     if (p.tail && p.tail.attached) return false;
-    if (!seatFiberInCleaverSlot(p, cleaverId, snapX)) return false;
+    if (!seatFiberOnCleaverDrop(p, cleaverId)) return false;
     if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
       FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
     }
@@ -1291,52 +1544,86 @@
     return FtthLab.findCleaverGrooveNear(tipX, tipY, CLEAVER_SNAP_PX);
   }
 
-  /**
-   * Ruler-slot snap while dragging bare tip — jacket pinned at wall, pull left to release.
-   */
-  function applyCleaverSnapDuringTailDrag(p, worldX, worldY) {
+  function setCleaverDropzoneHighlight(cleaverId) {
+    if (global.FtthLab && typeof FtthLab.setCleaverDropzoneActive === 'function') {
+      FtthLab.setCleaverDropzoneActive(cleaverId, true);
+    }
+  }
+
+  function clearCleaverDropzoneHighlight() {
+    if (global.FtthLab && typeof FtthLab.clearCleaverDropzones === 'function') {
+      FtthLab.clearCleaverDropzones();
+    }
+  }
+
+  function cleaverEligibleForDropzone(p) {
     if (!p || p.cleaved || p.isCleaved) return false;
     if ((Number(p.stripStage) || 0) < 2) return false;
     if (p.tail && p.tail.attached) return false;
+    return true;
+  }
 
-    if (p.isSnappedToCleaver && p.snappedCleaverId) {
-      var slot = getCleaverSlotGeometry(p.snappedCleaverId);
-      if (!slot || !slot.open) {
-        clearCleaverSnap(p);
-        return false;
-      }
-      var anchorX = p.cleaverSlotAnchorX != null ? p.cleaverSlotAnchorX : slot.rulerStopX;
-      var pullLeft = anchorX - worldX;
-      if (pullLeft > CLEAVER_RELEASE_PULL_PX) {
-        clearCleaverSnap(p);
-        setStatus('SC Pigtail · released from cleaver ruler slot');
-        return false;
-      }
-      var span = bareTipSpanX(slot.bladeX, slot.rulerStopX);
-      var targetTipX = p.bx + (worldX - p.bx) * CLEAVER_SLOT_FOLLOW;
-      targetTipX = Math.max(span.minX, Math.min(span.maxX, targetTipX));
-      pinJacketToRulerWall(p, slot, targetTipX);
-      var guide = cleaverSlotGuideFromInfo(slot);
-      if (guide) setCleaverGuideLine(guide, true);
-      setCleaverRulerWallGuide(slot, true);
-      return true;
+  /**
+   * Snap on release only: lock Y to groove, shift tail so jacketTo meets ruler stop (art X=305).
+   */
+  function seatFiberOnCleaverDrop(p, cleaverId) {
+    if (!cleaverEligibleForDropzone(p)) return false;
+    var slot = getCleaverSlotGeometry(cleaverId);
+    if (!slot || !slot.open || slot.grooveY == null || slot.rulerStopX == null) return false;
+
+    var grooveY = slot.grooveY;
+    var rulerStopX = slot.rulerStopX;
+    var bladeX = slot.bladeX;
+    var span = bareTipSpanX(bladeX, rulerStopX);
+    if (span.maxX - span.minX < ORTHO_MIN_SEG) return false;
+
+    p.by = Math.round(grooveY);
+    flattenOrthoForCleaverSlot(p, p.bx, grooveY);
+
+    var boundary = getJacketBoundaryWorld(p);
+    if (boundary) {
+      translateTailGeometry(p, rulerStopX - boundary.x, 0);
+    }
+    enforceRulerWall(p, rulerStopX);
+
+    var tipX = Math.max(span.minX, Math.min(span.maxX, p.bx));
+    p.bx = tipX;
+    flattenOrthoForCleaverSlot(p, tipX, grooveY);
+    boundary = getJacketBoundaryWorld(p);
+    if (boundary) {
+      translateTailGeometry(p, rulerStopX - boundary.x, 0);
+    }
+    enforceRulerWall(p, rulerStopX);
+
+    var iter;
+    for (iter = 0; iter < 16; iter++) {
+      boundary = getJacketBoundaryWorld(p);
+      if (!boundary || Math.abs(boundary.x - rulerStopX) < RULER_WALL_EPS) break;
+      translateTailGeometry(p, rulerStopX - boundary.x, 0);
     }
 
-    var snap = findCleaverGrooveSnapForTip(p, p.bx, p.by);
-    if (!snap) {
-      clearCleaverGuideLine();
-      return false;
+    p.bx = Math.round(Math.max(span.minX, Math.min(span.maxX, p.bx)));
+    p.by = Math.round(grooveY);
+    p.isSnappedToCleaver = true;
+    p.snappedCleaverId = cleaverId;
+    p.cleaverSlotAnchorX = rulerStopX;
+    lockPermanentStripFrontier(p);
+    return true;
+  }
+
+  function finishCleaverDropSeat(p, cleaverId) {
+    if (!seatFiberOnCleaverDrop(p, cleaverId)) return false;
+    if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
+      FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
     }
-    var slotInfo = getCleaverSlotGeometry(snap.cleaverId);
-    var approachGuide = cleaverSlotGuideFromInfo(slotInfo) || snap.groove;
-    if (snap.dist <= CLEAVER_SNAP_PX) {
-      var gy = typeof snap.grooveY === 'number' ? snap.grooveY : snap.snapY;
-      snapPigtailToCleaverGroove(p, snap.cleaverId, snap.snapX, gy, { quiet: true });
-      return true;
-    }
-    setCleaverGuideLine(approachGuide, false);
-    if (slotInfo) setCleaverRulerWallGuide(slotInfo, false);
-    return false;
+    var slot = getCleaverSlotGeometry(cleaverId);
+    var guide = cleaverSlotGuideFromInfo(slot);
+    if (guide) setCleaverGuideLine(guide, true);
+    if (slot) setCleaverRulerWallGuide(slot, true);
+    updateCleaverSnapVisual(p);
+    updateFiberPath(p);
+    setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
+    return true;
   }
 
   /** Bare stripped tip probe for cleaver secondary snap. */
@@ -1463,7 +1750,7 @@
   function notchIntersectsUnstrippedFiber(p, wx, wy, thresholdPx) {
     var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
     thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
-    if (!p) return null;
+    if (!p || p.isCleaved || p.cleaved) return null;
     ensureFiberStrip(p);
     clampStripFrontiersToPath(p);
     var fs = p.fiberStrip;
@@ -1806,11 +2093,22 @@
     if (hit.along < CLEAVE_MIN_CUT_PX) return false;
     if (polylineLength(pts) < hit.along + 6) return false;
 
+    var anchor = captureCleaveStripAnchor(p, opts.cleaverId);
+    var lenBefore = polylineLength(pts);
+
     truncateFiberAtBladeX(p, bladeX, bladeY);
-    ensureFiberStrip(p);
-    clampStripFrontiersToPath(p);
+
+    var lenAfter = polylineLength(fiberSleevePathPoints(p));
+    var removed = Math.max(0, lenBefore - lenAfter);
+
     p.isCleaved = true;
     p.cleaved = true;
+    lockCleavedStripGeometry(p, getBareGlassLengthAfterCutPx(), {
+      preJacketTo: anchor.preJacketTo,
+      removedFromTip: removed,
+      jacketBoundaryX: anchor.jacketBoundaryX,
+      rulerStopX: anchor.rulerStopX,
+    });
     p.cleaveAngle = 90;
     p.cleaveFaceRot = 90;
     clearCleaverSnap(p, { skipGuide: true });
@@ -1856,7 +2154,7 @@
           rot: proj.rot,
           perpDist: proj.perpDist,
           along: proj.dist,
-          wastePx: CLEAVE_WASTE_PX,
+          wastePx: getBareGlassLengthAfterCutPx(),
         };
       }
     }
@@ -1899,15 +2197,23 @@
       if (proj.dist > CLEAVE_TIP_ZONE_PX) return false;
       cutDist = proj.dist;
     } else {
-      cutDist = typeof opts.wastePx === 'number' ? opts.wastePx : CLEAVE_WASTE_PX;
+      cutDist = typeof opts.wastePx === 'number' ? opts.wastePx : getBareGlassLengthAfterCutPx();
     }
     if (cutDist < CLEAVE_MIN_CUT_PX) return false;
     if (total < cutDist + 6) return false;
+
+    var anchor = captureCleaveStripAnchor(p, opts.cleaverId);
     var newTip = pointAtPathDistance(pts, cutDist);
     p.bx = newTip.x;
     p.by = newTip.y;
     p.isCleaved = true;
     p.cleaved = true;
+    lockCleavedStripGeometry(p, getBareGlassLengthAfterCutPx(), {
+      preJacketTo: anchor.preJacketTo,
+      removedFromTip: cutDist,
+      jacketBoundaryX: anchor.jacketBoundaryX,
+      rulerStopX: anchor.rulerStopX,
+    });
     p.cleaveAngle = typeof opts.cleaveAngle === 'number' ? opts.cleaveAngle : 90;
     p.cleaveFaceRot = typeof opts.cleaveFaceRot === 'number' ? opts.cleaveFaceRot : p.cleaveAngle;
     updateFiberPath(p);
@@ -1924,7 +2230,7 @@
 
   function setStripPeel(id, peel) {
     var p = findPigtail(id);
-    if (!p) return;
+    if (!p || p.isCleaved || p.cleaved) return;
     ensureFiberStrip(p);
     if ((Number(p.stripStage) || 0) >= 2 && (p.fiberStrip.peelLayer || '') !== 'jacket') return;
     var n = Number(peel);
@@ -1937,7 +2243,7 @@
   /** Legacy hook — sets jacket frontier length from tip. */
   function setStripLengthPx(id, px) {
     var p = findPigtail(id);
-    if (!p) return;
+    if (!p || p.isCleaved || p.cleaved) return;
     ensureFiberStrip(p);
     clampStripFrontiersToPath(p);
     var n = Number(px);
@@ -1964,7 +2270,7 @@
   /** Stage is derived from fiberStrip frontiers — no fixed-length snap. */
   function commitStripStage(id) {
     var p = findPigtail(id);
-    if (!p) return false;
+    if (!p || p.isCleaved || p.cleaved) return false;
     ensureFiberStrip(p);
     syncStripStageFromFiberStrip(p);
     p.fiberStrip.peel = 0;
@@ -1986,11 +2292,13 @@
   function syncTailStripDom(p, tail) {
     if (!p || !tail) return;
     ensureFiberStrip(p);
+    enforceFullStripBareFrontier(p);
     var fs = p.fiberStrip;
     var peel = fs.peel || 0;
     var peelLayer = fs.peelLayer;
     var j = fs.jacketTo || 0;
-    var bareComplete = isBareStripComplete(fs);
+    var fullyStripped = isFullyStrippedPigtail(p);
+    var bareComplete = fullyStripped || isBareStripComplete(fs);
     var jacketStripped = j > STRIP_TIP_EPS;
     var stage = p.stripStage || 0;
 
@@ -2007,14 +2315,15 @@
       jacketEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'jacket');
     }
     if (bufferEl) {
-      bufferEl.classList.toggle('is-strip-exposed', jacketStripped && !bareComplete);
+      bufferEl.classList.toggle('is-strip-exposed', !fullyStripped && jacketStripped && !bareComplete);
       bufferEl.classList.toggle('is-strip-jacketed', !jacketStripped);
       bufferEl.classList.toggle('is-strip-removed', bareComplete);
       bufferEl.classList.toggle('is-strip-peeling', peel > 0.02 && peelLayer === 'buffer');
     }
     if (cleaveEl) {
       cleaveEl.classList.toggle('is-strip-bare', bareComplete);
-      cleaveEl.classList.toggle('is-strip-buffered', jacketStripped && !bareComplete);
+      cleaveEl.classList.toggle('is-strip-buffered', !fullyStripped && jacketStripped && !bareComplete);
+      cleaveEl.classList.toggle('is-cleaved', !!(p.isCleaved || p.cleaved));
     }
   }
 
@@ -2268,6 +2577,8 @@
       isSnappedToCleaver: false,
       snappedCleaverId: null,
       cleaverSlotAnchorX: null,
+      cleavedStripLock: null,
+      stripFrontierLock: null,
     };
     pigtails.push(item);
     selectPigtail(item.id);
@@ -3402,7 +3713,8 @@
       ensureFiberStrip(p);
       var fs = p.fiberStrip;
       var j = fs.jacketTo || 0;
-      var bareComplete = isBareStripComplete(fs);
+      var fullyStripped = isFullyStrippedPigtail(p);
+      var bareComplete = fullyStripped || isBareStripComplete(fs);
       var jacketStripped = j > STRIP_TIP_EPS;
       var stripStage = p.stripStage || 0;
       var peel = fs.peel || 0;
@@ -3424,6 +3736,7 @@
         '<button type="button" class="lab-pigtail__tail' +
         (p.tail.attached ? ' is-attached' : '') +
         (p.isSnappedToCleaver ? ' is-cleaver-docked' : '') +
+        (p.isCleaved || p.cleaved ? ' is-cleaved' : '') +
         (jacketStripped ? ' is-strip-stage1' : '') +
         (bareComplete ? ' is-strip-stage2' : '') +
         (peel > 0.02 ? ' is-strip-peeling' : '') +
@@ -3435,7 +3748,7 @@
         (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') +
         '" aria-hidden="true"></span>' +
         '<span class="lab-pigtail__buffer' +
-        (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed') +
+        (fullyStripped ? ' is-strip-removed' : (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed')) +
         (bareComplete ? ' is-strip-removed' : '') +
         (peel > 0.02 && peelLayer === 'buffer' ? ' is-strip-peeling' : '') +
         '" aria-hidden="true"></span>' +
@@ -3470,6 +3783,9 @@
 
   function updateFiberPath(p) {
     if (!layer) return;
+    if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+      restorePermanentStripFrontier(p);
+    }
     syncPigtailFiberLength(p);
     replacePigtailFiberSvg(p);
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
@@ -3781,6 +4097,12 @@
         if (snakeMode) beginOrthoSnake(p, 'B');
         else p.snake = { dragEnd: 'B' };
 
+        if (p.isSnappedToCleaver) {
+          clearCleaverSnap(p, { skipGuide: true });
+        } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+          restorePermanentStripFrontier(p);
+        }
+
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pigtail-dragging');
 
@@ -3812,7 +4134,24 @@
             moveTipGravity(p, 'B', world.x, world.y);
           }
 
-          applyCleaverSnapDuringTailDrag(p, world.x, world.y);
+          if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+            restorePermanentStripFrontier(p);
+            if (p.isSnappedToCleaver && (p.isCleaved || p.cleaved)) {
+              enforceCleavedJacketWall(p);
+            }
+          }
+
+          if (cleaverEligibleForDropzone(p) &&
+              global.FtthLab && typeof FtthLab.findCleaverGrooveNear === 'function') {
+            var grooveHit = FtthLab.findCleaverGrooveNear(p.bx, p.by, CLEAVER_SNAP_PX);
+            if (grooveHit && grooveHit.dist <= CLEAVER_SNAP_PX) {
+              setCleaverDropzoneHighlight(grooveHit.cleaverId);
+            } else {
+              clearCleaverDropzoneHighlight();
+            }
+          } else {
+            clearCleaverDropzoneHighlight();
+          }
 
           var hit = hitTestTailTarget(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
@@ -3829,13 +4168,15 @@
           if (snakeMode) endOrthoSnake(p);
           else p.snake = null;
 
-          if (p.isSnappedToCleaver && p.snappedCleaverId) {
-            var dockInfo = getCleaverSlotGeometry(p.snappedCleaverId);
-            var dockGuide = cleaverSlotGuideFromInfo(dockInfo);
-            if (dockGuide) setCleaverGuideLine(dockGuide, true);
-            if (dockInfo) setCleaverRulerWallGuide(dockInfo, true);
-            setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
-          } else {
+          var seated = false;
+          var activeCleaver = document.querySelector('.lab-cleaver.cleaver-dropzone-active');
+          if (activeCleaver) {
+            var dropCleaverId = activeCleaver.getAttribute('data-cleaver-node');
+            seated = finishCleaverDropSeat(p, dropCleaverId);
+          }
+          clearCleaverDropzoneHighlight();
+
+          if (!seated) {
             clearCleaverGuideLine();
           }
 
@@ -3847,7 +4188,7 @@
           }
           rebuildLayer();
           updateInspector();
-          if (moved || undocked) pushHistory();
+          if (moved || undocked || seated) pushHistory();
         }
 
         window.addEventListener('pointermove', onMove);
@@ -4338,6 +4679,7 @@
       FtthLab.findPigtailBladeHit = findPigtailBladeHit;
       FtthLab.commitPigtailCleave = commitCleave;
       FtthLab.commitPigtailCleaveAtBlade = commitCleaveAtBlade;
+      FtthLab.getBareGlassLengthAfterCutPx = getBareGlassLengthAfterCutPx;
       FtthLab.bladeHitRadiusPx = function () { return BLADE_HIT_RADIUS_PX; };
       FtthLab.findPigtailBareTipNearWorld = findBareTipNearWorld;
       FtthLab.snapPigtailToCleaverGroove = function (id, cleaverId, snapX, grooveY, opts) {

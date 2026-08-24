@@ -24,8 +24,10 @@
   var RULER_STOP_NAT_X = RULER_RAIL_LEFT_NAT + RULER_RAIL_WIDTH_NAT;
   var GROOVE_NAT_Y = 142;
   var GROOVE_NAT_X1 = RULER_RAIL_LEFT_NAT;
-  var GROOVE_NAT_X2 = RULER_STOP_NAT_X;
-  var BLADE_NAT_X = 175;
+  /** Bare-glass channel runs ruler stop → anvil (not the silver slider at ~175). */
+  var FIBER_ANVIL_NAT_X = 380;
+  var BLADE_NAT_X = FIBER_ANVIL_NAT_X;
+  var GROOVE_NAT_X2 = BLADE_NAT_X;
   var BLADE_NAT_Y = 142;
   /** Perpendicular tolerance — fiber must overlap groove centerline. */
   var CLEAVE_HIT_PX = 8;
@@ -251,45 +253,19 @@
     c.dockedPigtailId = null;
   }
 
-  /** Secondary snap: align cleaver to bare tip while dragging the tool. */
-  function refreshCleaverFiberSnap(c, node) {
-    if (!c || c.clamped) {
-      if (global.FtthLab && typeof FtthLab.clearCleaverGuideLine === 'function') {
-        FtthLab.clearCleaverGuideLine();
-      }
-      return;
-    }
-    var groove = grooveWorldSegment(c);
-    var gy = grooveWorldY(c);
-    var blade = bladeWorldPos(c);
-    var tip = null;
-    if (global.FtthLab && typeof FtthLab.findPigtailBareTipNearWorld === 'function') {
-      tip = FtthLab.findPigtailBareTipNearWorld(blade.x, gy, CLEAVER_SNAP_PX);
-      if (!tip) {
-        var midX = (Math.min(groove.x1, groove.x2) + Math.max(groove.x1, groove.x2)) * 0.5;
-        tip = FtthLab.findPigtailBareTipNearWorld(midX, gy, CLEAVER_SNAP_PX);
-      }
-    }
-    if (tip) {
-      var snap = alignCleaverBladeToPoint(c, tip.x, tip.y);
-      updateCleaverPosition(c, node);
-      if (global.FtthLab && typeof FtthLab.snapPigtailToCleaverGroove === 'function') {
-        FtthLab.snapPigtailToCleaverGroove(tip.id, c.id, snap.snapX, snap.grooveY, { quiet: true });
-      } else if (global.FtthLab && typeof FtthLab.dockPigtailToCleaver === 'function') {
-        FtthLab.dockPigtailToCleaver(tip.id, c.id, snap.snapX, snap.grooveY, { quiet: true });
-      }
-      c.dockedPigtailId = tip.id;
-      if (global.FtthLab && typeof FtthLab.setCleaverGuideLine === 'function') {
-        FtthLab.setCleaverGuideLine(groove, true);
-      }
-      return;
-    }
-    if (c.dockedPigtailId) {
-      clearCleaverDockState(c);
-    }
-    if (global.FtthLab && typeof FtthLab.setCleaverGuideLine === 'function') {
-      FtthLab.setCleaverGuideLine(groove, false);
-    }
+  /** Highlight / clear cleaver dropzone while pigtail is dragged nearby (snap happens on release). */
+  function setCleaverDropzoneActive(cleaverId, active) {
+    if (!layer) return;
+    layer.querySelectorAll('.lab-cleaver.cleaver-dropzone-active').forEach(function (node) {
+      node.classList.remove('cleaver-dropzone-active');
+    });
+    if (!active || !cleaverId) return;
+    var node = layer.querySelector('[data-cleaver-node="' + cleaverId + '"]');
+    if (node) node.classList.add('cleaver-dropzone-active');
+  }
+
+  function clearCleaverDropzones() {
+    setCleaverDropzoneActive(null, false);
   }
 
   /**
@@ -303,6 +279,7 @@
     var blade = bladeDropPoint(c);
     var ok = FtthLab.commitPigtailCleaveAtBlade(blade.x, blade.y, {
       hitRadius: BLADE_HIT_RADIUS_PX,
+      cleaverId: c.id,
     });
     if (ok) {
       clearCleaverDockState(c);
@@ -494,8 +471,6 @@
       if (c.dockedPigtailId && global.FtthLab &&
           typeof FtthLab.refreshPigtailCleaverSlot === 'function') {
         FtthLab.refreshPigtailCleaverSlot(c.dockedPigtailId, c.id);
-      } else {
-        refreshCleaverFiberSnap(c, node);
       }
     }
 
@@ -780,6 +755,8 @@
       return snap;
     };
     FtthLab.setCleaverDockedPigtail = setCleaverDockedPigtail;
+    FtthLab.setCleaverDropzoneActive = setCleaverDropzoneActive;
+    FtthLab.clearCleaverDropzones = clearCleaverDropzones;
     FtthLab.cleaverSnapRadiusPx = function () {
       return CLEAVER_SNAP_PX;
     };
