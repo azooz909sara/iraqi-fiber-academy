@@ -299,6 +299,129 @@ body.lab-page {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
+/* Fusion splicer machine — canvas layer (below pigtail fiber z-index 20) */
+.lab-fusion-machine-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+body.lab-fusion-machine-dragging .lab-fusion-machine-layer {
+  z-index: 12;
+}
+
+.lab-fusion-machine {
+  position: absolute;
+  pointer-events: none;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  z-index: 6;
+  transform: scale(0.32);
+  transform-origin: 50% 50%;
+  transform-style: preserve-3d;
+  overflow: visible;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  outline: none;
+}
+
+.lab-fusion-machine.is-dragging,
+.lab-fusion-machine.is-selected {
+  z-index: 11;
+}
+
+.lab-fusion-machine__frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  outline: none;
+  box-shadow: none;
+}
+
+.lab-fusion-machine.is-armed .lab-fusion-machine__frame {
+  pointer-events: auto;
+}
+
+.lab-fusion-machine:not(.is-armed) .lab-fusion-machine__frame {
+  pointer-events: none !important;
+}
+
+.lab-fusion-machine__hit {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: auto;
+  cursor: grab;
+  outline: none;
+  box-shadow: none;
+}
+
+.lab-fusion-machine__hit:focus,
+.lab-fusion-machine__hit:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.lab-fusion-machine.is-armed .lab-fusion-machine__hit {
+  pointer-events: none;
+}
+
+.lab-fusion-machine.is-dragging .lab-fusion-machine__hit,
+.lab-fusion-machine:active .lab-fusion-machine__hit {
+  cursor: grabbing;
+}
+
+body.lab-fusion-machine-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+.lab-tool--fusion-machine {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.7rem 0.75rem;
+  border-radius: 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(15, 23, 42, 0.72);
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  font: inherit;
+  user-select: none;
+}
+
+.lab-tool--fusion-machine:hover,
+.lab-tool--fusion-machine.is-selected {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(14, 35, 58, 0.9);
+}
+
+.lab-tool__mark--fusion-machine {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 0.35rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #0b1220;
+  background: linear-gradient(135deg, #38bdf8, #2563eb);
+}
+
 .lab-rail__group {
   margin: 0;
   padding: 0;
@@ -2926,7 +3049,7 @@ body.lab-pcord-linking .lab-pcord-fiber {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  /* Always above cleaver base/ruler (layer max 12) — fiber rests on the black ruler */
+  /* Above cleaver (7), stripper (9), fusion splicer (6) — fiber over bench tools */
   z-index: 20;
   overflow: visible;
 }
