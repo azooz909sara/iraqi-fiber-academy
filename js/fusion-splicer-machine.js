@@ -1,11 +1,10 @@
 /**
- * Fusion Splicer Lab — draggable canvas machine (iframe-hosted v6 UI).
- * Drop from toolbox onto the grid; drag via top handle; fibers render above chassis.
+ * Fusion Splicer Lab — draggable native DOM machine (shared document with pigtails).
+ * Drop from toolbox onto the grid; drag via top handle; fibers use native z-index stack.
  */
 (function (global) {
   'use strict';
 
-  var MACHINE_SRC = 'fusion-splicer-machine.html';
   var TOOL_ID = 'fusion-splicer-machine';
   var HISTORY_MAX = 40;
   var DRAG_THRESHOLD_PX = 3;
@@ -17,6 +16,11 @@
   var MACHINE_VISUAL_SCALE = 0.32;
   var MACHINE_LOCAL_CX = MACHINE_NAT_W / 2;
   var MACHINE_LOCAL_CY = MACHINE_NAT_H / 2;
+  /** Magnetic snap — expanded client px padding around `.clamp-base-groove`. */
+  var GROOVE_HIT_PAD_CLIENT_X = 32;
+  var GROOVE_HIT_PAD_CLIENT_Y = 28;
+  /** Bare glass past inner groove lip toward fusion electrodes (world px). */
+  var GROOVE_BARE_PROTRUDE_WORLD = 14;
 
   var layer = null;
   var machines = [];
@@ -49,6 +53,399 @@
     return { x: 0, y: 0 };
   }
 
+  function dist2(ax, ay, bx, by) {
+    var dx = ax - bx;
+    var dy = ay - by;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+  function clientRectCenterToWorld(rect) {
+    if (!rect) return null;
+    return clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }
+
+  function clientRectSpanToWorld(rect) {
+    if (!rect) return null;
+    var cy = rect.top + rect.height / 2;
+    var a = clientToWorld(rect.left, cy);
+    var b = clientToWorld(rect.right, cy);
+    return {
+      x1: Math.min(a.x, b.x),
+      x2: Math.max(a.x, b.x),
+      y: (a.y + b.y) / 2,
+    };
+  }
+
+  function clientRectToWorldBox(rect) {
+    if (!rect) return null;
+    var tl = clientToWorld(rect.left, rect.top);
+    var br = clientToWorld(rect.right, rect.bottom);
+    return {
+      x1: Math.min(tl.x, br.x),
+      y1: Math.min(tl.y, br.y),
+      x2: Math.max(tl.x, br.x),
+      y2: Math.max(tl.y, br.y),
+    };
+  }
+
+  function queryGrooveElements(uiRoot, side) {
+    if (!uiRoot || (side !== 'L' && side !== 'R')) return null;
+    var suffix = side === 'L' ? 'l' : 'r';
+    return {
+      assembly: uiRoot.querySelector('.fsm-clamp-assembly-' + suffix),
+      groove: uiRoot.querySelector('.fsm-clamp-assembly-' + suffix + ' .clamp-base-groove'),
+      entry: uiRoot.querySelector(side === 'L' ? '.fsm-fiber-entry-left' : '.fsm-fiber-entry-right'),
+      lid: uiRoot.querySelector('.fsm-clamp-lid-' + suffix),
+    };
+  }
+
+  function grooveRectToWorldSlot(rect, machineId, side, opts) {
+    opts = opts || {};
+    if (!rect || (!rect.width && !rect.height)) return null;
+
+    var centerClientX = rect.left + rect.width / 2;
+    var centerClientY = rect.top + rect.height / 2;
+    var centerWorld = clientToWorld(centerClientX, centerClientY);
+    var leftWorld = clientToWorld(rect.left, centerClientY);
+    var rightWorld = clientToWorld(rect.right, centerClientY);
+
+    var grooveX1 = Math.min(leftWorld.x, rightWorld.x);
+    var grooveX2 = Math.max(leftWorld.x, rightWorld.x);
+    var grooveY = centerWorld.y;
+    var centerX = centerWorld.x;
+    var grooveW = Math.max(4, grooveX2 - grooveX1);
+    var innerEdgeX = side === 'L' ? grooveX2 : grooveX1;
+    var outerEdgeX = side === 'L' ? grooveX1 : grooveX2;
+    var bareProtrude = Math.max(8, Math.min(GROOVE_BARE_PROTRUDE_WORLD, grooveW * 0.28));
+    var tipX = side === 'L' ? innerEdgeX + bareProtrude : innerEdgeX - bareProtrude;
+    var anchorX = innerEdgeX;
+    var entryX = side === 'L' ? outerEdgeX - 28 : outerEdgeX + 28;
+    var entryY = grooveY;
+
+    if (opts.entryRect) {
+      var entryCenterY = opts.entryRect.top + opts.entryRect.height / 2;
+      var entryCenter = clientToWorld(
+        opts.entryRect.left + opts.entryRect.width / 2,
+        entryCenterY
+      );
+      entryX = entryCenter.x;
+      entryY = entryCenter.y;
+    }
+
+    return {
+      machineId: machineId,
+      side: side,
+      open: opts.open !== false,
+      lidClosed: !!opts.lidClosed,
+      grooveY: grooveY,
+      centerX: centerX,
+      tipX: tipX,
+      anchorX: anchorX,
+      innerEdgeX: innerEdgeX,
+      outerEdgeX: outerEdgeX,
+      bareProtrude: bareProtrude,
+      clampFaceX: anchorX,
+      entryX: entryX,
+      entryY: entryY,
+      workspaceEdgeX: entryX,
+      grooveX1: grooveX1,
+      grooveX2: grooveX2,
+      groove: { x1: grooveX1, y1: grooveY, x2: grooveX2, y2: grooveY },
+      clampRect: opts.clampRect || null,
+    };
+  }
+
+  function buildGrooveSlotFromElement(grooveEl) {
+    if (!grooveEl || !grooveEl.classList || !grooveEl.classList.contains('clamp-base-groove')) {
+      return null;
+    }
+
+    var assembly = grooveEl.closest('.fsm-clamp-assembly-l, .fsm-clamp-assembly-r');
+    if (!assembly || !assembly.classList.contains('lid-open')) return null;
+
+    var side = assembly.classList.contains('fsm-clamp-assembly-l') ? 'L' : 'R';
+    var machineNode = grooveEl.closest('[data-fusion-node]');
+    if (!machineNode) return null;
+    var machineId = machineNode.getAttribute('data-fusion-node');
+    if (!machineId) return null;
+
+    var bridge = bridges[machineId];
+    var api = bridge && bridge.api;
+    if (!api || typeof api.getState !== 'function') return null;
+
+    var state = api.getState();
+    var closed = !!(state.clampsClosed && state.clampsClosed[side]);
+    if (closed) return null;
+
+    var uiRoot = machineNode.querySelector('[data-fusion-ui-root]');
+    var parts = queryGrooveElements(uiRoot, side);
+    var rect = grooveEl.getBoundingClientRect();
+    var entryRect = parts && parts.entry ? parts.entry.getBoundingClientRect() : null;
+    var assemblyBox = clientRectToWorldBox(
+      parts && parts.assembly ? parts.assembly.getBoundingClientRect() : rect
+    );
+
+    return grooveRectToWorldSlot(rect, machineId, side, {
+      open: true,
+      lidClosed: false,
+      entryRect: entryRect,
+      clampRect: assemblyBox,
+    });
+  }
+
+  function getGrooveSlot(machineId, side) {
+    var node = getMachineNode(machineId);
+    var bridge = bridges[machineId];
+    var api = bridge && bridge.api;
+    if (!node || !api || typeof api.getState !== 'function') return null;
+
+    var uiRoot = node.querySelector('[data-fusion-ui-root]');
+    var parts = queryGrooveElements(uiRoot, side);
+    if (!parts || !parts.groove) return null;
+
+    var state = api.getState();
+    var closed = !!(state.clampsClosed && state.clampsClosed[side]);
+    var rect = parts.groove.getBoundingClientRect();
+    var entryRect = parts.entry ? parts.entry.getBoundingClientRect() : null;
+    var assemblyBox = clientRectToWorldBox(
+      parts.assembly ? parts.assembly.getBoundingClientRect() : rect
+    );
+
+    return grooveRectToWorldSlot(rect, machineId, side, {
+      open: !closed,
+      lidClosed: closed,
+      entryRect: entryRect,
+      clampRect: assemblyBox,
+    });
+  }
+
+  function makeGrooveHit(slot, grooveEl) {
+    return {
+      machineId: slot.machineId,
+      side: slot.side,
+      slot: slot,
+      grooveEl: grooveEl,
+      snapX: slot.tipX,
+      grooveY: slot.grooveY,
+    };
+  }
+
+  function clientInExpandedGrooveRect(clientX, clientY, rect, padX, padY) {
+    if (!rect) return false;
+    return (
+      clientX >= rect.left - padX &&
+      clientX <= rect.right + padX &&
+      clientY >= rect.top - padY &&
+      clientY <= rect.bottom + padY
+    );
+  }
+
+  function hitTestGrooveStackAtClient(clientX, clientY) {
+    var list = document.elementsFromPoint
+      ? document.elementsFromPoint(clientX, clientY)
+      : [];
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var grooveEl = list[i].closest && list[i].closest('.clamp-base-groove');
+      if (!grooveEl) continue;
+      var slot = buildGrooveSlotFromElement(grooveEl);
+      if (slot && slot.open) return makeGrooveHit(slot, grooveEl);
+    }
+    return null;
+  }
+
+  function hitTestGrooveExpandedAtClient(clientX, clientY) {
+    var padX = GROOVE_HIT_PAD_CLIENT_X;
+    var padY = GROOVE_HIT_PAD_CLIENT_Y;
+    var best = null;
+    var bestD = Infinity;
+    var i;
+    for (i = 0; i < machines.length; i++) {
+      var m = machines[i];
+      var node = getMachineNode(m.id);
+      if (!node) continue;
+      var uiRoot = node.querySelector('[data-fusion-ui-root]');
+      if (!uiRoot) continue;
+      var sides = ['L', 'R'];
+      var s;
+      for (s = 0; s < sides.length; s++) {
+        var side = sides[s];
+        var parts = queryGrooveElements(uiRoot, side);
+        if (!parts || !parts.groove || !parts.assembly) continue;
+        if (!parts.assembly.classList.contains('lid-open')) continue;
+        var slot = getGrooveSlot(m.id, side);
+        if (!slot || !slot.open) continue;
+        var rect = parts.groove.getBoundingClientRect();
+        if (!clientInExpandedGrooveRect(clientX, clientY, rect, padX, padY)) continue;
+        var cx = rect.left + rect.width / 2;
+        var cy = rect.top + rect.height / 2;
+        var dx = clientX - cx;
+        var dy = clientY - cy;
+        var d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = makeGrooveHit(slot, parts.groove);
+        }
+      }
+    }
+    return best;
+  }
+
+  /** DOM hit-test: pointer near silver `.clamp-base-groove` (forgiving padded zone). */
+  function hitTestSplicerGrooveAtClient(clientX, clientY) {
+    var hit = hitTestGrooveStackAtClient(clientX, clientY);
+    if (hit) return hit;
+    return hitTestGrooveExpandedAtClient(clientX, clientY);
+  }
+
+  function findGrooveNearWorld(wx, wy, radiusPx) {
+    var thr = typeof radiusPx === 'number' ? radiusPx : 40;
+    var best = null;
+    var bestD = thr + 1;
+    var i;
+    for (i = 0; i < machines.length; i++) {
+      var m = machines[i];
+      var sides = ['L', 'R'];
+      var s;
+      for (s = 0; s < sides.length; s++) {
+        var side = sides[s];
+        var slot = getGrooveSlot(m.id, side);
+        if (!slot || !slot.open) continue;
+        var d = dist2(wx, wy, slot.centerX, slot.grooveY);
+        if (d <= thr && d < bestD) {
+          bestD = d;
+          best = {
+            machineId: m.id,
+            side: side,
+            slot: slot,
+            dist: d,
+            snapX: slot.tipX,
+            grooveY: slot.grooveY,
+          };
+        }
+      }
+    }
+    return best;
+  }
+
+  function findGrooveNearClient(clientX, clientY, radiusPx) {
+    var hit = hitTestSplicerGrooveAtClient(clientX, clientY);
+    if (hit) return hit;
+    var world = clientToWorld(clientX, clientY);
+    return findGrooveNearWorld(world.x, world.y, radiusPx);
+  }
+
+  function ensureFiberLayer(machineId) {
+    var mount = document.getElementById('lab-2d-mount');
+    if (!mount) return null;
+    var layerEl = mount.querySelector('[data-fusion-fiber-layer="' + machineId + '"]');
+    if (!layerEl) {
+      layerEl = document.createElement('div');
+      layerEl.className = 'lab-fusion-fiber-layer';
+      layerEl.setAttribute('data-fusion-fiber-layer', machineId);
+      layerEl.innerHTML =
+        '<svg class="lab-pigtail-svg lab-fusion-pigtail-svg" aria-hidden="true"></svg>';
+      mount.appendChild(layerEl);
+    }
+    return layerEl;
+  }
+
+  function ensureLidLayer(machineId) {
+    var mount = document.getElementById('lab-2d-mount');
+    if (!mount) return null;
+    var layerEl = mount.querySelector('[data-fusion-lid-layer="' + machineId + '"]');
+    if (!layerEl) {
+      layerEl = document.createElement('div');
+      layerEl.className = 'lab-fusion-lid-layer';
+      layerEl.setAttribute('data-fusion-lid-layer', machineId);
+      mount.appendChild(layerEl);
+    }
+    return layerEl;
+  }
+
+  function removeMachineOverlays(machineId) {
+    var mount = document.getElementById('lab-2d-mount');
+    if (!mount) return;
+    ['data-fusion-fiber-layer', 'data-fusion-lid-layer'].forEach(function (attr) {
+      var el = mount.querySelector('[' + attr + '="' + machineId + '"]');
+      if (el) el.remove();
+    });
+  }
+
+  function syncLidOverlays(machineId) {
+    var mount = document.getElementById('lab-2d-mount');
+    var node = getMachineNode(machineId);
+    var bridge = bridges[machineId];
+    var api = bridge && bridge.api;
+    if (!mount || !node || !api) return;
+
+    var lidLayer = ensureLidLayer(machineId);
+    if (!lidLayer) return;
+    lidLayer.innerHTML = '';
+
+    var uiRoot = node.querySelector('[data-fusion-ui-root]');
+    var state = api.getState();
+    ['L', 'R'].forEach(function (side) {
+      if (!state.clampsClosed || !state.clampsClosed[side]) return;
+      var parts = queryGrooveElements(uiRoot, side);
+      if (!parts || !parts.lid) return;
+      var lr = parts.lid.getBoundingClientRect();
+      if (!lr.width && !lr.height) return;
+      var box = clientRectToWorldBox(lr);
+      if (!box) return;
+      var proxy = document.createElement('div');
+      proxy.className = 'lab-fusion-lid-proxy lab-fusion-lid-proxy--' + side.toLowerCase();
+      proxy.setAttribute('data-fusion-lid-proxy', side);
+      proxy.style.left = Math.round(box.x1) + 'px';
+      proxy.style.top = Math.round(box.y1) + 'px';
+      proxy.style.width = Math.round(box.x2 - box.x1) + 'px';
+      proxy.style.height = Math.round(box.y2 - box.y1) + 'px';
+      lidLayer.appendChild(proxy);
+    });
+
+    mount.appendChild(lidLayer);
+  }
+
+  function syncFiberPorts(machineId) {
+    if (global.FtthLab && typeof FtthLab.renderSplicerFiberOverlays === 'function') {
+      FtthLab.renderSplicerFiberOverlays(machineId);
+    }
+    syncLidOverlays(machineId);
+  }
+
+  function syncAllFiberPorts() {
+    machines.forEach(function (m) {
+      syncFiberPorts(m.id);
+    });
+  }
+
+  function setSplicerDropzoneActive(machineId, side, active) {
+    var node = getMachineNode(machineId);
+    if (!node) return;
+    var uiRoot = node.querySelector('[data-fusion-ui-root]');
+    var parts = queryGrooveElements(uiRoot, side);
+    if (!parts || !parts.groove) return;
+    parts.groove.classList.toggle('splicer-dropzone-active', !!active);
+  }
+
+  function highlightSplicerGroove(grooveEl) {
+    clearSplicerMagnetHighlights();
+    if (grooveEl) grooveEl.classList.add('magnet-active');
+  }
+
+  function clearSplicerMagnetHighlights() {
+    document.querySelectorAll('.clamp-base-groove.magnet-active').forEach(function (el) {
+      el.classList.remove('magnet-active');
+    });
+  }
+
+  function clearSplicerDropzones() {
+    clearSplicerMagnetHighlights();
+    document.querySelectorAll('.clamp-base-groove.splicer-dropzone-active').forEach(function (el) {
+      el.classList.remove('splicer-dropzone-active');
+    });
+  }
+
   function cloneJson(v) {
     return JSON.parse(JSON.stringify(v == null ? null : v));
   }
@@ -64,29 +461,16 @@
     return layer && layer.querySelector('[data-fusion-node="' + id + '"]');
   }
 
-  function getMachineFrame(id) {
+  function getMachineUiRoot(id) {
     var node = getMachineNode(id);
-    return node ? node.querySelector('iframe') : null;
+    return node ? node.querySelector('[data-fusion-ui-root]') : null;
   }
 
-  function postToMachine(id, msg) {
-    var frame = getMachineFrame(id);
-    if (!frame || !frame.contentWindow) return;
-    try {
-      frame.contentWindow.postMessage(msg, '*');
-    } catch (err) { /* ignore */ }
-  }
-
-  function blurMachineFrame(id) {
-    var frame = getMachineFrame(id);
-    if (!frame) return;
-    postToMachine(id, { source: 'fusion-splicer-host', type: 'setActive', active: false });
-    try {
-      if (frame.contentWindow && frame.contentWindow.document && frame.contentWindow.document.activeElement) {
-        frame.contentWindow.document.activeElement.blur();
-      }
-      frame.blur();
-    } catch (err2) { /* ignore */ }
+  function blurMachineUi(id) {
+    var b = bridges[id];
+    if (b && b.api && typeof b.api.setActive === 'function') {
+      b.api.setActive(false);
+    }
   }
 
   function syncMachineDomState() {
@@ -104,7 +488,7 @@
     if (armedMachineId === id) armedMachineId = null;
     var node = getMachineNode(id);
     if (node) node.classList.remove('is-armed');
-    if (opts.blur !== false) blurMachineFrame(id);
+    if (opts.blur !== false) blurMachineUi(id);
   }
 
   function armMachine(id) {
@@ -113,11 +497,8 @@
     armedMachineId = id;
     var node = getMachineNode(id);
     if (node) node.classList.add('is-armed');
-    postToMachine(id, { source: 'fusion-splicer-host', type: 'setActive', active: true });
-    var frame = getMachineFrame(id);
-    if (frame && frame.contentWindow) {
-      try { frame.contentWindow.focus(); } catch (err) { /* ignore */ }
-    }
+    var b = bridges[id];
+    if (b && b.api && typeof b.api.setActive === 'function') b.api.setActive(true);
   }
 
   function disarmAllMachines(opts) {
@@ -175,6 +556,10 @@
     (b.offs || []).forEach(function (off) {
       try { if (typeof off === 'function') off(); } catch (err) { /* ignore */ }
     });
+    if (b.root && global.FusionSplicerMachineUI && typeof FusionSplicerMachineUI.destroy === 'function') {
+      try { FusionSplicerMachineUI.destroy(b.root); } catch (errDestroy) { /* ignore */ }
+    }
+    removeMachineOverlays(id);
     delete bridges[id];
     if (selection.id === id && global.FusionSplicerUI === b.api) {
       try { delete global.FusionSplicerUI; } catch (err2) {
@@ -183,12 +568,13 @@
     }
   }
 
-  function bridgeIframe(id, frame) {
+  function initNativeMachine(id, uiRoot) {
     clearBridge(id);
-    if (!frame || !frame.contentWindow) return;
+    if (!uiRoot || !global.FusionSplicerMachineUI || typeof FusionSplicerMachineUI.mount !== 'function') {
+      return;
+    }
 
-    var win = frame.contentWindow;
-    var api = win.FusionSplicerUI;
+    var api = FusionSplicerMachineUI.mount(uiRoot);
     if (!api) return;
 
     var offs = [];
@@ -205,32 +591,12 @@
       });
     }
 
-    bridges[id] = { api: api, offs: offs, frame: frame };
+    bridges[id] = { api: api, offs: offs, root: uiRoot };
     if (selection.id === id) global.FusionSplicerUI = api;
-    emitParent('ready', { machineId: id, empty: true, bridged: true });
-  }
-
-  function initMachineIframe(m, frame) {
-    if (!frame || frame.dataset.fusionBound === '1') return;
-    frame.dataset.fusionBound = '1';
-
-    function onLoad() {
-      var tries = 0;
-      function tryBridge() {
-        tries += 1;
-        if (frame.contentWindow && frame.contentWindow.FusionSplicerUI) {
-          bridgeIframe(m.id, frame);
-          return;
-        }
-        if (tries < 24) setTimeout(tryBridge, 50);
-      }
-      tryBridge();
-    }
-
-    frame.addEventListener('load', onLoad);
-    if (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') {
-      frame.src = MACHINE_SRC;
-    }
+    ensureFiberLayer(id);
+    ensureLidLayer(id);
+    syncFiberPorts(id);
+    emitParent('ready', { machineId: id, empty: true, native: true });
   }
 
   function ensureLayer() {
@@ -242,15 +608,7 @@
     layer.setAttribute('data-lab-fusion-machine-layer', '1');
     mount.appendChild(layer);
     bindLayerEvents(layer);
-    liftPigtailLayerAboveMachine();
     return layer;
-  }
-
-  function liftPigtailLayerAboveMachine() {
-    var mount = document.getElementById('lab-2d-mount');
-    if (!mount) return;
-    var pigLayer = mount.querySelector('[data-lab-pigtail-layer]');
-    if (pigLayer) mount.appendChild(pigLayer);
   }
 
   function machinePositionStyle(m) {
@@ -261,6 +619,13 @@
     );
   }
 
+  function machineBodyMarkup() {
+    if (global.FusionSplicerMachineUI && typeof FusionSplicerMachineUI.assemblyMarkup === 'function') {
+      return FusionSplicerMachineUI.assemblyMarkup();
+    }
+    return '<div class="fusion-splicer-machine" data-fusion-ui-root="1"></div>';
+  }
+
   function createMachineNode(m) {
     var selected = selection.id === m.id ? ' is-selected' : '';
     var node = document.createElement('div');
@@ -269,10 +634,13 @@
     node.setAttribute('title', 'Fusion Splicer · drag to move · click to operate');
     node.style.cssText = machinePositionStyle(m);
     node.innerHTML =
-      '<iframe class="lab-fusion-machine__frame" title="Fusion splicer machine" tabindex="-1" ' +
-        'sandbox="allow-scripts allow-same-origin" loading="lazy"></iframe>' +
+      '<div class="lab-fusion-machine__body">' +
+        '<div class="fusion-splicer-machine" data-fusion-ui-root="1">' +
+          machineBodyMarkup() +
+        '</div>' +
+      '</div>' +
       '<button type="button" class="lab-fusion-machine__hit" aria-label="Fusion Splicer"></button>';
-    initMachineIframe(m, node.querySelector('iframe'));
+    initNativeMachine(m.id, node.querySelector('[data-fusion-ui-root]'));
     return node;
   }
 
@@ -311,7 +679,7 @@
     host.innerHTML = '';
     host.appendChild(frag);
     syncMachineDomState();
-    liftPigtailLayerAboveMachine();
+    syncAllFiberPorts();
   }
 
   function updateMachinePosition(m, node) {
@@ -423,6 +791,10 @@
           m.x = Math.round(ox + dx);
           m.y = Math.round(oy + dy);
           updateMachinePosition(m, node);
+          if (global.FtthLab && typeof FtthLab.refreshSplicerDocks === 'function') {
+            FtthLab.refreshSplicerDocks(m.id);
+          }
+          syncLidOverlays(m.id);
         }
       }
 
@@ -694,7 +1066,15 @@
     ensureLayer();
     rebuildLayer();
     pushHistory();
-    liftPigtailLayerAboveMachine();
+    document.addEventListener('fusion-splicer:clampLid', function () {
+      syncAllFiberPorts();
+      if (global.FtthLab && typeof FtthLab.refreshSplicerDocks === 'function') {
+        FtthLab.refreshSplicerDocks();
+      }
+    });
+    document.addEventListener('fusion-splicer:clampNudge', function () {
+      syncAllFiberPorts();
+    });
   }
 
   var tool = {
@@ -719,7 +1099,22 @@
     list: listMachines,
     getUI: getUI,
     on: on,
-    liftFibersAbove: liftPigtailLayerAboveMachine,
+    getGrooveSlot: getGrooveSlot,
+    buildGrooveSlotFromElement: buildGrooveSlotFromElement,
+    hitTestSplicerGrooveAtClient: hitTestSplicerGrooveAtClient,
+    findGrooveNearWorld: findGrooveNearWorld,
+    findGrooveNearClient: findGrooveNearClient,
+    highlightSplicerGroove: highlightSplicerGroove,
+    clearSplicerMagnetHighlights: clearSplicerMagnetHighlights,
+    syncFiberPorts: syncFiberPorts,
+    syncAllFiberPorts: syncAllFiberPorts,
+    syncLidOverlays: syncLidOverlays,
+    ensureFiberLayer: ensureFiberLayer,
+    setSplicerDropzoneActive: setSplicerDropzoneActive,
+    clearSplicerDropzones: clearSplicerDropzones,
+    SNAP_PX: GROOVE_HIT_PAD_CLIENT_X,
+    GROOVE_HIT_PAD_CLIENT_X: GROOVE_HIT_PAD_CLIENT_X,
+    GROOVE_HIT_PAD_CLIENT_Y: GROOVE_HIT_PAD_CLIENT_Y,
   };
 
   function tryRegister() {

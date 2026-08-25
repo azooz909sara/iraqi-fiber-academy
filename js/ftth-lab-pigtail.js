@@ -49,6 +49,9 @@
   var BLADE_HIT_RADIUS_PX = 20;
   /** Dropzone highlight radius (fiber tip → cleaver groove). Snap occurs on release only. */
   var CLEAVER_SNAP_PX = 40;
+  /** Pointer → silver `.clamp-base-groove` center (world px); live pull + lock on release. */
+  var SPLICER_SNAP_PX = 40;
+  var SPLICER_UNDOCK_PX = 22;
   /** Jacket frontier must not cross ruler stop beyond this tolerance (world px). */
   var RULER_WALL_EPS = 0.75;
   /** Orthogonal snake: adaptive primary-axis preview + fillet corners. */
@@ -365,10 +368,19 @@
         p.snappedCleaverId = null;
         p.cleaverSlotAnchorX = null;
       }
+      p.isSnappedToSplicer = !!p.isSnappedToSplicer;
+      if (!p.isSnappedToSplicer || !p.snappedSplicerId || !p.snappedSplicerSide) {
+        p.isSnappedToSplicer = false;
+        p.snappedSplicerId = null;
+        p.snappedSplicerSide = null;
+        p.splicerGrooveY = null;
+        p.splicerTipX = null;
+      }
     });
     seq = snap.seq || 0;
     selection = { kind: 'none', id: null };
     rebuildLayer();
+    renderSplicerFiberOverlays();
     updateInspector();
     refreshBudget();
     historyLocked = false;
@@ -1126,11 +1138,20 @@
     return Math.min(renderLen, d * (renderLen / sleeveLen));
   }
 
-  function buildPigtailFiberSvg(p) {
+  function buildPigtailFiberSvg(p, opts) {
+    opts = opts || {};
     var fullPts = fiberRenderPathPoints(p);
     var fullPath = svgPathFromPoints(fullPts) || fiberPath(p);
     var bad = p.connector.mismatch;
     var sel = selection.id === p.id ? ' is-selected' : '';
+    var splicerDocked = !!p.isSnappedToSplicer;
+    var splicerPort = !!opts.splicerPort;
+    if (splicerDocked && !splicerPort) {
+      return (
+        '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
+        '" fill="none" stroke="transparent" />'
+      );
+    }
     ensureFiberStrip(p);
     enforceFullStripBareFrontier(p);
     var fs = p.fiberStrip;
@@ -1150,6 +1171,8 @@
       '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
       '" fill="none" stroke="transparent" />';
 
+    var splicerCls = splicerDocked && splicerPort ? ' is-splicer-terminated' : '';
+
     function peelStyle(layerName) {
       if (peel <= 0.02 || peelLayer !== layerName) return '';
       return ' style="--strip-peel:' + peel.toFixed(3) + ';"';
@@ -1166,7 +1189,7 @@
       var jacketD = svgPathFromPoints(jacketPts);
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
-        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') +
+        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + jacketD +
         '" fill="none"' + peelStyle('jacket') + ' />';
 
@@ -1188,7 +1211,7 @@
             svgPathFromPoints(bufferPts) + '" fill="none"' + peelStyle('buffer') + ' />' +
             '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
             (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
-            (bad ? ' is-mismatch' : '') + peelClass('bare') +
+            (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls +
             '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
             svgPathFromPoints(barePts) + '" fill="none"' + peelStyle('bare') + ' />';
         }
@@ -1202,7 +1225,7 @@
           '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + tipKind +
           (tipBare ? ' lab-pigtail-fiber--bare-tip' : '') +
           (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
-          (bad ? ' is-mismatch' : '') + peelClass(tipBare ? 'bare' : 'buffer') +
+          (bad ? ' is-mismatch' : '') + peelClass(tipBare ? 'bare' : 'buffer') + splicerCls +
           '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="' +
           (tipBare ? 'bare' : 'stripped') + '" d="' +
           svgPathFromPoints(tipPts) + '" fill="none"' + peelStyle(tipBare ? 'bare' : 'buffer') + ' />';
@@ -1210,7 +1233,7 @@
     } else {
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
-        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') +
+        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath +
         '" fill="none"' + peelStyle('jacket') + ' />';
     }
@@ -1669,8 +1692,322 @@
     setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
   }
 
+  /* ─── Fusion splicer clamp V-groove snap (cleaved pigtails) ─── */
+
+  function splicerEligibleForSnap(p) {
+    if (!p) return false;
+    if (!(p.isCleaved || p.cleaved) && !isFullyStrippedPigtail(p)) return false;
+    if (p.tail && p.tail.attached) return false;
+    if (p.isSnappedToCleaver) return false;
+    return true;
+  }
+
+  function getSplicerGrooveSlot(machineId, side) {
+    if (!global.FusionSplicerMachine || typeof FusionSplicerMachine.getGrooveSlot !== 'function') {
+      return null;
+    }
+    return FusionSplicerMachine.getGrooveSlot(machineId, side);
+  }
+
+  function flattenOrthoForSplicerGroove(p, tipX, grooveY, side) {
+    if (!usesOrthoRoute(p)) return;
+    ensurePathHistory(p);
+    var hist = p.pathHistory;
+    var inland = Math.max(ORTHO_MIN_SEG, 16);
+    var tipFromWest = side === 'L';
+    var inlandX = tipFromWest ? tipX - inland : tipX + inland;
+    if (!hist.length) {
+      hist.push({ x: inlandX, y: grooveY });
+    } else {
+      var last = hist[hist.length - 1];
+      if (Math.abs(last.y - grooveY) > 0.5) {
+        hist.push({ x: last.x, y: grooveY });
+      }
+      last = hist[hist.length - 1];
+      if (Math.abs(last.x - inlandX) > ORTHO_MIN_SEG) {
+        hist.push({ x: inlandX, y: grooveY });
+      } else {
+        hist[hist.length - 1] = { x: inlandX, y: grooveY };
+      }
+    }
+    p.pathHistory = hist;
+    syncPathAlias(p);
+    if (p.snake) {
+      p.snake.axis = 'h';
+      p.snake.ghost = null;
+    }
+  }
+
+  function alignJacketAlongSplicerGroove(p, slot) {
+    if (!p || !slot) return false;
+    var grooveY = slot.grooveY;
+    var anchorX = slot.anchorX;
+    var tipX = slot.tipX;
+    p.bx = Math.round(tipX);
+    p.by = Math.round(grooveY);
+    flattenOrthoForSplicerGroove(p, tipX, grooveY, slot.side);
+    var boundary = getJacketBoundaryWorld(p);
+    if (boundary) {
+      translateTailGeometry(p, anchorX - boundary.x, 0);
+    }
+    p.bx = Math.round(tipX);
+    p.by = Math.round(grooveY);
+    return true;
+  }
+
+  function previewFiberInSplicerGroove(p, slot) {
+    if (!p || !slot || !slot.open) return false;
+    alignJacketAlongSplicerGroove(p, slot);
+    return true;
+  }
+
+  function seatFiberInSplicerGroove(p, slot, opts) {
+    opts = opts || {};
+    if (!p || !slot || !slot.open) return false;
+    if (!splicerEligibleForSnap(p) && !opts.force) return false;
+
+    previewFiberInSplicerGroove(p, slot);
+
+    p.isSnappedToSplicer = true;
+    p.snappedSplicerId = slot.machineId;
+    p.snappedSplicerSide = slot.side;
+    p.splicerGrooveY = slot.grooveY;
+    p.splicerTipX = slot.tipX;
+
+    if (global.FusionSplicerMachine && global.FusionSplicerMachine.getUI) {
+      var api = FusionSplicerMachine.getUI(slot.machineId);
+      if (api && typeof api.setFiberPlaced === 'function') {
+        api.setFiberPlaced(slot.side, true);
+      }
+    }
+
+    if (!opts.quiet) {
+      setStatus('SC Pigtail · seated in ' + slot.side + '-clamp V-groove');
+    }
+    return true;
+  }
+
+  function clearSplicerSnap(p, opts) {
+    opts = opts || {};
+    if (!p || !p.isSnappedToSplicer) return;
+    var machineId = p.snappedSplicerId;
+    var side = p.snappedSplicerSide;
+    p.isSnappedToSplicer = false;
+    p.snappedSplicerId = null;
+    p.snappedSplicerSide = null;
+    p.splicerGrooveY = null;
+    p.splicerTipX = null;
+    if (machineId && side && global.FusionSplicerMachine && FusionSplicerMachine.getUI) {
+      var api = FusionSplicerMachine.getUI(machineId);
+      if (api && typeof api.setFiberPlaced === 'function') {
+        api.setFiberPlaced(side, false);
+      }
+    }
+    if (!opts.skipRebuild) {
+      renderSplicerFiberOverlays(machineId);
+      if (global.FusionSplicerMachine && FusionSplicerMachine.syncLidOverlays) {
+        FusionSplicerMachine.syncLidOverlays(machineId);
+      }
+    }
+  }
+
+  /** Pointer → silver `.clamp-base-groove` via elementFromPoint (no radius math). */
+  function hitTestSplicerGroove(clientX, clientY) {
+    if (!global.FusionSplicerMachine ||
+        typeof FusionSplicerMachine.hitTestSplicerGrooveAtClient !== 'function') {
+      return null;
+    }
+    return FusionSplicerMachine.hitTestSplicerGrooveAtClient(clientX, clientY);
+  }
+
+  function setPigtailDragPassthrough(p, active) {
+    if (!layer || !p) return;
+    layer.querySelectorAll('[data-pt-drag="' + p.id + '"]').forEach(function (el) {
+      el.classList.toggle('is-drag-passthrough', !!active);
+      el.style.pointerEvents = active ? 'none' : '';
+    });
+    layer.querySelectorAll('[data-pt-fiber="' + p.id + '"]').forEach(function (el) {
+      el.style.pointerEvents = active ? 'none' : '';
+    });
+  }
+
+  function highlightSplicerGrooveHit(hit) {
+    if (global.FusionSplicerMachine && typeof FusionSplicerMachine.highlightSplicerGroove === 'function') {
+      FusionSplicerMachine.highlightSplicerGroove(hit && hit.grooveEl ? hit.grooveEl : null);
+      return;
+    }
+    if (hit && hit.grooveEl) {
+      clearSplicerMagnetHighlight();
+      hit.grooveEl.classList.add('magnet-active');
+    } else if (hit && hit.machineId && hit.side) {
+      setSplicerDropzoneHighlight(hit.machineId, hit.side);
+    } else {
+      clearSplicerMagnetHighlight();
+    }
+  }
+
+  function clearSplicerMagnetHighlight() {
+    if (global.FusionSplicerMachine && typeof FusionSplicerMachine.clearSplicerMagnetHighlights === 'function') {
+      FusionSplicerMachine.clearSplicerMagnetHighlights();
+      return;
+    }
+    document.querySelectorAll('.clamp-base-groove.magnet-active').forEach(function (el) {
+      el.classList.remove('magnet-active');
+    });
+  }
+
+  /** Live magnetic preview while dragging tip or jacket over an open V-groove. */
+  function applySplicerMagnetDuringDrag(p, clientX, clientY) {
+    if (!splicerEligibleForSnap(p)) {
+      clearSplicerMagnetHighlight();
+      return false;
+    }
+    var splicerHit = hitTestSplicerGroove(clientX, clientY);
+    if (splicerHit && splicerHit.slot) {
+      highlightSplicerGrooveHit(splicerHit);
+      previewFiberInSplicerGroove(p, splicerHit.slot);
+      return true;
+    }
+    clearSplicerMagnetHighlight();
+    return false;
+  }
+
+  /** Lock pigtail into groove on pointer release. */
+  function finishSplicerMagnetOnDrop(p, clientX, clientY) {
+    if (!splicerEligibleForSnap(p)) return false;
+    var dropHit = hitTestSplicerGroove(clientX, clientY);
+    if (dropHit && dropHit.slot) {
+      return finishSplicerDropSeat(p, dropHit);
+    }
+    return false;
+  }
+
+  function setSplicerDropzoneHighlight(machineId, side) {
+    if (global.FusionSplicerMachine && typeof FusionSplicerMachine.setSplicerDropzoneActive === 'function') {
+      FusionSplicerMachine.setSplicerDropzoneActive(machineId, side, true);
+    }
+  }
+
+  function clearSplicerDropzoneHighlight() {
+    clearSplicerMagnetHighlight();
+    if (global.FusionSplicerMachine && typeof FusionSplicerMachine.clearSplicerDropzones === 'function') {
+      FusionSplicerMachine.clearSplicerDropzones();
+    }
+  }
+
+  function finishSplicerDropSeat(p, hit) {
+    if (!hit || !hit.slot) return false;
+    return seatFiberInSplicerGroove(p, hit.slot);
+  }
+
+  function handoverPigtailToSplicerClamp(machineId, side, opts) {
+    opts = opts || {};
+    var slot = getSplicerGrooveSlot(machineId, side);
+    if (!slot) return { ok: false, reason: 'no-slot' };
+    if (!slot.open && !opts.forceOpen) return { ok: false, reason: 'clamp-closed' };
+
+    var pig = opts.pigtailId ? findPigtail(opts.pigtailId) : null;
+    var i;
+    if (!pig) {
+      for (i = 0; i < pigtails.length; i++) {
+        if (pigtails[i].isSnappedToSplicer && pigtails[i].snappedSplicerId === machineId) {
+          pig = pigtails[i];
+          break;
+        }
+      }
+    }
+    if (!pig) {
+      for (i = 0; i < pigtails.length; i++) {
+        if (splicerEligibleForSnap(pigtails[i])) {
+          pig = pigtails[i];
+          break;
+        }
+      }
+    }
+    if (!pig) return { ok: false, reason: 'no-pigtail' };
+
+    var ok = seatFiberInSplicerGroove(pig, slot, { force: !!opts.force, quiet: !!opts.quiet });
+    if (!ok) return { ok: false, reason: 'seat-failed' };
+
+    updateFiberPath(pig);
+    rebuildLayer();
+    renderSplicerFiberOverlays(machineId);
+    if (!opts.quiet) pushHistory();
+    return { ok: true, pigtailId: pig.id, slot: slot };
+  }
+
+  function refreshSplicerDocks(machineId) {
+    var changed = false;
+    pigtails.forEach(function (p) {
+      if (!p.isSnappedToSplicer) return;
+      if (machineId && p.snappedSplicerId !== machineId) return;
+      var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
+      if (!slot || !slot.open) {
+        clearSplicerSnap(p, { skipRebuild: true });
+        changed = true;
+        return;
+      }
+      seatFiberInSplicerGroove(p, slot, { quiet: true, force: true });
+      changed = true;
+    });
+    if (changed) {
+      rebuildLayer();
+      renderSplicerFiberOverlays(machineId);
+    } else if (machineId) {
+      renderSplicerFiberOverlays(machineId);
+    } else {
+      renderSplicerFiberOverlays();
+    }
+  }
+
+  function renderSplicerFiberOverlays(machineId) {
+    if (!global.FusionSplicerMachine || typeof FusionSplicerMachine.ensureFiberLayer !== 'function') {
+      return;
+    }
+    var ids = {};
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      if (pigtails[i].isSnappedToSplicer && pigtails[i].snappedSplicerId) {
+        ids[pigtails[i].snappedSplicerId] = true;
+      }
+    }
+    if (machineId) ids[machineId] = true;
+
+    Object.keys(ids).forEach(function (mid) {
+      var host = FusionSplicerMachine.ensureFiberLayer(mid);
+      if (!host) return;
+      var svg = host.querySelector('.lab-pigtail-svg');
+      if (!svg) return;
+      var html = '';
+      pigtails.forEach(function (p) {
+        if (!p.isSnappedToSplicer || p.snappedSplicerId !== mid) return;
+        html +=
+          '<g data-pt-fiber-wrap="' + p.id + '">' +
+          buildPigtailFiberSvg(p, { splicerPort: true }) +
+          '</g>';
+      });
+      svg.innerHTML = html;
+      if (FusionSplicerMachine.syncLidOverlays) {
+        FusionSplicerMachine.syncLidOverlays(mid);
+      }
+    });
+
+    if (global.FusionSplicerMachine.list) {
+      FusionSplicerMachine.list().forEach(function (m) {
+        if (ids[m.id]) return;
+        var stale = document.querySelector('[data-fusion-fiber-layer="' + m.id + '"]');
+        if (stale) {
+          var svg = stale.querySelector('.lab-pigtail-svg');
+          if (svg) svg.innerHTML = '';
+        }
+        if (FusionSplicerMachine.syncLidOverlays) {
+          FusionSplicerMachine.syncLidOverlays(m.id);
+        }
+      });
+    }
+  }
+
   /**
-   * Project onto fiber polyline with NO tip extrapolation.
    * u is clamped to each segment [0,1] so empty space past the tip never hits.
    */
   function projectOntoFiberStrict(pts, wx, wy) {
@@ -2378,6 +2715,9 @@
       if (insertBefore) svg.insertBefore(node, insertBefore);
       else svg.appendChild(node);
     }
+    if (p.isSnappedToSplicer) {
+      renderSplicerFiberOverlays(p.snappedSplicerId);
+    }
   }
 
   function findBareTipProximity(clientX, clientY, thresholdPx) {
@@ -2577,6 +2917,11 @@
       isSnappedToCleaver: false,
       snappedCleaverId: null,
       cleaverSlotAnchorX: null,
+      isSnappedToSplicer: false,
+      snappedSplicerId: null,
+      snappedSplicerSide: null,
+      splicerGrooveY: null,
+      splicerTipX: null,
       cleavedStripLock: null,
       stripFrontierLock: null,
     };
@@ -3736,6 +4081,7 @@
         '<button type="button" class="lab-pigtail__tail' +
         (p.tail.attached ? ' is-attached' : '') +
         (p.isSnappedToCleaver ? ' is-cleaver-docked' : '') +
+        (p.isSnappedToSplicer ? ' is-splicer-docked' : '') +
         (p.isCleaved || p.cleaved ? ' is-cleaved' : '') +
         (jacketStripped ? ' is-strip-stage1' : '') +
         (bareComplete ? ' is-strip-stage2' : '') +
@@ -3779,6 +4125,7 @@
       if (dockInfo) setCleaverRulerWallGuide(dockInfo, true);
     });
     reapplyStoredVflGlow();
+    renderSplicerFiberOverlays();
   }
 
   function updateFiberPath(p) {
@@ -3800,6 +4147,7 @@
       bBtn.classList.toggle('is-strip-stage1', stripStage >= 1);
       bBtn.classList.toggle('is-strip-stage2', stripStage >= 2);
       bBtn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
+      bBtn.classList.toggle('is-splicer-docked', !!p.isSnappedToSplicer);
     }
     var sleeve = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
     if (p.hasSleeve) {
@@ -3919,38 +4267,73 @@
           setStatus('Drag the free end (connector or bare tip)');
           return;
         }
+
+        if (p.isSnappedToCleaver) {
+          clearCleaverSnap(p, { skipGuide: true });
+        } else if (p.isSnappedToSplicer) {
+          clearSplicerSnap(p, { skipRebuild: true });
+        } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+          restorePermanentStripFrontier(p);
+        }
+
+        document.body.classList.add('lab-pigtail-dragging');
+        setPigtailDragPassthrough(p, true);
+
         var w0 = clientToWorld(e.clientX, e.clientY);
         var oax = p.ax;
         var oay = p.ay;
         var obx = p.bx;
         var oby = p.by;
+        var moved = false;
         ensurePathHistory(p);
         var hist0 = p.pathHistory.map(function (pt) {
           return { x: pt.x, y: pt.y };
         });
+
         function onMove(ev) {
-          var w = clientToWorld(ev.clientX, ev.clientY);
-          var dx = w.x - w0.x;
-          var dy = w.y - w0.y;
-          p.ax = oax + dx;
-          p.ay = oay + dy;
-          p.bx = obx + dx;
-          p.by = oby + dy;
-          if (hist0.length) {
-            p.pathHistory = hist0.map(function (pt) {
-              return { x: pt.x + dx, y: pt.y + dy };
-            });
-            syncPathAlias(p);
+          moved = true;
+          var splicerMagnetActive = applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
+          if (!splicerMagnetActive) {
+            var w = clientToWorld(ev.clientX, ev.clientY);
+            var dx = w.x - w0.x;
+            var dy = w.y - w0.y;
+            p.ax = oax + dx;
+            p.ay = oay + dy;
+            p.bx = obx + dx;
+            p.by = oby + dy;
+            if (hist0.length) {
+              p.pathHistory = hist0.map(function (pt) {
+                return { x: pt.x + dx, y: pt.y + dy };
+              });
+              syncPathAlias(p);
+            }
+          }
+
+          if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+            restorePermanentStripFrontier(p);
           }
           updateFiberPath(p);
         }
-        function onUp() {
+
+        function onUp(ev) {
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
-          pushHistory();
+          window.removeEventListener('pointercancel', onUp);
+          document.body.classList.remove('lab-pigtail-dragging');
+          setPigtailDragPassthrough(p, false);
+
+          var seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
+          clearSplicerMagnetHighlight();
+          clearSplicerDropzoneHighlight();
+
+          rebuildLayer();
+          updateInspector();
+          if (moved || seated) pushHistory();
         }
+
         window.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', onUp);
+        window.addEventListener('pointercancel', onUp);
       });
     });
 
@@ -4099,12 +4482,15 @@
 
         if (p.isSnappedToCleaver) {
           clearCleaverSnap(p, { skipGuide: true });
+        } else if (p.isSnappedToSplicer) {
+          clearSplicerSnap(p, { skipRebuild: true });
         } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
           restorePermanentStripFrontier(p);
         }
 
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pigtail-dragging');
+        setPigtailDragPassthrough(p, true);
 
         function onMove(ev) {
           moved = true;
@@ -4128,10 +4514,14 @@
             );
           }
 
-          if (snakeMode) {
-            updateOrthoSnake(p, world.x, world.y);
-          } else {
-            moveTipGravity(p, 'B', world.x, world.y);
+          var splicerMagnetActive = applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
+
+          if (!splicerMagnetActive) {
+            if (snakeMode) {
+              updateOrthoSnake(p, world.x, world.y);
+            } else {
+              moveTipGravity(p, 'B', world.x, world.y);
+            }
           }
 
           if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
@@ -4164,6 +4554,7 @@
           window.removeEventListener('pointercancel', onUp);
           btn.classList.remove('is-dragging');
           document.body.classList.remove('lab-pigtail-dragging');
+          setPigtailDragPassthrough(p, false);
           clearPlugHighlights();
           if (snakeMode) endOrthoSnake(p);
           else p.snake = null;
@@ -4177,10 +4568,16 @@
           clearCleaverDropzoneHighlight();
 
           if (!seated) {
+            seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
+          }
+          clearSplicerMagnetHighlight();
+          clearSplicerDropzoneHighlight();
+
+          if (!seated) {
             clearCleaverGuideLine();
           }
 
-          if (!p.tail.attached && !p.isSnappedToCleaver) {
+          if (!p.tail.attached && !p.isSnappedToCleaver && !p.isSnappedToSplicer) {
             var hit = hitTestTailTarget(ev.clientX, ev.clientY);
             if (hit) {
               attachTail(p, hit);
@@ -4699,6 +5096,21 @@
       FtthLab.setCleaverGuideLine = setCleaverGuideLine;
       FtthLab.clearCleaverGuideLine = clearCleaverGuideLine;
       FtthLab.finalizePigtailCleaverDock = finalizePigtailCleaverDock;
+      FtthLab.handoverPigtailToSplicerClamp = handoverPigtailToSplicerClamp;
+      FtthLab.refreshSplicerDocks = refreshSplicerDocks;
+      FtthLab.renderSplicerFiberOverlays = renderSplicerFiberOverlays;
+      FtthLab.clearPigtailSplicerSnap = function (id) {
+        var pig = findPigtail(id);
+        if (pig) clearSplicerSnap(pig);
+      };
+      FtthLab.findSplicerGrooveNear = function (clientX, clientY) {
+        return hitTestSplicerGroove(clientX, clientY);
+      };
+
+      document.addEventListener('fusion-splicer:clampLid', function () {
+        renderSplicerFiberOverlays();
+        refreshSplicerDocks();
+      });
 
       var prevTranslate = FtthLab.translateVflGroup;
       FtthLab.translateVflGroup = function (vflId, dx, dy, opts) {

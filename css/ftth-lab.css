@@ -334,22 +334,22 @@ body.lab-fusion-machine-dragging .lab-fusion-machine-layer {
   z-index: 11;
 }
 
-.lab-fusion-machine__frame {
-  display: block;
+.lab-fusion-machine__body {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
-  border: 0;
-  background: transparent;
   pointer-events: none;
   outline: none;
   box-shadow: none;
+  overflow: visible;
 }
 
-.lab-fusion-machine.is-armed .lab-fusion-machine__frame {
+.lab-fusion-machine.is-armed .lab-fusion-machine__body {
   pointer-events: auto;
 }
 
-.lab-fusion-machine:not(.is-armed) .lab-fusion-machine__frame {
+.lab-fusion-machine:not(.is-armed) .lab-fusion-machine__body {
   pointer-events: none !important;
 }
 
@@ -384,6 +384,41 @@ body.lab-fusion-machine-dragging .lab-fusion-machine-layer {
 body.lab-fusion-machine-dragging {
   user-select: none;
   cursor: grabbing;
+}
+
+/* Docked pigtail fiber — between clamp base (10) and global pigtail chrome (20) */
+.lab-fusion-fiber-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.lab-fusion-fiber-layer .lab-fusion-pigtail-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* Closed clamp lids — above docked fiber (30) */
+.lab-fusion-lid-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.lab-fusion-lid-proxy {
+  position: absolute;
+  background: linear-gradient(180deg, #303038 0%, #18181c 45%, #0c0c10 100%);
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
 }
 
 .lab-tool--fusion-machine {
@@ -3062,6 +3097,19 @@ body.lab-pcord-linking .lab-pcord-fiber {
   overflow: visible;
   pointer-events: none;
   z-index: 2;
+}
+
+body.lab-pigtail-dragging .lab-pigtail-fiber-hit.is-drag-passthrough {
+  pointer-events: none !important;
+}
+
+body.lab-pigtail-dragging .lab-fusion-machine__hit {
+  pointer-events: none !important;
+}
+
+body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-assembly.lid-open .clamp-base-groove,
+body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-assembly.lid-open .clamp-base-groove::before {
+  pointer-events: auto;
 }
 
 .lab-pigtail-fiber-hit {
