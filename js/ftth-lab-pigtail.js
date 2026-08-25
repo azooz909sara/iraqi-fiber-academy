@@ -375,6 +375,11 @@
         p.snappedSplicerSide = null;
         p.splicerGrooveY = null;
         p.splicerTipX = null;
+        p.splicerPreviewSlot = null;
+        p.splicerDragDetached = false;
+        p.splicerGrooveAnchor = null;
+        p.splicerBareGlassPx = null;
+        p.splicerInnerEdgeX = null;
       }
     });
     seq = snap.seq || 0;
@@ -390,13 +395,7 @@
    * Bare-fiber path for sleeve sliding: 0% = cleaved tip (End B), 100% = strain relief.
    */
   function fiberSleevePathPoints(p) {
-    var tipB = { x: p.bx, y: p.by };
-    var p0 = strainReliefStart(p);
-    if (usesOrthoRoute(p)) {
-      return sampleFilletOrthoPoints(orthoPolyline(p), ORTHO_FILLET_R).slice().reverse();
-    }
-    var L = resolvePigtailRenderLength(p, p0, tipB);
-    return samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES).slice().reverse();
+    return fiberRenderPathPointsDense(p).slice().reverse();
   }
 
   function polylineLength(pts) {
@@ -1043,14 +1042,36 @@
     };
   }
 
-  function svgPathFromPoints(pts) {
+  function svgPathFromPoints(pts, opts) {
+    opts = opts || {};
     if (!pts || !pts.length) return '';
+    if (opts.fillet) {
+      return filletOrthoSvg(pts, opts.filletRadius || ORTHO_FILLET_R);
+    }
     var d = 'M ' + pts[0].x + ' ' + pts[0].y;
     var i;
     for (i = 1; i < pts.length; i++) {
       d += ' L ' + pts[i].x + ' ' + pts[i].y;
     }
     return d;
+  }
+
+  /** Dense polyline for arc-length / strip math (filleted snake corners). */
+  function fiberRenderPathPointsDense(p) {
+    var pts = fiberRenderPathPoints(p);
+    if (usesOrthoRoute(p)) {
+      return sampleFilletOrthoPoints(collapseOrthoPts(pts), ORTHO_FILLET_R);
+    }
+    return pts;
+  }
+
+  /** SVG d= string with smooth quadratic fillets in snake mode. */
+  function fiberSvgPathFromRenderPoints(p, pts) {
+    if (!pts || !pts.length) return '';
+    if (usesOrthoRoute(p)) {
+      return filletOrthoSvg(collapseOrthoPts(pts), ORTHO_FILLET_R);
+    }
+    return svgPathFromPoints(pts);
   }
 
   /** Slice a polyline between two arc-length distances [d0, d1]. */
@@ -1101,6 +1122,7 @@
 
   /**
    * Full render polyline connector → tip (same geometry as fiberPath).
+   * Snake mode returns corner vertices; SVG fillets are applied at draw time.
    */
   function fiberRenderPathPoints(p) {
     var tipA = bootAnchor(p);
@@ -1115,7 +1137,7 @@
         pushSleevePathPt(pts, ortho[i]);
       }
       pushSleevePathPt(pts, tipB);
-      return sampleFilletOrthoPoints(collapseOrthoPts(pts), ORTHO_FILLET_R);
+      return collapseOrthoPts(pts);
     }
     var L = resolvePigtailRenderLength(p, p0, tipB);
     var mid = samplePigtailCatenary(p0, tipB, L, PIGTAIL_CATENARY_SAMPLES);
@@ -1131,7 +1153,7 @@
     var d = Number(sleeveDistFromTip);
     if (!isFinite(d) || d <= 0) return 0;
     var sleevePts = fiberSleevePathPoints(p);
-    var renderPts = fiberRenderPathPoints(p);
+    var renderPts = fiberRenderPathPointsDense(p);
     var sleeveLen = polylineLength(sleevePts);
     var renderLen = polylineLength(renderPts);
     if (sleeveLen < STRIP_TIP_EPS) return 0;
@@ -1141,7 +1163,8 @@
   function buildPigtailFiberSvg(p, opts) {
     opts = opts || {};
     var fullPts = fiberRenderPathPoints(p);
-    var fullPath = svgPathFromPoints(fullPts) || fiberPath(p);
+    var densePts = fiberRenderPathPointsDense(p);
+    var fullPath = fiberSvgPathFromRenderPoints(p, fullPts) || fiberPath(p);
     var bad = p.connector.mismatch;
     var sel = selection.id === p.id ? ' is-selected' : '';
     var splicerDocked = !!p.isSnappedToSplicer;
@@ -1162,11 +1185,9 @@
     if (bareComplete) {
       bareTo = jacketTo;
     }
-    var jacketRender = stripArcOnRenderPath(p, jacketTo);
-    var bareRender = stripArcOnRenderPath(p, bareTo);
     var peel = fs.peel || 0;
     var peelLayer = fs.peelLayer;
-    var total = polylineLength(fullPts);
+    var total = polylineLength(densePts);
     var html =
       '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
       '" fill="none" stroke="transparent" />';
@@ -1182,11 +1203,45 @@
       return peel > 0.02 && peelLayer === layerName ? ' is-strip-peeling' : '';
     }
 
+    function segPathFromDenseSlice(d0, d1) {
+      var segPts = slicePolylineByDistance(densePts, d0, d1);
+      if (usesOrthoRoute(p) && segPts.length >= 2) {
+        return filletOrthoSvg(collapseOrthoPts(segPts), ORTHO_FILLET_R);
+      }
+      return svgPathFromPoints(segPts);
+    }
+
+    var splicerSlot = null;
+    if (splicerDocked && splicerPort && p.snappedSplicerId && p.snappedSplicerSide) {
+      splicerSlot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
+    }
+    var splicerClampRender = !!(splicerSlot && p.splicerInnerEdgeX != null);
+
+    if (splicerClampRender) {
+      var innerPt = { x: p.splicerInnerEdgeX, y: splicerSlot.grooveY };
+      var innerProj = projectOntoFiberStrict(densePts, innerPt.x, innerPt.y);
+      var dInner = Math.max(0, Math.min(total, innerProj.dist || 0));
+      var jacketPts = slicePolylineByDistance(densePts, 0, dInner);
+      var barePts = slicePolylineByDistance(densePts, dInner, total);
+      if (jacketPts.length < 2) jacketPts = slicePolylineByDistance(densePts, 0, Math.max(dInner, 2));
+      if (barePts.length < 2) barePts = slicePolylineByDistance(densePts, Math.max(0, dInner), total);
+      html +=
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
+        (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' +
+        fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' + peelStyle('jacket') + ' />' +
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+        (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
+        (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls +
+        '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
+        fiberSvgPathFromRenderPoints(p, barePts) + '" fill="none"' + peelStyle('bare') + ' />';
+    } else {
+    var jacketRender = stripArcOnRenderPath(p, jacketTo);
+    var bareRender = stripArcOnRenderPath(p, bareTo);
     if (jacketRender > STRIP_TIP_EPS && total > jacketRender + STRIP_TIP_EPS) {
       var dJacketEnd = Math.max(0, total - jacketRender);
       var dBareEnd = Math.max(dJacketEnd, total - bareRender);
-      var jacketPts = slicePolylineByDistance(fullPts, 0, dJacketEnd);
-      var jacketD = svgPathFromPoints(jacketPts);
+      var jacketD = segPathFromDenseSlice(0, dJacketEnd);
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
@@ -1198,26 +1253,24 @@
         bareRender > STRIP_TIP_EPS &&
         bufferGap >= STRIP_BUFFER_COMPLETE_PX;
       if (bufferSplit) {
-        var bufferPts = slicePolylineByDistance(fullPts, dJacketEnd, dBareEnd);
+        var bufferPts = slicePolylineByDistance(densePts, dJacketEnd, dBareEnd);
         var bufferLen = polylineLength(bufferPts);
         if (bufferLen < STRIP_BUFFER_COMPLETE_PX) {
           bufferSplit = false;
         } else {
-          var barePts = slicePolylineByDistance(fullPts, dBareEnd, total);
           html +=
             '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' +
             (bad ? ' is-mismatch' : '') + peelClass('buffer') +
             '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="buffer" d="' +
-            svgPathFromPoints(bufferPts) + '" fill="none"' + peelStyle('buffer') + ' />' +
+            segPathFromDenseSlice(dJacketEnd, dBareEnd) + '" fill="none"' + peelStyle('buffer') + ' />' +
             '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
             (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
             (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls +
             '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
-            svgPathFromPoints(barePts) + '" fill="none"' + peelStyle('bare') + ' />';
+            segPathFromDenseSlice(dBareEnd, total) + '" fill="none"' + peelStyle('bare') + ' />';
         }
       }
       if (!bufferSplit) {
-        var tipPts = slicePolylineByDistance(fullPts, dJacketEnd, total);
         var tipBare = fullyStripped || bareComplete ||
           (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX && jacketRender > STRIP_TIP_EPS);
         var tipKind = tipBare ? 'bare' : (stripExposedKind(p) || 'buffer');
@@ -1228,7 +1281,8 @@
           (bad ? ' is-mismatch' : '') + peelClass(tipBare ? 'bare' : 'buffer') + splicerCls +
           '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="' +
           (tipBare ? 'bare' : 'stripped') + '" d="' +
-          svgPathFromPoints(tipPts) + '" fill="none"' + peelStyle(tipBare ? 'bare' : 'buffer') + ' />';
+          segPathFromDenseSlice(dJacketEnd, total) + '" fill="none"' +
+          peelStyle(tipBare ? 'bare' : 'buffer') + ' />';
       }
     } else {
       html +=
@@ -1236,6 +1290,7 @@
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath +
         '" fill="none"' + peelStyle('jacket') + ' />';
+    }
     }
 
     var ghost = ghostPreviewPath(p);
@@ -1709,56 +1764,141 @@
     return FusionSplicerMachine.getGrooveSlot(machineId, side);
   }
 
-  function flattenOrthoForSplicerGroove(p, tipX, grooveY, side) {
-    if (!usesOrthoRoute(p)) return;
-    ensurePathHistory(p);
-    var hist = p.pathHistory;
-    var inland = Math.max(ORTHO_MIN_SEG, 16);
-    var tipFromWest = side === 'L';
-    var inlandX = tipFromWest ? tipX - inland : tipX + inland;
-    if (!hist.length) {
-      hist.push({ x: inlandX, y: grooveY });
-    } else {
-      var last = hist[hist.length - 1];
-      if (Math.abs(last.y - grooveY) > 0.5) {
-        hist.push({ x: last.x, y: grooveY });
-      }
-      last = hist[hist.length - 1];
-      if (Math.abs(last.x - inlandX) > ORTHO_MIN_SEG) {
-        hist.push({ x: inlandX, y: grooveY });
-      } else {
-        hist[hist.length - 1] = { x: inlandX, y: grooveY };
-      }
+  /** Rigid-body vertical shift — entire pigtail moves as one unit (connector + route + tip). */
+  /** Rigid-body shift — entire pigtail (connector, route, tip) moves as one unit. */
+  function translatePigtailRigid(p, deltaX, deltaY) {
+    if (!p) return;
+    var dx = deltaX || 0;
+    var dy = deltaY || 0;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return;
+    p.ax += dx;
+    p.ay += dy;
+    p.bx += dx;
+    p.by += dy;
+    var hist = ensurePathHistory(p);
+    var i;
+    for (i = 0; i < hist.length; i++) {
+      hist[i].x += dx;
+      hist[i].y += dy;
     }
-    p.pathHistory = hist;
     syncPathAlias(p);
-    if (p.snake) {
-      p.snake.axis = 'h';
-      p.snake.ghost = null;
-    }
   }
 
-  function alignJacketAlongSplicerGroove(p, slot) {
+  function translatePigtailRigidY(p, deltaY) {
+    translatePigtailRigid(p, 0, deltaY);
+  }
+
+  /** Exposed bare-glass length from strip state (not a hardcoded groove protrusion). */
+  function getSplicerExposedBareLengthPx(p) {
+    if (!p) return 0;
+    ensureFiberStrip(p);
+    var fs = p.fiberStrip;
+    if (p.splicerBareGlassPx != null && isFinite(p.splicerBareGlassPx)) {
+      return Math.max(CLEAVE_MIN_CUT_PX, p.splicerBareGlassPx);
+    }
+    if (p.isCleaved || p.cleaved) {
+      return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassLengthAfterCutPx());
+    }
+    if (isFullyStrippedPigtail(p) || isBareStripComplete(fs)) {
+      return Math.max(CLEAVE_MIN_CUT_PX, fs.bareTo || fs.jacketTo || 0);
+    }
+    return Math.max(0, fs.bareTo || 0);
+  }
+
+  /** On drop: pin yellow jacket at clamp inner edge; bare length follows strip/cleave state. */
+  function alignSplicerJacketToInnerEdge(p, slot) {
     if (!p || !slot) return false;
-    var grooveY = slot.grooveY;
-    var anchorX = slot.anchorX;
-    var tipX = slot.tipX;
-    p.bx = Math.round(tipX);
-    p.by = Math.round(grooveY);
-    flattenOrthoForSplicerGroove(p, tipX, grooveY, slot.side);
+    pinJacketBoundaryToWorldX(p, slot.innerEdgeX);
     var boundary = getJacketBoundaryWorld(p);
-    if (boundary) {
-      translateTailGeometry(p, anchorX - boundary.x, 0);
+    if (boundary && Math.abs(boundary.x - slot.innerEdgeX) > RULER_WALL_EPS) {
+      translateTailGeometry(p, slot.innerEdgeX - boundary.x, 0);
     }
-    p.bx = Math.round(tipX);
-    p.by = Math.round(grooveY);
+    var bareLen = getSplicerExposedBareLengthPx(p);
+    var dir = slot.side === 'L' ? 1 : -1;
+    p.bx = Math.round(slot.innerEdgeX + dir * bareLen);
+    p.by = Math.round(slot.grooveY);
+    p.splicerBareGlassPx = bareLen;
+    p.splicerInnerEdgeX = slot.innerEdgeX;
     return true;
   }
 
-  function previewFiberInSplicerGroove(p, slot) {
-    if (!p || !slot || !slot.open) return false;
-    alignJacketAlongSplicerGroove(p, slot);
+  /** Shift whole pigtail vertically so tip Y aligns with groove — no stretch, no diagonal bridge. */
+  function applySplicerRigidSnapShift(p, slot) {
+    if (!p || !slot) return false;
+    var deltaY = slot.grooveY - p.by;
+    if (Math.abs(deltaY) > 0.01) {
+      translatePigtailRigidY(p, deltaY);
+    }
+    p.by = Math.round(slot.grooveY);
+    p.ay = Math.round(p.ay);
     return true;
+  }
+
+  var splicerDockTrackRafId = null;
+
+  function syncSnappedPigtailToLiveGroove(p) {
+    if (!p || !p.isSnappedToSplicer) return false;
+    var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
+    if (!slot || !slot.open) return false;
+    var changed = false;
+    if (!p.splicerGrooveAnchor) {
+      p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
+      p.splicerGrooveY = slot.grooveY;
+    } else {
+      var deltaX = slot.centerX - p.splicerGrooveAnchor.x;
+      var deltaY = slot.grooveY - p.splicerGrooveAnchor.y;
+      if (Math.abs(deltaX) >= 0.01 || Math.abs(deltaY) >= 0.01) {
+        translatePigtailRigid(p, deltaX, deltaY);
+        p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
+        p.splicerGrooveY = slot.grooveY;
+        changed = true;
+      }
+    }
+    var innerDrift = p.splicerInnerEdgeX == null ||
+      Math.abs(p.splicerInnerEdgeX - slot.innerEdgeX) > 0.5;
+    if (changed || innerDrift) {
+      alignSplicerJacketToInnerEdge(p, slot);
+      changed = true;
+    }
+    return changed;
+  }
+
+  function splicerDockTrackTick() {
+    var anySnapped = false;
+    var changed = false;
+    var machineIds = {};
+    pigtails.forEach(function (p) {
+      if (!p.isSnappedToSplicer) return;
+      anySnapped = true;
+      if (p.snappedSplicerId) machineIds[p.snappedSplicerId] = true;
+      if (syncSnappedPigtailToLiveGroove(p)) {
+        changed = true;
+        updateFiberPath(p);
+      }
+    });
+    if (changed) {
+      Object.keys(machineIds).forEach(function (mid) {
+        renderSplicerFiberOverlays(mid);
+      });
+      if (layer) rebuildLayer();
+    }
+    if (anySnapped) {
+      splicerDockTrackRafId = requestAnimationFrame(splicerDockTrackTick);
+    } else {
+      splicerDockTrackRafId = null;
+    }
+  }
+
+  function ensureSplicerDockTracking() {
+    if (splicerDockTrackRafId != null) return;
+    splicerDockTrackRafId = requestAnimationFrame(splicerDockTrackTick);
+  }
+
+  function stopSplicerDockTracking() {
+    if (splicerDockTrackRafId != null) {
+      cancelAnimationFrame(splicerDockTrackRafId);
+      splicerDockTrackRafId = null;
+    }
   }
 
   function seatFiberInSplicerGroove(p, slot, opts) {
@@ -1766,13 +1906,16 @@
     if (!p || !slot || !slot.open) return false;
     if (!splicerEligibleForSnap(p) && !opts.force) return false;
 
-    previewFiberInSplicerGroove(p, slot);
+    applySplicerRigidSnapShift(p, slot);
+    alignSplicerJacketToInnerEdge(p, slot);
 
     p.isSnappedToSplicer = true;
     p.snappedSplicerId = slot.machineId;
     p.snappedSplicerSide = slot.side;
     p.splicerGrooveY = slot.grooveY;
-    p.splicerTipX = slot.tipX;
+    p.splicerTipX = p.bx;
+    p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
+    p.splicerPreviewSlot = null;
 
     if (global.FusionSplicerMachine && global.FusionSplicerMachine.getUI) {
       var api = FusionSplicerMachine.getUI(slot.machineId);
@@ -1784,6 +1927,7 @@
     if (!opts.quiet) {
       setStatus('SC Pigtail · seated in ' + slot.side + '-clamp V-groove');
     }
+    ensureSplicerDockTracking();
     return true;
   }
 
@@ -1797,18 +1941,31 @@
     p.snappedSplicerSide = null;
     p.splicerGrooveY = null;
     p.splicerTipX = null;
+    p.splicerPreviewSlot = null;
+    p.splicerGrooveAnchor = null;
+    p.splicerBareGlassPx = null;
+    p.splicerInnerEdgeX = null;
     if (machineId && side && global.FusionSplicerMachine && FusionSplicerMachine.getUI) {
       var api = FusionSplicerMachine.getUI(machineId);
       if (api && typeof api.setFiberPlaced === 'function') {
         api.setFiberPlaced(side, false);
       }
     }
-    if (!opts.skipRebuild) {
+    if (machineId) {
       renderSplicerFiberOverlays(machineId);
-      if (global.FusionSplicerMachine && FusionSplicerMachine.syncLidOverlays) {
+      if (!opts.skipRebuild && global.FusionSplicerMachine && FusionSplicerMachine.syncLidOverlays) {
         FusionSplicerMachine.syncLidOverlays(machineId);
       }
     }
+  }
+
+  /** Instant unsnap — detach machine slot, keep current geometry (shifted pathHistory + curves). */
+  function forceUnsnapPigtailFromSplicer(p) {
+    if (!p || !p.isSnappedToSplicer) return false;
+    clearSplicerSnap(p, { skipRebuild: true });
+    p.splicerDragDetached = true;
+    updateFiberPath(p);
+    return true;
   }
 
   /** Pointer → silver `.clamp-base-groove` via elementFromPoint (no radius math). */
@@ -1821,12 +1978,19 @@
   }
 
   function setPigtailDragPassthrough(p, active) {
-    if (!layer || !p) return;
-    layer.querySelectorAll('[data-pt-drag="' + p.id + '"]').forEach(function (el) {
+    if (!p) return;
+    var selector = '[data-pt-drag="' + p.id + '"]';
+    if (layer) {
+      layer.querySelectorAll(selector).forEach(function (el) {
+        el.classList.toggle('is-drag-passthrough', !!active);
+        el.style.pointerEvents = active ? 'none' : '';
+      });
+      layer.querySelectorAll('[data-pt-fiber="' + p.id + '"]').forEach(function (el) {
+        el.style.pointerEvents = active ? 'none' : '';
+      });
+    }
+    document.querySelectorAll('.lab-fusion-fiber-layer ' + selector).forEach(function (el) {
       el.classList.toggle('is-drag-passthrough', !!active);
-      el.style.pointerEvents = active ? 'none' : '';
-    });
-    layer.querySelectorAll('[data-pt-fiber="' + p.id + '"]').forEach(function (el) {
       el.style.pointerEvents = active ? 'none' : '';
     });
   }
@@ -1856,20 +2020,22 @@
     });
   }
 
-  /** Live magnetic preview while dragging tip or jacket over an open V-groove. */
+  /** Magnet glow only while dragging — rigid snap executes on pointerup drop. */
   function applySplicerMagnetDuringDrag(p, clientX, clientY) {
+    if (p.splicerDragDetached) return;
     if (!splicerEligibleForSnap(p)) {
+      p.splicerPreviewSlot = null;
       clearSplicerMagnetHighlight();
-      return false;
+      return;
     }
     var splicerHit = hitTestSplicerGroove(clientX, clientY);
     if (splicerHit && splicerHit.slot) {
+      p.splicerPreviewSlot = splicerHit.slot;
       highlightSplicerGrooveHit(splicerHit);
-      previewFiberInSplicerGroove(p, splicerHit.slot);
-      return true;
+      return;
     }
+    p.splicerPreviewSlot = null;
     clearSplicerMagnetHighlight();
-    return false;
   }
 
   /** Lock pigtail into groove on pointer release. */
@@ -1947,8 +2113,9 @@
         changed = true;
         return;
       }
-      seatFiberInSplicerGroove(p, slot, { quiet: true, force: true });
-      changed = true;
+      if (syncSnappedPigtailToLiveGroove(p)) {
+        changed = true;
+      }
     });
     if (changed) {
       rebuildLayer();
@@ -1987,6 +2154,7 @@
           '</g>';
       });
       svg.innerHTML = html;
+      svg.querySelectorAll('[data-pt-drag]').forEach(bindPigtailBodyDragGrip);
       if (FusionSplicerMachine.syncLidOverlays) {
         FusionSplicerMachine.syncLidOverlays(mid);
       }
@@ -2922,6 +3090,11 @@
       snappedSplicerSide: null,
       splicerGrooveY: null,
       splicerTipX: null,
+      splicerPreviewSlot: null,
+      splicerDragDetached: false,
+      splicerGrooveAnchor: null,
+      splicerBareGlassPx: null,
+      splicerInnerEdgeX: null,
       cleavedStripLock: null,
       stripFrontierLock: null,
     };
@@ -4182,6 +4355,98 @@
     if (el) el.classList.add('is-plug-target');
   }
 
+  function bindPigtailBodyDragGrip(grip) {
+    if (!grip || grip.dataset.ptDragBound === '1') return;
+    grip.dataset.ptDragBound = '1';
+    grip.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var id = grip.getAttribute('data-pt-drag');
+      var p = findPigtail(id);
+      if (!p) return;
+      selectPigtail(id);
+      if (p.connector.attached && p.tail.attached) {
+        setStatus('Both ends parked · drag connector or bare tip to move');
+        return;
+      }
+      if (p.connector.attached || p.tail.attached) {
+        setStatus('Drag the free end (connector or bare tip)');
+        return;
+      }
+
+      if (p.isSnappedToCleaver) {
+        clearCleaverSnap(p, { skipGuide: true });
+      } else if (p.isSnappedToSplicer) {
+        forceUnsnapPigtailFromSplicer(p);
+      } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+        restorePermanentStripFrontier(p);
+      }
+
+      document.body.classList.add('lab-pigtail-dragging');
+      setPigtailDragPassthrough(p, true);
+
+      var w0 = clientToWorld(e.clientX, e.clientY);
+      var oax = p.ax;
+      var oay = p.ay;
+      var obx = p.bx;
+      var oby = p.by;
+      var moved = false;
+      ensurePathHistory(p);
+      var hist0 = p.pathHistory.map(function (pt) {
+        return { x: pt.x, y: pt.y };
+      });
+
+      function onMove(ev) {
+        moved = true;
+        applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
+        var w = clientToWorld(ev.clientX, ev.clientY);
+        var dx = w.x - w0.x;
+        var dy = w.y - w0.y;
+        p.ax = oax + dx;
+        p.ay = oay + dy;
+        p.bx = obx + dx;
+        p.by = oby + dy;
+        if (hist0.length) {
+          p.pathHistory = hist0.map(function (pt) {
+            return { x: pt.x + dx, y: pt.y + dy };
+          });
+          syncPathAlias(p);
+        }
+
+        if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+          restorePermanentStripFrontier(p);
+        }
+        updateFiberPath(p);
+        if (p.isSnappedToSplicer) {
+          renderSplicerFiberOverlays(p.snappedSplicerId);
+        }
+      }
+
+      function onUp(ev) {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        document.body.classList.remove('lab-pigtail-dragging');
+        setPigtailDragPassthrough(p, false);
+
+        var seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
+        if (!seated) p.splicerPreviewSlot = null;
+        p.splicerDragDetached = false;
+        clearSplicerMagnetHighlight();
+        clearSplicerDropzoneHighlight();
+
+        rebuildLayer();
+        updateInspector();
+        if (moved || seated) pushHistory();
+      }
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
   function bindLayerEvents(host) {
     host.querySelectorAll('[data-pt-node]').forEach(function (node) {
       node.addEventListener('click', function (e) {
@@ -4250,92 +4515,7 @@
       });
     });
 
-    host.querySelectorAll('[data-pt-drag]').forEach(function (grip) {
-      grip.addEventListener('pointerdown', function (e) {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var id = grip.getAttribute('data-pt-drag');
-        var p = findPigtail(id);
-        if (!p) return;
-        selectPigtail(id);
-        if (p.connector.attached && p.tail.attached) {
-          setStatus('Both ends parked · drag connector or bare tip to move');
-          return;
-        }
-        if (p.connector.attached || p.tail.attached) {
-          setStatus('Drag the free end (connector or bare tip)');
-          return;
-        }
-
-        if (p.isSnappedToCleaver) {
-          clearCleaverSnap(p, { skipGuide: true });
-        } else if (p.isSnappedToSplicer) {
-          clearSplicerSnap(p, { skipRebuild: true });
-        } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
-          restorePermanentStripFrontier(p);
-        }
-
-        document.body.classList.add('lab-pigtail-dragging');
-        setPigtailDragPassthrough(p, true);
-
-        var w0 = clientToWorld(e.clientX, e.clientY);
-        var oax = p.ax;
-        var oay = p.ay;
-        var obx = p.bx;
-        var oby = p.by;
-        var moved = false;
-        ensurePathHistory(p);
-        var hist0 = p.pathHistory.map(function (pt) {
-          return { x: pt.x, y: pt.y };
-        });
-
-        function onMove(ev) {
-          moved = true;
-          var splicerMagnetActive = applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
-          if (!splicerMagnetActive) {
-            var w = clientToWorld(ev.clientX, ev.clientY);
-            var dx = w.x - w0.x;
-            var dy = w.y - w0.y;
-            p.ax = oax + dx;
-            p.ay = oay + dy;
-            p.bx = obx + dx;
-            p.by = oby + dy;
-            if (hist0.length) {
-              p.pathHistory = hist0.map(function (pt) {
-                return { x: pt.x + dx, y: pt.y + dy };
-              });
-              syncPathAlias(p);
-            }
-          }
-
-          if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
-            restorePermanentStripFrontier(p);
-          }
-          updateFiberPath(p);
-        }
-
-        function onUp(ev) {
-          window.removeEventListener('pointermove', onMove);
-          window.removeEventListener('pointerup', onUp);
-          window.removeEventListener('pointercancel', onUp);
-          document.body.classList.remove('lab-pigtail-dragging');
-          setPigtailDragPassthrough(p, false);
-
-          var seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
-          clearSplicerMagnetHighlight();
-          clearSplicerDropzoneHighlight();
-
-          rebuildLayer();
-          updateInspector();
-          if (moved || seated) pushHistory();
-        }
-
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-        window.addEventListener('pointercancel', onUp);
-      });
-    });
+    host.querySelectorAll('[data-pt-drag]').forEach(bindPigtailBodyDragGrip);
 
     /* Connector drag / plug — snake from A or gravity 1:1 world tracking */
     host.querySelectorAll('[data-pt-end="A"]').forEach(function (btn) {
@@ -4470,23 +4650,24 @@
         if (!p) return;
         selectPigtail(id);
 
-        var home = p.tail.attached
-          ? { x: p.tail.attached.wx, y: p.tail.attached.wy }
-          : null;
         var undocked = false;
         var moved = false;
         var snakeMode = getRouteMode(p) === 'snake';
 
-        if (snakeMode) beginOrthoSnake(p, 'B');
-        else p.snake = { dragEnd: 'B' };
-
         if (p.isSnappedToCleaver) {
           clearCleaverSnap(p, { skipGuide: true });
         } else if (p.isSnappedToSplicer) {
-          clearSplicerSnap(p, { skipRebuild: true });
+          forceUnsnapPigtailFromSplicer(p);
         } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
           restorePermanentStripFrontier(p);
         }
+
+        if (snakeMode) beginOrthoSnake(p, 'B');
+        else p.snake = { dragEnd: 'B' };
+
+        var home = p.tail.attached
+          ? { x: p.tail.attached.wx, y: p.tail.attached.wy }
+          : null;
 
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-pigtail-dragging');
@@ -4514,14 +4695,12 @@
             );
           }
 
-          var splicerMagnetActive = applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
+          applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
 
-          if (!splicerMagnetActive) {
-            if (snakeMode) {
-              updateOrthoSnake(p, world.x, world.y);
-            } else {
-              moveTipGravity(p, 'B', world.x, world.y);
-            }
+          if (snakeMode) {
+            updateOrthoSnake(p, world.x, world.y);
+          } else {
+            moveTipGravity(p, 'B', world.x, world.y);
           }
 
           if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
@@ -4570,6 +4749,8 @@
           if (!seated) {
             seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
           }
+          if (!seated) p.splicerPreviewSlot = null;
+          p.splicerDragDetached = false;
           clearSplicerMagnetHighlight();
           clearSplicerDropzoneHighlight();
 
@@ -5109,6 +5290,16 @@
 
       document.addEventListener('fusion-splicer:clampLid', function () {
         renderSplicerFiberOverlays();
+        refreshSplicerDocks();
+      });
+      document.addEventListener('fusion-splicer:clampNudge', function () {
+        ensureSplicerDockTracking();
+        refreshSplicerDocks();
+      });
+      document.addEventListener('fusion-splicer:spliceStart', function () {
+        ensureSplicerDockTracking();
+      });
+      document.addEventListener('fusion-splicer:spliceComplete', function () {
         refreshSplicerDocks();
       });
 

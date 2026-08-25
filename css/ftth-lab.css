@@ -404,6 +404,15 @@ body.lab-fusion-machine-dragging {
   pointer-events: none;
 }
 
+.lab-fusion-fiber-layer .lab-pigtail-fiber-hit {
+  pointer-events: stroke;
+  cursor: grab;
+}
+
+.lab-fusion-fiber-layer .lab-pigtail-fiber-hit:active {
+  cursor: grabbing;
+}
+
 /* Closed clamp lids — above docked fiber (30) */
 .lab-fusion-lid-layer {
   position: absolute;
