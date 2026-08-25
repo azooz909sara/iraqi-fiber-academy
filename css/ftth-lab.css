@@ -386,7 +386,12 @@ body.lab-fusion-machine-dragging {
   cursor: grabbing;
 }
 
-/* Docked pigtail fiber — between clamp base (10) and global pigtail chrome (20) */
+/* ── Fusion splicer mount-level stack (siblings on #lab-2d-mount) ──
+ *   6–11  machine chassis (.lab-fusion-machine-layer / .lab-fusion-machine)
+ *   18    docked fiber SVG (.lab-fusion-fiber-layer) — always above machine body
+ *   20    general pigtail chrome (.lab-pigtail-layer)
+ *   35+   closed-lid occluder proxies (.lab-fusion-lid-layer) — only hides fiber in clamp zone
+ * Do NOT lower fiber z-index when the clamp closes; use lid proxies for local occlusion. */
 .lab-fusion-fiber-layer {
   position: absolute;
   inset: 0;
@@ -413,13 +418,17 @@ body.lab-fusion-machine-dragging {
   cursor: grabbing;
 }
 
-/* Closed clamp lids — above docked fiber (30) */
+/* Closed clamp lids — always above pigtail (20) and docked fiber (18), even when machine is selected */
 .lab-fusion-lid-layer {
   position: absolute;
   inset: 0;
-  z-index: 30;
+  z-index: 35;
   pointer-events: none;
   overflow: visible;
+}
+
+.lab-fusion-lid-layer.is-machine-selected {
+  z-index: 42;
 }
 
 .lab-fusion-lid-proxy {

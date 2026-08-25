@@ -219,6 +219,11 @@
     });
   }
 
+  /** Live clamp coordinates for docked-fiber tracking — ignores lid-open / magnet guards. */
+  function getGrooveSlotForTracking(machineId, side) {
+    return getGrooveSlot(machineId, side);
+  }
+
   function makeGrooveHit(slot, grooveEl) {
     return {
       machineId: slot.machineId,
@@ -347,6 +352,7 @@
         '<svg class="lab-pigtail-svg lab-fusion-pigtail-svg" aria-hidden="true"></svg>';
       mount.appendChild(layerEl);
     }
+    layerEl.removeAttribute('data-fusion-fiber-sealed');
     return layerEl;
   }
 
@@ -403,6 +409,7 @@
       lidLayer.appendChild(proxy);
     });
 
+    lidLayer.classList.toggle('is-machine-selected', selection.id === machineId);
     mount.appendChild(lidLayer);
   }
 
@@ -480,6 +487,7 @@
       node.classList.toggle('is-selected', selection.id === id);
       node.classList.toggle('is-armed', armedMachineId === id);
     });
+    syncAllFiberPorts();
   }
 
   function disarmMachine(id, opts) {
@@ -1100,6 +1108,7 @@
     getUI: getUI,
     on: on,
     getGrooveSlot: getGrooveSlot,
+    getGrooveSlotForTracking: getGrooveSlotForTracking,
     buildGrooveSlotFromElement: buildGrooveSlotFromElement,
     hitTestSplicerGrooveAtClient: hitTestSplicerGrooveAtClient,
     findGrooveNearWorld: findGrooveNearWorld,

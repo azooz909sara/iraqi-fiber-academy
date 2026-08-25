@@ -680,6 +680,12 @@
       animFrame = requestAnimationFrame(animate);
     }
 
+    function onClampAssemblyClick(side, e) {
+      e.stopPropagation();
+      selectClamp(side);
+      toggleClampLid(side);
+    }
+
     function bindUi() {
       root.addEventListener('click', function (e) {
         var t = e.target;
@@ -693,24 +699,12 @@
           toggleOvenLid();
           return;
         }
-        if (t.closest('.fsm-clamp-lid-l')) {
-          e.stopPropagation();
-          toggleClampLid('L');
-          return;
-        }
-        if (t.closest('.fsm-clamp-lid-r')) {
-          e.stopPropagation();
-          toggleClampLid('R');
-          return;
-        }
         if (t.closest('.fsm-clamp-assembly-l')) {
-          e.stopPropagation();
-          selectClamp('L');
+          onClampAssemblyClick('L', e);
           return;
         }
         if (t.closest('.fsm-clamp-assembly-r')) {
-          e.stopPropagation();
-          selectClamp('R');
+          onClampAssemblyClick('R', e);
           return;
         }
         if (t.closest('.fsm-dpad-up')) {

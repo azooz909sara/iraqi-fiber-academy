@@ -380,6 +380,8 @@
         p.splicerGrooveAnchor = null;
         p.splicerBareGlassPx = null;
         p.splicerInnerEdgeX = null;
+        p.splicerDockSnapshot = null;
+        p.splicerWeldMachineId = null;
       }
     });
     seq = snap.seq || 0;
@@ -1213,9 +1215,14 @@
 
     var splicerSlot = null;
     if (splicerDocked && splicerPort && p.snappedSplicerId && p.snappedSplicerSide) {
-      splicerSlot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
+      splicerSlot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide, { forTracking: true });
     }
-    var splicerClampRender = !!(splicerSlot && p.splicerInnerEdgeX != null);
+  var splicerClampRender = !!(
+      splicerDocked &&
+      splicerPort &&
+      splicerSlot &&
+      p.splicerInnerEdgeX != null
+    );
 
     if (splicerClampRender) {
       var innerPt = { x: p.splicerInnerEdgeX, y: splicerSlot.grooveY };
@@ -1757,14 +1764,126 @@
     return true;
   }
 
-  function getSplicerGrooveSlot(machineId, side) {
-    if (!global.FusionSplicerMachine || typeof FusionSplicerMachine.getGrooveSlot !== 'function') {
-      return null;
+  function getSplicerGrooveSlot(machineId, side, opts) {
+    opts = opts || {};
+    if (!global.FusionSplicerMachine) return null;
+    if (opts.forTracking && typeof FusionSplicerMachine.getGrooveSlotForTracking === 'function') {
+      return FusionSplicerMachine.getGrooveSlotForTracking(machineId, side);
     }
-    return FusionSplicerMachine.getGrooveSlot(machineId, side);
+    if (typeof FusionSplicerMachine.getGrooveSlot === 'function') {
+      return FusionSplicerMachine.getGrooveSlot(machineId, side);
+    }
+    return null;
   }
 
-  /** Rigid-body vertical shift — entire pigtail moves as one unit (connector + route + tip). */
+  function findSnappedPigtailOnSide(machineId, side, exceptId) {
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var cand = pigtails[i];
+      if (exceptId && cand.id === exceptId) continue;
+      if (
+        cand.isSnappedToSplicer &&
+        cand.snappedSplicerId === machineId &&
+        cand.snappedSplicerSide === side
+      ) {
+        return cand;
+      }
+    }
+    return null;
+  }
+
+  function getSplicerDockedPair(machineId) {
+    var left = null;
+    var right = null;
+    var i;
+    for (i = 0; i < pigtails.length; i++) {
+      var p = pigtails[i];
+      if (!p.isSnappedToSplicer || p.snappedSplicerId !== machineId) continue;
+      if (p.snappedSplicerSide === 'L') left = p;
+      if (p.snappedSplicerSide === 'R') right = p;
+    }
+    return { left: left, right: right };
+  }
+
+  function isSplicerWeldedPair(machineId) {
+    var pair = getSplicerDockedPair(machineId);
+    return !!(
+      pair.left &&
+      pair.right &&
+      pair.left.splicerWeldMachineId === machineId &&
+      pair.right.splicerWeldMachineId === machineId
+    );
+  }
+
+  function captureSplicerDockSnapshot(p) {
+    if (!p) return;
+    ensureFiberStrip(p);
+    p.splicerDockSnapshot = {
+      jacketTo: p.fiberStrip.jacketTo,
+      bareTo: p.fiberStrip.bareTo,
+      peel: p.fiberStrip.peel,
+      peelLayer: p.fiberStrip.peelLayer,
+    };
+  }
+
+  /** Restore strip arc-lengths captured before docking — never clamp-truncate after unsnap. */
+  function restoreSplicerDockStripState(p) {
+    if (!p || !p.splicerDockSnapshot) return;
+    ensureFiberStrip(p);
+    var snap = p.splicerDockSnapshot;
+    p.fiberStrip.jacketTo = snap.jacketTo;
+    p.fiberStrip.bareTo = snap.bareTo;
+    p.fiberStrip.peel = snap.peel;
+    p.fiberStrip.peelLayer = snap.peelLayer;
+    p.splicerDockSnapshot = null;
+    enforceFullStripBareFrontier(p);
+    if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+      restorePermanentStripFrontier(p);
+    }
+  }
+
+  function clearSplicerWeldForMachine(machineId) {
+    if (!machineId) return;
+    pigtails.forEach(function (p) {
+      if (p.splicerWeldMachineId === machineId) {
+        p.splicerWeldMachineId = null;
+      }
+    });
+  }
+
+  /** Bare glass exposed in clamp only — do not bridge electrode gap pre-weld. */
+  function clampedSplicerBareProtrudePx(p, slot) {
+    var bareLen = getSplicerExposedBareLengthPx(p);
+    var protrude = slot && slot.bareProtrude != null ? slot.bareProtrude : 12;
+    return Math.max(4, Math.min(bareLen, protrude));
+  }
+
+  function syncSplicerWeldedTips(machineId) {
+    if (!isSplicerWeldedPair(machineId)) return false;
+    var pair = getSplicerDockedPair(machineId);
+    var slotL = getSplicerGrooveSlot(machineId, 'L', { forTracking: true });
+    var slotR = getSplicerGrooveSlot(machineId, 'R', { forTracking: true });
+    if (!slotL || !slotR || !pair.left || !pair.right) return false;
+    var meetX = (slotL.innerEdgeX + slotR.innerEdgeX) / 2;
+    var grooveY = (slotL.grooveY + slotR.grooveY) / 2;
+    pair.left.bx = Math.round(meetX);
+    pair.left.by = Math.round(grooveY);
+    pair.right.bx = Math.round(meetX);
+    pair.right.by = Math.round(grooveY);
+    pair.left.splicerInnerEdgeX = slotL.innerEdgeX;
+    pair.right.splicerInnerEdgeX = slotR.innerEdgeX;
+    return true;
+  }
+
+  function applySplicerArcWeld(machineId) {
+    var pair = getSplicerDockedPair(machineId);
+    if (!pair.left || !pair.right) return false;
+    pair.left.splicerWeldMachineId = machineId;
+    pair.right.splicerWeldMachineId = machineId;
+    syncSplicerWeldedTips(machineId);
+    return true;
+  }
+
   /** Rigid-body shift — entire pigtail (connector, route, tip) moves as one unit. */
   function translatePigtailRigid(p, deltaX, deltaY) {
     if (!p) return;
@@ -1805,19 +1924,22 @@
     return Math.max(0, fs.bareTo || 0);
   }
 
-  /** On drop: pin yellow jacket at clamp inner edge; bare length follows strip/cleave state. */
+  /**
+   * Docked tip alignment — per-side only. Never mutates strip arc-lengths (clamp truncation
+   * is geometric in buildPigtailFiberSvg). Pre-weld tips stay inside their own clamp zone.
+   */
   function alignSplicerJacketToInnerEdge(p, slot) {
     if (!p || !slot) return false;
-    pinJacketBoundaryToWorldX(p, slot.innerEdgeX);
-    var boundary = getJacketBoundaryWorld(p);
-    if (boundary && Math.abs(boundary.x - slot.innerEdgeX) > RULER_WALL_EPS) {
-      translateTailGeometry(p, slot.innerEdgeX - boundary.x, 0);
-    }
-    var bareLen = getSplicerExposedBareLengthPx(p);
     var dir = slot.side === 'L' ? 1 : -1;
-    p.bx = Math.round(slot.innerEdgeX + dir * bareLen);
+    var welded = p.splicerWeldMachineId === slot.machineId && isSplicerWeldedPair(slot.machineId);
+    if (welded) {
+      syncSplicerWeldedTips(slot.machineId);
+      return true;
+    }
+    var exposed = clampedSplicerBareProtrudePx(p, slot);
+    p.bx = Math.round(slot.innerEdgeX + dir * exposed);
     p.by = Math.round(slot.grooveY);
-    p.splicerBareGlassPx = bareLen;
+    p.splicerBareGlassPx = exposed;
     p.splicerInnerEdgeX = slot.innerEdgeX;
     return true;
   }
@@ -1838,8 +1960,8 @@
 
   function syncSnappedPigtailToLiveGroove(p) {
     if (!p || !p.isSnappedToSplicer) return false;
-    var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
-    if (!slot || !slot.open) return false;
+    var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide, { forTracking: true });
+    if (!slot) return false;
     var changed = false;
     if (!p.splicerGrooveAnchor) {
       p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
@@ -1905,7 +2027,10 @@
     opts = opts || {};
     if (!p || !slot || !slot.open) return false;
     if (!splicerEligibleForSnap(p) && !opts.force) return false;
+    var occupant = findSnappedPigtailOnSide(slot.machineId, slot.side, p.id);
+    if (occupant) return false;
 
+    captureSplicerDockSnapshot(p);
     applySplicerRigidSnapShift(p, slot);
     alignSplicerJacketToInnerEdge(p, slot);
 
@@ -1945,6 +2070,8 @@
     p.splicerGrooveAnchor = null;
     p.splicerBareGlassPx = null;
     p.splicerInnerEdgeX = null;
+    restoreSplicerDockStripState(p);
+    if (machineId) clearSplicerWeldForMachine(machineId);
     if (machineId && side && global.FusionSplicerMachine && FusionSplicerMachine.getUI) {
       var api = FusionSplicerMachine.getUI(machineId);
       if (api && typeof api.setFiberPlaced === 'function') {
@@ -2063,7 +2190,11 @@
 
   function finishSplicerDropSeat(p, hit) {
     if (!hit || !hit.slot) return false;
-    return seatFiberInSplicerGroove(p, hit.slot);
+    var ok = seatFiberInSplicerGroove(p, hit.slot);
+    if (!ok) return false;
+    updateFiberPath(p);
+    renderSplicerFiberOverlays(hit.slot.machineId);
+    return true;
   }
 
   function handoverPigtailToSplicerClamp(machineId, side, opts) {
@@ -2075,19 +2206,15 @@
     var pig = opts.pigtailId ? findPigtail(opts.pigtailId) : null;
     var i;
     if (!pig) {
-      for (i = 0; i < pigtails.length; i++) {
-        if (pigtails[i].isSnappedToSplicer && pigtails[i].snappedSplicerId === machineId) {
-          pig = pigtails[i];
-          break;
-        }
-      }
+      pig = findSnappedPigtailOnSide(machineId, side);
     }
     if (!pig) {
       for (i = 0; i < pigtails.length; i++) {
-        if (splicerEligibleForSnap(pigtails[i])) {
-          pig = pigtails[i];
-          break;
-        }
+        var cand = pigtails[i];
+        if (!splicerEligibleForSnap(cand)) continue;
+        if (cand.isSnappedToSplicer && cand.snappedSplicerId === machineId) continue;
+        pig = cand;
+        break;
       }
     }
     if (!pig) return { ok: false, reason: 'no-pigtail' };
@@ -2107,8 +2234,8 @@
     pigtails.forEach(function (p) {
       if (!p.isSnappedToSplicer) return;
       if (machineId && p.snappedSplicerId !== machineId) return;
-      var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide);
-      if (!slot || !slot.open) {
+      var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide, { forTracking: true });
+      if (!slot) {
         clearSplicerSnap(p, { skipRebuild: true });
         changed = true;
         return;
@@ -3095,6 +3222,8 @@
       splicerGrooveAnchor: null,
       splicerBareGlassPx: null,
       splicerInnerEdgeX: null,
+      splicerDockSnapshot: null,
+      splicerWeldMachineId: null,
       cleavedStripLock: null,
       stripFrontierLock: null,
     };
@@ -5299,8 +5428,15 @@
       document.addEventListener('fusion-splicer:spliceStart', function () {
         ensureSplicerDockTracking();
       });
-      document.addEventListener('fusion-splicer:spliceComplete', function () {
-        refreshSplicerDocks();
+      document.addEventListener('fusion-splicer:spliceComplete', function (ev) {
+        var machineId = ev.detail && ev.detail.machineId;
+        if (machineId) applySplicerArcWeld(machineId);
+        refreshSplicerDocks(machineId);
+        rebuildLayer();
+      });
+      document.addEventListener('fusion-splicer:reset', function (ev) {
+        var machineId = ev.detail && ev.detail.machineId;
+        if (machineId) clearSplicerWeldForMachine(machineId);
       });
 
       var prevTranslate = FtthLab.translateVflGroup;
