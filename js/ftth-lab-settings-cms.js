@@ -57,6 +57,76 @@
 
   function store() { return window[cms.storeName]; }
 
+  function splicingToolKeys() {
+    var s = store();
+    return (s && s.SPLICING_TOOL_KEYS) ? s.SPLICING_TOOL_KEYS.slice() : ['fiber-cleaver', 'fusion-splicer-machine'];
+  }
+
+  function isSplicingToolKey(toolKey) {
+    return splicingToolKeys().indexOf(toolKey) >= 0;
+  }
+
+  function getDraftItem(toolKey) {
+    if (!store() || !toolKey) return null;
+    var items = store().getDraft().items || [];
+    var i;
+    for (i = 0; i < items.length; i++) {
+      if (items[i].toolKey === toolKey) return items[i];
+    }
+    return null;
+  }
+
+  function pushLivePreview() {
+    var s = store();
+    if (!s) return;
+    if (typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation(s.getDraft());
+    }
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({
+          type: 'ifa:ftth-lab-draft-live',
+          draft: s.getDraft(),
+        }, '*');
+      }
+    } catch (err) { /* ignore */ }
+    if (window.FtthLab && typeof FtthLab.notifyLabConfigPreview === 'function') {
+      FtthLab.notifyLabConfigPreview();
+    }
+  }
+
+  function syncDeviceCardUi(toolKey) {
+    var item = getDraftItem(toolKey);
+    if (!item) return;
+    var articles = document.querySelectorAll('[data-lab-device="' + toolKey + '"]');
+    if (!articles.length) return;
+    articles.forEach(function (article) {
+    var strong = article.querySelector('.lab-settings-cms__meta strong');
+    var span = article.querySelector('.lab-settings-cms__meta span');
+    if (strong) strong.textContent = item.label;
+    if (span) span.textContent = item.sublabel;
+    var mark = article.querySelector('.lab-settings-cms__mark');
+    if (mark) {
+      var previewStyle = '';
+      if (item.icon && item.icon.indexOf('data:image') === 0) {
+        previewStyle =
+          ' style="background-image:url(\'' + item.icon.replace(/'/g, '%27') +
+          '\');background-size:contain;background-repeat:no-repeat;background-position:center;' +
+          'background-color:transparent;border-color:rgba(148,163,184,0.25);"';
+      }
+      mark.className = 'lab-tool__mark lab-settings-cms__mark' +
+        (item.markClass ? ' lab-tool__mark--' + item.markClass : '');
+      if (previewStyle) mark.setAttribute('style', previewStyle.replace(/^ style="|"$/g, ''));
+      else mark.removeAttribute('style');
+      if (store() && typeof store().applyIconToMark === 'function') {
+        store().applyIconToMark(mark, item.icon, item.markClass);
+      }
+    }
+    var vis = article.querySelector('[data-lab-field="visible"]');
+    if (vis) vis.checked = item.visible !== false;
+    });
+  }
+
   function isAdminPreviewContext() {
     try {
       if (window.self !== window.top) return true;
@@ -249,69 +319,95 @@
     }
   }
 
+  function renderDeviceArticle(item) {
+    var previewClass = 'lab-tool__mark' + (item.markClass ? ' lab-tool__mark--' + item.markClass : '');
+    var previewStyle = '';
+    if (item.icon && item.icon.indexOf('data:image') === 0) {
+      previewStyle = ' style="background-image:url(\'' + item.icon.replace(/'/g, '%27') + '\');background-size:contain;background-repeat:no-repeat;background-position:center;background-color:transparent;border-color:rgba(148,163,184,0.25);"';
+    }
+    return (
+      '<article class="lab-settings-cms__device" data-lab-device="' + escapeHtml(item.toolKey) + '">' +
+        '<div class="lab-settings-cms__row lab-settings-cms__row--head">' +
+          '<div class="lab-settings-cms__preview" aria-hidden="true">' +
+            '<span class="' + previewClass + ' lab-settings-cms__mark"' + previewStyle + '></span>' +
+          '</div>' +
+          '<div class="lab-settings-cms__meta">' +
+            '<strong>' + escapeHtml(item.label) + '</strong>' +
+            '<span>' + escapeHtml(item.sublabel) + '</span>' +
+          '</div>' +
+          '<div class="lab-settings-cms__actions">' +
+            '<label class="lab-settings-cms__visibility">' +
+              '<span>Visible</span>' +
+              '<input type="checkbox" class="toggle-tool-visibility" ' +
+                (item.visible !== false ? 'checked ' : '') +
+                'data-lab-field="visible" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+            '</label>' +
+            '<label class="lab-settings-cms__upload">' +
+              'Upload icon' +
+              '<input type="file" accept="image/png, image/svg+xml, image/jpeg" ' +
+                'data-lab-icon-upload="' + escapeHtml(item.toolKey) + '">' +
+            '</label>' +
+            '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" ' +
+              'data-lab-icon-clear="' + escapeHtml(item.toolKey) + '"' +
+              (item.icon ? '' : ' disabled') + '>Clear icon</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="lab-settings-cms__fields">' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Device title / name</span>' +
+            '<input type="text" value="' + escapeAttr(item.label) + '" ' +
+              'data-lab-field="label" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Subtitle (toolbox)</span>' +
+            '<input type="text" value="' + escapeAttr(item.sublabel) + '" ' +
+              'data-lab-field="sublabel" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field">' +
+            '<span>Description / guide (properties pane)</span>' +
+            '<textarea rows="2" data-lab-field="guideText" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
+              escapeHtml(item.guideText) +
+            '</textarea>' +
+          '</label>' +
+          renderSpecsFields(item) +
+        '</div>' +
+      '</article>'
+    );
+  }
+
+  function renderSplicingTab(hostEl) {
+    var host = hostEl || $(cms.bodyId);
+    if (!host || !store()) return;
+    var draft = store().getDraft();
+    var keys = splicingToolKeys();
+    var html =
+      '<section class="lab-settings-cms__section lab-settings-cms__section--splicing">' +
+        '<h3 class="lab-settings-cms__cat">معدات اللحام · Splicing Equipment</h3>' +
+        '<p class="lab-settings-cms__hint">Fiber Cleaver and Fusion Splicer — isolated from splitters and routers. Changes preview live in the lab toolbox.</p>';
+    draft.items.forEach(function (item) {
+      if (keys.indexOf(item.toolKey) < 0) return;
+      html += renderDeviceArticle(item);
+    });
+    html += '</section>';
+    host.innerHTML = html;
+    syncToolbar();
+  }
+
   function renderDevicesTab() {
     var host = $(cms.bodyId);
     if (!host || !store()) return;
     var draft = store().getDraft();
     var html = '';
     draft.categories.forEach(function (cat) {
-      var items = draft.items.filter(function (it) { return it.categoryId === cat.id; });
+      if (cat.id === 'splicing') return;
+      var items = draft.items.filter(function (it) {
+        return it.categoryId === cat.id && !isSplicingToolKey(it.toolKey);
+      });
       if (!items.length) return;
       html += '<section class="lab-settings-cms__section">' +
         '<h3 class="lab-settings-cms__cat">' + escapeHtml(cat.label) + '</h3>';
       items.forEach(function (item) {
-        var previewClass = 'lab-tool__mark' + (item.markClass ? ' lab-tool__mark--' + item.markClass : '');
-        var previewStyle = '';
-        if (item.icon && item.icon.indexOf('data:image') === 0) {
-          previewStyle = ' style="background-image:url(\'' + item.icon.replace(/'/g, '%27') + '\');background-size:contain;background-repeat:no-repeat;background-position:center;background-color:transparent;border-color:rgba(148,163,184,0.25);"';
-        }
-        html +=
-          '<article class="lab-settings-cms__device" data-lab-device="' + escapeHtml(item.toolKey) + '">' +
-            '<div class="lab-settings-cms__row lab-settings-cms__row--head">' +
-              '<div class="lab-settings-cms__preview" aria-hidden="true">' +
-                '<span class="' + previewClass + ' lab-settings-cms__mark"' + previewStyle + '></span>' +
-              '</div>' +
-              '<div class="lab-settings-cms__meta">' +
-                '<strong>' + escapeHtml(item.label) + '</strong>' +
-                '<span>' + escapeHtml(item.sublabel) + '</span>' +
-              '</div>' +
-              '<div class="lab-settings-cms__actions">' +
-                '<label class="lab-settings-cms__visibility">' +
-                  '<span>Visible</span>' +
-                  '<input type="checkbox" class="toggle-tool-visibility" ' +
-                    (item.visible !== false ? 'checked ' : '') +
-                    'data-lab-field="visible" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
-                '</label>' +
-                '<label class="lab-settings-cms__upload">' +
-                  'Upload icon' +
-                  '<input type="file" accept="image/png, image/svg+xml, image/jpeg" ' +
-                    'data-lab-icon-upload="' + escapeHtml(item.toolKey) + '">' +
-                '</label>' +
-                '<button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--ghost" ' +
-                  'data-lab-icon-clear="' + escapeHtml(item.toolKey) + '"' +
-                  (item.icon ? '' : ' disabled') + '>Clear icon</button>' +
-              '</div>' +
-            '</div>' +
-            '<div class="lab-settings-cms__fields">' +
-              '<label class="lab-settings-cms__field">' +
-                '<span>Device title / name</span>' +
-                '<input type="text" value="' + escapeAttr(item.label) + '" ' +
-                  'data-lab-field="label" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
-              '</label>' +
-              '<label class="lab-settings-cms__field">' +
-                '<span>Subtitle (toolbox)</span>' +
-                '<input type="text" value="' + escapeAttr(item.sublabel) + '" ' +
-                  'data-lab-field="sublabel" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
-              '</label>' +
-              '<label class="lab-settings-cms__field">' +
-                '<span>Description / guide (properties pane)</span>' +
-                '<textarea rows="2" data-lab-field="guideText" data-tool-key="' + escapeAttr(item.toolKey) + '">' +
-                  escapeHtml(item.guideText) +
-                '</textarea>' +
-              '</label>' +
-              renderSpecsFields(item) +
-            '</div>' +
-          '</article>';
+        html += renderDeviceArticle(item);
       });
       html += '</section>';
     });
@@ -346,6 +442,7 @@
         '</header>' +
         '<nav class="lab-settings-cms__tabs" aria-label="Settings sections">' +
           '<button type="button" class="lab-settings-cms__tab is-active" data-lab-settings-tab="devices">Devices &amp; Icons</button>' +
+          '<button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="splicing">معدات اللحام · Splicing</button>' +
           '<button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="performance">Performance Specs</button>' +
         '</nav>' +
         '<div class="lab-settings-cms__body" id="' + cms.bodyId + '"></div>' +
@@ -357,8 +454,53 @@
 
   function refresh() {
     if (activeTab === 'performance') renderPerformanceTab();
+    else if (activeTab === 'splicing') renderSplicingTab();
     else renderDevicesTab();
     syncToolbar();
+  }
+
+  function handleLiveFieldEvent(input) {
+    if (!input || !input.getAttribute) return false;
+    var toolKey = input.getAttribute('data-tool-key');
+
+    if (input.getAttribute('data-lab-perf')) {
+      commitPerformanceField(toolKey, input.getAttribute('data-lab-perf'), input.value);
+      setStatus('Performance specs updated · live preview.');
+      return true;
+    }
+    if (input.getAttribute('data-sfp-field')) {
+      commitSfpVariantField(input.getAttribute('data-sfp-id'), input.getAttribute('data-sfp-field'), input.value);
+      setStatus('SFP variant updated · live preview.');
+      refresh();
+      return true;
+    }
+    if (input.getAttribute('data-sfp-perf')) {
+      commitSfpVariantPerf(input.getAttribute('data-sfp-id'), input.getAttribute('data-sfp-perf'), input.value);
+      setStatus('SFP performance updated · live preview.');
+      refresh();
+      return true;
+    }
+    if (input.getAttribute('data-lab-field')) {
+      var fieldName = input.getAttribute('data-lab-field');
+      commitField(toolKey, fieldName, fieldName === 'visible' ? input.checked : input.value);
+      syncDeviceCardUi(toolKey);
+      pushLivePreview();
+      setStatus('Live preview · Save Changes to persist.');
+      return true;
+    }
+    if (input.getAttribute('data-lab-spec')) {
+      commitSpecField(toolKey, input.getAttribute('data-lab-spec'), input.value);
+      pushLivePreview();
+      setStatus('Specs updated · live preview.');
+      return true;
+    }
+    if (input.getAttribute('data-lab-spec-loss')) {
+      commitSplitterLoss(toolKey, input.getAttribute('data-lab-spec-loss'), input.value);
+      pushLivePreview();
+      setStatus('Splitter loss updated · live preview.');
+      return true;
+    }
+    return false;
   }
 
   function commitPerformanceField(toolKey, field, value) {
@@ -414,6 +556,8 @@
       specs.txLevels = store().parseTxLevels(value);
     } else if (specKey === 'defaultTxDbm') {
       specs.defaultTxDbm = Number(value);
+    } else if (specKey === 'bareGlassLengthAfterCutPx') {
+      specs.bareGlassLengthAfterCutPx = Math.round(Number(value));
     }
     store().updateItem(toolKey, { specs: specs }, true);
   }
@@ -433,40 +577,33 @@
       el.addEventListener('click', closeModal);
     });
 
+    root.addEventListener('input', function (e) {
+      var input = e.target;
+      if (!input || input.type === 'file') return;
+      if (input.getAttribute('data-lab-spec') === 'bareGlassLengthAfterCutPx') {
+        var out = input.parentElement && input.parentElement.querySelector('output');
+        if (out) out.textContent = input.value + ' px';
+      }
+      handleLiveFieldEvent(input);
+    });
+
     root.addEventListener('change', function (e) {
       var input = e.target;
       if (!input || !input.getAttribute) return;
 
       if (input.getAttribute('data-lab-perf')) {
-        commitPerformanceField(
-          input.getAttribute('data-tool-key'),
-          input.getAttribute('data-lab-perf'),
-          input.value
-        );
-        setStatus('Performance specs updated · Save Changes to apply.');
+        handleLiveFieldEvent(input);
         refresh();
         return;
       }
 
       if (input.getAttribute('data-sfp-field')) {
-        commitSfpVariantField(
-          input.getAttribute('data-sfp-id'),
-          input.getAttribute('data-sfp-field'),
-          input.value
-        );
-        setStatus('SFP variant updated · Save Changes to apply.');
-        refresh();
+        handleLiveFieldEvent(input);
         return;
       }
 
       if (input.getAttribute('data-sfp-perf')) {
-        commitSfpVariantPerf(
-          input.getAttribute('data-sfp-id'),
-          input.getAttribute('data-sfp-perf'),
-          input.value
-        );
-        setStatus('SFP performance updated · Save Changes to apply.');
-        refresh();
+        handleLiveFieldEvent(input);
         return;
       }
 
@@ -487,46 +624,17 @@
             return;
           }
           store().setToolIcon(toolKey, data, true);
-          setStatus('Icon updated · Save Changes to persist.');
-          refresh();
+          setStatus('Icon updated · live preview.');
+          syncDeviceCardUi(toolKey);
+          pushLivePreview();
         };
         reader.readAsDataURL(file);
         return;
       }
 
-      if (input.getAttribute('data-lab-field')) {
-        var fieldName = input.getAttribute('data-lab-field');
-        commitField(
-          input.getAttribute('data-tool-key'),
-          fieldName,
-          fieldName === 'visible' ? input.checked : input.value
-        );
-        setStatus(fieldName === 'visible'
-          ? 'Toolbox visibility updated · Save Changes to persist.'
-          : 'Updated · Save Changes to apply to workspace.');
-        refresh();
+      if (input.getAttribute('data-lab-field') || input.getAttribute('data-lab-spec') || input.getAttribute('data-lab-spec-loss')) {
+        handleLiveFieldEvent(input);
         return;
-      }
-
-      if (input.getAttribute('data-lab-spec')) {
-        commitSpecField(
-          input.getAttribute('data-tool-key'),
-          input.getAttribute('data-lab-spec'),
-          input.value
-        );
-        setStatus('Specs updated · Save Changes to apply.');
-        refresh();
-        return;
-      }
-
-      if (input.getAttribute('data-lab-spec-loss')) {
-        commitSplitterLoss(
-          input.getAttribute('data-tool-key'),
-          input.getAttribute('data-lab-spec-loss'),
-          input.value
-        );
-        setStatus('Splitter loss updated · Save Changes to apply.');
-        refresh();
       }
     });
 
@@ -571,8 +679,9 @@
       if (!clearBtn || !store()) return;
       var toolKey = clearBtn.getAttribute('data-lab-icon-clear');
       store().setToolIcon(toolKey, '', true);
-      setStatus('Icon cleared · Save Changes to persist.');
-      refresh();
+      setStatus('Icon cleared · live preview.');
+      syncDeviceCardUi(toolKey);
+      pushLivePreview();
     });
 
     $(cms.undoId).addEventListener('click', function () {
@@ -681,9 +790,63 @@
     bind();
   }
 
+  function mountSplicingPanel(hostId, opts) {
+    opts = opts || {};
+    if (!store()) return false;
+    var host = typeof hostId === 'string' ? $(hostId) : hostId;
+    if (!host) return false;
+    if (!host.id) host.id = 'admin-ftth-splicing-body';
+    if (opts.discardDraft !== false) store().discardDraft();
+    renderSplicingTab(host);
+    if (!host.dataset.liveBound) {
+      host.dataset.liveBound = '1';
+      host.addEventListener('input', function (e) {
+        if (e.target && e.target.type !== 'file') handleLiveFieldEvent(e.target);
+      });
+      host.addEventListener('change', function (e) {
+        var input = e.target;
+        if (!input) return;
+        if (input.getAttribute('data-lab-icon-upload')) {
+          var toolKey = input.getAttribute('data-lab-icon-upload');
+          var file = input.files && input.files[0];
+          input.value = '';
+          if (!file || !store()) return;
+          var reader = new FileReader();
+          reader.onload = function () {
+            var data = String(reader.result || '');
+            if (data.indexOf('data:image') !== 0) return;
+            store().setToolIcon(toolKey, data, true);
+            syncDeviceCardUi(toolKey);
+            pushLivePreview();
+            if (opts.onStatus) opts.onStatus('Icon updated · live preview.');
+          };
+          reader.readAsDataURL(file);
+          return;
+        }
+        handleLiveFieldEvent(input);
+      });
+      host.addEventListener('click', function (e) {
+        var clearBtn = e.target.closest ? e.target.closest('[data-lab-icon-clear]') : null;
+        if (!clearBtn || !store()) return;
+        var tk = clearBtn.getAttribute('data-lab-icon-clear');
+        store().setToolIcon(tk, '', true);
+        syncDeviceCardUi(tk);
+        pushLivePreview();
+      });
+    }
+    return true;
+  }
+
   window.FtthLabSettingsCms = {
     openModal: openModal,
     closeModal: closeModal,
     isAdminPreviewContext: isAdminPreviewContext,
+    mountSplicingPanel: mountSplicingPanel,
+    renderSplicingTab: renderSplicingTab,
+    renderDeviceArticle: renderDeviceArticle,
+    handleLiveFieldEvent: handleLiveFieldEvent,
+    pushLivePreview: pushLivePreview,
+    syncDeviceCardUi: syncDeviceCardUi,
+    splicingToolKeys: splicingToolKeys,
   };
 })();

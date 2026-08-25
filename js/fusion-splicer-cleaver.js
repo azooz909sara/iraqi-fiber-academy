@@ -587,7 +587,7 @@
       '<div class="lab-toolbox" role="list">' +
       '<div class="tool-item lab-tool lab-tool--cleaver' +
       (selectedTool === 'cleaver' ? ' is-selected' : '') +
-      '" data-tool="cleaver" data-lab-tool="cleaver" draggable="true" ' +
+      '" data-tool="cleaver" data-lab-tool="fiber-cleaver" draggable="true" ' +
       'role="listitem" tabindex="0" title="Fiber Cleaver">' +
       '<span class="lab-tool__mark lab-tool__mark--cleaver" aria-hidden="true"></span>' +
       '<span class="lab-tool__copy">' +

@@ -696,6 +696,28 @@
     notifyTools('onLabConfigChanged');
   }
 
+  function notifyLabConfigPreview() {
+    applyFtthLabConfig();
+  }
+
+  function bindAdminPreviewBridge() {
+    if (!isAdminPreviewContext()) return;
+    var draftEvt = 'ifa:ftth-lab-draft-changed';
+    if (activeLabSettings() && activeLabSettings().EVENTS && activeLabSettings().EVENTS.draft) {
+      draftEvt = activeLabSettings().EVENTS.draft;
+    }
+    window.addEventListener(draftEvt, function () {
+      applyFtthLabConfig();
+    });
+    window.addEventListener('message', function (ev) {
+      if (!ev.data || ev.data.type !== 'ifa:ftth-lab-apply-draft') return;
+      var s = activeLabSettings();
+      if (!s || typeof s.importPreviewDraft !== 'function') return;
+      s.importPreviewDraft(ev.data.draft, false);
+      applyFtthLabConfig();
+    });
+  }
+
   function watchToolboxForIconRefresh() {
     var panel = document.querySelector('.lab-rail__panel');
     if (!panel || panel.dataset.iconWatch === '1') return;
@@ -779,6 +801,7 @@
     }
     setTimeout(applyFtthLabToolboxIcons, 0);
     watchToolboxForIconRefresh();
+    bindAdminPreviewBridge();
     ['ifa:ftth-lab-config-saved', 'ifa:opm-config-saved'].forEach(function (evt) {
       global.addEventListener(evt, function () {
         applyFtthLabConfig();
@@ -1965,6 +1988,7 @@
     TOOLBOX_CATEGORIES: TOOLBOX_CATEGORIES,
     applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
     applyFtthLabConfig: applyFtthLabConfig,
+    notifyLabConfigPreview: notifyLabConfigPreview,
     getToolMeta: getToolMeta,
     serializeProjectState: serializeProjectState,
     restoreProjectState: restoreProjectState,

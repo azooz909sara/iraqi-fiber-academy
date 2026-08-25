@@ -18,6 +18,11 @@
   };
 
   var PERFORMANCE_TOOL_KEYS = ['chassis', 'sfp', 'ols', 'opm'];
+  var SPLICING_TOOL_KEYS = ['fiber-cleaver', 'fusion-splicer-machine'];
+  /** DOM data-lab-tool values that map to a settings toolKey */
+  var TOOL_KEY_DOM_ALIASES = {
+    cleaver: 'fiber-cleaver',
+  };
 
   var FACTORY_SFP_VARIANTS = [
     {
@@ -75,6 +80,7 @@
       { id: 'active', label: 'ACTIVE EQUIPMENT' },
       { id: 'splitters', label: 'SPLITTERS' },
       { id: 'test', label: 'TEST EQUIPMENT' },
+      { id: 'splicing', label: 'SPLICING EQUIPMENT' },
       { id: 'termination', label: 'PATCH PANELS / TERMINATION' },
     ],
     items: [
@@ -142,10 +148,15 @@
         guideText: 'Route a patch cord through the slot and set bend angle θ in properties.',
       },
       {
-        id: 'fiber-cleaver', toolKey: 'fiber-cleaver', categoryId: 'test',
+        id: 'fiber-cleaver', toolKey: 'fiber-cleaver', categoryId: 'splicing',
         label: 'Fiber Cleaver', sublabel: 'Precision cleave · V-groove', markClass: 'cleaver', icon: '',
         guideText: 'Seat bare fiber in the V-groove and clamp to cleave.',
         specs: { bareGlassLengthAfterCutPx: 16 },
+      },
+      {
+        id: 'fusion-splicer-machine', toolKey: 'fusion-splicer-machine', categoryId: 'splicing',
+        label: 'Fusion Splicer', sublabel: 'Machine UI · drag to grid', markClass: 'fusion-machine', icon: '',
+        guideText: 'Place on the workspace · load fibers in L/R clamps · close lids · SET to arc weld.',
       },
       {
         id: 'patchcord', toolKey: 'patchcord', categoryId: 'termination',
@@ -336,6 +347,11 @@
         }
       }
     });
+    var catIds = {};
+    cats.forEach(function (c) { catIds[c.id] = true; });
+    factory.categories.forEach(function (fc) {
+      if (!catIds[fc.id]) cats.push({ id: fc.id, label: fc.label });
+    });
     items.sort(function (a, b) {
       var ai = factory.items.findIndex(function (fi) { return fi.toolKey === a.toolKey; });
       var bi = factory.items.findIndex(function (fi) { return fi.toolKey === b.toolKey; });
@@ -419,10 +435,15 @@
     return map;
   }
 
+  function resolveToolKeyFromDom(domKey) {
+    if (!domKey) return '';
+    return TOOL_KEY_DOM_ALIASES[domKey] || domKey;
+  }
+
   function applyToolboxIcons(config) {
     var iconMap = itemMapFromConfig(config || {});
     document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
-      var key = btn.getAttribute('data-lab-tool');
+      var key = resolveToolKeyFromDom(btn.getAttribute('data-lab-tool'));
       var item = iconMap[key];
       var mark = btn.querySelector('.lab-tool__mark');
       if (!mark || !item) return;
@@ -433,7 +454,7 @@
   function applyToolboxLabels(config) {
     var labelMap = itemMapFromConfig(config || {});
     document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
-      var key = btn.getAttribute('data-lab-tool');
+      var key = resolveToolKeyFromDom(btn.getAttribute('data-lab-tool'));
       var item = labelMap[key];
       if (!item) return;
       var strong = btn.querySelector('.lab-tool__copy strong');
@@ -446,7 +467,7 @@
   function applyToolboxVisibility(config) {
     var visMap = itemMapFromConfig(config || {});
     document.querySelectorAll('.lab-rail .lab-tool[data-lab-tool]').forEach(function (btn) {
-      var key = btn.getAttribute('data-lab-tool');
+      var key = resolveToolKeyFromDom(btn.getAttribute('data-lab-tool'));
       var item = visMap[key];
       var show = !item || item.visible !== false;
       btn.hidden = !show;
@@ -587,6 +608,7 @@
     },
 
     PERFORMANCE_TOOL_KEYS: PERFORMANCE_TOOL_KEYS,
+    SPLICING_TOOL_KEYS: SPLICING_TOOL_KEYS,
     FACTORY_SFP_VARIANTS: FACTORY_SFP_VARIANTS,
 
     getIconForTool: function (toolKey) {
@@ -680,6 +702,18 @@
     applyToolboxVisibility: function (config) { applyToolboxVisibility(config || draft); },
     applyToolboxPresentation: function (config) { applyToolboxPresentation(config || draft); },
     applyIconToMark: applyIconToMark,
+    importPreviewDraft: function (next, recordHistory) {
+      draft = normalizeConfig(next);
+      if (recordHistory !== false) {
+        historyStack = historyStack.slice(0, historyPointer + 1);
+        historyStack.push(clone(draft));
+        if (historyStack.length > MAX_HISTORY) historyStack.shift();
+        historyPointer = historyStack.length - 1;
+      }
+      applyToolboxPresentation(draft);
+      emit(draftEvt, { draft: clone(draft), preview: true });
+      return clone(draft);
+    },
     normalizeConfig: normalizeConfig,
     normalizeItem: normalizeItem,
   };

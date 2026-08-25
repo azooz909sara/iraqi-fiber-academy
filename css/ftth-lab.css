@@ -6644,6 +6644,18 @@ body.lab-pcord-winding .lab-pcord-fiber-hit {
   color: var(--lab-muted);
 }
 
+.lab-settings-cms__section--splicing {
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.lab-settings-cms__tab[data-lab-settings-tab="splicing"].is-active {
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fcd34d;
+}
+
 .lab-settings-cms__perf-device,
 .lab-settings-cms__sfp-variant {
   border: 1px solid rgba(148, 163, 184, 0.14);
