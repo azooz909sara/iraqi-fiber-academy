@@ -42,6 +42,7 @@
       alignment: { x: 0.0, y: 0.0 },
       stageOffset: { x: 0, y: 0 },
       clampOffset: { L: { x: 0, y: 0 }, R: { x: 0, y: 0 } },
+      aligning: false,
       splicing: false,
       heating: false,
       heatProgress: 0,
@@ -442,6 +443,7 @@
       state.clampOffset = { L: { x: 0, y: 0 }, R: { x: 0, y: 0 } };
       state.alarm = false;
       state.splicing = false;
+      state.aligning = false;
       state.heating = false;
       state.heatProgress = 0;
       if (state.heatInterval) {
@@ -500,6 +502,23 @@
         return showToast('No fiber loaded — use external placeFiber()', 'warning');
       }
       if (state.splicing) return showToast('Splice already in progress', 'warning');
+      if (state.aligning) return showToast('Motor alignment in progress', 'warning');
+
+      state.aligning = true;
+      var statusText = q('statusText');
+      if (statusText) {
+        statusText.textContent = 'ALIGNING';
+        statusText.style.color = 'var(--accent-orange)';
+      }
+      showToast('SET: Motor alignment started', 'success');
+      emit('setPress', {});
+    }
+
+    function runArcSpliceSequence() {
+      state.aligning = false;
+      if (state.splicing) return;
+      if (!state.clampsClosed.L || !state.clampsClosed.R) return;
+      if (!state.fiberPlaced.L || !state.fiberPlaced.R) return;
 
       state.splicing = true;
       var ledArc = q('ledArc');
@@ -767,6 +786,18 @@
           setPress();
         }
       });
+
+      var setBtn = root.querySelector('.fsm-set-btn');
+      if (setBtn) {
+        setBtn.addEventListener('click', function () {
+          console.log('SET button pressed! Ready to align.');
+          const travelDist = 40; // px
+          var leftClamp = root.querySelector('.fsm-clamp-assembly-l');
+          var rightClamp = root.querySelector('.fsm-clamp-assembly-r');
+          if (leftClamp) leftClamp.style.transform = 'translateX(' + travelDist + 'px)';
+          if (rightClamp) rightClamp.style.transform = 'translateX(-' + travelDist + 'px)';
+        });
+      }
     }
 
     function setActive(active) {
@@ -871,6 +902,7 @@
       andPress: andPress,
       resetPress: resetPress,
       setPress: setPress,
+      runArcSpliceSequence: runArcSpliceSequence,
       xPress: xPress,
       oPress: oPress,
       setActive: setActive,

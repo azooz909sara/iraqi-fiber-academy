@@ -216,6 +216,15 @@
     showAdminView(initialHash);
     window.refreshAdminOverviewStats();
     bindPlatformSettingsForm();
+    bindAdminFtthLabConfigPanel();
+  }
+
+  function bindAdminFtthLabConfigPanel() {
+    if (!window.FtthLabSettingsCms ||
+        typeof FtthLabSettingsCms.mountAdminEmbeddedPanel !== 'function') {
+      return;
+    }
+    FtthLabSettingsCms.mountAdminEmbeddedPanel('admin-ftth-lab-config-root');
   }
 
   function bindPlatformSettingsForm() {

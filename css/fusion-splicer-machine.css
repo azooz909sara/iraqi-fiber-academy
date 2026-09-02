@@ -766,7 +766,10 @@
     cursor: pointer;
     user-select: none;
     -webkit-user-select: none;
-    transition: box-shadow 0.3s ease, outline 0.3s ease;
+    transition:
+      transform 1.5s ease-in-out,
+      box-shadow 0.3s ease,
+      outline 0.3s ease;
   }.lab-fusion-machine .fusion-splicer-machine .clamp-assembly.selected{
     outline: 2px solid var(--accent-blue);
     outline-offset: 2px;

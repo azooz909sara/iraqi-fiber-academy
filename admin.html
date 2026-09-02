@@ -1181,6 +1181,25 @@
             <input class="admin-field__input" id="settingsFreeTrialDays" type="number" min="0" max="365" step="1" value="0" />
             <span class="admin-field__hint">0 = تعطيل التجربة. عند تسجيل حساب جديد تُمنح N يوماً من الوصول الكامل للمحاكيات.</span>
           </label>
+          <fieldset class="admin-field admin-field--fieldset admin-ftth-lab-config" id="ifa_ftth_lab_config" aria-labelledby="adminFtthLabConfigLegend">
+            <legend class="admin-field__label" id="adminFtthLabConfigLegend">إعدادات مختبر FTTH · <code>ifa_ftth_lab_config</code></legend>
+            <p class="admin-field__hint">Device names, specs, toolbox icons — use the tabs below to edit lab device configuration.</p>
+            <div class="admin-ftth-lab-config__panel lab-settings-cms lab-settings-cms--embedded" id="admin-ftth-lab-config-root">
+              <div class="lab-settings-cms__toolbar">
+                <button type="button" class="lab-settings-cms__btn" id="admin-ftth-lab-settings-undo" title="Ctrl+Z">Undo</button>
+                <button type="button" class="lab-settings-cms__btn" id="admin-ftth-lab-settings-redo" title="Ctrl+Y">Redo</button>
+                <button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--warn" id="admin-ftth-lab-settings-reset">Reset to Defaults</button>
+                <button type="button" class="lab-settings-cms__btn lab-settings-cms__btn--primary" id="admin-ftth-lab-settings-save">Save Changes</button>
+              </div>
+              <nav class="lab-settings-cms__tabs" aria-label="Settings sections">
+                <button type="button" class="lab-settings-cms__tab is-active" data-lab-settings-tab="devices">Devices &amp; Icons</button>
+                <button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="splicing">معدات اللحام · Splicing</button>
+                <button type="button" class="lab-settings-cms__tab" data-lab-settings-tab="performance">Performance Specs</button>
+              </nav>
+              <div class="lab-settings-cms__body" id="admin-ftth-lab-settings-body"></div>
+              <p class="lab-settings-cms__status" id="admin-ftth-lab-settings-status"></p>
+            </div>
+          </fieldset>
           <div class="admin-settings-form__actions">
             <button class="admin-btn admin-btn--primary" type="submit">حفظ الإعدادات</button>
             <p class="admin-panel__meta" id="settingsSaveStatus" role="status"></p>
@@ -1205,6 +1224,8 @@
   <script src="js/admin-courses-ui.js"></script>
   <script src="js/platform-plans.js"></script>
   <script src="js/admin-plans-ui.js"></script>
+  <script src="js/settings/FtthLabSettings.js"></script>
+  <script src="js/ftth-lab-settings-cms.js"></script>
   <script src="js/admin-core.js"></script>
   <script src="js/admin-users-ui.js"></script>
   <script src="js/admin-instructors-ui.js"></script>

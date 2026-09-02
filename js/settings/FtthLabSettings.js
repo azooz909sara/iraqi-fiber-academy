@@ -157,6 +157,7 @@
         id: 'fusion-splicer-machine', toolKey: 'fusion-splicer-machine', categoryId: 'splicing',
         label: 'Fusion Splicer', sublabel: 'Machine UI · drag to grid', markClass: 'fusion-machine', icon: '',
         guideText: 'Place on the workspace · load fibers in L/R clamps · close lids · SET to arc weld.',
+        specs: { splicerClampTravelPx: 40 },
       },
       {
         id: 'patchcord', toolKey: 'patchcord', categoryId: 'termination',
@@ -288,6 +289,19 @@
       );
       if (!isFinite(bareLen) || bareLen < 1) bareLen = 16;
       return { bareGlassLengthAfterCutPx: Math.round(bareLen) };
+    }
+
+    if (toolKey === 'fusion-splicer-machine') {
+      var travel = Number(
+        specs.splicerClampTravelPx != null
+          ? specs.splicerClampTravelPx
+          : (specs.splicer_clamp_travel != null
+            ? specs.splicer_clamp_travel
+            : factorySpecs.splicerClampTravelPx)
+      );
+      if (!isFinite(travel) || travel < 0) travel = 40;
+      if (travel > 120) travel = 120;
+      return { splicerClampTravelPx: Math.round(travel) };
     }
 
     return specs;

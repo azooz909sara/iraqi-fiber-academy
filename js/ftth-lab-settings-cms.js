@@ -22,6 +22,15 @@
     subtitle: 'Device names, specs, toolbox icons · <code>ifa_ftth_lab_config</code>',
     resetConfirm: 'Reset all FTTH Lab device settings to factory defaults?',
   };
+  var labCmsIds = {
+    bodyId: cms.bodyId,
+    statusId: cms.statusId,
+    undoId: cms.undoId,
+    redoId: cms.redoId,
+    resetId: cms.resetId,
+    saveId: cms.saveId,
+  };
+  var adminEmbedBound = false;
 
   function useOpmCms() {
     cms = {
@@ -209,6 +218,34 @@
     return html;
   }
 
+  function renderSplicerMechanicsFields() {
+    var item = getDraftItem('fusion-splicer-machine');
+    var travel = 40;
+    if (item && item.specs) {
+      var raw = item.specs.splicerClampTravelPx != null
+        ? item.specs.splicerClampTravelPx
+        : item.specs.splicer_clamp_travel;
+      var n = Number(raw);
+      if (isFinite(n)) travel = n;
+    }
+    if (!isFinite(travel) || travel < 8) travel = 40;
+    travel = Math.min(80, Math.round(travel));
+    return (
+      '<div class="lab-settings-cms__specs lab-settings-cms__specs--mechanics">' +
+        '<p class="lab-settings-cms__specs-title">Splicer Mechanics · ميكانيكا آلة اللحام</p>' +
+        '<p class="lab-settings-cms__hint">Motor alignment travel for the SET clamp phase (<code>config.splicer_clamp_travel</code>)</p>' +
+        '<label class="lab-settings-cms__field">' +
+          '<span>Clamp Alignment Travel Distance (px)</span>' +
+          '<input type="range" min="8" max="80" step="1" value="' + escapeAttr(String(travel)) + '" ' +
+            'name="splicer_clamp_travel" data-lab-spec="splicerClampTravelPx" data-tool-key="fusion-splicer-machine" ' +
+            'oninput="this.nextElementSibling.textContent=this.value+\' px\'">' +
+          '<output style="display:block;margin-top:4px;font-size:12px;color:#94a3b8">' +
+            escapeHtml(String(travel)) + ' px</output>' +
+        '</label>' +
+      '</div>'
+    );
+  }
+
   function renderPerformanceFields(toolKey, ps, label) {
     ps = ps || {};
     var range = ps.powerRangeDbm || {};
@@ -383,7 +420,8 @@
     var html =
       '<section class="lab-settings-cms__section lab-settings-cms__section--splicing">' +
         '<h3 class="lab-settings-cms__cat">معدات اللحام · Splicing Equipment</h3>' +
-        '<p class="lab-settings-cms__hint">Fiber Cleaver and Fusion Splicer — isolated from splitters and routers. Changes preview live in the lab toolbox.</p>';
+        '<p class="lab-settings-cms__hint">Fiber Cleaver and Fusion Splicer — isolated from splitters and routers. Changes preview live in the lab toolbox.</p>' +
+        renderSplicerMechanicsFields();
     draft.items.forEach(function (item) {
       if (keys.indexOf(item.toolKey) < 0) return;
       html += renderDeviceArticle(item);
@@ -558,6 +596,8 @@
       specs.defaultTxDbm = Number(value);
     } else if (specKey === 'bareGlassLengthAfterCutPx') {
       specs.bareGlassLengthAfterCutPx = Math.round(Number(value));
+    } else if (specKey === 'splicerClampTravelPx') {
+      specs.splicerClampTravelPx = Math.round(Number(value));
     }
     store().updateItem(toolKey, { specs: specs }, true);
   }
@@ -580,7 +620,8 @@
     root.addEventListener('input', function (e) {
       var input = e.target;
       if (!input || input.type === 'file') return;
-      if (input.getAttribute('data-lab-spec') === 'bareGlassLengthAfterCutPx') {
+      if (input.getAttribute('data-lab-spec') === 'bareGlassLengthAfterCutPx' ||
+          input.getAttribute('data-lab-spec') === 'splicerClampTravelPx') {
         var out = input.parentElement && input.parentElement.querySelector('output');
         if (out) out.textContent = input.value + ' px';
       }
@@ -710,7 +751,44 @@
     });
   }
 
+  function restoreLabCmsIds() {
+    cms.bodyId = labCmsIds.bodyId;
+    cms.statusId = labCmsIds.statusId;
+    cms.undoId = labCmsIds.undoId;
+    cms.redoId = labCmsIds.redoId;
+    cms.resetId = labCmsIds.resetId;
+    cms.saveId = labCmsIds.saveId;
+  }
+
+  function useAdminEmbedIds() {
+    cms.bodyId = 'admin-ftth-lab-settings-body';
+    cms.statusId = 'admin-ftth-lab-settings-status';
+    cms.undoId = 'admin-ftth-lab-settings-undo';
+    cms.redoId = 'admin-ftth-lab-settings-redo';
+    cms.resetId = 'admin-ftth-lab-settings-reset';
+    cms.saveId = 'admin-ftth-lab-settings-save';
+  }
+
+  function mountAdminEmbeddedPanel(rootId) {
+    var root = typeof rootId === 'string' ? $(rootId) : rootId;
+    if (!root || !store()) return false;
+    useAdminEmbedIds();
+    if (!adminEmbedBound) {
+      bindModal(root);
+      adminEmbedBound = true;
+    }
+    activeTab = 'devices';
+    store().discardDraft();
+    root.querySelectorAll('[data-lab-settings-tab]').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.getAttribute('data-lab-settings-tab') === activeTab);
+    });
+    refresh();
+    setStatus('');
+    return true;
+  }
+
   function openModal() {
+    restoreLabCmsIds();
     if (!isAdminPreviewContext() || !store()) return;
     ensureModal();
     modalOpen = true;
@@ -841,6 +919,7 @@
     openModal: openModal,
     closeModal: closeModal,
     isAdminPreviewContext: isAdminPreviewContext,
+    mountAdminEmbeddedPanel: mountAdminEmbeddedPanel,
     mountSplicingPanel: mountSplicingPanel,
     renderSplicingTab: renderSplicingTab,
     renderDeviceArticle: renderDeviceArticle,

@@ -2711,3 +2711,244 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ---------- FTTH Lab config (embedded CMS in Settings) ---------- */
+.admin-ftth-lab-config {
+  --lab-cyan: var(--color-accent-cyan);
+  --lab-muted: var(--color-text-secondary);
+  --lab-text: var(--color-text-primary);
+  --lab-border: var(--color-border);
+  --lab-amber: #fbbf24;
+}
+
+.admin-ftth-lab-config .lab-settings-cms--embedded {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: var(--color-bg-card);
+  overflow: hidden;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__btn {
+  padding: 0.38rem 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.45rem;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__btn--primary {
+  background: rgba(0, 229, 255, 0.12);
+  color: var(--color-accent-cyan);
+  border-color: rgba(0, 229, 255, 0.35);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__btn--warn {
+  color: var(--lab-amber);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.55rem 0.85rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__tab {
+  padding: 0.42rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem 0.45rem 0 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__tab.is-active {
+  color: var(--color-accent-cyan);
+  border-color: rgba(0, 229, 255, 0.35);
+  border-bottom-color: transparent;
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__tab[data-lab-settings-tab="splicing"].is-active {
+  border-color: rgba(251, 191, 36, 0.45);
+  color: #fcd34d;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__body {
+  max-height: min(62vh, 640px);
+  overflow: auto;
+  padding: 0.85rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__status {
+  margin: 0;
+  padding: 0.55rem 0.85rem 0.75rem;
+  font-size: 0.72rem;
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__status.is-error {
+  color: #f87171;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__section + .lab-settings-cms__section {
+  margin-top: 1rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__cat {
+  margin: 0 0 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-accent-cyan);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__hint {
+  margin: 0 0 0.65rem;
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__section--splicing {
+  border: 1px solid rgba(251, 191, 36, 0.22);
+  border-radius: 0.55rem;
+  padding: 0.75rem;
+  background: rgba(251, 191, 36, 0.04);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__device {
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__device + .lab-settings-cms__device {
+  margin-top: 0.65rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.45rem;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__meta strong {
+  font-size: 0.8rem;
+  color: var(--color-text-primary);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__meta span {
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__fields {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0 0.75rem 0.85rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  font-size: 0.68rem;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__field input,
+.admin-ftth-lab-config .lab-settings-cms__field textarea {
+  padding: 0.42rem 0.55rem;
+  border: 1px solid var(--color-border);
+  border-radius: 0.4rem;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__specs {
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--color-border);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__specs--mechanics {
+  margin-bottom: 0.85rem;
+}
+
+.admin-ftth-lab-config .lab-settings-cms__specs-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-accent-cyan);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__perf-device,
+.admin-ftth-lab-config .lab-settings-cms__sfp-variant {
+  border: 1px solid var(--color-border);
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.55rem;
+  background: var(--color-bg-secondary);
+}
+
+.admin-ftth-lab-config .lab-settings-cms__perf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.55rem;
+}
+
+@media (max-width: 720px) {
+  .admin-ftth-lab-config .lab-settings-cms__row {
+    grid-template-columns: 1fr;
+  }
+}

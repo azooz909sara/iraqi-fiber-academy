@@ -21,8 +21,13 @@
   var GROOVE_HIT_PAD_CLIENT_Y = 28;
   /** Bare glass past inner groove lip toward fusion electrodes (world px). */
   var GROOVE_BARE_PROTRUDE_WORLD = 14;
+  /** Must match `.clamp-assembly { transition: transform 1.5s ... }` in fusion-splicer-machine.css */
+  var MOTOR_ALIGN_TRANSITION_MS = 1500;
+  var DEFAULT_CLAMP_TRAVEL_PX = 40;
 
   var layer = null;
+  /** Per-machine RAF handles for SET motor-align pigtail sync (cancel on reset / re-trigger). */
+  var motorAlignRafByMachine = {};
   var machines = [];
   var seq = 0;
   var selection = { kind: 'none', id: null };
@@ -473,6 +478,101 @@
     return node ? node.querySelector('[data-fusion-ui-root]') : null;
   }
 
+  function getClampAlignmentTravelPx() {
+    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
+      var item = FtthLabSettings.getItem('fusion-splicer-machine');
+      if (item && item.specs) {
+        var n = Number(
+          item.specs.splicerClampTravelPx != null
+            ? item.specs.splicerClampTravelPx
+            : item.specs.splicer_clamp_travel
+        );
+        if (isFinite(n) && n >= 0) return Math.round(n);
+      }
+    }
+    return DEFAULT_CLAMP_TRAVEL_PX;
+  }
+
+  function getClampAssemblyEl(machineId, side) {
+    var uiRoot = getMachineUiRoot(machineId);
+    var parts = queryGrooveElements(uiRoot, side);
+    return parts && parts.assembly ? parts.assembly : null;
+  }
+
+  function cancelMotorAlignRaf(machineId) {
+    var rafId = motorAlignRafByMachine[machineId];
+    if (rafId == null) return;
+    cancelAnimationFrame(rafId);
+    delete motorAlignRafByMachine[machineId];
+  }
+
+  function syncMotorAlignPigtails(machineId) {
+    if (global.FtthLab && typeof FtthLab.syncSplicerMotorAlignFrame === 'function') {
+      FtthLab.syncSplicerMotorAlignFrame(machineId);
+    } else if (global.FtthLab && typeof FtthLab.refreshSplicerDocks === 'function') {
+      FtthLab.refreshSplicerDocks(machineId);
+    }
+    syncFiberPorts(machineId);
+  }
+
+  function resetMotorAlignment(machineId) {
+    cancelMotorAlignRaf(machineId);
+    ['L', 'R'].forEach(function (side) {
+      var asm = getClampAssemblyEl(machineId, side);
+      if (!asm) return;
+      asm.classList.remove('is-motor-aligning');
+      asm.style.transform = '';
+    });
+    var m = findMachine(machineId);
+    if (m) m.motorAlignTravelPx = 0;
+  }
+
+  /**
+   * Motor alignment phase — translate L/R clamp assemblies inward, live-track docked fibers.
+   * Returns a promise that resolves when the CSS transition completes.
+   */
+  function executeMotorAlignment(machineId, opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      var travel = typeof opts.travelPx === 'number' ? opts.travelPx : getClampAlignmentTravelPx();
+      travel = Math.max(0, Math.round(travel));
+      var leftAsm = getClampAssemblyEl(machineId, 'L');
+      var rightAsm = getClampAssemblyEl(machineId, 'R');
+      if (!leftAsm || !rightAsm) {
+        resolve(false);
+        return;
+      }
+
+      cancelMotorAlignRaf(machineId);
+
+      var m = findMachine(machineId);
+      if (m) m.motorAlignTravelPx = travel;
+
+      leftAsm.classList.add('is-motor-aligning');
+      rightAsm.classList.add('is-motor-aligning');
+      void leftAsm.offsetWidth;
+      leftAsm.style.transform = 'translateX(' + travel + 'px)';
+      rightAsm.style.transform = 'translateX(' + (-travel) + 'px)';
+
+      emitParent('clampNudge', { machineId: machineId, phase: 'motorAlign' });
+      syncMotorAlignPigtails(machineId);
+
+      var start = performance.now();
+      function tick(now) {
+        syncMotorAlignPigtails(machineId);
+        if (now - start < MOTOR_ALIGN_TRANSITION_MS) {
+          motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+          return;
+        }
+        delete motorAlignRafByMachine[machineId];
+        syncMotorAlignPigtails(machineId);
+        emitParent('alignmentComplete', { machineId: machineId, travelPx: travel });
+        resolve(true);
+      }
+      motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+    });
+  }
+
   function blurMachineUi(id) {
     var b = bridges[id];
     if (b && b.api && typeof b.api.setActive === 'function') {
@@ -590,12 +690,20 @@
       [
         'ready', 'power', 'ovenLid', 'clampSelect', 'clampNudge', 'clampConfirm',
         'clampLid', 'fiberPlaced', 'heatStart', 'heatComplete', 'alarm',
-        'reset', 'spliceStart', 'spliceComplete', 'button'
+        'reset', 'setPress', 'alignmentComplete', 'spliceStart', 'spliceComplete', 'button'
       ].forEach(function (evt) {
         var off = api.on(evt, function (payload) {
           emitParent(evt, Object.assign({ machineId: id }, payload || {}));
         });
         if (typeof off === 'function') offs.push(off);
+      });
+
+      api.on('setPress', function () {
+        executeMotorAlignment(id).then(function () {
+          if (api && typeof api.runArcSpliceSequence === 'function') {
+            api.runArcSpliceSequence();
+          }
+        });
       });
     }
 
@@ -1080,8 +1188,15 @@
         FtthLab.refreshSplicerDocks();
       }
     });
-    document.addEventListener('fusion-splicer:clampNudge', function () {
+    document.addEventListener('fusion-splicer:clampNudge', function (ev) {
       syncAllFiberPorts();
+      if (global.FtthLab && typeof FtthLab.refreshSplicerDocks === 'function') {
+        FtthLab.refreshSplicerDocks(ev.detail && ev.detail.machineId);
+      }
+    });
+    document.addEventListener('fusion-splicer:reset', function (ev) {
+      var machineId = ev.detail && ev.detail.machineId;
+      if (machineId) resetMotorAlignment(machineId);
     });
   }
 
@@ -1121,6 +1236,10 @@
     ensureFiberLayer: ensureFiberLayer,
     setSplicerDropzoneActive: setSplicerDropzoneActive,
     clearSplicerDropzones: clearSplicerDropzones,
+    executeMotorAlignment: executeMotorAlignment,
+    resetMotorAlignment: resetMotorAlignment,
+    getClampAlignmentTravelPx: getClampAlignmentTravelPx,
+    MOTOR_ALIGN_TRANSITION_MS: MOTOR_ALIGN_TRANSITION_MS,
     SNAP_PX: GROOVE_HIT_PAD_CLIENT_X,
     GROOVE_HIT_PAD_CLIENT_X: GROOVE_HIT_PAD_CLIENT_X,
     GROOVE_HIT_PAD_CLIENT_Y: GROOVE_HIT_PAD_CLIENT_Y,

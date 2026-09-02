@@ -1162,6 +1162,26 @@
     return Math.min(renderLen, d * (renderLen / sleeveLen));
   }
 
+  /**
+   * Render-path px length of exposed bare glass — identical math to the free-state
+   * bare segment in buildPigtailFiberSvg (tip-anchored bareTo / jacketTo).
+   */
+  function getBareGlassDrawLengthPx(p) {
+    if (!p) return 0;
+    ensureFiberStrip(p);
+    enforceFullStripBareFrontier(p);
+    var fs = p.fiberStrip;
+    var jacketTo = Math.max(0, fs.jacketTo || 0);
+    var bareTo = Math.max(0, fs.bareTo || 0);
+    var fullyStripped = isFullyStrippedPigtail(p);
+    var bareComplete = fullyStripped || isBareStripComplete(fs);
+    if (bareComplete) {
+      bareTo = jacketTo;
+    }
+    if (bareTo <= STRIP_TIP_EPS) return 0;
+    return stripArcOnRenderPath(p, bareTo);
+  }
+
   function buildPigtailFiberSvg(p, opts) {
     opts = opts || {};
     var fullPts = fiberRenderPathPoints(p);
@@ -1228,10 +1248,12 @@
       var innerPt = { x: p.splicerInnerEdgeX, y: splicerSlot.grooveY };
       var innerProj = projectOntoFiberStrict(densePts, innerPt.x, innerPt.y);
       var dInner = Math.max(0, Math.min(total, innerProj.dist || 0));
+      var bareLenPx = getBareGlassDrawLengthPx(p);
+      var dBareEnd = Math.min(total, dInner + Math.max(CLEAVE_MIN_CUT_PX, bareLenPx));
       var jacketPts = slicePolylineByDistance(densePts, 0, dInner);
-      var barePts = slicePolylineByDistance(densePts, dInner, total);
+      var barePts = slicePolylineByDistance(densePts, dInner, dBareEnd);
       if (jacketPts.length < 2) jacketPts = slicePolylineByDistance(densePts, 0, Math.max(dInner, 2));
-      if (barePts.length < 2) barePts = slicePolylineByDistance(densePts, Math.max(0, dInner), total);
+      if (barePts.length < 2) barePts = slicePolylineByDistance(densePts, dInner, Math.max(dBareEnd, dInner + CLEAVE_MIN_CUT_PX));
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
@@ -1851,13 +1873,6 @@
     });
   }
 
-  /** Bare glass exposed in clamp only — do not bridge electrode gap pre-weld. */
-  function clampedSplicerBareProtrudePx(p, slot) {
-    var bareLen = getSplicerExposedBareLengthPx(p);
-    var protrude = slot && slot.bareProtrude != null ? slot.bareProtrude : 12;
-    return Math.max(4, Math.min(bareLen, protrude));
-  }
-
   function syncSplicerWeldedTips(machineId) {
     if (!isSplicerWeldedPair(machineId)) return false;
     var pair = getSplicerDockedPair(machineId);
@@ -1907,26 +1922,14 @@
     translatePigtailRigid(p, 0, deltaY);
   }
 
-  /** Exposed bare-glass length from strip state (not a hardcoded groove protrusion). */
+  /** Exposed bare-glass length on the render path (same px as free-state bare segment). */
   function getSplicerExposedBareLengthPx(p) {
-    if (!p) return 0;
-    ensureFiberStrip(p);
-    var fs = p.fiberStrip;
-    if (p.splicerBareGlassPx != null && isFinite(p.splicerBareGlassPx)) {
-      return Math.max(CLEAVE_MIN_CUT_PX, p.splicerBareGlassPx);
-    }
-    if (p.isCleaved || p.cleaved) {
-      return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassLengthAfterCutPx());
-    }
-    if (isFullyStrippedPigtail(p) || isBareStripComplete(fs)) {
-      return Math.max(CLEAVE_MIN_CUT_PX, fs.bareTo || fs.jacketTo || 0);
-    }
-    return Math.max(0, fs.bareTo || 0);
+    return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassDrawLengthPx(p));
   }
 
   /**
    * Docked tip alignment — per-side only. Never mutates strip arc-lengths (clamp truncation
-   * is geometric in buildPigtailFiberSvg). Pre-weld tips stay inside their own clamp zone.
+   * is geometric in buildPigtailFiberSvg). Bare glass length matches the free-state draw length.
    */
   function alignSplicerJacketToInnerEdge(p, slot) {
     if (!p || !slot) return false;
@@ -1936,7 +1939,8 @@
       syncSplicerWeldedTips(slot.machineId);
       return true;
     }
-    var exposed = clampedSplicerBareProtrudePx(p, slot);
+    var exposed = getBareGlassDrawLengthPx(p);
+    if (exposed < CLEAVE_MIN_CUT_PX) exposed = CLEAVE_MIN_CUT_PX;
     p.bx = Math.round(slot.innerEdgeX + dir * exposed);
     p.by = Math.round(slot.grooveY);
     p.splicerBareGlassPx = exposed;
@@ -2229,6 +2233,21 @@
     return { ok: true, pigtailId: pig.id, slot: slot };
   }
 
+  /** 60fps motor-align sync — force L/R docked pigtails to follow clamp CSS transform mid-transition. */
+  function syncSplicerMotorAlignFrame(machineId) {
+    if (!machineId) return false;
+    var any = false;
+    var changed = false;
+    pigtails.forEach(function (p) {
+      if (!p.isSnappedToSplicer || p.snappedSplicerId !== machineId) return;
+      any = true;
+      if (syncSnappedPigtailToLiveGroove(p)) changed = true;
+      updateFiberPath(p);
+    });
+    if (any) renderSplicerFiberOverlays(machineId);
+    return changed;
+  }
+
   function refreshSplicerDocks(machineId) {
     var changed = false;
     pigtails.forEach(function (p) {
@@ -2241,6 +2260,7 @@
         return;
       }
       if (syncSnappedPigtailToLiveGroove(p)) {
+        updateFiberPath(p);
         changed = true;
       }
     });
@@ -5408,6 +5428,8 @@
       FtthLab.finalizePigtailCleaverDock = finalizePigtailCleaverDock;
       FtthLab.handoverPigtailToSplicerClamp = handoverPigtailToSplicerClamp;
       FtthLab.refreshSplicerDocks = refreshSplicerDocks;
+      FtthLab.syncSplicerMotorAlignFrame = syncSplicerMotorAlignFrame;
+      FtthLab.ensureSplicerDockTracking = ensureSplicerDockTracking;
       FtthLab.renderSplicerFiberOverlays = renderSplicerFiberOverlays;
       FtthLab.clearPigtailSplicerSnap = function (id) {
         var pig = findPigtail(id);
