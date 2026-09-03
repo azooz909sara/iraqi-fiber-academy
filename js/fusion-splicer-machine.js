@@ -24,6 +24,165 @@
   /** Must match `.clamp-assembly { transition: transform 1.5s ... }` in fusion-splicer-machine.css */
   var MOTOR_ALIGN_TRANSITION_MS = 1500;
   var DEFAULT_CLAMP_TRAVEL_PX = 40;
+  var FALLBACK_ALIGN_TRAVEL_PX = 95;
+  var ALIGN_TIP_GAP_WORLD = 0.5;
+  var MOTOR_ALIGN_CALIB_LOCAL_PX = 20;
+
+  function worldToClient(worldX, worldY) {
+    var stage = document.getElementById('lab-canvas-2d');
+    if (!stage) return { x: worldX, y: worldY };
+    var rect = stage.getBoundingClientRect();
+    var z = getZoom();
+    var pan = global.FtthLab && typeof FtthLab.getPan2d === 'function'
+      ? FtthLab.getPan2d()
+      : { x: 0, y: 0 };
+    return {
+      x: rect.left + pan.x + worldX * z,
+      y: rect.top + pan.y + worldY * z,
+    };
+  }
+
+  function buildFallbackTravelPlan(reason) {
+    if (reason) console.warn('Alignment:', reason);
+    var d = getClampAlignmentTravelPx();
+    if (!isFinite(d) || d <= 0) d = FALLBACK_ALIGN_TRAVEL_PX;
+    return { leftTravelPx: d, rightTravelPx: d, fallback: true };
+  }
+
+  function getBareGlassPathEl(machineId, pigtailId) {
+    if (!global.FusionSplicerMachine ||
+        typeof FusionSplicerMachine.ensureFiberLayer !== 'function' ||
+        !pigtailId) {
+      return null;
+    }
+    var host = FusionSplicerMachine.ensureFiberLayer(machineId);
+    if (!host) return null;
+    return host.querySelector(
+      '[data-pt-fiber-stripped="' + pigtailId + '"][data-pt-fiber-seg="bare"]'
+    );
+  }
+
+  function getBareGlassTipClientX(machineId, pigtailId, pigtail) {
+    var path = getBareGlassPathEl(machineId, pigtailId);
+    if (path && typeof path.getTotalLength === 'function') {
+      try {
+        var pt = path.getPointAtLength(path.getTotalLength());
+        var svg = path.ownerSVGElement;
+        if (svg && typeof svg.createSVGPoint === 'function') {
+          var sp = svg.createSVGPoint();
+          sp.x = pt.x;
+          sp.y = pt.y;
+          var mat = path.getScreenCTM();
+          if (mat) return sp.matrixTransform(mat).x;
+        }
+      } catch (err) {
+        console.warn('Alignment: bare glass SVG tip read failed', err);
+      }
+    }
+    if (pigtail && isFinite(pigtail.bx)) {
+      return worldToClient(pigtail.bx, pigtail.by || 0).x;
+    }
+    return null;
+  }
+
+  function getGrooveCenterWorldX(grooveEl) {
+    if (!grooveEl) return null;
+    var rect = grooveEl.getBoundingClientRect();
+    if (!rect.width && !rect.height) return null;
+    return clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2).x;
+  }
+
+  function measureAssemblyWorldDxPerLocalPx(assembly, grooveEl, deltaLocal) {
+    if (!assembly || !grooveEl || !deltaLocal) return 0;
+    var beforeX = getGrooveCenterWorldX(grooveEl);
+    if (beforeX == null) return 0;
+    var prev = assembly.style.transform;
+    assembly.style.transform = 'translateX(' + deltaLocal + 'px)';
+    void assembly.offsetWidth;
+    var afterX = getGrooveCenterWorldX(grooveEl);
+    assembly.style.transform = prev;
+    void assembly.offsetWidth;
+    if (afterX == null) return 0;
+    return (afterX - beforeX) / deltaLocal;
+  }
+
+  function computeAlignmentTravelPlan(machineId) {
+    var fallback = buildFallbackTravelPlan('using default travel');
+    try {
+      var uiRoot = getMachineUiRoot(machineId);
+      if (!uiRoot) return buildFallbackTravelPlan('machine UI root not found');
+
+      var centerElement = uiRoot.querySelector('.fsm-alignment-stage');
+      console.log('Center Element:', centerElement);
+      if (!centerElement) return buildFallbackTravelPlan('center stage not found');
+
+      var pair = null;
+      if (global.FtthLab && typeof FtthLab.getSplicerDockedPair === 'function') {
+        pair = FtthLab.getSplicerDockedPair(machineId);
+      }
+      if (!pair || !pair.left || !pair.right) {
+        return buildFallbackTravelPlan('L/R pigtails not snapped');
+      }
+
+      if (global.FtthLab && typeof FtthLab.prepareSplicerAlignmentTips === 'function') {
+        FtthLab.prepareSplicerAlignmentTips(machineId);
+      }
+
+      var leftFiberTipX = getBareGlassTipClientX(machineId, pair.left.id, pair.left);
+      var rightFiberTipX = getBareGlassTipClientX(machineId, pair.right.id, pair.right);
+      console.log('Left Tip X:', leftFiberTipX, 'Right Tip X:', rightFiberTipX);
+      console.log('Left bare path:', getBareGlassPathEl(machineId, pair.left.id));
+      console.log('Right bare path:', getBareGlassPathEl(machineId, pair.right.id));
+
+      if (leftFiberTipX == null || rightFiberTipX == null) {
+        return buildFallbackTravelPlan('fiber tip positions unavailable');
+      }
+
+      var stageRect = centerElement.getBoundingClientRect();
+      var targetClientX = stageRect.left + stageRect.width / 2;
+      var halfGapClient = (ALIGN_TIP_GAP_WORLD * getZoom()) / 2;
+      var leftTravelClient = Math.max(0, (targetClientX - halfGapClient) - leftFiberTipX);
+      var rightTravelClient = Math.max(0, rightFiberTipX - (targetClientX + halfGapClient));
+
+      var leftAsm = getClampAssemblyEl(machineId, 'L');
+      var rightAsm = getClampAssemblyEl(machineId, 'R');
+      var grooveL = leftAsm && leftAsm.querySelector('.clamp-base-groove');
+      var grooveR = rightAsm && rightAsm.querySelector('.clamp-base-groove');
+      if (!leftAsm || !rightAsm || !grooveL || !grooveR) {
+        return buildFallbackTravelPlan('clamp assemblies not found');
+      }
+
+      var kL = measureAssemblyWorldDxPerLocalPx(leftAsm, grooveL, MOTOR_ALIGN_CALIB_LOCAL_PX);
+      var kR = measureAssemblyWorldDxPerLocalPx(rightAsm, grooveR, -MOTOR_ALIGN_CALIB_LOCAL_PX);
+      if (!kL || !kR) return buildFallbackTravelPlan('clamp calibration failed');
+
+      var targetWorldX = clientToWorld(
+        targetClientX,
+        stageRect.top + stageRect.height / 2
+      ).x;
+      var leftWorldTravel = Math.max(0, (targetWorldX - ALIGN_TIP_GAP_WORLD / 2) - pair.left.bx);
+      var rightWorldTravel = Math.max(0, pair.right.bx - (targetWorldX + ALIGN_TIP_GAP_WORLD / 2));
+      var leftTravelPx = Math.max(0, Math.round(leftWorldTravel / kL));
+      var rightTravelPx = Math.max(0, Math.round(rightWorldTravel / Math.abs(kR)));
+
+      if (leftTravelPx <= 0 && rightTravelPx <= 0) {
+        if (leftTravelClient <= 0 && rightTravelClient <= 0) {
+          return buildFallbackTravelPlan('tips already at center');
+        }
+        return fallback;
+      }
+
+      return {
+        leftTravelPx: leftTravelPx,
+        rightTravelPx: rightTravelPx,
+        fallback: false,
+        targetWorldX: targetWorldX,
+      };
+    } catch (e) {
+      console.error('Alignment Error:', e);
+      return fallback;
+    }
+  }
 
   var layer = null;
   /** Per-machine RAF handles for SET motor-align pigtail sync (cancel on reset / re-trigger). */
@@ -534,42 +693,70 @@
   function executeMotorAlignment(machineId, opts) {
     opts = opts || {};
     return new Promise(function (resolve) {
-      var travel = typeof opts.travelPx === 'number' ? opts.travelPx : getClampAlignmentTravelPx();
-      travel = Math.max(0, Math.round(travel));
-      var leftAsm = getClampAssemblyEl(machineId, 'L');
-      var rightAsm = getClampAssemblyEl(machineId, 'R');
-      if (!leftAsm || !rightAsm) {
-        resolve(false);
-        return;
-      }
-
-      cancelMotorAlignRaf(machineId);
-
-      var m = findMachine(machineId);
-      if (m) m.motorAlignTravelPx = travel;
-
-      leftAsm.classList.add('is-motor-aligning');
-      rightAsm.classList.add('is-motor-aligning');
-      void leftAsm.offsetWidth;
-      leftAsm.style.transform = 'translateX(' + travel + 'px)';
-      rightAsm.style.transform = 'translateX(' + (-travel) + 'px)';
-
-      emitParent('clampNudge', { machineId: machineId, phase: 'motorAlign' });
-      syncMotorAlignPigtails(machineId);
-
-      var start = performance.now();
-      function tick(now) {
-        syncMotorAlignPigtails(machineId);
-        if (now - start < MOTOR_ALIGN_TRANSITION_MS) {
-          motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+      try {
+        var leftAsm = getClampAssemblyEl(machineId, 'L');
+        var rightAsm = getClampAssemblyEl(machineId, 'R');
+        if (!leftAsm || !rightAsm) {
+          console.warn('Alignment: clamp assemblies missing');
+          resolve(false);
           return;
         }
-        delete motorAlignRafByMachine[machineId];
+
+        var travelPlan = null;
+        if (typeof opts.travelPx === 'number') {
+          var fixed = Math.max(0, Math.round(opts.travelPx));
+          travelPlan = { leftTravelPx: fixed, rightTravelPx: fixed, fallback: false };
+        } else {
+          travelPlan = computeAlignmentTravelPlan(machineId);
+        }
+        if (!travelPlan) {
+          travelPlan = buildFallbackTravelPlan('no travel plan');
+        }
+
+        cancelMotorAlignRaf(machineId);
+
+        var m = findMachine(machineId);
+        if (m) {
+          m.motorAlignLeftTravelPx = travelPlan.leftTravelPx;
+          m.motorAlignRightTravelPx = travelPlan.rightTravelPx;
+          m.motorAlignTravelPx = Math.max(travelPlan.leftTravelPx, travelPlan.rightTravelPx);
+        }
+
+        leftAsm.classList.add('is-motor-aligning');
+        rightAsm.classList.add('is-motor-aligning');
+        void leftAsm.offsetWidth;
+        leftAsm.style.transform = 'translateX(' + travelPlan.leftTravelPx + 'px)';
+        rightAsm.style.transform = 'translateX(-' + travelPlan.rightTravelPx + 'px)';
+
+        emitParent('clampNudge', { machineId: machineId, phase: 'motorAlign' });
         syncMotorAlignPigtails(machineId);
-        emitParent('alignmentComplete', { machineId: machineId, travelPx: travel });
-        resolve(true);
+
+        var start = performance.now();
+        function tick(now) {
+          try {
+            syncMotorAlignPigtails(machineId);
+          } catch (tickErr) {
+            console.error('Alignment Error:', tickErr);
+          }
+          if (now - start < MOTOR_ALIGN_TRANSITION_MS) {
+            motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+            return;
+          }
+          delete motorAlignRafByMachine[machineId];
+          syncMotorAlignPigtails(machineId);
+          emitParent('alignmentComplete', {
+            machineId: machineId,
+            leftTravelPx: travelPlan.leftTravelPx,
+            rightTravelPx: travelPlan.rightTravelPx,
+            fallback: !!travelPlan.fallback,
+          });
+          resolve(true);
+        }
+        motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+      } catch (err) {
+        console.error('Alignment Error:', err);
+        resolve(false);
       }
-      motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
     });
   }
 
@@ -682,7 +869,7 @@
       return;
     }
 
-    var api = FusionSplicerMachineUI.mount(uiRoot);
+    var api = FusionSplicerMachineUI.mount(uiRoot, { machineId: id });
     if (!api) return;
 
     var offs = [];
@@ -699,10 +886,17 @@
       });
 
       api.on('setPress', function () {
-        executeMotorAlignment(id).then(function () {
+        executeMotorAlignment(id).then(function (ok) {
+          if (!ok) {
+            if (typeof api.finishAligning === 'function') api.finishAligning(false);
+            return;
+          }
           if (api && typeof api.runArcSpliceSequence === 'function') {
             api.runArcSpliceSequence();
           }
+        }).catch(function (err) {
+          console.error('Alignment Error:', err);
+          if (typeof api.finishAligning === 'function') api.finishAligning(false);
         });
       });
     }

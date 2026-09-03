@@ -2233,6 +2233,27 @@
     return { ok: true, pigtailId: pig.id, slot: slot };
   }
 
+  /** Refresh docked pigtail geometry before motor-align distance math. */
+  function prepareSplicerAlignmentTips(machineId) {
+    if (!machineId) return false;
+    try {
+      var pair = getSplicerDockedPair(machineId);
+      if (!pair.left || !pair.right) {
+        console.warn('Alignment: cannot prepare tips — pigtails not docked');
+        return false;
+      }
+      [pair.left, pair.right].forEach(function (p) {
+        syncSnappedPigtailToLiveGroove(p);
+        updateFiberPath(p);
+      });
+      renderSplicerFiberOverlays(machineId);
+      return true;
+    } catch (err) {
+      console.error('Alignment Error:', err);
+      return false;
+    }
+  }
+
   /** 60fps motor-align sync — force L/R docked pigtails to follow clamp CSS transform mid-transition. */
   function syncSplicerMotorAlignFrame(machineId) {
     if (!machineId) return false;
@@ -5429,6 +5450,8 @@
       FtthLab.handoverPigtailToSplicerClamp = handoverPigtailToSplicerClamp;
       FtthLab.refreshSplicerDocks = refreshSplicerDocks;
       FtthLab.syncSplicerMotorAlignFrame = syncSplicerMotorAlignFrame;
+      FtthLab.prepareSplicerAlignmentTips = prepareSplicerAlignmentTips;
+      FtthLab.getSplicerDockedPair = getSplicerDockedPair;
       FtthLab.ensureSplicerDockTracking = ensureSplicerDockTracking;
       FtthLab.renderSplicerFiberOverlays = renderSplicerFiberOverlays;
       FtthLab.clearPigtailSplicerSnap = function (id) {

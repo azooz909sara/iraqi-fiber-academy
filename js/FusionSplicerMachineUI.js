@@ -62,6 +62,7 @@
     var animFrame = null;
     var time = 0;
     var toastTimer;
+    var boundMachineId = opts.machineId || null;
 
     function q(name) {
       return root.querySelector('.fsm-' + camelToKebab(name));
@@ -493,25 +494,63 @@
       emit('reset', {});
     }
 
-    function setPress() {
-      if (!requirePower()) return;
-      if (!state.clampsClosed.L || !state.clampsClosed.R) {
-        return showToast('Close both clamps first!', 'error');
+    function hasFibersForAlign() {
+      if (state.fiberPlaced.L && state.fiberPlaced.R) return true;
+      if (!boundMachineId || !global.FtthLab ||
+          typeof FtthLab.getSplicerDockedPair !== 'function') {
+        return false;
       }
-      if (!state.fiberPlaced.L || !state.fiberPlaced.R) {
-        return showToast('No fiber loaded — use external placeFiber()', 'warning');
+      var pair = FtthLab.getSplicerDockedPair(boundMachineId);
+      if (pair && pair.left && pair.right) {
+        state.fiberPlaced.L = true;
+        state.fiberPlaced.R = true;
+        return true;
       }
-      if (state.splicing) return showToast('Splice already in progress', 'warning');
-      if (state.aligning) return showToast('Motor alignment in progress', 'warning');
+      return false;
+    }
 
-      state.aligning = true;
+    function finishAligning(success) {
+      state.aligning = false;
       var statusText = q('statusText');
-      if (statusText) {
-        statusText.textContent = 'ALIGNING';
+      if (!statusText) return;
+      if (success) {
+        statusText.textContent = 'ALIGNED';
+        statusText.style.color = 'var(--accent-green, #4caf50)';
+      } else {
+        statusText.textContent = 'ALIGN FAILED';
         statusText.style.color = 'var(--accent-orange)';
       }
-      showToast('SET: Motor alignment started', 'success');
-      emit('setPress', {});
+    }
+
+    function setPress() {
+      try {
+        if (!requirePower()) return;
+        if (!state.clampsClosed.L || !state.clampsClosed.R) {
+          return showToast('Close both clamps first!', 'error');
+        }
+        if (!hasFibersForAlign()) {
+          console.warn('Alignment: L/R pigtails not snapped or fiber not placed');
+          return showToast('No fiber loaded — dock L/R pigtails first', 'warning');
+        }
+        if (state.splicing) return showToast('Splice already in progress', 'warning');
+        if (state.aligning) return showToast('Motor alignment in progress', 'warning');
+
+        var centerElement = root.querySelector('.fsm-alignment-stage');
+        console.log('Center Element:', centerElement);
+
+        state.aligning = true;
+        var statusText = q('statusText');
+        if (statusText) {
+          statusText.textContent = 'ALIGNING';
+          statusText.style.color = 'var(--accent-orange)';
+        }
+        showToast('SET: Motor alignment started', 'success');
+        emit('setPress', { machineId: boundMachineId });
+      } catch (e) {
+        console.error('Alignment Error:', e);
+        finishAligning(false);
+        showToast('Alignment failed — see console', 'error');
+      }
     }
 
     function runArcSpliceSequence() {
@@ -786,18 +825,6 @@
           setPress();
         }
       });
-
-      var setBtn = root.querySelector('.fsm-set-btn');
-      if (setBtn) {
-        setBtn.addEventListener('click', function () {
-          console.log('SET button pressed! Ready to align.');
-          const travelDist = 40; // px
-          var leftClamp = root.querySelector('.fsm-clamp-assembly-l');
-          var rightClamp = root.querySelector('.fsm-clamp-assembly-r');
-          if (leftClamp) leftClamp.style.transform = 'translateX(' + travelDist + 'px)';
-          if (rightClamp) rightClamp.style.transform = 'translateX(-' + travelDist + 'px)';
-        });
-      }
     }
 
     function setActive(active) {
@@ -902,6 +929,7 @@
       andPress: andPress,
       resetPress: resetPress,
       setPress: setPress,
+      finishAligning: finishAligning,
       runArcSpliceSequence: runArcSpliceSequence,
       xPress: xPress,
       oPress: oPress,
