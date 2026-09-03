@@ -570,14 +570,49 @@
       /* OLT / VFL far end: core glows, no further hop */
     }
 
-    /** Light enters at SC connector; exits bare cleave only when tail is free. */
+    /** Mark laser exit at the far open end (bare tail or unplugged connector). */
+    function resolvePigtailFarExit(p, opts) {
+      opts = opts || {};
+      if (!p) return;
+      /* Welded fused pair: B ends meet at weld — far exit is the unplugged connector only */
+      if (opts.fusedWelded || isWeldedFusedPigtail(p)) {
+        if (isOpenEnd(p.connector)) {
+          pigtailExits[p.id] = 'A';
+        }
+        return;
+      }
+      if (isOpenEnd(p.tail)) {
+        pigtailExits[p.id] = 'B';
+        return;
+      }
+      if (isOpenEnd(p.connector)) {
+        pigtailExits[p.id] = 'A';
+      }
+    }
+
+    function isWeldedFusedPigtail(p) {
+      if (!p || !p.splicerWeldMachineId) return false;
+      if (p.fusedPartnerId) return true;
+      if (!global.FtthLab || typeof FtthLab.isPigtailFused !== 'function') return false;
+      return FtthLab.isPigtailFused(p);
+    }
+
+    /** Light enters at SC connector; exits the far open end (tail or connector). */
     function injectPigtail(id) {
-      markPigtail(id);
+      if (!id) return;
       var p = findPigtail(graph, id);
       if (!p) return;
-      if (isOpenEnd(p.tail)) {
-        pigtailExits[id] = 'B';
+      markPigtail(id);
+
+      if (isWeldedFusedPigtail(p)) {
+        var partner = p.fusedPartnerId ? findPigtail(graph, p.fusedPartnerId) : null;
+        if (partner) markPigtail(partner.id);
+        resolvePigtailFarExit(p, { fusedWelded: true });
+        if (partner) resolvePigtailFarExit(partner, { fusedWelded: true });
+        return;
       }
+
+      resolvePigtailFarExit(p);
       /* Tail parked on splice / termination — light stops at the tray */
     }
 
@@ -636,10 +671,25 @@
     var mode = (targets && targets.mode) || 'OFF';
     var pc = {};
     var pt = {};
+    var fusedGlow = {};
     var pcExits = (targets && targets.pcordExits) || {};
     var ptExits = (targets && targets.pigtailExits) || {};
     (targets.pcords || []).forEach(function (id) { pc[id] = true; });
-    (targets.pigtails || []).forEach(function (id) { pt[id] = true; });
+    (targets.pigtails || []).forEach(function (id) {
+      pt[id] = true;
+      if (!global.FtthLab || typeof FtthLab.getFiberLaserGraph !== 'function') return;
+      var graph = FtthLab.getFiberLaserGraph() || { pigtails: [] };
+      var i;
+      for (i = 0; i < (graph.pigtails || []).length; i++) {
+        var node = graph.pigtails[i];
+        if (node.id !== id) continue;
+        if (node.fusedPartnerId && node.splicerWeldMachineId) {
+          pt[node.fusedPartnerId] = true;
+          fusedGlow[node.splicerWeldMachineId] = true;
+        }
+        break;
+      }
+    });
 
     document.querySelectorAll('[data-pcord-fiber], [data-pt-fiber]').forEach(function (el) {
       el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
@@ -647,8 +697,44 @@
     document.querySelectorAll('[data-pcord-laser]').forEach(function (el) {
       setFiberGlowClass(el, !!pc[el.getAttribute('data-pcord-laser')], mode);
     });
-    document.querySelectorAll('[data-pt-laser]').forEach(function (el) {
-      setFiberGlowClass(el, !!pt[el.getAttribute('data-pt-laser')], mode);
+
+    var svgRoots = [];
+    var mainSvg = document.querySelector('.lab-pigtail-layer .lab-pigtail-svg');
+    if (mainSvg) svgRoots.push(mainSvg);
+    document.querySelectorAll('[data-fusion-fiber-layer] .lab-pigtail-svg').forEach(function (svg) {
+      if (svgRoots.indexOf(svg) < 0) svgRoots.push(svg);
+    });
+    svgRoots.forEach(function (svgRoot) {
+      svgRoot.querySelectorAll('[data-pt-fiber], [data-fused-asm-id], .lab-splicer-fusion-bridge__glass').forEach(function (el) {
+        el.classList.remove('is-vfl-glow', 'is-vfl-glow--cw', 'is-vfl-glow--glint');
+      });
+      svgRoot.querySelectorAll('[data-fused-assembly]').forEach(function (el) {
+        var mid = el.getAttribute('data-fused-assembly');
+        el.classList.toggle('is-vfl-fused-lit', !!(mid && fusedGlow[mid] && mode !== 'OFF'));
+      });
+      svgRoot.querySelectorAll('[data-pt-laser], [data-fused-laser]').forEach(function (el) {
+        var id = el.getAttribute('data-pt-laser');
+        var mid = el.getAttribute('data-fused-laser');
+        var on = false;
+        if (mid) {
+          on = !!fusedGlow[mid];
+        } else if (id) {
+          var fused = false;
+          if (global.FtthLab && typeof FtthLab.isPigtailFused === 'function' &&
+              typeof FtthLab.getFiberLaserGraph === 'function') {
+            var graphPigtails = (FtthLab.getFiberLaserGraph() || {}).pigtails || [];
+            var gi;
+            for (gi = 0; gi < graphPigtails.length; gi++) {
+              if (graphPigtails[gi].id === id) {
+                fused = !!(graphPigtails[gi].splicerWeldMachineId && graphPigtails[gi].fusedPartnerId);
+                break;
+              }
+            }
+          }
+          on = !!pt[id] && !fused;
+        }
+        setFiberGlowClass(el, on, mode);
+      });
     });
     document.querySelectorAll('[data-pcord-id][data-pcord-end]').forEach(function (el) {
       var cid = el.getAttribute('data-pcord-id');

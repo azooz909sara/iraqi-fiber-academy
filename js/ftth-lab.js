@@ -463,6 +463,34 @@
     setStatus('Selection cleared', true);
   }
 
+  function flipSelected() {
+    if (selectionOwner && state.tools[selectionOwner] &&
+        typeof state.tools[selectionOwner].flipSelected === 'function') {
+      try {
+        if (state.tools[selectionOwner].flipSelected()) {
+          return true;
+        }
+      } catch (err) {
+        console.warn('[FtthLab] flipSelected failed:', selectionOwner, err);
+      }
+    }
+    var ids = Object.keys(state.tools);
+    for (var i = ids.length - 1; i >= 0; i--) {
+      var tool = state.tools[ids[i]];
+      if (tool && typeof tool.flipSelected === 'function') {
+        try {
+          if (tool.flipSelected()) {
+            return true;
+          }
+        } catch (err2) {
+          console.warn('[FtthLab] flipSelected failed:', ids[i], err2);
+        }
+      }
+    }
+    setStatus('Select a pigtail to flip');
+    return false;
+  }
+
   function deleteSelected() {
     if (selectionOwner && state.tools[selectionOwner] &&
         typeof state.tools[selectionOwner].deleteSelected === 'function') {
@@ -734,8 +762,10 @@
     var undoBtn = $('lab-btn-undo');
     var redoBtn = $('lab-btn-redo');
     var deleteBtn = $('lab-btn-delete');
+    var flipBtn = $('ftth-flip-btn');
     if (undoBtn) undoBtn.addEventListener('click', undo);
     if (redoBtn) redoBtn.addEventListener('click', redo);
+    if (flipBtn) flipBtn.addEventListener('click', function () { flipSelected(); });
     if (deleteBtn) deleteBtn.addEventListener('click', function () { deleteSelected(); });
 
     /* Capture-phase on window: works without focusing a field; blocks browser Undo/Redo */
@@ -971,6 +1001,7 @@
   var PIGTAIL_MISMATCH_DB = 3.0;
   var MATCHED_CONNECTOR_DB = 0.2;
   var FUSION_SPLICE_DB = 0.10;
+  var FUSED_WELD_LOSS_DB = 0.05;
   var opmRefreshHook = null;
   var opmWavelengthNm = 1310;
 
@@ -1412,6 +1443,48 @@
       } else {
         adj['pigtail:' + p.id + ':conn'] = adj['pigtail:' + p.id + ':conn'] || [];
         addUndirectedEdge(adj, 'pigtail:' + p.id + ':conn', tailKey, totalLossParts(pigParts), pigParts);
+      }
+    }
+
+    var fusedSeen = {};
+    function addFusedWeldEdge(idA, idB, machineId) {
+      if (!idA || !idB || idA === idB) return;
+      var seenKey = machineId || [idA, idB].sort().join('|');
+      if (fusedSeen[seenKey]) return;
+      fusedSeen[seenKey] = true;
+      var weldParts = { splice: FUSED_WELD_LOSS_DB };
+      addUndirectedEdge(
+        adj,
+        'pigtail:' + idA + ':tail',
+        'pigtail:' + idB + ':tail',
+        FUSED_WELD_LOSS_DB,
+        weldParts
+      );
+    }
+
+    for (i = 0; i < pigtails.length; i++) {
+      var fp = pigtails[i];
+      var fmid = fp.splicerWeldMachineId;
+      if (!fmid) continue;
+      var partnerId = fp.fusedPartnerId;
+      if (!partnerId) {
+        for (j = 0; j < pigtails.length; j++) {
+          if (pigtails[j].id !== fp.id && pigtails[j].splicerWeldMachineId === fmid) {
+            partnerId = pigtails[j].id;
+            break;
+          }
+        }
+      }
+      if (!partnerId) continue;
+      addFusedWeldEdge(fp.id, partnerId, fmid);
+    }
+
+    if (typeof api.getFusedAssemblyOpticalPairs === 'function') {
+      var fusedPairs = api.getFusedAssemblyOpticalPairs() || [];
+      for (i = 0; i < fusedPairs.length; i++) {
+        var pair = fusedPairs[i];
+        if (!pair || !pair.leftId || !pair.rightId) continue;
+        addFusedWeldEdge(pair.leftId, pair.rightId, pair.machineId);
       }
     }
 
@@ -1981,6 +2054,7 @@
     recordHistory: recordHistory,
     updateHistoryUi: updateHistoryUi,
     deleteSelected: deleteSelected,
+    flipSelected: flipSelected,
     setSelectionOwner: setSelectionOwner,
     claimToolboxTool: claimToolboxTool,
     getActiveToolboxTool: getActiveToolboxTool,

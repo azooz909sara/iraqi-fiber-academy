@@ -3220,6 +3220,27 @@ body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-ass
   stroke-linejoin: miter;
 }
 
+.lab-splicer-fusion-bridge__glass.is-vfl-glow,
+.lab-splicer-fusion-bridge__glass.is-vfl-glow--cw,
+.lab-splicer-fusion-bridge__glass.is-vfl-glow--glint {
+  stroke: #ffffff !important;
+  fill: none;
+  filter: drop-shadow(0 0 4px rgba(255, 34, 34, 0.8)) drop-shadow(0 0 8px rgba(255, 34, 34, 0.45)) !important;
+  animation: none !important;
+  opacity: 1 !important;
+}
+
+.lab-splicer-fusion-bridge__joint.is-vfl-glow,
+.lab-splicer-fusion-bridge__joint-glow.is-vfl-glow,
+.lab-splicer-fusion-bridge__joint.is-vfl-glow--cw,
+.lab-splicer-fusion-bridge__joint-glow.is-vfl-glow--cw,
+.lab-splicer-fusion-bridge__joint.is-vfl-glow--glint,
+.lab-splicer-fusion-bridge__joint-glow.is-vfl-glow--glint {
+  filter: drop-shadow(0 0 4px rgba(255, 34, 34, 0.75)) !important;
+  animation: none !important;
+  opacity: 1 !important;
+}
+
 .lab-splicer-fusion-bridge__joint {
   fill: rgba(255, 255, 255, 0.3);
   stroke: rgba(160, 220, 255, 0.5);
@@ -4717,6 +4738,18 @@ body.lab-vfl-dragging {
   stroke-width: 2.15;
 }
 
+/* Bare weld glass — never tint yellow when VFL glow is active nearby */
+.lab-splicer-fusion-bridge__glass.is-vfl-glow,
+.lab-splicer-fusion-bridge__glass.is-vfl-glow--cw,
+.lab-splicer-fusion-bridge__glass.is-vfl-glow--glint,
+.lab-splicer-fused-assembly.is-vfl-fused-lit .lab-splicer-fusion-bridge__glass {
+  stroke: #ffffff !important;
+  filter:
+    drop-shadow(0 0 4px rgba(255, 34, 34, 0.8))
+    drop-shadow(0 0 8px rgba(255, 34, 34, 0.45)) !important;
+  animation: none !important;
+}
+
 .lab-pcord-laser-core,
 .lab-pigtail-laser-core {
   stroke: transparent;
@@ -4739,6 +4772,26 @@ body.lab-vfl-dragging {
   filter: url(#lab-vfl-core-beam-pt);
 }
 
+/* Fused assembly — thin inner cores only; yellow jackets / white glass never tinted */
+[data-fused-laser].lab-pigtail-laser-core.is-vfl-glow {
+  opacity: 1;
+  stroke: #ff2222;
+  stroke-width: 0.75;
+  filter: url(#lab-vfl-core-beam-pt);
+}
+
+.lab-splicer-fused-assembly.is-vfl-fused-lit .lab-pigtail-fiber--jacket,
+.lab-splicer-fused-assembly.is-vfl-fused-lit .lab-fused-oven-channel-jacket {
+  stroke: #facc15;
+  stroke-width: 2.15;
+  filter: drop-shadow(0 0.5px 0.5px rgba(0, 0, 0, 0.35));
+}
+
+.lab-splicer-fused-assembly.is-vfl-fused-lit .lab-splicer-fusion-bridge__glass {
+  stroke: #ffffff;
+  filter: none;
+}
+
 .lab-pcord-laser-core.is-vfl-glow--cw,
 .lab-pigtail-laser-core.is-vfl-glow--cw {
   opacity: 1;
@@ -4756,12 +4809,23 @@ body.lab-vfl-dragging {
 }
 
 /* Laser exit — soft circular flare/aura at open ferrule or bare cleave */
-.lab-pcord__end.is-vfl-laser-exit:not(.is-attached) .lab-pcord__ferrule {
+.lab-pcord__end.is-vfl-laser-exit:not(.is-attached) .lab-pcord__ferrule,
+.lab-pigtail__conn.is-vfl-laser-exit:not(.is-attached) .lab-pcord__ferrule {
   background: #fff5f5 !important;
   border-color: #fca5a5 !important;
   box-shadow:
     0 0 2px #fecaca,
     0 0 6px rgba(248, 113, 113, 0.85);
+}
+
+.lab-pigtail__conn.is-vfl-laser-exit:not(.is-attached) {
+  overflow: visible;
+  z-index: 20;
+}
+
+.lab-pigtail__conn.is-vfl-laser-exit {
+  overflow: visible;
+  z-index: 20;
 }
 
 .lab-pigtail__tail.is-vfl-laser-exit:not(.is-attached) .lab-pigtail__cleave {
@@ -4836,14 +4900,17 @@ body.lab-vfl-dragging {
 }
 
 .lab-pcord__end.is-vfl-laser-exit:not(.is-attached) .lab-vfl-exit-flare,
+.lab-pigtail__conn.is-vfl-laser-exit:not(.is-attached) .lab-vfl-exit-flare,
 .lab-pigtail__tail.is-vfl-laser-exit:not(.is-attached) .lab-vfl-exit-flare {
   opacity: 1;
   visibility: visible;
 }
 
 .lab-pcord__end.is-vfl-laser-exit--glint:not(.is-attached) .lab-vfl-exit-flare,
+.lab-pigtail__conn.is-vfl-laser-exit--glint:not(.is-attached) .lab-vfl-exit-flare,
 .lab-pigtail__tail.is-vfl-laser-exit--glint:not(.is-attached) .lab-vfl-exit-flare,
 .lab-pcord__end.is-vfl-laser-exit--glint:not(.is-attached) .lab-pcord__ferrule,
+.lab-pigtail__conn.is-vfl-laser-exit--glint:not(.is-attached) .lab-pcord__ferrule,
 .lab-pigtail__tail.is-vfl-laser-exit--glint:not(.is-attached) .lab-pigtail__cleave {
   animation: lab-vfl-exit-glint 0.55s steps(2, end) infinite;
 }
