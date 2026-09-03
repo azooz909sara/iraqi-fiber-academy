@@ -44,7 +44,9 @@
   /** Bare tip zone for cleaver V-groove alignment. */
   var CLEAVE_TIP_ZONE_PX = 52;
   var CLEAVE_HIT_PX = 8;
-  var CLEAVE_WASTE_PX = 16;
+  /** Cleaved bare-glass protrusion (world px) — admin override via FtthLabSettings. */
+  var DEFAULT_CLEAVED_GLASS_LENGTH_PX = 16;
+  var CLEAVE_WASTE_PX = DEFAULT_CLEAVED_GLASS_LENGTH_PX;
   var CLEAVE_MIN_CUT_PX = 2;
   var BLADE_HIT_RADIUS_PX = 20;
   /** Dropzone highlight radius (fiber tip → cleaver groove). Snap occurs on release only. */
@@ -713,7 +715,10 @@
     return Math.max(0, polylineLength(pts));
   }
 
-  /** Admin-configurable bare glass length remaining after cleave (FtthLabSettings). */
+  /**
+   * Cleaved bare-glass length (world px) — single source of truth for cleaver + splicer.
+   * Admin-configurable via FtthLabSettings (`bareGlassLengthAfterCutPx`, default 16).
+   */
   function getBareGlassLengthAfterCutPx() {
     if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
       var item = FtthLabSettings.getItem('fiber-cleaver');
@@ -722,7 +727,15 @@
         if (isFinite(n) && n >= 1) return Math.round(n);
       }
     }
-    return CLEAVE_WASTE_PX;
+    return DEFAULT_CLEAVED_GLASS_LENGTH_PX;
+  }
+
+  /** Bare glass protrusion from clamp inner edge when docked on splicer (world px). */
+  function getSplicerExposedBareLengthPx(p) {
+    if (p && (p.cleaved || p.isCleaved)) {
+      return getBareGlassLengthAfterCutPx();
+    }
+    return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassDrawLengthPx(p));
   }
 
   function restoreCleavedStripLock(p) {
@@ -1248,12 +1261,14 @@
       var innerPt = { x: p.splicerInnerEdgeX, y: splicerSlot.grooveY };
       var innerProj = projectOntoFiberStrict(densePts, innerPt.x, innerPt.y);
       var dInner = Math.max(0, Math.min(total, innerProj.dist || 0));
-      var bareLenPx = getBareGlassDrawLengthPx(p);
-      var dBareEnd = Math.min(total, dInner + Math.max(CLEAVE_MIN_CUT_PX, bareLenPx));
+      var bareLenPx = getSplicerExposedBareLengthPx(p);
+      var dBareEnd = Math.min(total, dInner + bareLenPx);
       var jacketPts = slicePolylineByDistance(densePts, 0, dInner);
       var barePts = slicePolylineByDistance(densePts, dInner, dBareEnd);
       if (jacketPts.length < 2) jacketPts = slicePolylineByDistance(densePts, 0, Math.max(dInner, 2));
-      if (barePts.length < 2) barePts = slicePolylineByDistance(densePts, dInner, Math.max(dBareEnd, dInner + CLEAVE_MIN_CUT_PX));
+      if (barePts.length < 2) {
+        barePts = slicePolylineByDistance(densePts, dInner, Math.max(dBareEnd, dInner + bareLenPx));
+      }
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
@@ -1922,14 +1937,9 @@
     translatePigtailRigid(p, 0, deltaY);
   }
 
-  /** Exposed bare-glass length on the render path (same px as free-state bare segment). */
-  function getSplicerExposedBareLengthPx(p) {
-    return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassDrawLengthPx(p));
-  }
-
   /**
    * Docked tip alignment — per-side only. Never mutates strip arc-lengths (clamp truncation
-   * is geometric in buildPigtailFiberSvg). Bare glass length matches the free-state draw length.
+   * is geometric in buildPigtailFiberSvg). Cleaved fibers use exact cleavedGlassLength.
    */
   function alignSplicerJacketToInnerEdge(p, slot) {
     if (!p || !slot) return false;
@@ -1939,8 +1949,7 @@
       syncSplicerWeldedTips(slot.machineId);
       return true;
     }
-    var exposed = getBareGlassDrawLengthPx(p);
-    if (exposed < CLEAVE_MIN_CUT_PX) exposed = CLEAVE_MIN_CUT_PX;
+    var exposed = getSplicerExposedBareLengthPx(p);
     p.bx = Math.round(slot.innerEdgeX + dir * exposed);
     p.by = Math.round(slot.grooveY);
     p.splicerBareGlassPx = exposed;
@@ -5428,6 +5437,8 @@
       FtthLab.commitPigtailCleave = commitCleave;
       FtthLab.commitPigtailCleaveAtBlade = commitCleaveAtBlade;
       FtthLab.getBareGlassLengthAfterCutPx = getBareGlassLengthAfterCutPx;
+      FtthLab.getSplicerExposedBareLengthPx = getSplicerExposedBareLengthPx;
+      FtthLab.DEFAULT_CLEAVED_GLASS_LENGTH_PX = DEFAULT_CLEAVED_GLASS_LENGTH_PX;
       FtthLab.bladeHitRadiusPx = function () { return BLADE_HIT_RADIUS_PX; };
       FtthLab.findPigtailBareTipNearWorld = findBareTipNearWorld;
       FtthLab.snapPigtailToCleaverGroove = function (id, cleaverId, snapX, grooveY, opts) {

@@ -1,29 +1,60 @@
 /**
- * Admin helpers — FTTH lab preview messaging (parent → site-preview iframe).
+ * Admin helpers — FTTH fusion splicer clamp limits via shared localStorage bridge.
  */
 (function () {
   'use strict';
 
-  function postSplicerTravelToPreview(value) {
-    var frame = document.getElementById('site-preview-frame');
-    if (!frame || !frame.contentWindow) return;
-    frame.contentWindow.postMessage({
-      type: 'UPDATE_SPLICER_TRAVEL',
-      value: parseInt(value, 10),
-    }, '*');
+  var CLAMP_FORWARD_ID = 'config-clamp-forward';
+  var CLAMP_BACKWARD_ID = 'config-clamp-backward';
+  var FSM_FORWARD_KEY = 'fsm_forward_limit';
+  var FSM_BACKWARD_KEY = 'fsm_backward_limit';
+
+  function persistForwardLimit(value) {
+    try {
+      localStorage.setItem(FSM_FORWARD_KEY, String(value));
+    } catch (err) { /* ignore */ }
   }
 
-  function bindSplicerTravelSlider() {
-    document.addEventListener('input', function (e) {
-      var input = e.target;
-      if (!input || input.id !== 'config-splicer-travel') return;
-      postSplicerTravelToPreview(input.value);
-    });
+  function persistBackwardLimit(value) {
+    try {
+      localStorage.setItem(FSM_BACKWARD_KEY, String(value));
+    } catch (err) { /* ignore */ }
+  }
+
+  function bindClampStorageBridge() {
+    var forwardInput = document.getElementById(CLAMP_FORWARD_ID);
+    var backwardInput = document.getElementById(CLAMP_BACKWARD_ID);
+
+    if (forwardInput && !forwardInput.dataset.fsmStorageBound) {
+      forwardInput.dataset.fsmStorageBound = '1';
+      forwardInput.addEventListener('input', function (e) {
+        persistForwardLimit(e.target.value);
+      });
+      persistForwardLimit(forwardInput.value);
+    }
+
+    if (backwardInput && !backwardInput.dataset.fsmStorageBound) {
+      backwardInput.dataset.fsmStorageBound = '1';
+      backwardInput.addEventListener('input', function (e) {
+        persistBackwardLimit(e.target.value);
+      });
+      persistBackwardLimit(backwardInput.value);
+    }
+  }
+
+  function bindClampLimitPipeline() {
+    document.addEventListener('ifa:clamp-limit-fields-ready', bindClampStorageBridge);
+
+    if (window.FtthLabSettings && FtthLabSettings.EVENTS && FtthLabSettings.EVENTS.saved) {
+      document.addEventListener(FtthLabSettings.EVENTS.saved, bindClampStorageBridge);
+    }
+
+    bindClampStorageBridge();
   }
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bindSplicerTravelSlider);
+    document.addEventListener('DOMContentLoaded', bindClampLimitPipeline);
   } else {
-    bindSplicerTravelSlider();
+    bindClampLimitPipeline();
   }
 })();

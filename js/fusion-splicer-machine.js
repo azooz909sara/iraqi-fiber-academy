@@ -25,8 +25,34 @@
   var MOTOR_ALIGN_TRANSITION_MS = 1500;
   var DEFAULT_CLAMP_TRAVEL_PX = 40;
   var FALLBACK_ALIGN_TRAVEL_PX = 95;
-  var ALIGN_TIP_GAP_WORLD = 0.5;
+  /** Cleaved bare-glass length (world px) — must match ftth-lab-pigtail DEFAULT_CLEAVED_GLASS_LENGTH_PX. */
+  var DEFAULT_CLEAVED_GLASS_LENGTH_PX = 16;
   var MOTOR_ALIGN_CALIB_LOCAL_PX = 20;
+
+  function getClampForwardLimitPx() {
+    if (global.FusionSplicerMachineUI && typeof FusionSplicerMachineUI.getClampForwardLimit === 'function') {
+      return FusionSplicerMachineUI.getClampForwardLimit();
+    }
+    var n = global.clampForwardLimit;
+    if (typeof n === 'number' && isFinite(n)) return Math.max(0, Math.round(n));
+    return FALLBACK_ALIGN_TRAVEL_PX;
+  }
+
+  function getClampBackwardLimitPx() {
+    if (global.FusionSplicerMachineUI && typeof FusionSplicerMachineUI.getClampBackwardLimit === 'function') {
+      return FusionSplicerMachineUI.getClampBackwardLimit();
+    }
+    var n = global.clampBackwardLimit;
+    if (typeof n === 'number' && isFinite(n)) return Math.max(0, Math.round(n));
+    return 0;
+  }
+
+  function getCleavedGlassLengthPx() {
+    if (global.FtthLab && typeof FtthLab.getBareGlassLengthAfterCutPx === 'function') {
+      return FtthLab.getBareGlassLengthAfterCutPx();
+    }
+    return DEFAULT_CLEAVED_GLASS_LENGTH_PX;
+  }
 
   function worldToClient(worldX, worldY) {
     var stage = document.getElementById('lab-canvas-2d');
@@ -62,7 +88,7 @@
     );
   }
 
-  function getBareGlassTipClientX(machineId, pigtailId, pigtail) {
+  function getBareGlassTipClient(machineId, pigtailId, pigtail) {
     var path = getBareGlassPathEl(machineId, pigtailId);
     if (path && typeof path.getTotalLength === 'function') {
       try {
@@ -73,16 +99,84 @@
           sp.x = pt.x;
           sp.y = pt.y;
           var mat = path.getScreenCTM();
-          if (mat) return sp.matrixTransform(mat).x;
+          if (mat) {
+            var screen = sp.matrixTransform(mat);
+            return { x: screen.x, y: screen.y };
+          }
         }
       } catch (err) {
         console.warn('Alignment: bare glass SVG tip read failed', err);
       }
     }
     if (pigtail && isFinite(pigtail.bx)) {
-      return worldToClient(pigtail.bx, pigtail.by || 0).x;
+      return worldToClient(pigtail.bx, pigtail.by || 0);
     }
     return null;
+  }
+
+  function getBareGlassTipClientX(machineId, pigtailId, pigtail) {
+    var tip = getBareGlassTipClient(machineId, pigtailId, pigtail);
+    return tip ? tip.x : null;
+  }
+
+  function getFusionChamberCenterClient(machineId) {
+    var uiRoot = getMachineUiRoot(machineId);
+    if (!uiRoot) return null;
+    var stage = uiRoot.querySelector('.fsm-alignment-stage');
+    if (!stage) return null;
+    var rect = stage.getBoundingClientRect();
+    if (!rect.width && !rect.height) return null;
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+      element: stage,
+    };
+  }
+
+  function getFusionChamberCenterWorld(machineId) {
+    var center = getFusionChamberCenterClient(machineId);
+    if (!center) return null;
+    return clientToWorld(center.x, center.y);
+  }
+
+  /**
+   * Auto Alignment — cleaved-glass equation:
+   *   travelDistance = distanceToCenter(innerEdge → chamberCenter) - cleavedGlassLength
+   * Converts world travel to clamp-local translateX px; does not move clamps.
+   */
+  function calculateAutoAlignment(machineId) {
+    var plan = computeAlignmentTravelPlan(machineId);
+    var cleavedGlassLength = getCleavedGlassLengthPx();
+    var centerWorld = getFusionChamberCenterWorld(machineId);
+    var slotL = getGrooveSlot(machineId, 'L');
+    var slotR = getGrooveSlot(machineId, 'R');
+    var distanceToCenterL = slotL && centerWorld ? centerWorld.x - slotL.innerEdgeX : null;
+    var distanceToCenterR = slotR && centerWorld ? slotR.innerEdgeX - centerWorld.x : null;
+
+    var result = {
+      ok: !!plan && !plan.fallback,
+      machineId: machineId,
+      cleavedGlassLength: cleavedGlassLength,
+      centerWorldX: centerWorld ? centerWorld.x : null,
+      distanceToCenterL: distanceToCenterL,
+      distanceToCenterR: distanceToCenterR,
+      leftTravelPx: plan ? plan.leftTravelPx : null,
+      rightTravelPx: plan ? plan.rightTravelPx : null,
+      fallback: plan ? !!plan.fallback : true,
+    };
+
+    console.log('[Auto Alignment] calculateAutoAlignment(' + machineId + ')', {
+      cleavedGlassLength: cleavedGlassLength,
+      centerWorldX: result.centerWorldX,
+      distanceToCenterL: distanceToCenterL,
+      distanceToCenterR: distanceToCenterR,
+      leftTravelPx: result.leftTravelPx,
+      rightTravelPx: result.rightTravelPx,
+      formula: 'travelDistance = distanceToCenter - cleavedGlassLength',
+      fallback: result.fallback,
+    });
+
+    return result;
   }
 
   function getGrooveCenterWorldX(grooveEl) {
@@ -106,15 +200,17 @@
     return (afterX - beforeX) / deltaLocal;
   }
 
+  /**
+   * Cleaved auto-alignment travel plan:
+   *   travelDistance = distanceToCenter(innerEdge → chamberCenter) - cleavedGlassLength
+   * World travel is converted to clamp-local translateX via groove calibration.
+   */
   function computeAlignmentTravelPlan(machineId) {
     var fallback = buildFallbackTravelPlan('using default travel');
     try {
-      var uiRoot = getMachineUiRoot(machineId);
-      if (!uiRoot) return buildFallbackTravelPlan('machine UI root not found');
-
-      var centerElement = uiRoot.querySelector('.fsm-alignment-stage');
-      console.log('Center Element:', centerElement);
-      if (!centerElement) return buildFallbackTravelPlan('center stage not found');
+      if (global.FtthLab && typeof FtthLab.prepareSplicerAlignmentTips === 'function') {
+        FtthLab.prepareSplicerAlignmentTips(machineId);
+      }
 
       var pair = null;
       if (global.FtthLab && typeof FtthLab.getSplicerDockedPair === 'function') {
@@ -124,25 +220,22 @@
         return buildFallbackTravelPlan('L/R pigtails not snapped');
       }
 
-      if (global.FtthLab && typeof FtthLab.prepareSplicerAlignmentTips === 'function') {
-        FtthLab.prepareSplicerAlignmentTips(machineId);
+      var cleavedGlassLength = getCleavedGlassLengthPx();
+      var centerWorld = getFusionChamberCenterWorld(machineId);
+      var slotL = getGrooveSlot(machineId, 'L');
+      var slotR = getGrooveSlot(machineId, 'R');
+      if (!centerWorld || !slotL || !slotR) {
+        return buildFallbackTravelPlan('chamber center or groove slots unavailable');
       }
 
-      var leftFiberTipX = getBareGlassTipClientX(machineId, pair.left.id, pair.left);
-      var rightFiberTipX = getBareGlassTipClientX(machineId, pair.right.id, pair.right);
-      console.log('Left Tip X:', leftFiberTipX, 'Right Tip X:', rightFiberTipX);
-      console.log('Left bare path:', getBareGlassPathEl(machineId, pair.left.id));
-      console.log('Right bare path:', getBareGlassPathEl(machineId, pair.right.id));
-
-      if (leftFiberTipX == null || rightFiberTipX == null) {
-        return buildFallbackTravelPlan('fiber tip positions unavailable');
+      var distanceToCenterL = centerWorld.x - slotL.innerEdgeX;
+      var distanceToCenterR = slotR.innerEdgeX - centerWorld.x;
+      if (distanceToCenterL <= 0 || distanceToCenterR <= 0) {
+        return buildFallbackTravelPlan('invalid inner-edge geometry');
       }
 
-      var stageRect = centerElement.getBoundingClientRect();
-      var targetClientX = stageRect.left + stageRect.width / 2;
-      var halfGapClient = (ALIGN_TIP_GAP_WORLD * getZoom()) / 2;
-      var leftTravelClient = Math.max(0, (targetClientX - halfGapClient) - leftFiberTipX);
-      var rightTravelClient = Math.max(0, rightFiberTipX - (targetClientX + halfGapClient));
+      var travelWorldL = distanceToCenterL - cleavedGlassLength;
+      var travelWorldR = distanceToCenterR - cleavedGlassLength;
 
       var leftAsm = getClampAssemblyEl(machineId, 'L');
       var rightAsm = getClampAssemblyEl(machineId, 'R');
@@ -156,27 +249,21 @@
       var kR = measureAssemblyWorldDxPerLocalPx(rightAsm, grooveR, -MOTOR_ALIGN_CALIB_LOCAL_PX);
       if (!kL || !kR) return buildFallbackTravelPlan('clamp calibration failed');
 
-      var targetWorldX = clientToWorld(
-        targetClientX,
-        stageRect.top + stageRect.height / 2
-      ).x;
-      var leftWorldTravel = Math.max(0, (targetWorldX - ALIGN_TIP_GAP_WORLD / 2) - pair.left.bx);
-      var rightWorldTravel = Math.max(0, pair.right.bx - (targetWorldX + ALIGN_TIP_GAP_WORLD / 2));
-      var leftTravelPx = Math.max(0, Math.round(leftWorldTravel / kL));
-      var rightTravelPx = Math.max(0, Math.round(rightWorldTravel / Math.abs(kR)));
+      var leftTravelPx = Math.max(0, Math.round(travelWorldL / kL));
+      var rightTravelPx = Math.max(0, Math.round(travelWorldR / Math.abs(kR)));
 
       if (leftTravelPx <= 0 && rightTravelPx <= 0) {
-        if (leftTravelClient <= 0 && rightTravelClient <= 0) {
-          return buildFallbackTravelPlan('tips already at center');
-        }
-        return fallback;
+        return buildFallbackTravelPlan('cleaved glass already at center or too long');
       }
 
       return {
         leftTravelPx: leftTravelPx,
         rightTravelPx: rightTravelPx,
         fallback: false,
-        targetWorldX: targetWorldX,
+        cleavedGlassLength: cleavedGlassLength,
+        distanceToCenterL: distanceToCenterL,
+        distanceToCenterR: distanceToCenterR,
+        targetWorldX: centerWorld.x,
       };
     } catch (e) {
       console.error('Alignment Error:', e);
@@ -687,6 +774,54 @@
   }
 
   /**
+   * Motor-align RAF sync only — clamps already translated (e.g. from FusionSplicerMachineUI SET).
+   */
+  function runMotorAlignSyncOnly(machineId, travelPlan) {
+    travelPlan = travelPlan || { leftTravelPx: 0, rightTravelPx: 0, fallback: false };
+    return new Promise(function (resolve) {
+      try {
+        cancelMotorAlignRaf(machineId);
+
+        var m = findMachine(machineId);
+        if (m) {
+          m.motorAlignLeftTravelPx = travelPlan.leftTravelPx;
+          m.motorAlignRightTravelPx = travelPlan.rightTravelPx;
+          m.motorAlignTravelPx = Math.max(travelPlan.leftTravelPx, travelPlan.rightTravelPx);
+        }
+
+        emitParent('clampNudge', { machineId: machineId, phase: 'motorAlign' });
+        syncMotorAlignPigtails(machineId);
+
+        var start = performance.now();
+        function tick(now) {
+          try {
+            syncMotorAlignPigtails(machineId);
+          } catch (tickErr) {
+            console.error('Alignment Error:', tickErr);
+          }
+          if (now - start < MOTOR_ALIGN_TRANSITION_MS) {
+            motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+            return;
+          }
+          delete motorAlignRafByMachine[machineId];
+          syncMotorAlignPigtails(machineId);
+          emitParent('alignmentComplete', {
+            machineId: machineId,
+            leftTravelPx: travelPlan.leftTravelPx,
+            rightTravelPx: travelPlan.rightTravelPx,
+            fallback: !!travelPlan.fallback,
+          });
+          resolve(true);
+        }
+        motorAlignRafByMachine[machineId] = requestAnimationFrame(tick);
+      } catch (err) {
+        console.error('Alignment Error:', err);
+        resolve(false);
+      }
+    });
+  }
+
+  /**
    * Motor alignment phase — translate L/R clamp assemblies inward, live-track docked fibers.
    * Returns a promise that resolves when the CSS transition completes.
    */
@@ -706,6 +841,9 @@
         if (typeof opts.travelPx === 'number') {
           var fixed = Math.max(0, Math.round(opts.travelPx));
           travelPlan = { leftTravelPx: fixed, rightTravelPx: fixed, fallback: false };
+        } else if (typeof global.clampForwardLimit === 'number' && isFinite(global.clampForwardLimit)) {
+          var adminForward = getClampForwardLimitPx();
+          travelPlan = { leftTravelPx: adminForward, rightTravelPx: adminForward, fallback: false };
         } else {
           travelPlan = computeAlignmentTravelPlan(machineId);
         }
@@ -877,7 +1015,7 @@
       [
         'ready', 'power', 'ovenLid', 'clampSelect', 'clampNudge', 'clampConfirm',
         'clampLid', 'fiberPlaced', 'heatStart', 'heatComplete', 'alarm',
-        'reset', 'setPress', 'alignmentComplete', 'spliceStart', 'spliceComplete', 'button'
+        'setPress', 'alignmentComplete', 'spliceStart', 'spliceComplete', 'button'
       ].forEach(function (evt) {
         var off = api.on(evt, function (payload) {
           emitParent(evt, Object.assign({ machineId: id }, payload || {}));
@@ -885,8 +1023,42 @@
         if (typeof off === 'function') offs.push(off);
       });
 
-      api.on('setPress', function () {
-        executeMotorAlignment(id).then(function (ok) {
+      api.on('reset', function (payload) {
+        payload = payload || {};
+        emitParent('reset', Object.assign({ machineId: id }, payload));
+
+        if (payload.skipMotorTransform) {
+          var backward = Math.max(0, Math.round(
+            typeof payload.backward === 'number'
+              ? payload.backward
+              : getClampBackwardLimitPx()
+          ));
+          runMotorAlignSyncOnly(id, {
+            leftTravelPx: backward,
+            rightTravelPx: backward,
+            fallback: false,
+          }).then(function () {
+            if (payload.deferCleanup) {
+              emitParent('resetMotorComplete', { machineId: id, backward: backward });
+            } else {
+              resetMotorAlignment(id);
+            }
+          });
+          return;
+        }
+        resetMotorAlignment(id);
+      });
+
+      api.on('setPress', function (payload) {
+        payload = payload || {};
+        var forward = typeof payload.forward === 'number'
+          ? Math.max(0, Math.round(payload.forward))
+          : getClampForwardLimitPx();
+        var travelPlan = { leftTravelPx: forward, rightTravelPx: forward, fallback: false };
+        var alignPromise = payload.skipMotorTransform
+          ? runMotorAlignSyncOnly(id, travelPlan)
+          : executeMotorAlignment(id, { travelPx: forward });
+        alignPromise.then(function (ok) {
           if (!ok) {
             if (typeof api.finishAligning === 'function') api.finishAligning(false);
             return;
@@ -1390,7 +1562,9 @@
     });
     document.addEventListener('fusion-splicer:reset', function (ev) {
       var machineId = ev.detail && ev.detail.machineId;
-      if (machineId) resetMotorAlignment(machineId);
+      var detail = ev.detail || {};
+      if (!machineId || detail.skipMotorTransform) return;
+      resetMotorAlignment(machineId);
     });
   }
 
@@ -1431,6 +1605,9 @@
     setSplicerDropzoneActive: setSplicerDropzoneActive,
     clearSplicerDropzones: clearSplicerDropzones,
     executeMotorAlignment: executeMotorAlignment,
+    calculateAutoAlignment: calculateAutoAlignment,
+    getCleavedGlassLengthPx: getCleavedGlassLengthPx,
+    DEFAULT_CLEAVED_GLASS_LENGTH_PX: DEFAULT_CLEAVED_GLASS_LENGTH_PX,
     resetMotorAlignment: resetMotorAlignment,
     getClampAlignmentTravelPx: getClampAlignmentTravelPx,
     MOTOR_ALIGN_TRANSITION_MS: MOTOR_ALIGN_TRANSITION_MS,

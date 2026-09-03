@@ -31,6 +31,7 @@
     saveId: cms.saveId,
   };
   var adminEmbedBound = false;
+  var skipDraftRefreshDepth = 0;
 
   function useOpmCms() {
     cms = {
@@ -65,6 +66,87 @@
   }
 
   function store() { return window[cms.storeName]; }
+
+  function isEmbeddedAdminPanel() {
+    return !!document.getElementById('admin-ftth-lab-config-root');
+  }
+
+  function withoutDraftRefresh(fn) {
+    skipDraftRefreshDepth += 1;
+    try {
+      return fn();
+    } finally {
+      skipDraftRefreshDepth -= 1;
+    }
+  }
+
+  var FSM_FORWARD_STORAGE_KEY = 'fsm_forward_limit';
+  var FSM_BACKWARD_STORAGE_KEY = 'fsm_backward_limit';
+
+  function persistClampLimitsToStorage(forward, backward) {
+    try {
+      if (forward != null && forward !== '') {
+        localStorage.setItem(FSM_FORWARD_STORAGE_KEY, String(forward));
+      }
+      if (backward != null && backward !== '') {
+        localStorage.setItem(FSM_BACKWARD_STORAGE_KEY, String(backward));
+      }
+    } catch (err) { /* ignore */ }
+  }
+
+  function isEditableFocusInsideHost(host) {
+    try {
+      var active = document.activeElement;
+      if (!host || !active || !host.contains(active)) return false;
+      var tag = (active.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return true;
+      return !!active.isContentEditable;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function safeSetHostHtml(host, html) {
+    if (!host) return false;
+    if (isEditableFocusInsideHost(host)) {
+      return false;
+    }
+    try {
+      host.innerHTML = html;
+      return true;
+    } catch (err) {
+      console.warn('[FtthLabSettingsCms] Failed to update panel markup', err);
+      return false;
+    }
+  }
+
+  function readClampLimitValuesFromDom() {
+    var forwardInput = document.getElementById('config-clamp-forward');
+    var backwardInput = document.getElementById('config-clamp-backward');
+    if (!forwardInput || !backwardInput) return null;
+    return { forward: forwardInput.value, backward: backwardInput.value };
+  }
+
+  function notifyClampLimitsLive(forward, backward) {
+    try {
+      document.dispatchEvent(new CustomEvent('ifa:clamp-limits-live', {
+        detail: { forward: forward, backward: backward },
+      }));
+    } catch (err) { /* ignore */ }
+  }
+
+  function notifyClampLimitsLiveFromDom() {
+    var limits = readClampLimitValuesFromDom();
+    if (!limits) return;
+    persistClampLimitsToStorage(limits.forward, limits.backward);
+    notifyClampLimitsLive(limits.forward, limits.backward);
+  }
+
+  function shouldRefreshOnDraftChange() {
+    if (skipDraftRefreshDepth > 0) return false;
+    if (isEmbeddedAdminPanel()) return false;
+    return modalOpen;
+  }
 
   function splicingToolKeys() {
     var s = store();
@@ -220,28 +302,35 @@
 
   function renderSplicerMechanicsFields() {
     var item = getDraftItem('fusion-splicer-machine');
-    var travel = 40;
+    var forward = 95;
+    var backward = 0;
     if (item && item.specs) {
-      var raw = item.specs.splicerClampTravelPx != null
-        ? item.specs.splicerClampTravelPx
-        : item.specs.splicer_clamp_travel;
-      var n = Number(raw);
-      if (isFinite(n)) travel = n;
+      var fwdRaw = item.specs.splicerClampForwardPx != null
+        ? item.specs.splicerClampForwardPx
+        : item.specs.splicerClampTravelPx;
+      var backRaw = item.specs.splicerClampBackwardPx;
+      var fwdN = Number(fwdRaw);
+      var backN = Number(backRaw);
+      if (isFinite(fwdN)) forward = fwdN;
+      if (isFinite(backN)) backward = backN;
     }
-    if (!isFinite(travel) || travel < 8) travel = 40;
-    travel = Math.min(80, Math.round(travel));
+    forward = Math.max(0, Math.min(200, Math.round(forward)));
+    backward = Math.max(0, Math.min(200, Math.round(backward)));
     return (
       '<div class="lab-settings-cms__specs lab-settings-cms__specs--mechanics">' +
-        '<p class="lab-settings-cms__specs-title">Splicer Mechanics · ميكانيكا آلة اللحام</p>' +
-        '<p class="lab-settings-cms__hint">Motor alignment travel for the SET clamp phase (<code>config.splicer_clamp_travel</code>)</p>' +
-        '<label class="lab-settings-cms__field">' +
-          '<span>Clamp Alignment Travel Distance (px)</span>' +
-          '<input type="range" min="8" max="80" step="1" value="' + escapeAttr(String(travel)) + '" ' +
-            'name="splicer_clamp_travel" data-lab-spec="splicerClampTravelPx" data-tool-key="fusion-splicer-machine" ' +
-            'oninput="this.nextElementSibling.textContent=this.value+\' px\'">' +
-          '<output style="display:block;margin-top:4px;font-size:12px;color:#94a3b8">' +
-            escapeHtml(String(travel)) + ' px</output>' +
-        '</label>' +
+        '<p class="lab-settings-cms__hint">Global L/R clamp travel limits (saved to device specs).</p>' +
+        '<div class="lab-settings-cms__perf-grid">' +
+          '<label class="lab-settings-cms__field lab-settings-cms__field--inline">' +
+            '<span>Max Forward Travel (px) / أقصى مسافة للأمام باتجاه الأقطاب</span>' +
+            '<input type="number" id="config-clamp-forward" min="0" max="200" step="1" value="' + escapeAttr(String(forward)) + '" ' +
+              'data-lab-spec="splicerClampForwardPx" data-tool-key="fusion-splicer-machine">' +
+          '</label>' +
+          '<label class="lab-settings-cms__field lab-settings-cms__field--inline">' +
+            '<span>Max Backward Travel (px) / أقصى مسافة للخلف</span>' +
+            '<input type="number" id="config-clamp-backward" min="0" max="200" step="1" value="' + escapeAttr(String(backward)) + '" ' +
+              'data-lab-spec="splicerClampBackwardPx" data-tool-key="fusion-splicer-machine">' +
+          '</label>' +
+        '</div>' +
       '</div>'
     );
   }
@@ -350,7 +439,7 @@
       html += renderPerformanceFields(item.toolKey, item.performanceSpecs, item.label);
     });
     html += '</section>';
-    host.innerHTML = html;
+    safeSetHostHtml(host, html);
     if (!selectedSfpVariantId && draft.sfpVariants && draft.sfpVariants[0]) {
       selectedSfpVariantId = draft.sfpVariants[0].id;
     }
@@ -419,7 +508,6 @@
     var keys = splicingToolKeys();
     var html =
       '<section class="lab-settings-cms__section lab-settings-cms__section--splicing">' +
-        '<h3 class="lab-settings-cms__cat">معدات اللحام · Splicing Equipment</h3>' +
         '<p class="lab-settings-cms__hint">Fiber Cleaver and Fusion Splicer — isolated from splitters and routers. Changes preview live in the lab toolbox.</p>' +
         renderSplicerMechanicsFields();
     draft.items.forEach(function (item) {
@@ -427,8 +515,9 @@
       html += renderDeviceArticle(item);
     });
     html += '</section>';
-    host.innerHTML = html;
+    if (!safeSetHostHtml(host, html)) return;
     syncToolbar();
+    document.dispatchEvent(new CustomEvent('ifa:clamp-limit-fields-ready'));
   }
 
   function renderDevicesTab() {
@@ -449,7 +538,7 @@
       });
       html += '</section>';
     });
-    host.innerHTML = html;
+    safeSetHostHtml(host, html);
     syncToolbar();
   }
 
@@ -491,10 +580,15 @@
   }
 
   function refresh() {
-    if (activeTab === 'performance') renderPerformanceTab();
-    else if (activeTab === 'splicing') renderSplicingTab();
-    else renderDevicesTab();
-    syncToolbar();
+    try {
+      if (activeTab === 'performance') renderPerformanceTab();
+      else if (activeTab === 'splicing') renderSplicingTab();
+      else renderDevicesTab();
+      syncToolbar();
+    } catch (err) {
+      console.warn('[FtthLabSettingsCms] refresh failed', err);
+      syncToolbar();
+    }
   }
 
   function handleLiveFieldEvent(input) {
@@ -527,13 +621,18 @@
       return true;
     }
     if (input.getAttribute('data-lab-spec')) {
-      commitSpecField(toolKey, input.getAttribute('data-lab-spec'), input.value);
+      var specKey = input.getAttribute('data-lab-spec');
+      withoutDraftRefresh(function () {
+        commitSpecField(toolKey, specKey, input.value);
+      });
       pushLivePreview();
       setStatus('Specs updated · live preview.');
       return true;
     }
     if (input.getAttribute('data-lab-spec-loss')) {
-      commitSplitterLoss(toolKey, input.getAttribute('data-lab-spec-loss'), input.value);
+      withoutDraftRefresh(function () {
+        commitSplitterLoss(toolKey, input.getAttribute('data-lab-spec-loss'), input.value);
+      });
       pushLivePreview();
       setStatus('Splitter loss updated · live preview.');
       return true;
@@ -596,8 +695,13 @@
       specs.defaultTxDbm = Number(value);
     } else if (specKey === 'bareGlassLengthAfterCutPx') {
       specs.bareGlassLengthAfterCutPx = Math.round(Number(value));
+    } else if (specKey === 'splicerClampForwardPx') {
+      specs.splicerClampForwardPx = Math.round(Number(value));
+    } else if (specKey === 'splicerClampBackwardPx') {
+      specs.splicerClampBackwardPx = Math.round(Number(value));
     } else if (specKey === 'splicerClampTravelPx') {
       specs.splicerClampTravelPx = Math.round(Number(value));
+      specs.splicerClampForwardPx = Math.round(Number(value));
     }
     store().updateItem(toolKey, { specs: specs }, true);
   }
@@ -621,7 +725,10 @@
       var input = e.target;
       if (!input || input.type === 'file') return;
       if (input.getAttribute('data-lab-spec') === 'bareGlassLengthAfterCutPx' ||
-          input.getAttribute('data-lab-spec') === 'splicerClampTravelPx') {
+          input.getAttribute('data-lab-spec') === 'splicerClampTravelPx' ||
+          input.getAttribute('data-lab-spec') === 'splicerClampForwardPx' ||
+          input.getAttribute('data-lab-spec') === 'splicerClampBackwardPx') {
+        notifyClampLimitsLiveFromDom();
         var out = input.parentElement && input.parentElement.querySelector('output');
         if (out) out.textContent = input.value + ' px';
       }
@@ -858,7 +965,12 @@
       ? store().EVENTS.draft
       : 'ifa:ftth-lab-draft-changed';
     window.addEventListener(draftEvt, function () {
-      if (modalOpen) refresh();
+      if (!shouldRefreshOnDraftChange()) return;
+      try {
+        refresh();
+      } catch (err) {
+        console.warn('[FtthLabSettingsCms] Draft refresh failed', err);
+      }
     });
   }
 

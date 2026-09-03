@@ -817,6 +817,41 @@
       if (window.PlatformSimulators && typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function') {
         window.PlatformSimulators.applyPublicSimulatorGates();
       }
+
+      window.addEventListener('message', function (ev) {
+        var data = ev.data;
+        if (!data || data.type !== 'UPDATE_CLAMP_LIMITS') return;
+        try {
+          localStorage.setItem('ifa:splicer_clamp_limits_live', JSON.stringify({
+            type: data.type,
+            forward: data.forward,
+            backward: data.backward,
+            ts: Date.now(),
+          }));
+        } catch (err) { /* ignore */ }
+
+        function forwardClampLimits(rootWindow, seen) {
+          if (!rootWindow || seen[rootWindow]) return;
+          seen[rootWindow] = true;
+          try {
+            rootWindow.postMessage(data, '*');
+          } catch (err2) { /* ignore */ }
+          var doc;
+          try {
+            doc = rootWindow.document;
+          } catch (err3) {
+            return;
+          }
+          if (!doc || !doc.querySelectorAll) return;
+          doc.querySelectorAll('iframe').forEach(function (frameEl) {
+            try {
+              forwardClampLimits(frameEl.contentWindow, seen);
+            } catch (err4) { /* ignore */ }
+          });
+        }
+
+        forwardClampLimits(window, {});
+      });
     })();
   </script>
   <script src="js/navigation.js"></script>

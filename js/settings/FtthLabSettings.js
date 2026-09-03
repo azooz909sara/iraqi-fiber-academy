@@ -157,7 +157,7 @@
         id: 'fusion-splicer-machine', toolKey: 'fusion-splicer-machine', categoryId: 'splicing',
         label: 'Fusion Splicer', sublabel: 'Machine UI · drag to grid', markClass: 'fusion-machine', icon: '',
         guideText: 'Place on the workspace · load fibers in L/R clamps · close lids · SET to arc weld.',
-        specs: { splicerClampTravelPx: 40 },
+        specs: { splicerClampForwardPx: 95, splicerClampBackwardPx: 0 },
       },
       {
         id: 'patchcord', toolKey: 'patchcord', categoryId: 'termination',
@@ -292,16 +292,28 @@
     }
 
     if (toolKey === 'fusion-splicer-machine') {
-      var travel = Number(
-        specs.splicerClampTravelPx != null
-          ? specs.splicerClampTravelPx
-          : (specs.splicer_clamp_travel != null
-            ? specs.splicer_clamp_travel
-            : factorySpecs.splicerClampTravelPx)
+      var forward = Number(
+        specs.splicerClampForwardPx != null
+          ? specs.splicerClampForwardPx
+          : (specs.splicerClampTravelPx != null
+            ? specs.splicerClampTravelPx
+            : (specs.splicer_clamp_travel != null
+              ? specs.splicer_clamp_travel
+              : factorySpecs.splicerClampForwardPx))
       );
-      if (!isFinite(travel) || travel < 0) travel = 40;
-      if (travel > 120) travel = 120;
-      return { splicerClampTravelPx: Math.round(travel) };
+      var backward = Number(
+        specs.splicerClampBackwardPx != null
+          ? specs.splicerClampBackwardPx
+          : factorySpecs.splicerClampBackwardPx
+      );
+      if (!isFinite(forward) || forward < 0) forward = 95;
+      if (!isFinite(backward) || backward < 0) backward = 0;
+      if (forward > 200) forward = 200;
+      if (backward > 200) backward = 200;
+      return {
+        splicerClampForwardPx: Math.round(forward),
+        splicerClampBackwardPx: Math.round(backward),
+      };
     }
 
     return specs;
@@ -619,6 +631,22 @@
         factoryItemFor(item).performanceSpecs
       );
       return Store.updateItem(toolKey, { performanceSpecs: merged }, recordHistory !== false);
+    },
+
+    getSplicerClampLimits: function () {
+      var item = Store.getItem('fusion-splicer-machine');
+      var factoryItem = factoryItemFor(
+        item || { toolKey: 'fusion-splicer-machine', id: 'fusion-splicer-machine' }
+      );
+      var norm = normalizeSpecs(
+        'fusion-splicer-machine',
+        item && item.specs ? item.specs : {},
+        factoryItem && factoryItem.specs ? factoryItem.specs : {}
+      );
+      return {
+        forward: norm.splicerClampForwardPx,
+        backward: norm.splicerClampBackwardPx,
+      };
     },
 
     PERFORMANCE_TOOL_KEYS: PERFORMANCE_TOOL_KEYS,
