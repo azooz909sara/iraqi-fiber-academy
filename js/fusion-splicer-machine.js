@@ -19,6 +19,9 @@
   /** Magnetic snap — expanded client px padding around `.clamp-base-groove`. */
   var GROOVE_HIT_PAD_CLIENT_X = 32;
   var GROOVE_HIT_PAD_CLIENT_Y = 28;
+  /** Magnetic snap — expanded client px padding around `.fsm-heat-oven-channel`. */
+  var OVEN_HIT_PAD_CLIENT_X = 28;
+  var OVEN_HIT_PAD_CLIENT_Y = 22;
   /** Bare glass past inner groove lip toward fusion electrodes (world px). */
   var GROOVE_BARE_PROTRUDE_WORLD = 14;
   /** Must match `.clamp-assembly { transition: transform 1.5s ... }` in fusion-splicer-machine.css */
@@ -591,6 +594,113 @@
     return findGrooveNearWorld(world.x, world.y, radiusPx);
   }
 
+  function queryOvenElements(uiRoot) {
+    if (!uiRoot) return null;
+    return {
+      channel: uiRoot.querySelector('.fsm-heat-oven-channel'),
+      slot: uiRoot.querySelector('.fsm-heat-oven-slot'),
+      module: uiRoot.querySelector('.fsm-heat-oven-module'),
+    };
+  }
+
+  function isOvenLidOpen(machineId) {
+    return true;
+  }
+
+  function makeOvenSlotPublic(slot) {
+    if (!slot) return null;
+    return {
+      machineId: slot.machineId,
+      open: slot.open,
+      centerX: slot.centerX,
+      centerY: slot.centerY,
+      channelX1: slot.channelX1,
+      channelX2: slot.channelX2,
+      channelY: slot.channelY,
+    };
+  }
+
+  /**
+   * Heat-oven channel geometry in world space (measured from live DOM each call).
+   * Prefers `.fsm-heat-oven-channel`; falls back to `.fsm-heat-oven-slot`.
+   */
+  function getOvenSlot(machineId) {
+    var uiRoot = getMachineUiRoot(machineId);
+    if (!uiRoot) return null;
+    var parts = queryOvenElements(uiRoot);
+    if (!parts) return null;
+    var target = parts.channel || parts.slot;
+    if (!target) return null;
+    var rect = target.getBoundingClientRect();
+    if (!rect.width && !rect.height) return null;
+    var center = clientRectCenterToWorld(rect);
+    var span = clientRectSpanToWorld(rect);
+    if (!center || !span) return null;
+    return {
+      machineId: machineId,
+      open: isOvenLidOpen(machineId),
+      centerX: center.x,
+      centerY: center.y,
+      channelX1: span.x1,
+      channelX2: span.x2,
+      channelY: span.y,
+      clientRect: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      },
+      channelEl: parts.channel,
+      slotEl: parts.slot,
+    };
+  }
+
+  function clientInExpandedRect(clientX, clientY, rect, padX, padY) {
+    if (!rect) return false;
+    return (
+      clientX >= rect.left - padX &&
+      clientX <= rect.right + padX &&
+      clientY >= rect.top - padY &&
+      clientY <= rect.bottom + padY
+    );
+  }
+
+  /**
+   * Padded hit-test on the heat oven channel. Returns slot descriptor when hit.
+   */
+  function hitTestOvenSlotAtClient(machineId, clientX, clientY) {
+    var slot = getOvenSlot(machineId);
+    if (!slot) return null;
+    if (!clientInExpandedRect(
+      clientX,
+      clientY,
+      slot.clientRect,
+      OVEN_HIT_PAD_CLIENT_X,
+      OVEN_HIT_PAD_CLIENT_Y
+    )) {
+      return null;
+    }
+    return makeOvenSlotPublic(slot);
+  }
+
+  function highlightOvenSlot(machineId) {
+    clearOvenMagnetHighlights();
+    var uiRoot = getMachineUiRoot(machineId);
+    if (!uiRoot) return;
+    var parts = queryOvenElements(uiRoot);
+    if (parts && parts.channel) {
+      parts.channel.classList.add('magnet-active');
+    }
+  }
+
+  function clearOvenMagnetHighlights() {
+    document.querySelectorAll('.fsm-heat-oven-channel.magnet-active').forEach(function (el) {
+      el.classList.remove('magnet-active');
+    });
+  }
+
   function ensureFiberLayer(machineId) {
     var mount = document.getElementById('lab-2d-mount');
     if (!mount) return null;
@@ -1014,7 +1124,7 @@
     if (typeof api.on === 'function') {
       [
         'ready', 'power', 'ovenLid', 'clampSelect', 'clampNudge', 'clampConfirm',
-        'clampLid', 'fiberPlaced', 'heatStart', 'heatComplete', 'alarm',
+        'clampLid', 'fiberPlaced', 'heatStart', 'heatProgress', 'heatComplete', 'alarm',
         'setPress', 'alignmentComplete', 'spliceStart', 'spliceComplete', 'button'
       ].forEach(function (evt) {
         var off = api.on(evt, function (payload) {
@@ -1598,6 +1708,13 @@
     findGrooveNearClient: findGrooveNearClient,
     highlightSplicerGroove: highlightSplicerGroove,
     clearSplicerMagnetHighlights: clearSplicerMagnetHighlights,
+    getOvenSlot: getOvenSlot,
+    hitTestOvenSlotAtClient: hitTestOvenSlotAtClient,
+    highlightOvenSlot: highlightOvenSlot,
+    clearOvenMagnetHighlights: clearOvenMagnetHighlights,
+    worldToClient: worldToClient,
+    OVEN_HIT_PAD_CLIENT_X: OVEN_HIT_PAD_CLIENT_X,
+    OVEN_HIT_PAD_CLIENT_Y: OVEN_HIT_PAD_CLIENT_Y,
     syncFiberPorts: syncFiberPorts,
     syncAllFiberPorts: syncAllFiberPorts,
     syncLidOverlays: syncLidOverlays,

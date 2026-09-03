@@ -418,6 +418,16 @@ body.lab-fusion-machine-dragging {
   cursor: grabbing;
 }
 
+.lab-fusion-fiber-layer .lab-fused-bridge-hit {
+  pointer-events: stroke;
+  cursor: grab;
+  stroke-width: 16;
+}
+
+.lab-fusion-fiber-layer .lab-fused-bridge-hit:active {
+  cursor: grabbing;
+}
+
 /* Closed clamp lids — always above pigtail (20) and docked fiber (18), even when machine is selected */
 .lab-fusion-lid-layer {
   position: absolute;
@@ -3203,6 +3213,59 @@ body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-ass
   filter: none;
 }
 
+.lab-splicer-fusion-bridge__glass {
+  stroke: #ffffff;
+  stroke-width: 1.15;
+  stroke-linecap: butt;
+  stroke-linejoin: miter;
+}
+
+.lab-splicer-fusion-bridge__joint {
+  fill: rgba(255, 255, 255, 0.3);
+  stroke: rgba(160, 220, 255, 0.5);
+  stroke-width: 0.5;
+  animation: lab-splicer-weld-joint-fade 2.5s ease-out forwards;
+}
+
+.lab-splicer-fusion-bridge__joint-glow {
+  fill: rgba(160, 220, 255, 0.12);
+  stroke: none;
+  animation: lab-splicer-weld-joint-fade 2.5s ease-out forwards;
+}
+
+body.lab-pigtail-dragging .lab-splicer-fusion-bridge__joint,
+body.lab-pigtail-dragging .lab-splicer-fusion-bridge__joint-glow {
+  opacity: 0;
+  animation: none;
+}
+
+.lab-pigtail__tail.is-fused-assembly {
+  cursor: grab;
+}
+
+.lab-pigtail__tail.is-fused-assembly:active {
+  cursor: grabbing;
+}
+
+.lab-splicer-fused-assembly {
+  pointer-events: none;
+}
+
+.lab-fused-bridge-hit {
+  pointer-events: stroke;
+  cursor: grab;
+  stroke-width: 16;
+}
+
+.lab-fused-bridge-hit:active {
+  cursor: grabbing;
+}
+
+@keyframes lab-splicer-weld-joint-fade {
+  0% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .lab-pigtail__tail.is-cleaved .lab-pigtail__cleave.is-strip-bare,
 .lab-pigtail__tail.is-cleaved.is-cleaver-docked .lab-pigtail__cleave {
   box-shadow: none;
@@ -3544,6 +3607,33 @@ body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-ass
 .lab-pigtail-sleeve.is-dragging {
   cursor: grabbing;
   opacity: 0.85;
+}
+
+.lab-pigtail-sleeve.is-heat-shrinking {
+  transition: height 0.08s linear, top 0.08s linear, filter 0.12s ease;
+  filter: brightness(1.05) saturate(1.08);
+}
+
+.lab-pigtail-sleeve.is-heat-shrunk {
+  filter: brightness(1.06) saturate(0.92);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 0 4px rgba(251, 191, 36, 0.22);
+}
+
+.lab-fused-oven-channel-jacket {
+  stroke: #facc15;
+  stroke-width: 2.15;
+  stroke-linecap: butt;
+}
+
+.lab-splicer-fused-assembly.is-heat-locked .lab-fused-bridge-hit,
+.lab-splicer-fused-assembly.is-heat-locked [data-pt-drag] {
+  pointer-events: none;
+}
+
+.lab-splicer-fused-assembly.is-oven-docked .lab-pigtail-fiber--bare[data-fusion-bridge] {
+  stroke-linecap: butt;
 }
 
 .lab-pigtail-sleeve.is-sliding {

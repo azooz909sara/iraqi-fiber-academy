@@ -350,6 +350,10 @@
                 filter 0.55s ease;
     cursor: pointer;
     perspective: 600px;
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-heat-oven-lid-btn{
+    display: none !important;
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-heat-oven-module{
+    /* Chamber stays permanently open for direct drop-in */
   }.lab-fusion-machine .fusion-splicer-machine .fsm-heat-oven-module.lid-open .fsm-heat-oven-lid{
     transform: rotateX(-105deg);
     filter: drop-shadow(0 8px 12px rgba(0,0,0,0.55));
@@ -653,6 +657,40 @@
   }@keyframes arc-pulse{
     0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.8; }
     100% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-fusion-weld-bridge{
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 1.5px;
+    background: rgba(255,255,255,0.55);
+    border-radius: 1px;
+    opacity: 0;
+    z-index: 8;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-fusion-weld-bridge.is-active{
+    opacity: 1;
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-fusion-weld-bridge::after{
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.28);
+    box-shadow: 0 0 6px rgba(160,220,255,0.45);
+    animation: fsm-weld-joint-fade 2.5s ease-out forwards;
+  }@keyframes fsm-weld-joint-fade{
+    0% { opacity: 1; transform: translate(-50%, -50%) scale(1.15); }
+    100% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); }
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-alignment-stage.is-fibers-fused .fsm-groove-fiber-l::after,
+  .lab-fusion-machine .fusion-splicer-machine .fsm-alignment-stage.is-fibers-fused .fsm-groove-fiber-r::after{
+    left: 0;
+    right: 0;
   }.lab-fusion-machine .fusion-splicer-machine .fsm-v-groove{
     position: absolute;
     left: 50%; top: 50%;
@@ -1312,6 +1350,19 @@
   box-shadow:
     0 0 8px rgba(0, 255, 255, 0.65) inset,
     0 0 14px rgba(0, 255, 200, 0.4);
+}
+
+.lab-fusion-machine .fusion-splicer-machine .fsm-heat-oven-channel.magnet-active {
+  outline: 2px solid rgba(255, 140, 0, 0.95);
+  outline-offset: 1px;
+  box-shadow:
+    0 0 12px 3px rgba(255, 106, 0, 0.75) inset,
+    0 0 24px 6px rgba(255, 80, 0, 0.45);
+  transition: box-shadow 0.12s ease, outline 0.12s ease;
+}
+
+.lab-fusion-machine .fusion-splicer-machine .fsm-heat-oven-channel.magnet-active .fsm-heat-oven-plate {
+  filter: brightness(1.12) saturate(1.1);
 }
 
 .lab-fusion-machine .fusion-splicer-machine .clamp-base-groove.splicer-dropzone-active {

@@ -190,7 +190,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       powered: true,
       selectedClamp: 'L',
       clampsClosed: { L: true, R: true },
-      ovenLidOpen: false,
+      ovenLidOpen: true,
       fiberPlaced: { L: false, R: false },
       alignment: { x: 0.0, y: 0.0 },
       stageOffset: { x: 0, y: 0 },
@@ -205,6 +205,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       moveTimer: null,
       heatInterval: null,
       active: false,
+      fibersFused: false,
     };
 
     var CLAMP_BASE = { L: { left: 4, top: 18 }, R: { right: 4, top: 18 } };
@@ -289,21 +290,21 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     }
 
     function setOvenLidOpen(open) {
-      state.ovenLidOpen = !!open;
+      state.ovenLidOpen = true;
       var mod = q('heatOvenModule');
-      if (mod) mod.classList.toggle('lid-open', state.ovenLidOpen);
+      if (mod) mod.classList.add('lid-open');
+      var lid = q('heatOvenLid');
+      if (lid) {
+        lid.classList.add('is-open');
+        lid.style.pointerEvents = 'none';
+      }
       var btn = q('heatOvenLidBtn');
-      if (btn) btn.textContent = state.ovenLidOpen ? 'OPEN' : 'LID';
-      emit('ovenLid', { open: state.ovenLidOpen });
+      if (btn) btn.style.display = 'none';
+      emit('ovenLid', { open: true });
     }
 
     function toggleOvenLid() {
-      if (!requirePower()) return;
-      setOvenLidOpen(!state.ovenLidOpen);
-      showToast(
-        state.ovenLidOpen ? 'Heat oven lid OPEN' : 'Heat oven lid CLOSED',
-        state.ovenLidOpen ? 'warning' : 'success'
-      );
+      setOvenLidOpen(true);
     }
 
     function selectClamp(side) {
@@ -516,7 +517,11 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     function heatPress() {
       if (!requirePower()) return;
       if (state.heating) return showToast('Heating already in progress', 'warning');
-      if (!state.ovenLidOpen) return showToast('Open heat oven lid first', 'warning');
+      if (boundMachineId && global.FtthLab && typeof FtthLab.canStartOvenHeat === 'function') {
+        if (!FtthLab.canStartOvenHeat(boundMachineId)) {
+          return showToast('Snap fused splice with heat-shrink sleeve into oven first', 'warning');
+        }
+      }
 
       state.heating = true;
       state.heatProgress = 0;
@@ -540,6 +545,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       state.heatInterval = setInterval(function () {
         state.heatProgress += 2;
         if (fill) fill.style.width = state.heatProgress + '%';
+        emit('heatProgress', { progress: state.heatProgress, machineId: boundMachineId });
         if (state.heatProgress >= 100) {
           clearInterval(state.heatInterval);
           state.heatInterval = null;
@@ -555,10 +561,10 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
             statusText.style.color = '';
           }
           showToast('HEAT: Complete', 'success');
-          emit('heatComplete', {});
+          emit('heatComplete', { machineId: boundMachineId });
         }
       }, 60);
-      emit('heatStart', {});
+      emit('heatStart', { machineId: boundMachineId });
     }
 
     function almPress() {
@@ -609,6 +615,45 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         asm.classList.remove('is-motor-aligning');
         asm.style.transform = '';
       });
+    }
+
+    function clearFusionVisual() {
+      state.fibersFused = false;
+      global.isFiberFused = false;
+      var stage = q('alignmentStage');
+      if (stage) {
+        stage.classList.remove('is-fibers-fused');
+        var bridge = stage.querySelector('.fsm-fusion-weld-bridge');
+        if (bridge) bridge.classList.remove('is-active');
+      }
+      if (boundMachineId && global.FtthLab && typeof global.FtthLab.clearSplicerFusionVisual === 'function') {
+        global.FtthLab.clearSplicerFusionVisual(boundMachineId);
+      }
+    }
+
+    function fuseFibersVisual() {
+      if (state.fibersFused) return;
+      state.fibersFused = true;
+      global.isFiberFused = true;
+      var stage = q('alignmentStage');
+      if (stage) {
+        stage.classList.add('is-fibers-fused');
+        var bridge = stage.querySelector('.fsm-fusion-weld-bridge');
+        if (!bridge) {
+          bridge = document.createElement('div');
+          bridge.className = 'fsm-fusion-weld-bridge';
+          bridge.setAttribute('aria-hidden', 'true');
+          var vGroove = stage.querySelector('.fsm-v-groove');
+          if (vGroove) vGroove.appendChild(bridge);
+          else stage.appendChild(bridge);
+        }
+        bridge.classList.add('is-active');
+      }
+      if (boundMachineId && global.FtthLab && typeof global.FtthLab.fuseSplicerFibers === 'function') {
+        global.FtthLab.fuseSplicerFibers(boundMachineId);
+      } else {
+        emit('fuseFibers', { machineId: boundMachineId });
+      }
     }
 
     function finishSystemReset() {
@@ -663,6 +708,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       }
       if (glow) glow.classList.remove('active');
       if (ovenLed) ovenLed.classList.remove('on');
+      clearFusionVisual();
       clearAllFibers();
       showToast('System RESET — empty chamber', 'warning');
       emit('reset', { machineId: boundMachineId });
@@ -816,11 +862,12 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
           var lossEst = q('lossEst');
           if (lossEst) lossEst.textContent = 'EST.LOSS: 0.01 dB';
           showToast('Splice Complete — Loss: 0.01 dB', 'success');
+          fuseFibersVisual();
           setTimeout(function () {
             if (ledArc) ledArc.classList.remove('orange-on');
             if (arcGlow) arcGlow.classList.remove('active');
           }, 3000);
-          emit('spliceComplete', { lossDb: 0.01 });
+          emit('spliceComplete', { lossDb: 0.01, machineId: boundMachineId });
         }
       }, 80);
     }
@@ -955,7 +1002,6 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         }
         if (t.closest('.fsm-heat-oven-lid') || t.closest('.fsm-heat-oven-lid-btn')) {
           e.stopPropagation();
-          toggleOvenLid();
           return;
         }
         if (t.closest('.fsm-clamp-assembly-l')) {
@@ -1071,7 +1117,6 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       if (key === 'o' || key === 'O') {
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
-          toggleOvenLid();
         }
       }
     };
@@ -1092,7 +1137,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
 
     selectClamp('L');
     clearAllFibers();
-    setOvenLidOpen(false);
+    setOvenLidOpen(true);
     var xVal = q('xVal');
     var yVal = q('yVal');
     var lossEst = q('lossEst');
@@ -1139,6 +1184,8 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       setPress: setPress,
       finishAligning: finishAligning,
       runArcSpliceSequence: runArcSpliceSequence,
+      fuseFibersVisual: fuseFibersVisual,
+      clearFusionVisual: clearFusionVisual,
       xPress: xPress,
       oPress: oPress,
       setActive: setActive,
