@@ -613,9 +613,50 @@
 
   /**
    * Sleeve pose locked to fiber path coordinate (sleeveAlong: 0% tip → 100% strain relief).
+   * When heat-shrunk, pose locks to the fused weld point and cable tangent at the tip.
    */
+  function getPigtailFiberTangentRotAtTip(p) {
+    if (!p) return 0;
+    var densePts = fiberRenderPathPointsDense(p);
+    if (!densePts || densePts.length < 2) {
+      return fiberPathTangentRotDeg(p.bx - p.ax, p.by - p.ay);
+    }
+    var total = polylineLength(densePts);
+    var tip = densePts[densePts.length - 1];
+    var lookBack = Math.min(28, Math.max(8, total * 0.12));
+    var near = pointAtPathDistance(densePts, Math.max(0, total - lookBack));
+    var dx = tip.x - near.x;
+    var dy = tip.y - near.y;
+    if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) {
+      var prev = densePts[densePts.length - 2];
+      dx = tip.x - prev.x;
+      dy = tip.y - prev.y;
+    }
+    return fiberPathTangentRotDeg(dx, dy);
+  }
+
+  function getShrunkSleeveWeldPose(p) {
+    if (!p) return { x: 0, y: 0, rot: 0 };
+    var rot = getPigtailFiberTangentRotAtTip(p);
+    if (p.splicerWeldMachineId) {
+      var weld = getFusedWeldWorld(p.splicerWeldMachineId);
+      if (weld) return { x: weld.x, y: weld.y, rot: rot };
+    }
+    return { x: p.bx, y: p.by, rot: rot };
+  }
+
   function sleeveGeometry(p) {
     var size = getSleeveSizePx();
+    if (p.isSleeveShrunk) {
+      var weldPose = getShrunkSleeveWeldPose(p);
+      return {
+        x: weldPose.x,
+        y: weldPose.y,
+        rot: weldPose.rot,
+        w: size.w,
+        h: size.h,
+      };
+    }
     var pts = fiberSleevePathPoints(p);
     var total = polylineLength(pts);
     var along = typeof p.sleeveAlong === 'number'
@@ -663,7 +704,14 @@
     el.classList.toggle('is-heat-shrinking', !!p.isSleeveShrunk);
   }
 
+  function repaintPigtailSleeveDom(p) {
+    if (!layer || !p || !p.hasSleeve) return;
+    var el = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
+    if (el) updateSleeveElement(p, el);
+  }
+
   function dragSleeveAlongPath(p, wx, wy) {
+    if (p && p.isSleeveShrunk) return { eject: false, locked: true };
     var pts = fiberSleevePathPoints(p);
     var total = polylineLength(pts);
     var size = getSleeveSizePx();
@@ -2867,6 +2915,8 @@
       if (aBtn) aBtn.setAttribute('style', connectorStyle(partner));
       if (bBtn) bBtn.setAttribute('style', tailStyle(partner) + ';--strip-peel:' + (partner.stripPeel || 0).toFixed(3) + ';');
     }
+    repaintPigtailSleeveDom(primary);
+    if (partner) repaintPigtailSleeveDom(partner);
     syncFusedAssemblyVisuals(machineId);
     if (document.body.classList.contains('lab-pigtail-dragging')) {
       applyOvenMagnetDuringFusedDrag(machineId);
@@ -4293,6 +4343,7 @@
   function ejectSleeve(id, wx, wy) {
     var p = findPigtail(id);
     if (!p || !p.hasSleeve) return null;
+    if (p.isSleeveShrunk) return null;
     var g = sleeveGeometry(p);
     var spawnX = typeof wx === 'number' ? wx : g.x;
     var spawnY = typeof wy === 'number' ? wy : g.y;
@@ -5888,6 +5939,7 @@
         var id = btn.getAttribute('data-pt-sleeve');
         var p = findPigtail(id);
         if (!p || !p.hasSleeve) return;
+        if (p.isSleeveShrunk) return;
         if (isPigtailOvenDragLocked(p)) return;
         selectPigtail(id, { skipRebuild: true });
         btn.classList.add('is-dragging');
