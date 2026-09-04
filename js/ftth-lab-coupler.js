@@ -79,6 +79,7 @@
     couplers.forEach(function (c) {
       if (typeof c.lossDb !== 'number') c.lossDb = COUPLER_LOSS_DB;
       if (!c.polish) c.polish = 'APC';
+      delete c.rotation;
     });
     seq = snap.seq || 0;
     selection = snap.selection || { kind: 'none', couplerId: null };
@@ -373,22 +374,18 @@
       '<stop offset="100%" stop-color="' + bodyDeep + '"/>' +
       '</linearGradient>' +
       '</defs>' +
-      /* Main barrel — height fills most of view so ports ≈ connector width */
       '<rect x="4" y="6" width="72" height="24" rx="3.5" ry="3.5" ' +
       'fill="url(#' + gBody + ')" stroke="' + bodyHi + '" stroke-width="1.25"/>' +
-      /* Receptacle mouths — proportioned to SC head face */
       '<rect x="5.5" y="9" width="9" height="18" rx="1.6" fill="rgba(15,23,42,0.42)"/>' +
       '<rect x="65.5" y="9" width="9" height="18" rx="1.6" fill="rgba(15,23,42,0.42)"/>' +
       '<circle cx="10" cy="18" r="2.6" fill="#e2e8f0" stroke="#94a3b8" stroke-width="0.5"/>' +
       '<circle cx="70" cy="18" r="2.6" fill="#e2e8f0" stroke="#94a3b8" stroke-width="0.5"/>' +
       '<circle cx="10" cy="18" r="1.1" fill="#64748b"/>' +
       '<circle cx="70" cy="18" r="1.1" fill="#64748b"/>' +
-      /* Silver clip accents */
       '<rect x="22" y="4" width="10" height="2.4" rx="0.7" fill="#cbd5e1"/>' +
       '<rect x="48" y="4" width="10" height="2.4" rx="0.7" fill="#cbd5e1"/>' +
       '<rect x="22" y="29.6" width="10" height="2.4" rx="0.7" fill="#94a3b8"/>' +
       '<rect x="48" y="29.6" width="10" height="2.4" rx="0.7" fill="#94a3b8"/>' +
-      /* Central mounting flange */
       '<rect x="35" y="2.5" width="10" height="31" rx="1.6" ' +
       'fill="' + body + '" stroke="' + bodyHi + '" stroke-width="1.15"/>' +
       '</svg>'
@@ -610,7 +607,6 @@
     var c = findCoupler(id);
     if (!c) return null;
     var face = port === 'B' || port === 'b' ? 'B' : 'A';
-    /* Port hit targets sit on the left/right rims of the coupler box */
     var px = face === 'B' ? (c.x + CPL_W - 5.5) : (c.x + 5.5);
     var py = c.y + CPL_H / 2;
     return {
@@ -627,6 +623,10 @@
 
   function isCouplerId(id) {
     return !!findCoupler(id);
+  }
+
+  function getCouplerIds() {
+    return couplers.map(function (c) { return c.id; });
   }
 
   function applyCouplerLaserGlow(targets) {
@@ -681,6 +681,7 @@
       FtthLab.getCouplerPortWorld = getCouplerPortWorld;
       FtthLab.getCouplerOppositePort = getCouplerOppositePort;
       FtthLab.isCouplerId = isCouplerId;
+      FtthLab.getCouplerIds = getCouplerIds;
 
       var prevGlow = FtthLab.applyFiberLaserGlow;
       FtthLab.applyFiberLaserGlow = function (targets) {

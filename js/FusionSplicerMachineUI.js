@@ -619,7 +619,6 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
 
     function clearFusionVisual() {
       state.fibersFused = false;
-      global.isFiberFused = false;
       var stage = q('alignmentStage');
       if (stage) {
         stage.classList.remove('is-fibers-fused');
@@ -628,6 +627,10 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       }
       if (boundMachineId && global.FtthLab && typeof global.FtthLab.clearSplicerFusionVisual === 'function') {
         global.FtthLab.clearSplicerFusionVisual(boundMachineId);
+      }
+      if (global.FtthLab && typeof global.FtthLab.getFusedAssemblyOpticalPairs === 'function') {
+        var pairs = global.FtthLab.getFusedAssemblyOpticalPairs();
+        global.isFiberFused = !!(pairs && pairs.length);
       }
     }
 

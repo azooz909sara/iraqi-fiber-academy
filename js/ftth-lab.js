@@ -996,7 +996,7 @@
   /* ─── Optical Power Meter — live topology & dBm probe ─── */
 
   var OPM_NOISE_DBM = -70;
-  var COUPLER_PASS_LOSS_DB = 0.2;
+  var COUPLER_PASS_LOSS_DB = 0.3;
   var PIGTAIL_CONN_LOSS_DB = 0.2;
   var PIGTAIL_MISMATCH_DB = 3.0;
   var MATCHED_CONNECTOR_DB = 0.2;
@@ -1149,6 +1149,11 @@
     return Math.round(shown * 100) / 100;
   }
 
+  function normalizeCouplerFace(port) {
+    var s = String(port == null ? 'A' : port).toUpperCase();
+    return (s === 'B' || s === '2') ? 'B' : 'A';
+  }
+
   function portKeyFromAtt(att) {
     if (!att || !att.owner) return null;
     if (att.owner === 'olt') {
@@ -1158,7 +1163,7 @@
       return 'spl:' + att.splitterId + ':' + att.port;
     }
     if (att.owner === 'coupler') {
-      return 'cpl:' + att.couplerId + ':' + (att.port || 'A');
+      return 'cpl:' + att.couplerId + ':' + normalizeCouplerFace(att.port);
     }
     if (att.owner === 'vfl') {
       return 'vfl:' + att.vflId;
@@ -1389,6 +1394,151 @@
     adj[b].push({ to: a, loss: lossDb, parts: parts });
   }
 
+  function collectCouplerIdsFromGraph(pcords, pigtails, extraIds) {
+    var couplerIds = {};
+    function mark(cid) {
+      if (cid) couplerIds[cid] = true;
+    }
+    var ei;
+    for (ei = 0; extraIds && ei < extraIds.length; ei++) mark(extraIds[ei]);
+    pcords.forEach(function (c) {
+      [c.sideA, c.sideB].forEach(function (att) {
+        if (att && att.owner === 'coupler') mark(att.couplerId);
+      });
+    });
+    pigtails.forEach(function (p) {
+      if (p.connector && p.connector.owner === 'coupler') mark(p.connector.couplerId);
+    });
+    return couplerIds;
+  }
+
+  function collectHostsAtCouplerFace(graph, cid, face) {
+    var hosts = {};
+    function add(key) {
+      if (key) hosts[key] = true;
+    }
+    (graph.pcords || []).forEach(function (c) {
+      var sides = [
+        { att: c.sideA, other: c.sideB, otherEnd: 'B', freeOther: c.freeB },
+        { att: c.sideB, other: c.sideA, otherEnd: 'A', freeOther: c.freeA },
+      ];
+      sides.forEach(function (s) {
+        if (!s.att || s.att.owner !== 'coupler' || s.att.couplerId !== cid) return;
+        if (normalizeCouplerFace(s.att.port) !== face) return;
+        var otherKey = portKeyFromAtt(s.other);
+        if (otherKey) add(otherKey);
+        else if (s.freeOther) add('pcord:' + c.id + ':' + s.otherEnd);
+      });
+    });
+    (graph.pigtails || []).forEach(function (p) {
+      var att = p.connector;
+      if (!att || att.owner !== 'coupler' || att.couplerId !== cid) return;
+      if (normalizeCouplerFace(att.port) !== face) return;
+      add('pigtail:' + p.id + ':tail');
+      add('pigtail:' + p.id + ':conn');
+    });
+    return Object.keys(hosts);
+  }
+
+  function addCouplerPassThroughEdges(adj, graph, pcords, pigtails) {
+    var extraIds = typeof api.getCouplerIds === 'function' ? api.getCouplerIds() : [];
+    var couplerIds = collectCouplerIdsFromGraph(pcords, pigtails, extraIds);
+    Object.keys(couplerIds).forEach(function (cid) {
+      var passLoss = COUPLER_PASS_LOSS_DB;
+      if (typeof api.getCouplerPassLossDb === 'function') {
+        var custom = Number(api.getCouplerPassLossDb(cid));
+        if (isFinite(custom) && custom >= 0) passLoss = custom;
+      }
+      var portA = 'cpl:' + cid + ':A';
+      var portB = 'cpl:' + cid + ':B';
+      var couplerParts = { coupler: passLoss };
+      addUndirectedEdge(adj, portA, portB, passLoss, couplerParts);
+
+      var hostsA = collectHostsAtCouplerFace(graph, cid, 'A');
+      var hostsB = collectHostsAtCouplerFace(graph, cid, 'B');
+      var ai;
+      var bi;
+      for (ai = 0; ai < hostsA.length; ai++) {
+        for (bi = 0; bi < hostsB.length; bi++) {
+          if (hostsA[ai] !== hostsB[bi]) {
+            addUndirectedEdge(adj, hostsA[ai], hostsB[bi], passLoss, couplerParts);
+          }
+        }
+      }
+    });
+  }
+
+  function expandProbeKeys(probeKey, graph) {
+    var keys = [];
+    var seen = {};
+    function add(k) {
+      if (!k || seen[k]) return;
+      seen[k] = true;
+      keys.push(k);
+    }
+    add(probeKey);
+    if (!graph || !probeKey) return keys;
+
+    var opmMatch = /^opm:(.+)$/.exec(probeKey);
+    if (opmMatch) {
+      var opmId = opmMatch[1];
+      (graph.pigtails || []).forEach(function (p) {
+        var att = p.connector;
+        if (!att || att.owner !== 'opm' || att.opmId !== opmId) return;
+        add('pigtail:' + p.id + ':tail');
+        add('pigtail:' + p.id + ':conn');
+      });
+      (graph.pcords || []).forEach(function (c) {
+        var sides = [
+          { att: c.sideA, end: 'A', other: c.sideB, otherEnd: 'B', freeOther: c.freeB },
+          { att: c.sideB, end: 'B', other: c.sideA, otherEnd: 'A', freeOther: c.freeA },
+        ];
+        sides.forEach(function (s) {
+          if (!s.att || s.att.owner !== 'opm' || s.att.opmId !== opmId) return;
+          add('pcord:' + c.id + ':' + s.end);
+          var otherKey = portKeyFromAtt(s.other);
+          if (otherKey) add(otherKey);
+          else if (s.freeOther) add('pcord:' + c.id + ':' + s.otherEnd);
+        });
+      });
+    }
+    return keys;
+  }
+
+  function registerFusionWeldEdges(adj, pigtails, fusedSeen) {
+    function addFusedWeldEdge(idA, idB, dedupeKey) {
+      if (!idA || !idB || idA === idB) return;
+      var seenKey = dedupeKey || [idA, idB].sort().join('|');
+      if (fusedSeen[seenKey]) return;
+      fusedSeen[seenKey] = true;
+      var weldParts = { splice: FUSED_WELD_LOSS_DB };
+      addUndirectedEdge(
+        adj,
+        'pigtail:' + idA + ':tail',
+        'pigtail:' + idB + ':tail',
+        FUSED_WELD_LOSS_DB,
+        weldParts
+      );
+    }
+
+    if (typeof api.getFusedAssemblyOpticalPairs === 'function') {
+      var fusedPairs = api.getFusedAssemblyOpticalPairs() || [];
+      fusedPairs.forEach(function (pair) {
+        if (!pair || !pair.leftId || !pair.rightId) return;
+        var key = pair.assemblyId || pair.fusionAssemblyId ||
+          [pair.leftId, pair.rightId].sort().join('|');
+        addFusedWeldEdge(pair.leftId, pair.rightId, key);
+      });
+    }
+
+    pigtails.forEach(function (fp) {
+      var partnerId = fp.fusedPartnerId;
+      if (!partnerId) return;
+      var key = fp.fusionAssemblyId || [fp.id, partnerId].sort().join('|');
+      addFusedWeldEdge(fp.id, partnerId, key);
+    });
+  }
+
   function buildOpticalAdjacency() {
     var adj = {};
     var wavelengthNm = getOpmWavelengthNm();
@@ -1447,46 +1597,7 @@
     }
 
     var fusedSeen = {};
-    function addFusedWeldEdge(idA, idB, machineId) {
-      if (!idA || !idB || idA === idB) return;
-      var seenKey = machineId || [idA, idB].sort().join('|');
-      if (fusedSeen[seenKey]) return;
-      fusedSeen[seenKey] = true;
-      var weldParts = { splice: FUSED_WELD_LOSS_DB };
-      addUndirectedEdge(
-        adj,
-        'pigtail:' + idA + ':tail',
-        'pigtail:' + idB + ':tail',
-        FUSED_WELD_LOSS_DB,
-        weldParts
-      );
-    }
-
-    for (i = 0; i < pigtails.length; i++) {
-      var fp = pigtails[i];
-      var fmid = fp.splicerWeldMachineId;
-      if (!fmid) continue;
-      var partnerId = fp.fusedPartnerId;
-      if (!partnerId) {
-        for (j = 0; j < pigtails.length; j++) {
-          if (pigtails[j].id !== fp.id && pigtails[j].splicerWeldMachineId === fmid) {
-            partnerId = pigtails[j].id;
-            break;
-          }
-        }
-      }
-      if (!partnerId) continue;
-      addFusedWeldEdge(fp.id, partnerId, fmid);
-    }
-
-    if (typeof api.getFusedAssemblyOpticalPairs === 'function') {
-      var fusedPairs = api.getFusedAssemblyOpticalPairs() || [];
-      for (i = 0; i < fusedPairs.length; i++) {
-        var pair = fusedPairs[i];
-        if (!pair || !pair.leftId || !pair.rightId) continue;
-        addFusedWeldEdge(pair.leftId, pair.rightId, pair.machineId);
-      }
-    }
+    registerFusionWeldEdges(adj, pigtails, fusedSeen);
 
     if (typeof api.getOpticalSplitters === 'function') {
       var splitters = api.getOpticalSplitters() || [];
@@ -1508,35 +1619,7 @@
       }
     }
 
-    if (typeof api.getCouplerOppositePort === 'function') {
-      var couplerIds = {};
-      pcords.forEach(function (c) {
-        [c.sideA, c.sideB].forEach(function (att) {
-          if (att && att.owner === 'coupler' && att.couplerId) {
-            couplerIds[att.couplerId] = true;
-          }
-        });
-      });
-      pigtails.forEach(function (p) {
-        if (p.connector && p.connector.owner === 'coupler' && p.connector.couplerId) {
-          couplerIds[p.connector.couplerId] = true;
-        }
-      });
-      Object.keys(couplerIds).forEach(function (cid) {
-        var passLoss = COUPLER_PASS_LOSS_DB;
-        if (typeof api.getCouplerPassLossDb === 'function') {
-          var custom = Number(api.getCouplerPassLossDb(cid));
-          if (isFinite(custom) && custom >= 0) passLoss = custom;
-        }
-        addUndirectedEdge(
-          adj,
-          'cpl:' + cid + ':A',
-          'cpl:' + cid + ':B',
-          passLoss,
-          { coupler: passLoss }
-        );
-      });
-    }
+    addCouplerPassThroughEdges(adj, graph, pcords, pigtails);
 
     return adj;
   }
@@ -1560,11 +1643,14 @@
     var graph = typeof api.getFiberLaserGraph === 'function'
       ? api.getFiberLaserGraph()
       : { pcords: [], pigtails: [] };
+    var probeKeys = expandProbeKeys(probeKey, graph);
+    var probeKeySet = {};
+    probeKeys.forEach(function (k) { probeKeySet[k] = true; });
     var probeWavelengthNm = getOpmWavelengthNm();
     var si;
     for (si = 0; si < sources.length; si++) {
       var src = sources[si];
-      if (!adj[src.key]) continue;
+      if (!adj[src.key]) adj[src.key] = [];
       /* OLS emits at its calibrated λ — skip OLT SFP wavelength mismatch penalty */
       var wlPenalty = (src.kind === 'ols')
         ? 0
@@ -1581,7 +1667,7 @@
       var bestForSrc = null;
       while (qi < queue.length) {
         var cur = queue[qi++];
-        if (cur.key === probeKey) {
+        if (probeKeySet[cur.key]) {
           if (!bestForSrc || cur.loss < bestForSrc.loss) {
             bestForSrc = {
               loss: cur.loss,

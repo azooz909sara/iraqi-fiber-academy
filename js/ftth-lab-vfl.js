@@ -413,7 +413,9 @@
     }
 
     function normalizeCplPort(port) {
-      return (port === 'B' || port === 'b') ? 'B' : 'A';
+      var s = String(port == null ? 'A' : port).toUpperCase();
+      if (s === 'B' || s === '2') return 'B';
+      return 'A';
     }
 
     function oppositeCplPort(port) {
@@ -423,32 +425,54 @@
       return normalizeCplPort(port) === 'B' ? 'A' : 'B';
     }
 
-    function findFiberOnCouplerPort(cid, portId) {
+    function couplerAttachment(att) {
+      if (!att || att.owner !== 'coupler' || !att.couplerId) return null;
+      return {
+        couplerId: att.couplerId,
+        port: normalizeCplPort(att.port),
+      };
+    }
+
+    function buildCouplerFiberMap() {
+      var map = {};
+      function add(cid, face, fiber) {
+        if (!map[cid]) map[cid] = { A: [], B: [] };
+        map[cid][face].push(fiber);
+      }
+      (graph.pcords || []).forEach(function (c) {
+        var sides = [
+          { att: c.sideA, fromEnd: 'A' },
+          { att: c.sideB, fromEnd: 'B' },
+        ];
+        sides.forEach(function (s) {
+          var cpl = couplerAttachment(s.att);
+          if (!cpl) return;
+          add(cpl.couplerId, cpl.port, { kind: 'pcord', id: c.id, fromEnd: s.fromEnd });
+        });
+      });
+      (graph.pigtails || []).forEach(function (p) {
+        var cpl = couplerAttachment(p.connector);
+        if (!cpl) return;
+        add(cpl.couplerId, cpl.port, { kind: 'pigtail', id: p.id });
+      });
+      return map;
+    }
+
+    function isFiberLit(fiber) {
+      if (!fiber) return false;
+      return fiber.kind === 'pcord' ? !!pcords[fiber.id] : !!pigtails[fiber.id];
+    }
+
+    function findFibersOnCouplerPort(cid, portId) {
       var face = normalizeCplPort(portId);
-      var i;
-      var att;
-      for (i = 0; i < (graph.pcords || []).length; i++) {
-        var c = graph.pcords[i];
-        att = c.sideA;
-        if (att && att.owner === 'coupler' && att.couplerId === cid &&
-            normalizeCplPort(att.port) === face) {
-          return { kind: 'pcord', id: c.id, fromEnd: 'A' };
-        }
-        att = c.sideB;
-        if (att && att.owner === 'coupler' && att.couplerId === cid &&
-            normalizeCplPort(att.port) === face) {
-          return { kind: 'pcord', id: c.id, fromEnd: 'B' };
-        }
-      }
-      for (i = 0; i < (graph.pigtails || []).length; i++) {
-        var p = graph.pigtails[i];
-        att = p.connector;
-        if (att && att.owner === 'coupler' && att.couplerId === cid &&
-            normalizeCplPort(att.port) === face) {
-          return { kind: 'pigtail', id: p.id };
-        }
-      }
-      return null;
+      var map = buildCouplerFiberMap();
+      var ports = map[cid];
+      return ports ? (ports[face] || []).slice() : [];
+    }
+
+    function findFiberOnCouplerPort(cid, portId) {
+      var list = findFibersOnCouplerPort(cid, portId);
+      return list.length ? list[0] : null;
     }
 
     /**
@@ -456,11 +480,7 @@
      * Light on face A passes to face B (and reverse) at full source intensity.
      */
     function injectCoupler(cid, entryPort) {
-      if (!cid || !entryPort) return;
-      if (global.FtthLab && typeof FtthLab.isCouplerId === 'function' &&
-          !FtthLab.isCouplerId(cid)) {
-        return;
-      }
+      if (!cid || entryPort == null) return;
       var face = normalizeCplPort(entryPort);
       var key = cid + ':' + face;
       if (visitedCplEntry[key]) return;
@@ -468,10 +488,59 @@
       couplerPass[cid] = true;
 
       var exitFace = oppositeCplPort(face);
-      var fiber = findFiberOnCouplerPort(cid, exitFace);
-      if (!fiber) return;
-      if (fiber.kind === 'pcord') injectPcord(fiber.id, fiber.fromEnd);
-      else injectPigtail(fiber.id);
+      var fibers = findFibersOnCouplerPort(cid, exitFace);
+      var fi;
+      for (fi = 0; fi < fibers.length; fi++) {
+        var fiber = fibers[fi];
+        if (fiber.kind === 'pcord') injectPcord(fiber.id, fiber.fromEnd);
+        else injectPigtail(fiber.id, { enteredViaCoupler: true });
+      }
+    }
+
+    /**
+     * After any fiber is lit, bridge every coupler whose opposite port is also
+     * seated so VFL / power traverse A↔B even if the first hop missed a port.
+     */
+    function bridgeCouplerPassThrough() {
+      var fiberMap = buildCouplerFiberMap();
+      var changed = true;
+      var guard = 0;
+      while (changed && guard < 24) {
+        changed = false;
+        guard += 1;
+        Object.keys(fiberMap).forEach(function (cid) {
+          var ports = fiberMap[cid];
+          if (!ports.A.length || !ports.B.length) return;
+          var aLit = ports.A.some(isFiberLit);
+          var bLit = ports.B.some(isFiberLit);
+          if (!aLit && !bLit) return;
+          couplerPass[cid] = true;
+          if (aLit) {
+            ports.B.forEach(function (fiber) {
+              if (isFiberLit(fiber)) return;
+              if (fiber.kind === 'pcord') {
+                injectPcord(fiber.id, fiber.fromEnd);
+                changed = true;
+              } else {
+                injectPigtail(fiber.id, { enteredViaCoupler: true });
+                changed = true;
+              }
+            });
+          }
+          if (bLit) {
+            ports.A.forEach(function (fiber) {
+              if (isFiberLit(fiber)) return;
+              if (fiber.kind === 'pcord') {
+                injectPcord(fiber.id, fiber.fromEnd);
+                changed = true;
+              } else {
+                injectPigtail(fiber.id, { enteredViaCoupler: true });
+                changed = true;
+              }
+            });
+          }
+        });
+      }
     }
 
     function emitFromSplitterPort(sid, portSpec, intensity) {
@@ -598,7 +667,8 @@
     }
 
     /** Light enters at SC connector; exits the far open end (tail or connector). */
-    function injectPigtail(id) {
+    function injectPigtail(id, opts) {
+      opts = opts || {};
       if (!id) return;
       var p = findPigtail(graph, id);
       if (!p) return;
@@ -612,6 +682,10 @@
         return;
       }
 
+      var connAtt = p.connector;
+      if (connAtt && connAtt.owner === 'coupler' && !opts.enteredViaCoupler) {
+        injectCoupler(connAtt.couplerId, connAtt.port);
+      }
       resolvePigtailFarExit(p);
       /* Tail parked on splice / termination — light stops at the tray */
     }
@@ -633,6 +707,8 @@
         }
       });
     });
+
+    bridgeCouplerPassThrough();
 
     return {
       mode: activeEmitMode(),

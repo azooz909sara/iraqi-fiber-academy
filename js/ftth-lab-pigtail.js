@@ -77,8 +77,151 @@
   var history = [];
   var historyIndex = -1;
   var historyLocked = false;
-  /** Post-arc weld assemblies — left/right pigtails move as one unit until RESET. */
+  /** Post-arc weld assemblies — keyed by fusionAssemblyId (one record per fused pair). */
   var fusedAssemblies = {};
+
+  function makeFusionAssemblyId(leftId, rightId) {
+    if (!leftId || !rightId) return null;
+    return leftId < rightId
+      ? ('fa:' + leftId + ':' + rightId)
+      : ('fa:' + rightId + ':' + leftId);
+  }
+
+  function isFusionAssemblyPermanent(asm) {
+    return !!(asm && (asm.permanent || asm.sleeveShrunk));
+  }
+
+  function isPigtailFusionPermanent(p) {
+    if (!p) return false;
+    if (p.isSleeveShrunk || p.fusionPermanent) return true;
+    var asmId = p.fusionAssemblyId;
+    return !!(asmId && isFusionAssemblyPermanent(fusedAssemblies[asmId]));
+  }
+
+  function getPigtailFusionAssemblyId(p) {
+    if (!p) return null;
+    if (p.fusionAssemblyId && fusedAssemblies[p.fusionAssemblyId]) {
+      return p.fusionAssemblyId;
+    }
+    if (p.fusedPartnerId) {
+      var partner = findPigtail(p.fusedPartnerId);
+      var derived = partner ? makeFusionAssemblyId(p.id, partner.id) : null;
+      if (derived && fusedAssemblies[derived]) return derived;
+    }
+    /* Legacy: registry keyed by splicer machine id (single pair per machine). */
+    if (p.splicerWeldMachineId && fusedAssemblies[p.splicerWeldMachineId]) {
+      var legacy = fusedAssemblies[p.splicerWeldMachineId];
+      if (legacy && (legacy.leftId === p.id || legacy.rightId === p.id)) {
+        return p.splicerWeldMachineId;
+      }
+    }
+    return null;
+  }
+
+  function getFusionAssemblyMachineId(assemblyId) {
+    var asm = assemblyId && fusedAssemblies[assemblyId];
+    return asm && asm.machineId ? asm.machineId : null;
+  }
+
+  /** Map splicer machine id → fusion assembly id (registry is keyed by fusionAssemblyId). */
+  function findFusionAssemblyByMachineId(machineId, prefs) {
+    prefs = prefs || {};
+    if (!machineId) return null;
+    if (fusedAssemblies[machineId]) return machineId;
+    var candidates = [];
+    Object.keys(fusedAssemblies).forEach(function (aid) {
+      var asm = fusedAssemblies[aid];
+      if (asm && asm.machineId === machineId) candidates.push(aid);
+    });
+    if (!candidates.length) return null;
+    if (prefs.preferDocked) {
+      for (var i = 0; i < candidates.length; i++) {
+        if (fusedAssemblies[candidates[i]].isOvenDocked) return candidates[i];
+      }
+    }
+    if (prefs.preferHeating) {
+      for (var j = 0; j < candidates.length; j++) {
+        var phase = fusedAssemblies[candidates[j]].heatPhase;
+        if (phase === 'heating' || phase === 'docked') return candidates[j];
+      }
+    }
+    return candidates[candidates.length - 1];
+  }
+
+  function resolveFusionAssemblyId(idOrMachineId, prefs) {
+    if (!idOrMachineId) return null;
+    if (fusedAssemblies[idOrMachineId]) return idOrMachineId;
+    return findFusionAssemblyByMachineId(idOrMachineId, prefs || {});
+  }
+
+  function syncGlobalFiberFusedFlag() {
+    if (!global.__fiberFusedMachines) global.__fiberFusedMachines = {};
+    global.__fiberFusedMachines = {};
+    Object.keys(fusedAssemblies).forEach(function (assemblyId) {
+      var asm = fusedAssemblies[assemblyId];
+      if (asm && asm.machineId) global.__fiberFusedMachines[asm.machineId] = true;
+    });
+    global.isFiberFused = Object.keys(fusedAssemblies).length > 0;
+  }
+
+  function rebuildFusedAssemblyRegistry() {
+    var next = {};
+    Object.keys(fusedAssemblies).forEach(function (key) {
+      var asm = fusedAssemblies[key];
+      if (!asm || !asm.leftId || !asm.rightId) return;
+      var fusionId = asm.fusionAssemblyId || makeFusionAssemblyId(asm.leftId, asm.rightId);
+      asm.fusionAssemblyId = fusionId;
+      if (!asm.machineId && key.indexOf('fa:') !== 0) asm.machineId = key;
+      next[fusionId] = asm;
+    });
+    fusedAssemblies = next;
+    pigtails.forEach(function (p) {
+      if (!p || isPigtailFusionPermanent(p)) return;
+      if (p.fusionAssemblyId && fusedAssemblies[p.fusionAssemblyId]) return;
+      if (!p.splicerWeldMachineId && !p.fusedPartnerId) return;
+      var partner = p.fusedPartnerId ? findPigtail(p.fusedPartnerId) : null;
+      if (!partner) {
+        pigtails.forEach(function (other) {
+          if (other.id === p.id) return;
+          if (other.splicerWeldMachineId === p.splicerWeldMachineId &&
+              other.splicerWeldMachineId) {
+            partner = other;
+          }
+        });
+      }
+      if (!partner) return;
+      var fusionId = makeFusionAssemblyId(p.id, partner.id);
+      if (!fusionId) return;
+      p.fusionAssemblyId = fusionId;
+      partner.fusionAssemblyId = fusionId;
+      p.fusedPartnerId = partner.id;
+      partner.fusedPartnerId = p.id;
+      if (!fusedAssemblies[fusionId]) {
+        fusedAssemblies[fusionId] = {
+          fusionAssemblyId: fusionId,
+          machineId: p.splicerWeldMachineId,
+          leftId: fusionId.indexOf(p.id) === 3 ? p.id : partner.id,
+          rightId: fusionId.indexOf(partner.id) > 0 ? partner.id : p.id,
+          sleeveShrunk: !!(p.isSleeveShrunk || partner.isSleeveShrunk),
+          permanent: isPigtailFusionPermanent(p) || isPigtailFusionPermanent(partner),
+        };
+      }
+    });
+    pigtails.forEach(function (p) {
+      if (!p) return;
+      var asmId = getPigtailFusionAssemblyId(p);
+      if (!asmId) return;
+      p.fusionAssemblyId = asmId;
+      var partner = getFusedPartner(p);
+      if (partner) {
+        partner.fusionAssemblyId = asmId;
+        p.fusedPartnerId = partner.id;
+        partner.fusedPartnerId = p.id;
+      }
+    });
+    syncGlobalFiberFusedFlag();
+    syncGlobalSleeveShrunkFlag();
+  }
 
   function setStatus(msg) {
     if (global.FtthLab && FtthLab.setStatus) FtthLab.setStatus(msg);
@@ -325,13 +468,18 @@
   }
 
   function captureSnapshot() {
-    return { pigtails: cloneJson(pigtails), seq: seq };
+    return {
+      pigtails: cloneJson(pigtails),
+      fusedAssemblies: cloneJson(fusedAssemblies),
+      seq: seq,
+    };
   }
 
   function applySnapshot(snap) {
     if (!snap) return;
     historyLocked = true;
     pigtails = cloneJson(snap.pigtails) || [];
+    fusedAssemblies = cloneJson(snap.fusedAssemblies) || {};
     pigtails.forEach(function (p) {
       if (!p) return;
       p.hasSleeve = !!p.hasSleeve;
@@ -388,11 +536,16 @@
         p.splicerBareGlassPx = null;
         p.splicerInnerEdgeX = null;
         p.splicerDockSnapshot = null;
-        p.splicerWeldMachineId = null;
-        p.fusedJacketEndDist = null;
-        p.splicerFusedSide = null;
+        if (!isPigtailFusionPermanent(p)) {
+          p.splicerWeldMachineId = null;
+          p.fusionAssemblyId = null;
+          p.fusedPartnerId = null;
+          p.fusedJacketEndDist = null;
+          p.splicerFusedSide = null;
+        }
       }
     });
+    rebuildFusedAssemblyRegistry();
     seq = snap.seq || 0;
     selection = { kind: 'none', id: null };
     rebuildLayer();
@@ -638,8 +791,8 @@
   function getShrunkSleeveWeldPose(p) {
     if (!p) return { x: 0, y: 0, rot: 0 };
     var rot = getPigtailFiberTangentRotAtTip(p);
-    if (p.splicerWeldMachineId) {
-      var weld = getFusedWeldWorld(p.splicerWeldMachineId);
+    if (getPigtailFusionAssemblyId(p)) {
+      var weld = getFusedWeldWorld(getPigtailFusionAssemblyId(p));
       if (weld) return { x: weld.x, y: weld.y, rot: rot };
     }
     return { x: p.bx, y: p.by, rot: rot };
@@ -1915,29 +2068,27 @@
   }
 
   function setFiberFusedState(machineId, fused) {
-    if (!global.__fiberFusedMachines) global.__fiberFusedMachines = {};
-    if (fused && machineId) {
+    if (!fused) {
+      syncGlobalFiberFusedFlag();
+      return;
+    }
+    if (machineId) {
+      if (!global.__fiberFusedMachines) global.__fiberFusedMachines = {};
       global.__fiberFusedMachines[machineId] = true;
       global.isFiberFused = true;
-    } else if (machineId) {
-      delete global.__fiberFusedMachines[machineId];
-      global.isFiberFused = Object.keys(global.__fiberFusedMachines).length > 0;
-    } else if (!fused) {
-      global.__fiberFusedMachines = {};
-      global.isFiberFused = false;
     }
   }
 
-  function isFusedAssembly(machineId) {
-    return !!(machineId && fusedAssemblies[machineId]);
+  function isFusedAssembly(assemblyId) {
+    return !!(assemblyId && fusedAssemblies[assemblyId]);
   }
 
   function isPigtailFused(p) {
-    return !!(p && p.splicerWeldMachineId && isFusedAssembly(p.splicerWeldMachineId));
+    return !!getPigtailFusionAssemblyId(p);
   }
 
-  function getFusedAssemblyPigtails(machineId) {
-    var asm = fusedAssemblies[machineId];
+  function getFusedAssemblyPigtails(assemblyId) {
+    var asm = fusedAssemblies[assemblyId];
     if (!asm) return { left: null, right: null };
     return {
       left: findPigtail(asm.leftId),
@@ -1947,7 +2098,11 @@
 
   function getFusedPartner(p) {
     if (!isPigtailFused(p)) return null;
-    var pair = getFusedAssemblyPigtails(p.splicerWeldMachineId);
+    if (p.fusedPartnerId) {
+      var byId = findPigtail(p.fusedPartnerId);
+      if (byId) return byId;
+    }
+    var pair = getFusedAssemblyPigtails(getPigtailFusionAssemblyId(p));
     if (!pair.left || !pair.right) return null;
     return pair.left.id === p.id ? pair.right : pair.left;
   }
@@ -1964,6 +2119,12 @@
   function registerFusedAssembly(machineId) {
     var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
+    var fusionId = makeFusionAssemblyId(pair.left.id, pair.right.id);
+    if (!fusionId) return false;
+    var existing = fusedAssemblies[fusionId];
+    if (existing && isFusionAssemblyPermanent(existing)) {
+      return true;
+    }
     var slotL = getSplicerGrooveSlot(machineId, 'L', { forTracking: true });
     var slotR = getSplicerGrooveSlot(machineId, 'R', { forTracking: true });
     var meetX = slotL && slotR
@@ -1972,7 +2133,9 @@
     var grooveY = slotL && slotR
       ? (slotL.grooveY + slotR.grooveY) / 2
       : pair.left.by;
-    fusedAssemblies[machineId] = {
+    fusedAssemblies[fusionId] = {
+      fusionAssemblyId: fusionId,
+      machineId: machineId,
       leftId: pair.left.id,
       rightId: pair.right.id,
       bridgeX1: slotL ? slotL.innerEdgeX : pair.left.bx,
@@ -1983,38 +2146,56 @@
       ovenPreviewSlot: null,
       heatPhase: 'idle',
       heatProgress: 0,
-      sleeveShrunk: false,
+      sleeveShrunk: !!(existing && existing.sleeveShrunk),
+      permanent: !!(existing && existing.permanent),
       ovenChannel: null,
       ovenGrooveAnchor: null,
       ovenDockSnapshot: null,
     };
+    pair.left.fusionAssemblyId = fusionId;
+    pair.right.fusionAssemblyId = fusionId;
+    pair.left.fusedPartnerId = pair.right.id;
+    pair.right.fusedPartnerId = pair.left.id;
+    pair.left.splicerWeldMachineId = machineId;
+    pair.right.splicerWeldMachineId = machineId;
     pair.left.splicerFusedSide = 'L';
     pair.right.splicerFusedSide = 'R';
     captureFusedJacketEndDist(pair.left, machineId, 'L');
     captureFusedJacketEndDist(pair.right, machineId, 'R');
     setFiberFusedState(machineId, true);
+    syncGlobalFiberFusedFlag();
     return true;
   }
 
-  function clearFusedAssembly(machineId) {
-    if (!machineId) return;
-    var pair = getFusedAssemblyPigtails(machineId);
-    if (pair.left) {
+  function clearFusedAssembly(assemblyId) {
+    if (!assemblyId) return;
+    var asm = fusedAssemblies[assemblyId];
+    if (!asm || isFusionAssemblyPermanent(asm)) return;
+    var pair = getFusedAssemblyPigtails(assemblyId);
+    if (pair.left && !isPigtailFusionPermanent(pair.left)) {
       pair.left.splicerFusedSide = null;
       pair.left.fusedJacketEndDist = null;
       pair.left.isOvenDocked = false;
       pair.left.ovenDockMachineId = null;
       pair.left.isSleeveShrunk = false;
+      pair.left.fusionPermanent = false;
+      pair.left.fusionAssemblyId = null;
+      pair.left.fusedPartnerId = null;
+      pair.left.splicerWeldMachineId = null;
     }
-    if (pair.right) {
+    if (pair.right && !isPigtailFusionPermanent(pair.right)) {
       pair.right.splicerFusedSide = null;
       pair.right.fusedJacketEndDist = null;
       pair.right.isOvenDocked = false;
       pair.right.ovenDockMachineId = null;
       pair.right.isSleeveShrunk = false;
+      pair.right.fusionPermanent = false;
+      pair.right.fusionAssemblyId = null;
+      pair.right.fusedPartnerId = null;
+      pair.right.splicerWeldMachineId = null;
     }
-    delete fusedAssemblies[machineId];
-    setFiberFusedState(machineId, false);
+    delete fusedAssemblies[assemblyId];
+    syncGlobalFiberFusedFlag();
     syncGlobalSleeveShrunkFlag();
   }
 
@@ -2028,19 +2209,25 @@
     if (typeof window !== 'undefined') window.isSleeveShrunk = any;
   }
 
-  function markFusedAssemblySleeveShrunk(machineId, shrunk) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
-    var pair = getFusedAssemblyPigtails(machineId);
-    if (asm) asm.sleeveShrunk = !!shrunk;
+  function markFusedAssemblySleeveShrunk(assemblyId, shrunk) {
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
+    var pair = getFusedAssemblyPigtails(assemblyId);
+    if (asm) {
+      asm.sleeveShrunk = !!shrunk;
+      asm.permanent = !!shrunk;
+    }
     [pair.left, pair.right].forEach(function (pg) {
       if (!pg) return;
       pg.isSleeveShrunk = !!shrunk;
+      pg.fusionPermanent = !!shrunk;
     });
     syncGlobalSleeveShrunkFlag();
   }
 
-  function ensureFusedAssemblyOvenState(machineId) {
-    var asm = fusedAssemblies[machineId];
+  function ensureFusedAssemblyOvenState(assemblyIdOrMachine) {
+    var assemblyId = resolveFusionAssemblyId(assemblyIdOrMachine, { preferDocked: true, preferHeating: true }) ||
+      assemblyIdOrMachine;
+    var asm = assemblyId ? fusedAssemblies[assemblyId] : null;
     if (!asm) return null;
     if (asm.isOvenDocked == null) asm.isOvenDocked = false;
     if (asm.heatPhase == null) asm.heatPhase = 'idle';
@@ -2049,8 +2236,9 @@
     return asm;
   }
 
-  function isFusedAssemblySleeveShrunk(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+  function isFusedAssemblySleeveShrunk(assemblyIdOrMachine) {
+    var assemblyId = resolveFusionAssemblyId(assemblyIdOrMachine);
+    var asm = assemblyId ? ensureFusedAssemblyOvenState(assemblyId) : null;
     return !!(asm && asm.sleeveShrunk);
   }
 
@@ -2061,14 +2249,15 @@
 
   function ovenDragBlockedMessage(p) {
     if (!p || !isPigtailFused(p)) return '';
-    if (isFusedAssemblyHeatLocked(p.splicerWeldMachineId)) {
+    if (isFusedAssemblyHeatLocked(getPigtailFusionAssemblyId(p))) {
       return 'Heat oven · cable locked while shrinking';
     }
     return '';
   }
 
-  function isFusedAssemblyOvenDocked(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+  function isFusedAssemblyOvenDocked(assemblyIdOrMachine) {
+    var assemblyId = resolveFusionAssemblyId(assemblyIdOrMachine, { preferDocked: true });
+    var asm = assemblyId ? ensureFusedAssemblyOvenState(assemblyId) : null;
     return !!(asm && asm.isOvenDocked);
   }
 
@@ -2079,7 +2268,7 @@
 
   function isPigtailOvenDragLocked(p) {
     if (!p || !isPigtailFused(p)) return false;
-    return isFusedAssemblyHeatLocked(p.splicerWeldMachineId);
+    return isFusedAssemblyHeatLocked(getPigtailFusionAssemblyId(p));
   }
 
   function canLiftFusedAssemblyFromOven(machineId) {
@@ -2147,15 +2336,19 @@
     }
   }
 
-  function syncOvenDockedAssemblyToLiveSlot(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+  function getSplicerMachineForAssembly(assemblyId) {
+    return getFusionAssemblyMachineId(assemblyId) || assemblyId;
+  }
+
+  function syncOvenDockedAssemblyToLiveSlot(assemblyId) {
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     if (!asm || !asm.isOvenDocked || asm.sleeveShrunk) return false;
     if (!global.FusionSplicerMachine || typeof FusionSplicerMachine.getOvenSlot !== 'function') {
       return false;
     }
-    var slot = FusionSplicerMachine.getOvenSlot(machineId);
+    var slot = FusionSplicerMachine.getOvenSlot(getSplicerMachineForAssembly(assemblyId));
     if (!slot) return false;
-    var weld = getFusedWeldWorld(machineId);
+    var weld = getFusedWeldWorld(assemblyId);
     if (!weld) return false;
     var dx = slot.centerX - weld.x;
     var dy = (slot.channelY != null ? slot.channelY : slot.centerY) - weld.y;
@@ -2166,9 +2359,9 @@
       asm.ovenChannel.cy !== (slot.channelY != null ? slot.channelY : slot.centerY);
     if (Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 && !channelChanged) return false;
     if (Math.abs(dx) >= 0.05 || Math.abs(dy) >= 0.05) {
-      translateFusedAssembly(machineId, dx, dy);
+      translateFusedAssembly(assemblyId, dx, dy);
     }
-    applyOvenChannelLayout(machineId, slot);
+    applyOvenChannelLayout(assemblyId, slot);
     asm.ovenGrooveAnchor = { x: slot.centerX, y: slot.channelY != null ? slot.channelY : slot.centerY };
     return true;
   }
@@ -2207,12 +2400,13 @@
     }
   }
 
-  function markFusedAssemblyOvenDocked(machineId, docked) {
-    var pair = getFusedAssemblyPigtails(machineId);
+  function markFusedAssemblyOvenDocked(assemblyId, docked) {
+    var pair = getFusedAssemblyPigtails(assemblyId);
+    var splicerId = getSplicerMachineForAssembly(assemblyId);
     [pair.left, pair.right].forEach(function (pg) {
       if (!pg) return;
       pg.isOvenDocked = !!docked;
-      pg.ovenDockMachineId = docked ? machineId : null;
+      pg.ovenDockMachineId = docked ? splicerId : null;
     });
   }
 
@@ -2309,7 +2503,10 @@
     if (!ovenEligibleForSnap(machineId)) return false;
     var slot = asm.ovenPreviewSlot;
     if (!slot) {
-      slot = applyOvenMagnetDuringFusedDrag(machineId);
+      slot = applyOvenMagnetDuringFusedDrag(
+        machineId,
+        getFusionAssemblyMachineId(machineId)
+      );
     }
     if (!slot) return false;
     clearOvenMagnetHighlight();
@@ -2325,8 +2522,9 @@
         el.classList.remove('is-heat-shrinking', 'is-heat-shrunk');
         el.style.removeProperty('height');
       });
-      if (pg.isSleeveShrunk) {
+      if (pg.isSleeveShrunk && !isPigtailFusionPermanent(pg)) {
         pg.isSleeveShrunk = false;
+        pg.fusionPermanent = false;
       }
     });
   }
@@ -2354,36 +2552,39 @@
   }
 
   function onOvenHeatStart(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+    var assemblyId = resolveFusionAssemblyId(machineId, { preferDocked: true });
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     if (!asm || !asm.isOvenDocked) return false;
     asm.heatPhase = 'heating';
     asm.heatProgress = 0;
     rebuildLayer();
-    applyOvenSleeveShrinkVisual(machineId, 0);
-    syncFusedAssemblyVisuals(machineId);
+    applyOvenSleeveShrinkVisual(assemblyId, 0);
+    syncFusedAssemblyVisuals(assemblyId);
     setStatus('Heat oven · sleeve shrinking · do not remove cable');
     return true;
   }
 
   function onOvenHeatProgress(machineId, progress) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+    var assemblyId = resolveFusionAssemblyId(machineId, { preferHeating: true, preferDocked: true });
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     if (!asm || asm.heatPhase !== 'heating') return;
     asm.heatProgress = Math.max(0, Math.min(100, progress || 0));
-    applyOvenSleeveShrinkVisual(machineId, asm.heatProgress);
+    applyOvenSleeveShrinkVisual(assemblyId, asm.heatProgress);
   }
 
   function onOvenHeatComplete(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+    var assemblyId = resolveFusionAssemblyId(machineId, { preferHeating: true, preferDocked: true });
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     if (!asm) return false;
     asm.heatPhase = 'ready';
     asm.heatProgress = 100;
-    markFusedAssemblySleeveShrunk(machineId, true);
+    releaseFusedAssemblyFromOven(assemblyId, { preserveShrink: true, force: true });
+    markFusedAssemblySleeveShrunk(assemblyId, true);
     global.isSleeveShrunk = true;
     if (typeof window !== 'undefined') window.isSleeveShrunk = true;
-    releaseFusedAssemblyFromOven(machineId, { preserveShrink: true, force: true });
     rebuildLayer();
-    applyOvenSleeveShrinkVisual(machineId, 100);
-    syncFusedAssemblyVisuals(machineId);
+    applyOvenSleeveShrinkVisual(assemblyId, 100);
+    syncFusedAssemblyVisuals(assemblyId);
     if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
       FtthLab.refreshVflLaser();
     }
@@ -2393,13 +2594,14 @@
   }
 
   function canStartOvenHeat(machineId) {
-    var asm = ensureFusedAssemblyOvenState(machineId);
+    var assemblyId = resolveFusionAssemblyId(machineId, { preferDocked: true });
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     return !!(
       asm &&
       asm.isOvenDocked &&
       asm.heatPhase === 'docked' &&
       !asm.sleeveShrunk &&
-      fusedAssemblyHasShrinkSleeve(machineId)
+      fusedAssemblyHasShrinkSleeve(assemblyId)
     );
   }
 
@@ -2777,14 +2979,14 @@
   }
 
   function beginFusedRigidDrag(p, clientX, clientY) {
-    var fusedMachineId = isPigtailFused(p) ? p.splicerWeldMachineId : null;
-    if (fusedMachineId && !isFusedAssemblyHeatLocked(fusedMachineId)) {
-      if (isFusedAssemblyOvenDocked(fusedMachineId)) {
-        releaseFusedAssemblyFromOven(fusedMachineId, {
-          preserveShrink: isFusedAssemblySleeveShrunk(fusedMachineId),
+    var fusedAssemblyId = getPigtailFusionAssemblyId(p);
+    if (fusedAssemblyId && !isFusedAssemblyHeatLocked(fusedAssemblyId)) {
+      if (isFusedAssemblyOvenDocked(fusedAssemblyId)) {
+        releaseFusedAssemblyFromOven(fusedAssemblyId, {
+          preserveShrink: isFusedAssemblySleeveShrunk(fusedAssemblyId),
         });
       } else {
-        liftFusedAssemblyFromSplicer(fusedMachineId);
+        liftFusedAssemblyFromSplicer(fusedAssemblyId);
       }
     } else if (p.isSnappedToCleaver) {
       clearCleaverSnap(p, { skipGuide: true });
@@ -2803,8 +3005,9 @@
       hist0: p.pathHistory.map(function (pt) {
         return { x: pt.x, y: pt.y };
       }),
-      fusedMachineId: fusedMachineId,
-      fusedCompanion: fusedMachineId ? createFusedDragCompanion(p, fusedMachineId) : null,
+      fusedMachineId: fusedAssemblyId,
+      splicerMachineId: p.splicerWeldMachineId,
+      fusedCompanion: fusedAssemblyId ? createFusedDragCompanion(p, fusedAssemblyId) : null,
     };
   }
 
@@ -2835,7 +3038,8 @@
     updateFiberPath(p);
     if (ctx.fusedMachineId) {
       syncFusedAssemblyVisuals(ctx.fusedMachineId);
-      applyOvenMagnetDuringFusedDrag(ctx.fusedMachineId);
+      var splicerMid = ctx.splicerMachineId || getFusionAssemblyMachineId(ctx.fusedMachineId);
+      if (splicerMid) applyOvenMagnetDuringFusedDrag(ctx.fusedMachineId, splicerMid);
     }
   }
 
@@ -2845,9 +3049,13 @@
   }
 
   function getFusedDragContext(p) {
-    if (!isPigtailFused(p)) return { machineId: null, partner: null };
+    if (!isPigtailFused(p)) {
+      return { machineId: null, splicerMachineId: null, partner: null };
+    }
+    var asmId = getPigtailFusionAssemblyId(p);
     return {
-      machineId: p.splicerWeldMachineId,
+      machineId: asmId,
+      splicerMachineId: p.splicerWeldMachineId || getFusionAssemblyMachineId(asmId),
       partner: getFusedPartner(p),
     };
   }
@@ -2919,7 +3127,10 @@
     if (partner) repaintPigtailSleeveDom(partner);
     syncFusedAssemblyVisuals(machineId);
     if (document.body.classList.contains('lab-pigtail-dragging')) {
-      applyOvenMagnetDuringFusedDrag(machineId);
+      applyOvenMagnetDuringFusedDrag(
+        machineId,
+        getFusionAssemblyMachineId(machineId)
+      );
     }
   }
 
@@ -2930,14 +3141,13 @@
   }
 
   function isSplicerWeldedPair(machineId) {
-    if (!isFusedAssembly(machineId)) return false;
-    var pair = getFusedAssemblyPigtails(machineId);
-    return !!(
-      pair.left &&
-      pair.right &&
-      pair.left.splicerWeldMachineId === machineId &&
-      pair.right.splicerWeldMachineId === machineId
-    );
+    var pair = getSplicerDockedPair(machineId);
+    if (!pair.left || !pair.right) return false;
+    var assemblyId = getPigtailFusionAssemblyId(pair.left);
+    if (!assemblyId || !isFusedAssembly(assemblyId)) return false;
+    var fused = getFusedAssemblyPigtails(assemblyId);
+    return !!(fused.left && fused.right &&
+      fused.left.id === pair.left.id && fused.right.id === pair.right.id);
   }
 
   function captureSplicerDockSnapshot(p) {
@@ -2970,28 +3180,34 @@
   function clearSplicerWeldForMachine(machineId) {
     if (!machineId) return;
     pigtails.forEach(function (p) {
-      if (p.splicerWeldMachineId === machineId) {
-        p.splicerWeldMachineId = null;
-        p.fusedJacketEndDist = null;
-        p.splicerFusedSide = null;
-      }
+      if (p.splicerWeldMachineId !== machineId) return;
+      if (isPigtailFusionPermanent(p)) return;
+      p.splicerWeldMachineId = null;
+      p.fusionAssemblyId = null;
+      p.fusedPartnerId = null;
+      p.fusedJacketEndDist = null;
+      p.splicerFusedSide = null;
     });
   }
 
   function syncSplicerWeldedTips(machineId) {
-    if (!isFusedAssembly(machineId)) return false;
-    var pair = getFusedAssemblyPigtails(machineId);
+    var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
+    var assemblyId = getPigtailFusionAssemblyId(pair.left) ||
+      makeFusionAssemblyId(pair.left.id, pair.right.id);
     var docked = pair.left.isSnappedToSplicer || pair.right.isSnappedToSplicer;
     if (!docked) return true;
     var slotL = getSplicerGrooveSlot(machineId, 'L', { forTracking: true });
     var slotR = getSplicerGrooveSlot(machineId, 'R', { forTracking: true });
     if (slotL && slotR) {
-      updateFusedAssemblyBridgeFromSlots(machineId, slotL, slotR);
+      if (isFusedAssembly(assemblyId)) {
+        updateFusedAssemblyBridgeFromSlots(assemblyId, slotL, slotR);
+      }
       pair.left.splicerInnerEdgeX = slotL.innerEdgeX;
       pair.right.splicerInnerEdgeX = slotR.innerEdgeX;
-      var meetX = fusedAssemblies[machineId].meetX;
-      var grooveY = fusedAssemblies[machineId].bridgeY;
+      var asm = fusedAssemblies[assemblyId];
+      var meetX = asm ? asm.meetX : (slotL.innerEdgeX + slotR.innerEdgeX) / 2;
+      var grooveY = asm ? asm.bridgeY : (slotL.grooveY + slotR.grooveY) / 2;
       pair.left.bx = Math.round(meetX);
       pair.left.by = Math.round(grooveY);
       pair.right.bx = Math.round(meetX);
@@ -3003,8 +3219,16 @@
   function applySplicerArcWeld(machineId) {
     var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
+    if (isPigtailFusionPermanent(pair.left) || isPigtailFusionPermanent(pair.right)) {
+      return false;
+    }
+    var fusionId = makeFusionAssemblyId(pair.left.id, pair.right.id);
     pair.left.splicerWeldMachineId = machineId;
     pair.right.splicerWeldMachineId = machineId;
+    pair.left.fusionAssemblyId = fusionId;
+    pair.right.fusionAssemblyId = fusionId;
+    pair.left.fusedPartnerId = pair.right.id;
+    pair.right.fusedPartnerId = pair.left.id;
     syncSplicerWeldedTips(machineId);
     return true;
   }
@@ -3030,8 +3254,14 @@
 
   function clearSplicerFusionVisual(machineId) {
     if (machineId) {
+      var docked = getSplicerDockedPair(machineId);
+      if (docked.left && docked.right) {
+        var fusionId = makeFusionAssemblyId(docked.left.id, docked.right.id);
+        if (fusionId && !isPigtailFusionPermanent(docked.left) && !isPigtailFusionPermanent(docked.right)) {
+          clearFusedAssembly(fusionId);
+        }
+      }
       clearSplicerWeldForMachine(machineId);
-      clearFusedAssembly(machineId);
     }
     if (machineId && global.FusionSplicerMachine && typeof FusionSplicerMachine.ensureFiberLayer === 'function') {
       var host = FusionSplicerMachine.ensureFiberLayer(machineId);
@@ -3205,7 +3435,7 @@
     if (!p || !p.isSnappedToSplicer) return;
     var machineId = p.snappedSplicerId;
     var side = p.snappedSplicerSide;
-    var preserveWeld = !!opts.preserveWeld || (machineId && isFusedAssembly(machineId));
+    var preserveWeld = !!opts.preserveWeld || isPigtailFused(p);
     p.isSnappedToSplicer = false;
     p.snappedSplicerId = null;
     p.snappedSplicerSide = null;
@@ -3239,7 +3469,7 @@
   function forceUnsnapPigtailFromSplicer(p) {
     if (!p || !p.isSnappedToSplicer) return false;
     if (isPigtailFused(p)) {
-      return liftFusedAssemblyFromSplicer(p.splicerWeldMachineId);
+      return liftFusedAssemblyFromSplicer(getPigtailFusionAssemblyId(p));
     }
     clearSplicerSnap(p, { skipRebuild: true });
     p.splicerDragDetached = true;
@@ -3348,19 +3578,19 @@
     return { x: pair.left.bx, y: pair.left.by };
   }
 
-  function ovenEligibleForSnap(machineId) {
-    if (!machineId || !isFusedAssembly(machineId)) return false;
-    if (!isSplicerWeldedPair(machineId)) return false;
-    var asm = ensureFusedAssemblyOvenState(machineId);
+  function ovenEligibleForSnap(assemblyId, splicerMachineId) {
+    if (!assemblyId || !isFusedAssembly(assemblyId)) return false;
+    splicerMachineId = splicerMachineId || getSplicerMachineForAssembly(assemblyId);
+    var asm = ensureFusedAssemblyOvenState(assemblyId);
     if (asm && (asm.isOvenDocked || asm.heatPhase === 'heating' || asm.sleeveShrunk)) return false;
-    if (!fusedAssemblyHasShrinkSleeve(machineId)) return false;
-    var pair = getFusedAssemblyPigtails(machineId);
+    if (!fusedAssemblyHasShrinkSleeve(assemblyId)) return false;
+    var pair = getFusedAssemblyPigtails(assemblyId);
     if (!pair.left || !pair.right) return false;
     if (pair.left.isSnappedToSplicer || pair.right.isSnappedToSplicer) return false;
     if (!global.FusionSplicerMachine || typeof FusionSplicerMachine.getOvenSlot !== 'function') {
       return false;
     }
-    var slot = FusionSplicerMachine.getOvenSlot(machineId);
+    var slot = FusionSplicerMachine.getOvenSlot(splicerMachineId);
     return !!slot;
   }
 
@@ -3375,17 +3605,18 @@
    * Preview-only oven magnet while dragging a fused assembly.
    * Probes the weld joint (not the pointer) against the padded oven channel.
    */
-  function applyOvenMagnetDuringFusedDrag(machineId) {
-    if (!machineId) {
+  function applyOvenMagnetDuringFusedDrag(assemblyId, splicerMachineId) {
+    if (!assemblyId) {
       clearOvenMagnetHighlight();
       return null;
     }
-    if (!ovenEligibleForSnap(machineId)) {
+    splicerMachineId = splicerMachineId || getSplicerMachineForAssembly(assemblyId);
+    if (!ovenEligibleForSnap(assemblyId, splicerMachineId)) {
       clearOvenMagnetHighlight();
-      if (fusedAssemblies[machineId]) fusedAssemblies[machineId].ovenPreviewSlot = null;
+      if (fusedAssemblies[assemblyId]) fusedAssemblies[assemblyId].ovenPreviewSlot = null;
       return null;
     }
-    var weld = getFusedWeldWorld(machineId);
+    var weld = getFusedWeldWorld(assemblyId);
     if (!weld || !global.FusionSplicerMachine ||
         typeof FusionSplicerMachine.hitTestOvenSlotAtClient !== 'function' ||
         typeof FusionSplicerMachine.worldToClient !== 'function') {
@@ -3393,16 +3624,16 @@
       return null;
     }
     var client = FusionSplicerMachine.worldToClient(weld.x, weld.y);
-    var hit = FusionSplicerMachine.hitTestOvenSlotAtClient(machineId, client.x, client.y);
+    var hit = FusionSplicerMachine.hitTestOvenSlotAtClient(splicerMachineId, client.x, client.y);
     if (hit) {
       if (typeof FusionSplicerMachine.highlightOvenSlot === 'function') {
-        FusionSplicerMachine.highlightOvenSlot(machineId);
+        FusionSplicerMachine.highlightOvenSlot(splicerMachineId);
       }
-      if (fusedAssemblies[machineId]) fusedAssemblies[machineId].ovenPreviewSlot = hit;
+      if (fusedAssemblies[assemblyId]) fusedAssemblies[assemblyId].ovenPreviewSlot = hit;
       return hit;
     }
     clearOvenMagnetHighlight();
-    if (fusedAssemblies[machineId]) fusedAssemblies[machineId].ovenPreviewSlot = null;
+    if (fusedAssemblies[assemblyId]) fusedAssemblies[assemblyId].ovenPreviewSlot = null;
     return null;
   }
 
@@ -3528,10 +3759,14 @@
       var svg = host.querySelector('.lab-pigtail-svg');
       if (!svg) return;
       var html = '';
-      var fused = isFusedAssembly(mid);
-      var overlayUnified = fused && !shouldRenderFusedBridgeInMainLayer(mid);
+      var dockedPair = getSplicerDockedPair(mid);
+      var overlayAssemblyId = (dockedPair.left && isPigtailFused(dockedPair.left))
+        ? getPigtailFusionAssemblyId(dockedPair.left)
+        : null;
+      var fused = overlayAssemblyId && isFusedAssembly(overlayAssemblyId);
+      var overlayUnified = fused && !shouldRenderFusedBridgeInMainLayer(overlayAssemblyId);
       if (overlayUnified) {
-        html += '<g class="lab-splicer-fused-assembly" data-fused-assembly="' + mid + '">';
+        html += '<g class="lab-splicer-fused-assembly" data-fused-assembly="' + overlayAssemblyId + '">';
       }
       pigtails.forEach(function (p) {
         if (!p.isSnappedToSplicer || p.snappedSplicerId !== mid) return;
@@ -3541,7 +3776,7 @@
           '</g>';
       });
       if (overlayUnified) {
-        html += buildFusedAssemblyUnifiedSvg(mid, { splicerPort: true, skipWrapper: true });
+        html += buildFusedAssemblyUnifiedSvg(overlayAssemblyId, { splicerPort: true, skipWrapper: true });
         html += '</g>';
       }
       svg.innerHTML = html;
@@ -4277,10 +4512,13 @@
       else svg.appendChild(node);
     }
     if (isPigtailFused(p) && !opts.skipFusedAssemblyRefresh) {
-      if (document.body.classList.contains('lab-pigtail-dragging')) {
-        refreshFusedAssemblyInMainLayer(p.splicerWeldMachineId);
-      } else {
-        syncFusedAssemblyVisuals(p.splicerWeldMachineId);
+      var asmId = getPigtailFusionAssemblyId(p);
+      if (asmId) {
+        if (document.body.classList.contains('lab-pigtail-dragging')) {
+          refreshFusedAssemblyInMainLayer(asmId);
+        } else {
+          syncFusedAssemblyVisuals(asmId);
+        }
       }
       rebindDragGripsInRoot(svg);
     } else if (p.isSnappedToSplicer) {
@@ -4498,6 +4736,9 @@
       splicerInnerEdgeX: null,
       splicerDockSnapshot: null,
       splicerWeldMachineId: null,
+      fusionAssemblyId: null,
+      fusedPartnerId: null,
+      fusionPermanent: false,
       splicerFusedSide: null,
       fusedJacketEndDist: null,
       cleavedStripLock: null,
@@ -4515,14 +4756,20 @@
   function removePigtail(id) {
     var p = findPigtail(id);
     if (p && isPigtailFused(p)) {
-      var mid = p.splicerWeldMachineId;
-      var pair = getFusedAssemblyPigtails(mid);
+      var asmId = getPigtailFusionAssemblyId(p);
+      var pair = getFusedAssemblyPigtails(asmId);
       var ids = {};
       ids[id] = true;
       if (pair.left) ids[pair.left.id] = true;
       if (pair.right) ids[pair.right.id] = true;
       pigtails = pigtails.filter(function (pg) { return !ids[pg.id]; });
-      clearFusedAssembly(mid);
+      if (asmId && !isFusionAssemblyPermanent(fusedAssemblies[asmId])) {
+        clearFusedAssembly(asmId);
+      } else if (asmId) {
+        delete fusedAssemblies[asmId];
+        syncGlobalFiberFusedFlag();
+        syncGlobalSleeveShrunkFlag();
+      }
       if (selection.id && ids[selection.id]) selection = { kind: 'none', id: null };
       rebuildLayer();
       updateInspector();
@@ -6460,26 +6707,58 @@
   }
 
   function getFusedAssemblyOpticalPairs() {
-    return Object.keys(fusedAssemblies).map(function (machineId) {
-      var pair = getFusedAssemblyPigtails(machineId);
-      return {
-        machineId: machineId,
-        leftId: pair.left ? pair.left.id : null,
-        rightId: pair.right ? pair.right.id : null,
+    var map = {};
+    function addPair(leftId, rightId, assemblyId, machineId, permanent) {
+      if (!leftId || !rightId || leftId === rightId) return;
+      var key = assemblyId || makeFusionAssemblyId(leftId, rightId);
+      if (!key) return;
+      var existing = map[key];
+      map[key] = {
+        assemblyId: key,
+        fusionAssemblyId: key,
+        machineId: machineId || (existing && existing.machineId) || null,
+        leftId: leftId,
+        rightId: rightId,
+        permanent: !!(permanent || (existing && existing.permanent)),
       };
+    }
+    Object.keys(fusedAssemblies).forEach(function (assemblyId) {
+      var asm = fusedAssemblies[assemblyId];
+      var pair = getFusedAssemblyPigtails(assemblyId);
+      addPair(
+        pair.left ? pair.left.id : (asm && asm.leftId),
+        pair.right ? pair.right.id : (asm && asm.rightId),
+        assemblyId,
+        asm && asm.machineId,
+        asm && isFusionAssemblyPermanent(asm)
+      );
     });
+    pigtails.forEach(function (p) {
+      if (!p.fusedPartnerId) return;
+      addPair(
+        p.id,
+        p.fusedPartnerId,
+        p.fusionAssemblyId,
+        p.splicerWeldMachineId,
+        isPigtailFusionPermanent(p)
+      );
+    });
+    return Object.keys(map).map(function (key) { return map[key]; });
   }
 
   function getLaserGraphNodes() {
     return pigtails.map(function (p) {
       var partner = getFusedPartner(p);
       var fused = isPigtailFused(p);
-      var shrunk = !!(fused && partner && isFusedAssemblySleeveShrunk(p.splicerWeldMachineId));
+      var asmId = getPigtailFusionAssemblyId(p);
+      var shrunk = !!(fused && partner && asmId && isFusedAssemblySleeveShrunk(asmId));
       return {
         id: p.id,
         sleeveShrunk: shrunk,
         isSleeveShrunk: shrunk,
+        fusionPermanent: isPigtailFusionPermanent(p),
         fusedPartnerId: (fused && partner) ? partner.id : null,
+        fusionAssemblyId: asmId || null,
         splicerWeldMachineId: p.splicerWeldMachineId || null,
         connector: p.connector.attached
           ? {
@@ -6514,7 +6793,7 @@
       if (!map[id]) return;
       var pg = findPigtail(id);
       if (!pg || !isPigtailFused(pg)) return;
-      fusedGlow[pg.splicerWeldMachineId] = true;
+      fusedGlow[getPigtailFusionAssemblyId(pg) || pg.fusionAssemblyId] = true;
       var partner = getFusedPartner(pg);
       if (partner) map[partner.id] = true;
     });
@@ -6776,9 +7055,9 @@
     }
 
     if (isPigtailFused(p)) {
-      var machineId = p.splicerWeldMachineId;
-      var pair = getFusedAssemblyPigtails(machineId);
-      var weld = getFusedWeldWorld(machineId);
+      var asmId = getPigtailFusionAssemblyId(p);
+      var pair = getFusedAssemblyPigtails(asmId);
+      var weld = getFusedWeldWorld(asmId);
       if (!pair.left || !pair.right || !weld) return false;
       mirrorAroundX(pair.left, weld.x);
       mirrorAroundX(pair.right, weld.x);
@@ -6873,6 +7152,7 @@
   function mount(api) {
     ctx = api || {};
     pigtails = [];
+    fusedAssemblies = {};
     seq = 0;
     history = [];
     historyIndex = -1;
@@ -6966,8 +7246,11 @@
       FtthLab.isFusedAssemblyOvenDocked = isFusedAssemblyOvenDocked;
       FtthLab.isFusedAssemblySleeveShrunk = isFusedAssemblySleeveShrunk;
       FtthLab.isFiberFused = function (machineId) {
-        if (machineId) return isFusedAssembly(machineId);
-        return !!global.isFiberFused;
+        if (!machineId) return !!global.isFiberFused;
+        return Object.keys(fusedAssemblies).some(function (assemblyId) {
+          var asm = fusedAssemblies[assemblyId];
+          return !!(asm && asm.machineId === machineId);
+        });
       };
       FtthLab.clearPigtailSplicerSnap = function (id) {
         var pig = findPigtail(id);
