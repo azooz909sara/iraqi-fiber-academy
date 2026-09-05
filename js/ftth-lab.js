@@ -1506,17 +1506,18 @@
   }
 
   function registerFusionWeldEdges(adj, pigtails, fusedSeen) {
-    function addFusedWeldEdge(idA, idB, dedupeKey) {
+    function addFusedWeldEdge(idA, idB, dedupeKey, lossDb) {
       if (!idA || !idB || idA === idB) return;
       var seenKey = dedupeKey || [idA, idB].sort().join('|');
       if (fusedSeen[seenKey]) return;
       fusedSeen[seenKey] = true;
-      var weldParts = { splice: FUSED_WELD_LOSS_DB };
+      var weldLoss = typeof lossDb === 'number' && isFinite(lossDb) ? lossDb : FUSED_WELD_LOSS_DB;
+      var weldParts = { splice: weldLoss };
       addUndirectedEdge(
         adj,
         'pigtail:' + idA + ':tail',
         'pigtail:' + idB + ':tail',
-        FUSED_WELD_LOSS_DB,
+        weldLoss,
         weldParts
       );
     }
@@ -1527,7 +1528,7 @@
         if (!pair || !pair.leftId || !pair.rightId) return;
         var key = pair.assemblyId || pair.fusionAssemblyId ||
           [pair.leftId, pair.rightId].sort().join('|');
-        addFusedWeldEdge(pair.leftId, pair.rightId, key);
+        addFusedWeldEdge(pair.leftId, pair.rightId, key, pair.spliceLossDb);
       });
     }
 

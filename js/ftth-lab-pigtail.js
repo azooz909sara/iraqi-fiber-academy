@@ -66,6 +66,18 @@
   var ORTHO_BACKTRACK_PX = 8;
   /** Initial free length: connector (left) → bare tip (right), same Y. */
   var SPAWN_LEN_PX = 120;
+  /** Lab-world SVG stroke widths — keep in sync with .lab-pigtail-fiber--* in ftth-lab.css */
+  var PIGTAIL_FIBER_STROKE_JACKET_PX = 2.15;
+  var PIGTAIL_FIBER_STROKE_BUFFER_PX = 1.65;
+  var PIGTAIL_FIBER_STROKE_BARE_PX = 1.15;
+
+  function getPigtailFiberRenderStrokeWidths() {
+    return {
+      jacket: PIGTAIL_FIBER_STROKE_JACKET_PX,
+      buffer: PIGTAIL_FIBER_STROKE_BUFFER_PX,
+      bare: PIGTAIL_FIBER_STROKE_BARE_PX,
+    };
+  }
 
   var ctx = null;
   var layer = null;
@@ -2116,7 +2128,8 @@
     asm.meetX = (slotL.innerEdgeX + slotR.innerEdgeX) / 2;
   }
 
-  function registerFusedAssembly(machineId) {
+  function registerFusedAssembly(machineId, opts) {
+    opts = opts || {};
     var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
     var fusionId = makeFusionAssemblyId(pair.left.id, pair.right.id);
@@ -2133,6 +2146,9 @@
     var grooveY = slotL && slotR
       ? (slotL.grooveY + slotR.grooveY) / 2
       : pair.left.by;
+    var spliceLossDb = typeof opts.lossDb === 'number' && isFinite(opts.lossDb)
+      ? opts.lossDb
+      : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null);
     fusedAssemblies[fusionId] = {
       fusionAssemblyId: fusionId,
       machineId: machineId,
@@ -2142,6 +2158,7 @@
       bridgeX2: slotR ? slotR.innerEdgeX : pair.right.bx,
       bridgeY: grooveY,
       meetX: meetX,
+      spliceLossDb: spliceLossDb,
       isOvenDocked: false,
       ovenPreviewSlot: null,
       heatPhase: 'idle',
@@ -3238,10 +3255,11 @@
   }
 
   /** Arc-weld complete — merge tips, bridge SVG, seal overlay layer. */
-  function fuseSplicerFibers(machineId) {
+  function fuseSplicerFibers(machineId, opts) {
+    opts = opts || {};
     if (!machineId) return false;
     if (!applySplicerArcWeld(machineId)) return false;
-    registerFusedAssembly(machineId);
+    registerFusedAssembly(machineId, opts);
     renderSplicerFiberOverlays(machineId);
     rebuildLayer();
     rebindFusedAssemblyDragGrips(machineId);
@@ -6708,7 +6726,7 @@
 
   function getFusedAssemblyOpticalPairs() {
     var map = {};
-    function addPair(leftId, rightId, assemblyId, machineId, permanent) {
+    function addPair(leftId, rightId, assemblyId, machineId, permanent, spliceLossDb) {
       if (!leftId || !rightId || leftId === rightId) return;
       var key = assemblyId || makeFusionAssemblyId(leftId, rightId);
       if (!key) return;
@@ -6720,6 +6738,9 @@
         leftId: leftId,
         rightId: rightId,
         permanent: !!(permanent || (existing && existing.permanent)),
+        spliceLossDb: typeof spliceLossDb === 'number' && isFinite(spliceLossDb)
+          ? spliceLossDb
+          : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null),
       };
     }
     Object.keys(fusedAssemblies).forEach(function (assemblyId) {
@@ -6730,17 +6751,20 @@
         pair.right ? pair.right.id : (asm && asm.rightId),
         assemblyId,
         asm && asm.machineId,
-        asm && isFusionAssemblyPermanent(asm)
+        asm && isFusionAssemblyPermanent(asm),
+        asm && asm.spliceLossDb
       );
     });
     pigtails.forEach(function (p) {
       if (!p.fusedPartnerId) return;
+      var asm = p.fusionAssemblyId ? fusedAssemblies[p.fusionAssemblyId] : null;
       addPair(
         p.id,
         p.fusedPartnerId,
         p.fusionAssemblyId,
         p.splicerWeldMachineId,
-        isPigtailFusionPermanent(p)
+        isPigtailFusionPermanent(p),
+        asm && asm.spliceLossDb
       );
     });
     return Object.keys(map).map(function (key) { return map[key]; });
@@ -7210,6 +7234,7 @@
       FtthLab.commitPigtailCleaveAtBlade = commitCleaveAtBlade;
       FtthLab.getBareGlassLengthAfterCutPx = getBareGlassLengthAfterCutPx;
       FtthLab.getSplicerExposedBareLengthPx = getSplicerExposedBareLengthPx;
+      FtthLab.getPigtailFiberRenderStrokeWidths = getPigtailFiberRenderStrokeWidths;
       FtthLab.DEFAULT_CLEAVED_GLASS_LENGTH_PX = DEFAULT_CLEAVED_GLASS_LENGTH_PX;
       FtthLab.bladeHitRadiusPx = function () { return BLADE_HIT_RADIUS_PX; };
       FtthLab.findPigtailBareTipNearWorld = findBareTipNearWorld;
@@ -7272,10 +7297,23 @@
         ensureSplicerDockTracking();
       });
       document.addEventListener('fusion-splicer:spliceComplete', function (ev) {
-        var machineId = ev.detail && ev.detail.machineId;
+        var detail = ev.detail || {};
+        var machineId = detail.machineId;
+        var lossDb = typeof detail.lossDb === 'number' && isFinite(detail.lossDb)
+          ? detail.lossDb
+          : null;
         if (machineId && !isSplicerWeldedPair(machineId)) {
-          fuseSplicerFibers(machineId);
+          fuseSplicerFibers(machineId, { lossDb: lossDb });
         } else if (machineId) {
+          if (lossDb != null) {
+            var docked = getSplicerDockedPair(machineId);
+            if (docked.left && docked.right) {
+              var fusionId = makeFusionAssemblyId(docked.left.id, docked.right.id);
+              if (fusionId && fusedAssemblies[fusionId]) {
+                fusedAssemblies[fusionId].spliceLossDb = lossDb;
+              }
+            }
+          }
           renderSplicerFiberOverlays(machineId);
           refreshSplicerDocks(machineId);
           rebuildLayer();

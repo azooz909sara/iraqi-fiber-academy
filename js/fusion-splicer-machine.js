@@ -1133,6 +1133,14 @@
         if (typeof off === 'function') offs.push(off);
       });
 
+      api.on('spliceComplete', function (payload) {
+        payload = payload || {};
+        if (typeof payload.lossDb === 'number' && isFinite(payload.lossDb)) {
+          var bridge = bridges[id];
+          if (bridge) bridge.lastSpliceLossDb = payload.lossDb;
+        }
+      });
+
       api.on('reset', function (payload) {
         payload = payload || {};
         emitParent('reset', Object.assign({ machineId: id }, payload));

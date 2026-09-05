@@ -455,9 +455,10 @@
     border-radius: 1px;
   }.lab-fusion-machine .fusion-splicer-machine .camera-views{
     display: flex;
-    gap: 8px;
+    width: 100%;
   }.lab-fusion-machine .fusion-splicer-machine .camera-panel{
-    flex: 1;
+    flex: 1 1 100%;
+    width: 100%;
     height: 130px;
     background: #050a14;
     border: 1px solid rgba(0,180,255,0.15);
@@ -474,13 +475,19 @@
   }.lab-fusion-machine .fusion-splicer-machine .alignment-overlay{
     position: absolute;
     bottom: 4px; left: 6px;
+    display: flex;
+    gap: 14px;
     font-size: 8px;
     color: rgba(0,180,255,0.5);
     z-index: 2;
+  }.lab-fusion-machine .fusion-splicer-machine .fsm-cam-main{
+    border-color: rgba(0,180,255,0.2);
   }.lab-fusion-machine .fusion-splicer-machine .camera-panel canvas{
     position: absolute;
     top: 0; left: 0;
-    width: 100%; height: 100%;
+    width: 100%;
+    height: 100%;
+    display: block;
   }.lab-fusion-machine .fusion-splicer-machine .screen-info{
     display: flex;
     justify-content: space-between;
@@ -1323,15 +1330,14 @@
 }
 
 .lab-fusion-machine .fusion-splicer-machine .camera-panel canvas,
-.lab-fusion-machine .fusion-splicer-machine .fsm-cam-x canvas,
-.lab-fusion-machine .fusion-splicer-machine .fsm-cam-y canvas,
-.lab-fusion-machine .fusion-splicer-machine .fsm-canvas-x,
-.lab-fusion-machine .fusion-splicer-machine .fsm-canvas-y {
+.lab-fusion-machine .fusion-splicer-machine .fsm-cam-main canvas,
+.lab-fusion-machine .fusion-splicer-machine .fsm-canvas-main {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
+  display: block;
 }
 
 .lab-fusion-machine .fusion-splicer-machine .clamp-base-groove.magnet-active {

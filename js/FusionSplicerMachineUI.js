@@ -14,6 +14,37 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
   var DEFAULT_CLAMP_FORWARD = 95;
   var DEFAULT_CLAMP_FORWARD_STORAGE_FALLBACK = 74;
   var DEFAULT_CLAMP_BACKWARD = 0;
+  var CAMERA_ZOOM_FACTOR = 2.5;
+  var CAMERA_CORE_PX = 1.5;
+  var FALLBACK_STROKE_JACKET_PX = 2.15;
+  var FALLBACK_STROKE_BUFFER_PX = 1.65;
+  var FALLBACK_STROKE_BARE_PX = 1.15;
+  var FALLBACK_BARE_EXPOSED_PX = 16;
+  var SM_SPLICE_LOSS_OPTIONS = [0.00, 0.01, 0.01, 0.02, 0.02, 0.03];
+
+  function readPigtailFiberStrokeWidths() {
+    if (global.FtthLab && typeof FtthLab.getPigtailFiberRenderStrokeWidths === 'function') {
+      return FtthLab.getPigtailFiberRenderStrokeWidths();
+    }
+    return {
+      jacket: FALLBACK_STROKE_JACKET_PX,
+      buffer: FALLBACK_STROKE_BUFFER_PX,
+      bare: FALLBACK_STROKE_BARE_PX,
+    };
+  }
+
+  function getCameraFiberWidths() {
+    var base = readPigtailFiberStrokeWidths();
+    return {
+      coating: base.jacket * CAMERA_ZOOM_FACTOR,
+      cladding: base.bare * CAMERA_ZOOM_FACTOR,
+      core: CAMERA_CORE_PX,
+    };
+  }
+
+  function pickRandomSmSpliceLossDb() {
+    return SM_SPLICE_LOSS_OPTIONS[Math.floor(Math.random() * SM_SPLICE_LOSS_OPTIONS.length)];
+  }
 
   function parseClampLimitPx(value, fallback) {
     if (value == null || value === '') return fallback;
@@ -156,7 +187,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
   }
 
   function assemblyMarkup() {
-    return "<div  class=\"fsm-toast\"></div>\r\n\r\n<div  class=\"fsm-machine-body\">\r\n\r\n  <!-- ===== HEAT OVEN MODULE (Sleeve Heater) ===== -->\r\n  <div  class=\"fsm-heat-oven-module\">\r\n    <div  class=\"fsm-heat-oven-housing\">\r\n      <div  class=\"fsm-heat-oven-step-left\"></div>\r\n      <div  class=\"fsm-heat-oven-step-right\"></div>\r\n      <div  class=\"fsm-heat-oven-channel\">\r\n        <div  class=\"fsm-heat-oven-plate\">\r\n          <div  data-oven-slot=\"1\" class=\"fsm-heat-oven-slot\"></div>\r\n        </div>\r\n        <div  class=\"fsm-heat-oven-glow\"></div>\r\n      </div>\r\n      <!-- Interactive lid over heating compartment -->\r\n      <div  role=\"button\" tabindex=\"0\" aria-label=\"Toggle heat oven lid\" class=\"fsm-heat-oven-lid\">\r\n        <div  class=\"fsm-heat-oven-lid-face\"></div>\r\n        <div  class=\"fsm-heat-oven-lid-handle\"></div>\r\n      </div>\r\n    </div>\r\n    <div  class=\"fsm-heat-oven-lid-btn\">LID</div>\r\n    <div  class=\"fsm-heat-oven-led\"></div>\r\n    <div  class=\"fsm-heat-oven-label\">HEAT OVEN</div>\r\n  </div>\r\n\r\n  <!-- ===== TOP SCREEN ===== -->\r\n  <div  class=\"fsm-screen-section\">\r\n    <div  class=\"fsm-screen-housing\">\r\n      <div class=\"status-bar\">\r\n        <div class=\"left-icons\">\r\n          <span class=\"mode-label fsm-mode-label\" >SM AUTO</span>\r\n          <div class=\"icon-signal\"><span></span><span></span><span></span><span></span></div>\r\n        </div>\r\n        <div class=\"right-icons\">\r\n          <div class=\"icon-battery\"></div>\r\n        </div>\r\n      </div>\r\n\r\n      <div class=\"camera-views\">\r\n        <div class=\"camera-panel fsm-cam-x\" >\r\n          <div class=\"camera-label\">X-AXIS</div>\r\n          <div class=\"alignment-overlay\">\r\n            <div class=\"val\"><span>X:</span> <span  class=\"fsm-x-val\">0.002</span> mm</div>\r\n          </div>\r\n          <canvas  class=\"fsm-canvas-x\"></canvas>\r\n        </div>\r\n        <div class=\"camera-panel fsm-cam-y\" >\r\n          <div class=\"camera-label\">Y-AXIS</div>\r\n          <div class=\"alignment-overlay\">\r\n            <div class=\"val\"><span>Y:</span> <span  class=\"fsm-y-val\">0.005</span> mm</div>\r\n          </div>\r\n          <canvas  class=\"fsm-canvas-y\"></canvas>\r\n        </div>\r\n      </div>\r\n\r\n      <div class=\"screen-info\">\r\n        <span class=\"splice-mode fsm-splice-mode\" >AUTO SPLICE</span>\r\n        <span class=\"status-text fsm-status-text\" >READY</span>\r\n        <span class=\"loss-est fsm-loss-est\" >EST.LOSS: 0.02 dB</span>\r\n      </div>\r\n    </div>\r\n  </div>\r\n\r\n  <!-- ===== FUSION CHAMBER ===== -->\r\n  <div  class=\"fsm-fusion-chamber\">\r\n    <div  class=\"fsm-chamber-label\">Fusion Chamber</div>\r\n    <div  class=\"fsm-chamber-panel\">\r\n\r\n      <!-- Chamber panel corner Phillips screws -->\r\n      <div class=\"phillips-screw screw-tl\"></div>\r\n      <div class=\"phillips-screw screw-tr\"></div>\r\n      <div class=\"phillips-screw screw-bl\"></div>\r\n      <div class=\"phillips-screw screw-br\"></div>\r\n\r\n      <!-- Clamp status indicators -->\r\n      <div class=\"clamp-indicator fsm-clamp-ind-l\" ></div>\r\n      <div class=\"clamp-indicator fsm-clamp-ind-r\" ></div>\r\n\r\n      <!-- D-pad movement indicator & clamp selector display -->\r\n      <div  class=\"fsm-move-indicator\">ALIGN MODE</div>\r\n      <div  class=\"fsm-offset-display\">X:+0.000 Y:+0.000</div>\r\n      <div  class=\"fsm-clamp-select-display\">SEL: L-CLAMP</div>\r\n\r\n      <!-- Recessed cavity -->\r\n      <div  class=\"fsm-chamber-cavity\">\r\n\r\n        <!-- Fiber entry ports -->\r\n        <div class=\"fiber-entry fsm-fiber-entry-left\" ></div>\r\n        <div class=\"fiber-entry fsm-fiber-entry-right\" ></div>\r\n\r\n        <!-- ========== LEFT CLAMP ========== -->\r\n        <div class=\"clamp-assembly fsm-clamp-assembly-l\" >\r\n          <div class=\"clamp-base\">\r\n            <div class=\"clamp-base-groove\">\r\n              <div class=\"clamp-base-groove-inner\"></div>\r\n              <div class=\"clamp-base-groove-cut\"></div>\r\n            </div>\r\n            <div class=\"hex-screw hs-l1\"></div>\r\n            <div class=\"hex-screw hs-l2\"></div>\r\n            <div class=\"hex-screw hs-l3\"></div>\r\n            <div class=\"hex-screw hs-l4\"></div>\r\n            <!-- External fiber mount points (empty until injected) -->\r\n            <div class=\"clamp-fiber fsm-clamp-fiber-l\"  data-fiber-slot=\"L\" hidden></div>\r\n            <div class=\"clamp-fiber-lock fsm-clamp-fiber-lock-l\"  data-fiber-lock=\"L\" hidden></div>\r\n          </div>\r\n          <div class=\"clamp-latch\"></div>\r\n          <div class=\"clamp-lid fsm-clamp-lid-l\" >\r\n            <div class=\"clamp-lid-exterior\">\r\n              <div class=\"ribbed-pad\">\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div>\r\n              </div>\r\n              <div class=\"lid-grip\">\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div>\r\n              </div>\r\n            </div>\r\n            <div class=\"clamp-lid-interior\">\r\n              <div class=\"inner-rubber-pad\"></div>\r\n            </div>\r\n          </div>\r\n          <div class=\"clamp-hinge-barrel\">\r\n            <div class=\"hinge-ring\" style=\"top:8px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:22px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:36px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:50px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:64px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:78px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:92px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:106px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:120px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:134px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:148px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:162px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:176px\"></div>\r\n          </div>\r\n          <div class=\"clamp-label\">L-CLAMP</div>\r\n        </div>\r\n\r\n        <!-- ========== CENTRAL ELECTRODE / V-GROOVE ZONE ========== -->\r\n        <div  class=\"fsm-alignment-stage\">\r\n          <div  class=\"fsm-alignment-crosshair\"></div>\r\n          <div class=\"electrode-label\">ARC ZONE</div>\r\n\r\n          <div  class=\"fsm-electrode-top\">\r\n            <div class=\"electrode-mount\"></div>\r\n            <div class=\"electrode-rod\"></div>\r\n            <div class=\"electrode-tip\"></div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-electrode-bottom\">\r\n            <div class=\"electrode-tip-up\"></div>\r\n            <div class=\"electrode-rod-b\"></div>\r\n            <div class=\"electrode-mount-b\"></div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-v-groove\">\r\n            <div class=\"v-groove-body\">\r\n              <div class=\"v-groove-channel\"></div>\r\n              <div class=\"v-groove-highlight\"></div>\r\n            </div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-arc-glow\"></div>\r\n\r\n          <!-- Chamber fiber hooks (empty at boot; external scripts may reveal) -->\r\n          <div class=\"groove-fiber fsm-groove-fiber-l\"  data-groove-fiber=\"L\" hidden></div>\r\n          <div class=\"groove-fiber fsm-groove-fiber-r\"  data-groove-fiber=\"R\" hidden></div>\r\n          <div class=\"fiber-lock fsm-fiber-lock-l\"  data-fiber-lock-zone=\"L\" hidden></div>\r\n          <div class=\"fiber-lock fsm-fiber-lock-r\"  data-fiber-lock-zone=\"R\" hidden></div>\r\n        </div>\r\n\r\n        <!-- ========== RIGHT CLAMP ========== -->\r\n        <div class=\"clamp-assembly fsm-clamp-assembly-r\" >\r\n          <div class=\"clamp-base\">\r\n            <div class=\"clamp-base-groove\">\r\n              <div class=\"clamp-base-groove-inner\"></div>\r\n              <div class=\"clamp-base-groove-cut\"></div>\r\n            </div>\r\n            <div class=\"hex-screw hs-r1\"></div>\r\n            <div class=\"hex-screw hs-r2\"></div>\r\n            <div class=\"hex-screw hs-r3\"></div>\r\n            <div class=\"hex-screw hs-r4\"></div>\r\n            <div class=\"clamp-fiber fsm-clamp-fiber-r\"  data-fiber-slot=\"R\" hidden></div>\r\n            <div class=\"clamp-fiber-lock fsm-clamp-fiber-lock-r\"  data-fiber-lock=\"R\" hidden></div>\r\n          </div>\r\n          <div class=\"clamp-latch\"></div>\r\n          <div class=\"clamp-lid fsm-clamp-lid-r\" >\r\n            <div class=\"clamp-lid-exterior\">\r\n              <div class=\"ribbed-pad\">\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div>\r\n              </div>\r\n              <div class=\"lid-grip\">\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div>\r\n              </div>\r\n            </div>\r\n            <div class=\"clamp-lid-interior\">\r\n              <div class=\"inner-rubber-pad\"></div>\r\n            </div>\r\n          </div>\r\n          <div class=\"clamp-hinge-barrel\">\r\n            <div class=\"hinge-ring\" style=\"top:8px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:22px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:36px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:50px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:64px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:78px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:92px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:106px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:120px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:134px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:148px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:162px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:176px\"></div>\r\n          </div>\r\n          <div class=\"clamp-label\">R-CLAMP</div>\r\n        </div>\r\n\r\n      </div><!-- /chamberCavity -->\r\n\r\n    </div><!-- /chamberPanel -->\r\n\r\n    <!-- Sleeve UI reserved for external sleeve tool — machine boots empty -->\r\n    <div  hidden aria-hidden=\"true\" class=\"fsm-sleeve-indicator\">\r\n      <div  class=\"fsm-sleeve-icon\"></div>\r\n      <span  class=\"fsm-sleeve-text\">SLEEVE EMPTY</span>\r\n      <div  class=\"fsm-heat-bar\"><div  class=\"fsm-heat-bar-fill\"></div></div>\r\n    </div>\r\n  </div>\r\n\r\n  <!-- ===== BOTTOM CONTROL PANEL ===== -->\r\n  <div  class=\"fsm-control-panel\">\r\n    <div  class=\"fsm-power-section\">\r\n      <div  class=\"fsm-power-btn\">\r\n        <div  class=\"on fsm-power-led\"></div>\r\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" style=\"position:absolute;top:8px;left:50%;transform:translateX(-50%)\">\r\n          <path d=\"M12 2v8M6.34 7.34a8 8 0 1 0 11.32 0\" stroke=\"#888\" stroke-width=\"2.5\" fill=\"none\" stroke-linecap=\"round\"/>\r\n        </svg>\r\n      </div>\r\n      <span class=\"power-label\">POWER</span>\r\n      <div  class=\"fsm-status-leds\">\r\n        <div class=\"led green-on fsm-led-pwr\"  title=\"Power\"></div>\r\n        <div class=\"led fsm-led-arc\"  title=\"Arc\"></div>\r\n        <div class=\"led fsm-led-err\"  title=\"Error\"></div>\r\n      </div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-dpad-section\">\r\n      <div  class=\"fsm-dpad\">\r\n        <!-- Up -->\r\n        <div class=\"dpad-btn fsm-dpad-up\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"12,4 20,16 4,16\"/></svg>\r\n        </div>\r\n        <!-- Left -->\r\n        <div class=\"dpad-btn fsm-dpad-left\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"4,12 16,4 16,20\"/></svg>\r\n        </div>\r\n        <!-- Center/OK -->\r\n        <div  class=\"fsm-dpad-center\">\r\n          <svg class=\"check-icon\" viewBox=\"0 0 24 24\"><polyline points=\"6,12 10,16 18,8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>\r\n        </div>\r\n        <!-- Right -->\r\n        <div class=\"dpad-btn fsm-dpad-right\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"20,12 8,4 8,20\"/></svg>\r\n        </div>\r\n        <!-- Down -->\r\n        <div class=\"dpad-btn fsm-dpad-down\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"12,20 4,8 20,8\"/></svg>\r\n        </div>\r\n      </div>\r\n      <div class=\"dpad-label\">Navigation</div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-xo-section\">\r\n      <div class=\"xo-btn fsm-x-btn\" >✕</div>\r\n      <div class=\"xo-btn fsm-o-btn\" >○</div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-func-section\">\r\n      <div class=\"func-btn fsm-heat-btn\" >HEAT</div>\r\n      <div class=\"func-btn fsm-alm-btn\" >ALM</div>\r\n      <div class=\"func-btn fsm-and-btn\" >AND</div>\r\n      <div class=\"func-btn fsm-reset-btn\" >RESET</div>\r\n      <div class=\"func-btn fsm-set-btn\" >SET</div>\r\n    </div>\r\n  </div>\r\n\r\n  <div  class=\"fsm-brand-plate\">FIBER OPTIC FUSION SPLICER — INDUSTRIAL SERIES</div>\r\n\r\n</div>";
+    return "<div  class=\"fsm-toast\"></div>\r\n\r\n<div  class=\"fsm-machine-body\">\r\n\r\n  <!-- ===== HEAT OVEN MODULE (Sleeve Heater) ===== -->\r\n  <div  class=\"fsm-heat-oven-module\">\r\n    <div  class=\"fsm-heat-oven-housing\">\r\n      <div  class=\"fsm-heat-oven-step-left\"></div>\r\n      <div  class=\"fsm-heat-oven-step-right\"></div>\r\n      <div  class=\"fsm-heat-oven-channel\">\r\n        <div  class=\"fsm-heat-oven-plate\">\r\n          <div  data-oven-slot=\"1\" class=\"fsm-heat-oven-slot\"></div>\r\n        </div>\r\n        <div  class=\"fsm-heat-oven-glow\"></div>\r\n      </div>\r\n      <!-- Interactive lid over heating compartment -->\r\n      <div  role=\"button\" tabindex=\"0\" aria-label=\"Toggle heat oven lid\" class=\"fsm-heat-oven-lid\">\r\n        <div  class=\"fsm-heat-oven-lid-face\"></div>\r\n        <div  class=\"fsm-heat-oven-lid-handle\"></div>\r\n      </div>\r\n    </div>\r\n    <div  class=\"fsm-heat-oven-lid-btn\">LID</div>\r\n    <div  class=\"fsm-heat-oven-led\"></div>\r\n    <div  class=\"fsm-heat-oven-label\">HEAT OVEN</div>\r\n  </div>\r\n\r\n  <!-- ===== TOP SCREEN ===== -->\r\n  <div  class=\"fsm-screen-section\">\r\n    <div  class=\"fsm-screen-housing\">\r\n      <div class=\"status-bar\">\r\n        <div class=\"left-icons\">\r\n          <span class=\"mode-label fsm-mode-label\" >SM AUTO</span>\r\n          <div class=\"icon-signal\"><span></span><span></span><span></span><span></span></div>\r\n        </div>\r\n        <div class=\"right-icons\">\r\n          <div class=\"icon-battery\"></div>\r\n        </div>\r\n      </div>\r\n\r\n      <div class=\"camera-views\">\r\n        <div class=\"camera-panel fsm-cam-main\">\r\n          <div class=\"camera-label\">ALIGN VIEW</div>\r\n          <div class=\"alignment-overlay\">\r\n            <div class=\"val\"><span>X:</span> <span class=\"fsm-x-val\">0.002</span> mm</div>\r\n            <div class=\"val\"><span>Y:</span> <span class=\"fsm-y-val\">0.005</span> mm</div>\r\n          </div>\r\n          <canvas class=\"fsm-canvas-main\"></canvas>\r\n        </div>\r\n      </div>\r\n\r\n      <div class=\"screen-info\">\r\n        <span class=\"splice-mode fsm-splice-mode\" >AUTO SPLICE</span>\r\n        <span class=\"status-text fsm-status-text\" >READY</span>\r\n        <span class=\"loss-est fsm-loss-est\" >EST.LOSS: 0.02 dB</span>\r\n      </div>\r\n    </div>\r\n  </div>\r\n\r\n  <!-- ===== FUSION CHAMBER ===== -->\r\n  <div  class=\"fsm-fusion-chamber\">\r\n    <div  class=\"fsm-chamber-label\">Fusion Chamber</div>\r\n    <div  class=\"fsm-chamber-panel\">\r\n\r\n      <!-- Chamber panel corner Phillips screws -->\r\n      <div class=\"phillips-screw screw-tl\"></div>\r\n      <div class=\"phillips-screw screw-tr\"></div>\r\n      <div class=\"phillips-screw screw-bl\"></div>\r\n      <div class=\"phillips-screw screw-br\"></div>\r\n\r\n      <!-- Clamp status indicators -->\r\n      <div class=\"clamp-indicator fsm-clamp-ind-l\" ></div>\r\n      <div class=\"clamp-indicator fsm-clamp-ind-r\" ></div>\r\n\r\n      <!-- D-pad movement indicator & clamp selector display -->\r\n      <div  class=\"fsm-move-indicator\">ALIGN MODE</div>\r\n      <div  class=\"fsm-offset-display\">X:+0.000 Y:+0.000</div>\r\n      <div  class=\"fsm-clamp-select-display\">SEL: L-CLAMP</div>\r\n\r\n      <!-- Recessed cavity -->\r\n      <div  class=\"fsm-chamber-cavity\">\r\n\r\n        <!-- Fiber entry ports -->\r\n        <div class=\"fiber-entry fsm-fiber-entry-left\" ></div>\r\n        <div class=\"fiber-entry fsm-fiber-entry-right\" ></div>\r\n\r\n        <!-- ========== LEFT CLAMP ========== -->\r\n        <div class=\"clamp-assembly fsm-clamp-assembly-l\" >\r\n          <div class=\"clamp-base\">\r\n            <div class=\"clamp-base-groove\">\r\n              <div class=\"clamp-base-groove-inner\"></div>\r\n              <div class=\"clamp-base-groove-cut\"></div>\r\n            </div>\r\n            <div class=\"hex-screw hs-l1\"></div>\r\n            <div class=\"hex-screw hs-l2\"></div>\r\n            <div class=\"hex-screw hs-l3\"></div>\r\n            <div class=\"hex-screw hs-l4\"></div>\r\n            <!-- External fiber mount points (empty until injected) -->\r\n            <div class=\"clamp-fiber fsm-clamp-fiber-l\"  data-fiber-slot=\"L\" hidden></div>\r\n            <div class=\"clamp-fiber-lock fsm-clamp-fiber-lock-l\"  data-fiber-lock=\"L\" hidden></div>\r\n          </div>\r\n          <div class=\"clamp-latch\"></div>\r\n          <div class=\"clamp-lid fsm-clamp-lid-l\" >\r\n            <div class=\"clamp-lid-exterior\">\r\n              <div class=\"ribbed-pad\">\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div>\r\n              </div>\r\n              <div class=\"lid-grip\">\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div>\r\n              </div>\r\n            </div>\r\n            <div class=\"clamp-lid-interior\">\r\n              <div class=\"inner-rubber-pad\"></div>\r\n            </div>\r\n          </div>\r\n          <div class=\"clamp-hinge-barrel\">\r\n            <div class=\"hinge-ring\" style=\"top:8px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:22px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:36px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:50px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:64px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:78px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:92px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:106px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:120px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:134px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:148px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:162px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:176px\"></div>\r\n          </div>\r\n          <div class=\"clamp-label\">L-CLAMP</div>\r\n        </div>\r\n\r\n        <!-- ========== CENTRAL ELECTRODE / V-GROOVE ZONE ========== -->\r\n        <div  class=\"fsm-alignment-stage\">\r\n          <div  class=\"fsm-alignment-crosshair\"></div>\r\n          <div class=\"electrode-label\">ARC ZONE</div>\r\n\r\n          <div  class=\"fsm-electrode-top\">\r\n            <div class=\"electrode-mount\"></div>\r\n            <div class=\"electrode-rod\"></div>\r\n            <div class=\"electrode-tip\"></div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-electrode-bottom\">\r\n            <div class=\"electrode-tip-up\"></div>\r\n            <div class=\"electrode-rod-b\"></div>\r\n            <div class=\"electrode-mount-b\"></div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-v-groove\">\r\n            <div class=\"v-groove-body\">\r\n              <div class=\"v-groove-channel\"></div>\r\n              <div class=\"v-groove-highlight\"></div>\r\n            </div>\r\n          </div>\r\n\r\n          <div  class=\"fsm-arc-glow\"></div>\r\n\r\n          <!-- Chamber fiber hooks (empty at boot; external scripts may reveal) -->\r\n          <div class=\"groove-fiber fsm-groove-fiber-l\"  data-groove-fiber=\"L\" hidden></div>\r\n          <div class=\"groove-fiber fsm-groove-fiber-r\"  data-groove-fiber=\"R\" hidden></div>\r\n          <div class=\"fiber-lock fsm-fiber-lock-l\"  data-fiber-lock-zone=\"L\" hidden></div>\r\n          <div class=\"fiber-lock fsm-fiber-lock-r\"  data-fiber-lock-zone=\"R\" hidden></div>\r\n        </div>\r\n\r\n        <!-- ========== RIGHT CLAMP ========== -->\r\n        <div class=\"clamp-assembly fsm-clamp-assembly-r\" >\r\n          <div class=\"clamp-base\">\r\n            <div class=\"clamp-base-groove\">\r\n              <div class=\"clamp-base-groove-inner\"></div>\r\n              <div class=\"clamp-base-groove-cut\"></div>\r\n            </div>\r\n            <div class=\"hex-screw hs-r1\"></div>\r\n            <div class=\"hex-screw hs-r2\"></div>\r\n            <div class=\"hex-screw hs-r3\"></div>\r\n            <div class=\"hex-screw hs-r4\"></div>\r\n            <div class=\"clamp-fiber fsm-clamp-fiber-r\"  data-fiber-slot=\"R\" hidden></div>\r\n            <div class=\"clamp-fiber-lock fsm-clamp-fiber-lock-r\"  data-fiber-lock=\"R\" hidden></div>\r\n          </div>\r\n          <div class=\"clamp-latch\"></div>\r\n          <div class=\"clamp-lid fsm-clamp-lid-r\" >\r\n            <div class=\"clamp-lid-exterior\">\r\n              <div class=\"ribbed-pad\">\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div><div class=\"rib\"></div>\r\n                <div class=\"rib\"></div><div class=\"rib\"></div>\r\n              </div>\r\n              <div class=\"lid-grip\">\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div><div class=\"grip-line\"></div>\r\n                <div class=\"grip-line\"></div>\r\n              </div>\r\n            </div>\r\n            <div class=\"clamp-lid-interior\">\r\n              <div class=\"inner-rubber-pad\"></div>\r\n            </div>\r\n          </div>\r\n          <div class=\"clamp-hinge-barrel\">\r\n            <div class=\"hinge-ring\" style=\"top:8px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:22px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:36px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:50px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:64px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:78px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:92px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:106px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:120px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:134px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:148px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:162px\"></div>\r\n            <div class=\"hinge-ring\" style=\"top:176px\"></div>\r\n          </div>\r\n          <div class=\"clamp-label\">R-CLAMP</div>\r\n        </div>\r\n\r\n      </div><!-- /chamberCavity -->\r\n\r\n    </div><!-- /chamberPanel -->\r\n\r\n    <!-- Sleeve UI reserved for external sleeve tool — machine boots empty -->\r\n    <div  hidden aria-hidden=\"true\" class=\"fsm-sleeve-indicator\">\r\n      <div  class=\"fsm-sleeve-icon\"></div>\r\n      <span  class=\"fsm-sleeve-text\">SLEEVE EMPTY</span>\r\n      <div  class=\"fsm-heat-bar\"><div  class=\"fsm-heat-bar-fill\"></div></div>\r\n    </div>\r\n  </div>\r\n\r\n  <!-- ===== BOTTOM CONTROL PANEL ===== -->\r\n  <div  class=\"fsm-control-panel\">\r\n    <div  class=\"fsm-power-section\">\r\n      <div  class=\"fsm-power-btn\">\r\n        <div  class=\"on fsm-power-led\"></div>\r\n        <svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" style=\"position:absolute;top:8px;left:50%;transform:translateX(-50%)\">\r\n          <path d=\"M12 2v8M6.34 7.34a8 8 0 1 0 11.32 0\" stroke=\"#888\" stroke-width=\"2.5\" fill=\"none\" stroke-linecap=\"round\"/>\r\n        </svg>\r\n      </div>\r\n      <span class=\"power-label\">POWER</span>\r\n      <div  class=\"fsm-status-leds\">\r\n        <div class=\"led green-on fsm-led-pwr\"  title=\"Power\"></div>\r\n        <div class=\"led fsm-led-arc\"  title=\"Arc\"></div>\r\n        <div class=\"led fsm-led-err\"  title=\"Error\"></div>\r\n      </div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-dpad-section\">\r\n      <div  class=\"fsm-dpad\">\r\n        <!-- Up -->\r\n        <div class=\"dpad-btn fsm-dpad-up\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"12,4 20,16 4,16\"/></svg>\r\n        </div>\r\n        <!-- Left -->\r\n        <div class=\"dpad-btn fsm-dpad-left\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"4,12 16,4 16,20\"/></svg>\r\n        </div>\r\n        <!-- Center/OK -->\r\n        <div  class=\"fsm-dpad-center\">\r\n          <svg class=\"check-icon\" viewBox=\"0 0 24 24\"><polyline points=\"6,12 10,16 18,8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>\r\n        </div>\r\n        <!-- Right -->\r\n        <div class=\"dpad-btn fsm-dpad-right\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"20,12 8,4 8,20\"/></svg>\r\n        </div>\r\n        <!-- Down -->\r\n        <div class=\"dpad-btn fsm-dpad-down\" >\r\n          <svg class=\"arrow-icon\" viewBox=\"0 0 24 24\"><polygon points=\"12,20 4,8 20,8\"/></svg>\r\n        </div>\r\n      </div>\r\n      <div class=\"dpad-label\">Navigation</div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-xo-section\">\r\n      <div class=\"xo-btn fsm-x-btn\" >✕</div>\r\n      <div class=\"xo-btn fsm-o-btn\" >○</div>\r\n    </div>\r\n\r\n    <div  class=\"fsm-func-section\">\r\n      <div class=\"func-btn fsm-heat-btn\" >HEAT</div>\r\n      <div class=\"func-btn fsm-alm-btn\" >ALM</div>\r\n      <div class=\"func-btn fsm-and-btn\" >AND</div>\r\n      <div class=\"func-btn fsm-reset-btn\" >RESET</div>\r\n      <div class=\"func-btn fsm-set-btn\" >SET</div>\r\n    </div>\r\n  </div>\r\n\r\n  <div  class=\"fsm-brand-plate\">FIBER OPTIC FUSION SPLICER — INDUSTRIAL SERIES</div>\r\n\r\n</div>";
   }
 
   var instances = {};
@@ -175,6 +206,9 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     if (inst.heatInterval) clearInterval(inst.heatInterval);
     if (inst.keyHandler) document.removeEventListener('keydown', inst.keyHandler);
     if (inst.resizeHandler) window.removeEventListener('resize', inst.resizeHandler);
+    if (inst.resizeObserver) {
+      try { inst.resizeObserver.disconnect(); } catch (err) { /* ignore */ }
+    }
     if (inst.resetMotorCompleteHandler) {
       document.removeEventListener('fusion-splicer:resetMotorComplete', inst.resetMotorCompleteHandler);
     }
@@ -206,13 +240,14 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       heatInterval: null,
       active: false,
       fibersFused: false,
+      spliceLossDb: null,
     };
 
     var CLAMP_BASE = { L: { left: 4, top: 18 }, R: { right: 4, top: 18 } };
     var PX_STEP = 1.5;
     var OFFSET_LIMIT = 30;
     var listeners = {};
-    var canvases = [];
+    var mainCanvas = null;
     var animFrame = null;
     var time = 0;
     var toastTimer;
@@ -619,6 +654,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
 
     function clearFusionVisual() {
       state.fibersFused = false;
+      state.spliceLossDb = null;
       var stage = q('alignmentStage');
       if (stage) {
         stage.classList.remove('is-fibers-fused');
@@ -653,9 +689,11 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         bridge.classList.add('is-active');
       }
       if (boundMachineId && global.FtthLab && typeof global.FtthLab.fuseSplicerFibers === 'function') {
-        global.FtthLab.fuseSplicerFibers(boundMachineId);
+        global.FtthLab.fuseSplicerFibers(boundMachineId, {
+          lossDb: state.spliceLossDb,
+        });
       } else {
-        emit('fuseFibers', { machineId: boundMachineId });
+        emit('fuseFibers', { machineId: boundMachineId, lossDb: state.spliceLossDb });
       }
     }
 
@@ -862,131 +900,331 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
             statusText.textContent = 'SPLICE OK';
             statusText.style.color = 'var(--accent-green)';
           }
+          var lossDb = pickRandomSmSpliceLossDb();
+          state.spliceLossDb = lossDb;
           var lossEst = q('lossEst');
-          if (lossEst) lossEst.textContent = 'EST.LOSS: 0.01 dB';
-          showToast('Splice Complete — Loss: 0.01 dB', 'success');
+          if (lossEst) lossEst.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
+          showToast('Splice Complete — Loss: ' + lossDb.toFixed(2) + ' dB', 'success');
           fuseFibersVisual();
           setTimeout(function () {
             if (ledArc) ledArc.classList.remove('orange-on');
             if (arcGlow) arcGlow.classList.remove('active');
           }, 3000);
-          emit('spliceComplete', { lossDb: 0.01, machineId: boundMachineId });
+          emit('spliceComplete', { lossDb: lossDb, machineId: boundMachineId });
         }
       }, 80);
     }
 
-    function initCanvas(className, axis) {
-      var canvas = root.querySelector('.' + className);
-      if (!canvas || !canvas.parentElement) return null;
-      var rect = canvas.parentElement.getBoundingClientRect();
-      canvas.width = rect.width * 2;
-      canvas.height = rect.height * 2;
-      return { canvas: canvas, ctx: canvas.getContext('2d'), axis: axis };
+    function devicePixelRatioClamped() {
+      var dpr = window.devicePixelRatio || 1;
+      return dpr > 0 ? Math.min(dpr, 2) : 1;
     }
 
-    function drawCamera(ctx, w, h, axis, t) {
+    function ensureMainCanvas() {
+      if (mainCanvas) return;
+      var canvas = root.querySelector('.fsm-canvas-main');
+      if (!canvas) return;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      mainCanvas = { canvas: canvas, ctx: ctx };
+    }
+
+    function syncCanvasSize() {
+      ensureMainCanvas();
+      if (!mainCanvas) return false;
+      var canvas = mainCanvas.canvas;
+      var panel = canvas.parentElement;
+      if (!panel) return false;
+      var cssW = Math.floor(panel.clientWidth);
+      var cssH = Math.floor(panel.clientHeight);
+      if (cssW < 1 || cssH < 1) return false;
+      var dpr = devicePixelRatioClamped();
+      var bw = Math.max(1, Math.round(cssW * dpr));
+      var bh = Math.max(1, Math.round(cssH * dpr));
+      if (canvas.width === bw && canvas.height === bh &&
+          mainCanvas.cssW === cssW && mainCanvas.cssH === cssH && mainCanvas.dpr === dpr) {
+        return false;
+      }
+      canvas.width = bw;
+      canvas.height = bh;
+      mainCanvas.cssW = cssW;
+      mainCanvas.cssH = cssH;
+      mainCanvas.dpr = dpr;
+      return true;
+    }
+
+    function renderCameraFrame() {
+      ensureMainCanvas();
+      if (!mainCanvas || !mainCanvas.ctx) return;
+      var canvas = mainCanvas.canvas;
+      if (canvas.width < 1 || canvas.height < 1) return;
+      var cssW = mainCanvas.cssW || Math.floor(canvas.width / devicePixelRatioClamped());
+      var cssH = mainCanvas.cssH || Math.floor(canvas.height / devicePixelRatioClamped());
+      var dpr = mainCanvas.dpr || devicePixelRatioClamped();
+      drawCamera(mainCanvas.ctx, cssW, cssH, dpr, time);
+    }
+
+    function startRenderLoop() {
+      if (animFrame != null) return;
+      function tick() {
+        time += 1;
+        renderCameraFrame();
+        animFrame = requestAnimationFrame(tick);
+        var inst = instances[root];
+        if (inst) inst.animFrame = animFrame;
+      }
+      tick();
+    }
+
+    function handleCameraLayoutChange() {
+      syncCanvasSize();
+      renderCameraFrame();
+      startRenderLoop();
+    }
+
+    function scheduleInitialCameraLayout() {
+      requestAnimationFrame(function () {
+        requestAnimationFrame(handleCameraLayoutChange);
+      });
+      setTimeout(handleCameraLayoutChange, 0);
+    }
+
+    function getCameraBareExposedPx() {
+      if (boundMachineId && global.FtthLab) {
+        if (typeof FtthLab.getSplicerDockedPair === 'function') {
+          var pair = FtthLab.getSplicerDockedPair(boundMachineId);
+          if (pair && typeof FtthLab.getSplicerExposedBareLengthPx === 'function') {
+            var leftLen = pair.left ? FtthLab.getSplicerExposedBareLengthPx(pair.left) : null;
+            var rightLen = pair.right ? FtthLab.getSplicerExposedBareLengthPx(pair.right) : null;
+            if (typeof leftLen === 'number' && isFinite(leftLen) &&
+                typeof rightLen === 'number' && isFinite(rightLen)) {
+              return (leftLen + rightLen) / 2;
+            }
+            if (typeof leftLen === 'number' && isFinite(leftLen)) return leftLen;
+            if (typeof rightLen === 'number' && isFinite(rightLen)) return rightLen;
+          }
+        }
+        if (typeof FtthLab.getBareGlassLengthAfterCutPx === 'function') {
+          return FtthLab.getBareGlassLengthAfterCutPx();
+        }
+      }
+      return FALLBACK_BARE_EXPOSED_PX;
+    }
+
+    function getCameraStripDistancePx() {
+      return getCameraBareExposedPx() * CAMERA_ZOOM_FACTOR;
+    }
+
+    function drawCoatingSegment(ctx, xStart, xEnd, yCenter, coatingWidth) {
+      if (xEnd <= xStart) return;
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = '#FFD700';
+      ctx.lineWidth = coatingWidth;
+      ctx.beginPath();
+      ctx.moveTo(xStart, yCenter);
+      ctx.lineTo(xEnd, yCenter);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(160, 120, 0, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(xStart, yCenter);
+      ctx.lineTo(xEnd, yCenter);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawBareGlassFiber(ctx, xStart, xEnd, yCenter, claddingWidth, coreWidth) {
+      if (xEnd <= xStart) return;
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.strokeStyle = 'rgba(200, 220, 255, 0.3)';
+      ctx.lineWidth = claddingWidth;
+      ctx.beginPath();
+      ctx.moveTo(xStart, yCenter);
+      ctx.lineTo(xEnd, yCenter);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(140, 190, 255, 0.95)';
+      ctx.lineWidth = coreWidth;
+      ctx.beginPath();
+      ctx.moveTo(xStart, yCenter);
+      ctx.lineTo(xEnd, yCenter);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawCompositeFiber(ctx, side, edgeX, tipX, stripBoundaryX, yCenter, fiberWidths) {
+      if (side === 'L') {
+        if (tipX <= edgeX) return;
+        if (tipX <= stripBoundaryX) {
+          drawCoatingSegment(ctx, edgeX, tipX, yCenter, fiberWidths.coating);
+          return;
+        }
+        drawCoatingSegment(ctx, edgeX, stripBoundaryX, yCenter, fiberWidths.coating);
+        drawBareGlassFiber(
+          ctx,
+          stripBoundaryX,
+          tipX,
+          yCenter,
+          fiberWidths.cladding,
+          fiberWidths.core
+        );
+        return;
+      }
+      if (tipX >= edgeX) return;
+      if (tipX >= stripBoundaryX) {
+        drawCoatingSegment(ctx, tipX, edgeX, yCenter, fiberWidths.coating);
+        return;
+      }
+      drawBareGlassFiber(
+        ctx,
+        tipX,
+        stripBoundaryX,
+        yCenter,
+        fiberWidths.cladding,
+        fiberWidths.core
+      );
+      drawCoatingSegment(ctx, stripBoundaryX, edgeX, yCenter, fiberWidths.coating);
+    }
+
+    function drawCamera(ctx, w, h, dpr, t) {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      var cx = w / 2;
+      var cy = h / 2;
+      var spliceComplete = state.fibersFused && state.spliceLossDb != null;
+      var fiberWidths = getCameraFiberWidths();
+
       ctx.fillStyle = '#060e1e';
       ctx.fillRect(0, 0, w, h);
+
       ctx.strokeStyle = 'rgba(0,180,255,0.06)';
       ctx.lineWidth = 1;
       var gridSize = 30;
-      var x;
-      var y;
-      for (x = 0; x < w; x += gridSize) {
+      var gx;
+      var gy;
+      for (gx = 0; gx < w; gx += gridSize) {
         ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.moveTo(gx, 0);
+        ctx.lineTo(gx, h);
         ctx.stroke();
       }
-      for (y = 0; y < h; y += gridSize) {
+      for (gy = 0; gy < h; gy += gridSize) {
         ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(w, y);
+        ctx.moveTo(0, gy);
+        ctx.lineTo(w, gy);
         ctx.stroke();
       }
+
       ctx.strokeStyle = 'rgba(255,200,0,0.25)';
       ctx.beginPath();
-      ctx.moveTo(w / 2, 0);
-      ctx.lineTo(w / 2, h);
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, h);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(0, h / 2);
-      ctx.lineTo(w, h / 2);
+      ctx.moveTo(0, cy);
+      ctx.lineTo(w, cy);
       ctx.stroke();
 
-      if (state.fiberPlaced.L || state.fiberPlaced.R) {
-        var centerY = h / 2;
+      var crossR = Math.min(w, h) * 0.12;
+      ctx.strokeStyle = 'rgba(0,180,255,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, crossR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(cx - crossR - 6, cy);
+      ctx.lineTo(cx + crossR + 6, cy);
+      ctx.moveTo(cx, cy - crossR - 6);
+      ctx.lineTo(cx, cy + crossR + 6);
+      ctx.stroke();
+
+      if (spliceComplete) {
+        var lossLabel = state.spliceLossDb.toFixed(2) + ' dB';
+        var lossFontSize = Math.max(28, Math.round(h * 0.28));
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '700 ' + lossFontSize + 'px "Share Tech Mono", monospace';
+        ctx.shadowColor = 'rgba(0, 229, 255, 0.55)';
+        ctx.shadowBlur = 14;
+        ctx.fillStyle = '#00e5ff';
+        ctx.fillText(lossLabel, cx, cy);
+        ctx.shadowBlur = 0;
+        ctx.font = '500 ' + Math.max(10, Math.round(lossFontSize * 0.28)) + 'px "Orbitron", monospace';
+        ctx.fillStyle = 'rgba(0, 229, 255, 0.55)';
+        ctx.fillText('SPLICE LOSS', cx, cy + lossFontSize * 0.72);
+      } else if (state.fiberPlaced.L || state.fiberPlaced.R) {
         var gap = state.splicing ? Math.max(0, 8 * (1 - (t % 100) / 40)) : 8;
-        var fiberWidth = 12;
+        var edgePad = Math.max(10, w * 0.02);
+        var stripDist = getCameraStripDistancePx();
+        var offLX = state.clampOffset.L.x * 0.5;
+        var offLY = state.clampOffset.L.y * 0.3;
+        var offRX = state.clampOffset.R.x * 0.5;
+        var offRY = state.clampOffset.R.y * 0.3;
+
         if (state.fiberPlaced.L) {
-          var leftEnd = w / 2 - gap + state.clampOffset.L.x * 0.5;
-          var offLY = state.clampOffset.L.y * 0.3;
-          ctx.fillStyle = 'rgba(255,213,79,0.85)';
-          ctx.beginPath();
-          if (ctx.roundRect) {
-            ctx.roundRect(
-              10,
-              centerY - fiberWidth / 2 + offLY,
-              Math.max(2, leftEnd - 10),
-              fiberWidth,
-              fiberWidth / 2
-            );
-          } else {
-            ctx.rect(10, centerY - fiberWidth / 2 + offLY, Math.max(2, leftEnd - 10), fiberWidth);
-          }
-          ctx.fill();
+          var leftTip = cx - gap + offLX;
+          drawCompositeFiber(
+            ctx,
+            'L',
+            edgePad,
+            leftTip,
+            cx - stripDist,
+            cy + offLY,
+            fiberWidths
+          );
         }
         if (state.fiberPlaced.R) {
-          var rightStart = w / 2 + gap - state.clampOffset.R.x * 0.5;
-          var offRY = state.clampOffset.R.y * 0.3;
-          ctx.fillStyle = 'rgba(255,213,79,0.85)';
-          ctx.beginPath();
-          if (ctx.roundRect) {
-            ctx.roundRect(
-              rightStart,
-              centerY - fiberWidth / 2 + offRY,
-              Math.max(2, w - 10 - rightStart),
-              fiberWidth,
-              fiberWidth / 2
-            );
-          } else {
-            ctx.rect(
-              rightStart,
-              centerY - fiberWidth / 2 + offRY,
-              Math.max(2, w - 10 - rightStart),
-              fiberWidth
-            );
-          }
-          ctx.fill();
+          var rightTip = cx + gap - offRX;
+          drawCompositeFiber(
+            ctx,
+            'R',
+            w - edgePad,
+            rightTip,
+            cx + stripDist,
+            cy + offRY,
+            fiberWidths
+          );
         }
       }
 
       var arcGlow = q('arcGlow');
-      if (arcGlow && arcGlow.classList.contains('active')) {
-        var glow = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, 40);
+      if (!spliceComplete && arcGlow && arcGlow.classList.contains('active')) {
+        var arcR = Math.min(w, h) * 0.14;
+        var glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, arcR);
         glow.addColorStop(0, 'rgba(255,255,255,0.9)');
         glow.addColorStop(0.2, 'rgba(0,180,255,0.8)');
         glow.addColorStop(1, 'rgba(0,0,255,0)');
         ctx.fillStyle = glow;
-        ctx.fillRect(w / 2 - 50, h / 2 - 50, 100, 100);
+        ctx.fillRect(cx - arcR, cy - arcR, arcR * 2, arcR * 2);
       }
 
       ctx.fillStyle = 'rgba(0,180,255,0.15)';
-      ctx.font = '24px Orbitron, monospace';
+      ctx.font = Math.max(14, Math.round(h * 0.14)) + 'px Orbitron, monospace';
       ctx.textAlign = 'right';
-      ctx.fillText(axis + '-VIEW', w - 16, h - 12);
+      ctx.fillText('PANORAMIC', w - 16, h - 12);
 
       var scanY = (t * 0.5) % h;
       ctx.fillStyle = 'rgba(0,180,255,0.06)';
       ctx.fillRect(0, scanY - 2, w, 4);
+      ctx.restore();
     }
 
     function animate() {
-      time += 1;
-      canvases.forEach(function (c) {
-        drawCamera(c.ctx, c.canvas.width, c.canvas.height, c.axis, time);
+      renderCameraFrame();
+    }
+
+    var resizeObserver = null;
+    var cameraViews = root.querySelector('.camera-views');
+    if (cameraViews && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(function () {
+        handleCameraLayoutChange();
       });
-      animFrame = requestAnimationFrame(animate);
+      resizeObserver.observe(cameraViews);
+      cameraViews.querySelectorAll('.camera-panel').forEach(function (panel) {
+        resizeObserver.observe(panel);
+      });
     }
 
     function onClampAssemblyClick(side, e) {
@@ -1125,13 +1363,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     };
 
     var resizeHandler = function () {
-      canvases.length = 0;
-      if (animFrame) cancelAnimationFrame(animFrame);
-      var cx = initCanvas('fsm-canvas-x', 'X');
-      var cy = initCanvas('fsm-canvas-y', 'Y');
-      if (cx) canvases.push(cx);
-      if (cy) canvases.push(cy);
-      animate();
+      handleCameraLayoutChange();
     };
 
     bindUi();
@@ -1149,7 +1381,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     if (yVal) yVal.textContent = '0.000';
     if (lossEst) lossEst.textContent = 'EST.LOSS: —';
     if (statusText) statusText.textContent = 'READY';
-    resizeHandler();
+    scheduleInitialCameraLayout();
     emit('ready', { empty: true });
 
     var onResetMotorComplete = function (ev) {
@@ -1202,6 +1434,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       heatInterval: state.heatInterval,
       keyHandler: keyHandler,
       resizeHandler: resizeHandler,
+      resizeObserver: resizeObserver,
       resetMotorCompleteHandler: onResetMotorComplete,
     };
 

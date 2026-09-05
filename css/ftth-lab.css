@@ -3140,6 +3140,13 @@ body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-ass
   pointer-events: auto;
 }
 
+/* Fusion splicer camera canvas — fill panoramic panel (see ResizeObserver in FusionSplicerMachineUI.js) */
+.lab-fusion-machine .fusion-splicer-machine .fsm-canvas-main {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 .lab-pigtail-fiber-hit {
   stroke: transparent;
   stroke-width: 14;
