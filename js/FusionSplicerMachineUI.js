@@ -21,6 +21,40 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
   var FALLBACK_STROKE_BARE_PX = 1.15;
   var FALLBACK_BARE_EXPOSED_PX = 16;
   var SM_SPLICE_LOSS_OPTIONS = [0.00, 0.01, 0.01, 0.02, 0.02, 0.03];
+  var SM_SPLICE_LOSS_DIRTY_MIN = 0.15;
+  var SM_SPLICE_LOSS_DIRTY_MAX = 0.45;
+  var BUFFER_RESIDUE_STROKE = '#7FB5F5';
+
+  function pickRandomSmSpliceLossDb() {
+    return SM_SPLICE_LOSS_OPTIONS[Math.floor(Math.random() * SM_SPLICE_LOSS_OPTIONS.length)];
+  }
+
+  function pickRandomDirtySpliceLossDb() {
+    var n = SM_SPLICE_LOSS_DIRTY_MIN +
+      Math.random() * (SM_SPLICE_LOSS_DIRTY_MAX - SM_SPLICE_LOSS_DIRTY_MIN);
+    return Math.round(n * 100) / 100;
+  }
+
+  function isDockedFiberClean(fiber) {
+    return !!(fiber && fiber.isCleaned === true);
+  }
+
+  function pickSpliceLossForDockedPair(pair) {
+    if (!pair || !pair.left || !pair.right) return pickRandomSmSpliceLossDb();
+    if (isDockedFiberClean(pair.left) && isDockedFiberClean(pair.right)) {
+      return pickRandomSmSpliceLossDb();
+    }
+    return pickRandomDirtySpliceLossDb();
+  }
+
+  function getFiberBufferResidueColor(fiber) {
+    if (fiber && typeof fiber.bufferColor === 'string' && fiber.bufferColor) return fiber.bufferColor;
+    if (fiber && fiber.fiberStrip && typeof fiber.fiberStrip.bufferColor === 'string' &&
+        fiber.fiberStrip.bufferColor) {
+      return fiber.fiberStrip.bufferColor;
+    }
+    return BUFFER_RESIDUE_STROKE;
+  }
 
   function readPigtailFiberStrokeWidths() {
     if (global.FtthLab && typeof FtthLab.getPigtailFiberRenderStrokeWidths === 'function') {
@@ -40,10 +74,6 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       cladding: base.bare * CAMERA_ZOOM_FACTOR,
       core: CAMERA_CORE_PX,
     };
-  }
-
-  function pickRandomSmSpliceLossDb() {
-    return SM_SPLICE_LOSS_OPTIONS[Math.floor(Math.random() * SM_SPLICE_LOSS_OPTIONS.length)];
   }
 
   function parseClampLimitPx(value, fallback) {
@@ -241,6 +271,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       active: false,
       fibersFused: false,
       spliceLossDb: null,
+      spliceDirty: false,
     };
 
     var CLAMP_BASE = { L: { left: 4, top: 18 }, R: { right: 4, top: 18 } };
@@ -655,6 +686,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     function clearFusionVisual() {
       state.fibersFused = false;
       state.spliceLossDb = null;
+      state.spliceDirty = false;
       var stage = q('alignmentStage');
       if (stage) {
         stage.classList.remove('is-fibers-fused');
@@ -733,7 +765,10 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         statusText.style.color = '';
       }
       var lossEst = q('lossEst');
-      if (lossEst) lossEst.textContent = 'EST.LOSS: —';
+      if (lossEst) {
+        lossEst.textContent = 'EST.LOSS: —';
+        lossEst.classList.remove('is-high-loss');
+      }
       var moveIndicator = q('moveIndicator');
       var offsetDisplay = q('offsetDisplay');
       if (moveIndicator) moveIndicator.classList.remove('active');
@@ -896,21 +931,46 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
           if (stage) stage.style.transform = 'translate(0, 0)';
           if (xVal) xVal.textContent = '0.000';
           if (yVal) yVal.textContent = '0.000';
-          if (statusText) {
-            statusText.textContent = 'SPLICE OK';
-            statusText.style.color = 'var(--accent-green)';
+          var dockedPair = null;
+          if (boundMachineId && global.FtthLab &&
+              typeof FtthLab.getSplicerDockedPair === 'function') {
+            dockedPair = FtthLab.getSplicerDockedPair(boundMachineId);
           }
-          var lossDb = pickRandomSmSpliceLossDb();
+          var dirtySplice = !!(dockedPair && dockedPair.left && dockedPair.right &&
+            (!isDockedFiberClean(dockedPair.left) || !isDockedFiberClean(dockedPair.right)));
+          state.spliceDirty = dirtySplice;
+          var lossDb = pickSpliceLossForDockedPair(dockedPair);
           state.spliceLossDb = lossDb;
+          if (statusText) {
+            if (dirtySplice) {
+              statusText.textContent = 'SPLICE OK (DIRTY)';
+              statusText.style.color = 'var(--accent-orange)';
+            } else {
+              statusText.textContent = 'SPLICE OK';
+              statusText.style.color = 'var(--accent-green)';
+            }
+          }
           var lossEst = q('lossEst');
-          if (lossEst) lossEst.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
-          showToast('Splice Complete — Loss: ' + lossDb.toFixed(2) + ' dB', 'success');
+          if (lossEst) {
+            lossEst.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
+            lossEst.classList.toggle('is-high-loss', dirtySplice);
+          }
+          showToast(
+            dirtySplice
+              ? 'Splice Complete — HIGH LOSS: ' + lossDb.toFixed(2) + ' dB (dirty fiber)'
+              : 'Splice Complete — Loss: ' + lossDb.toFixed(2) + ' dB',
+            dirtySplice ? 'warning' : 'success'
+          );
           fuseFibersVisual();
           setTimeout(function () {
             if (ledArc) ledArc.classList.remove('orange-on');
             if (arcGlow) arcGlow.classList.remove('active');
           }, 3000);
-          emit('spliceComplete', { lossDb: lossDb, machineId: boundMachineId });
+          emit('spliceComplete', {
+            lossDb: lossDb,
+            machineId: boundMachineId,
+            dirty: dirtySplice,
+          });
         }
       }, 80);
     }
@@ -1013,6 +1073,55 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
 
     function getCameraStripDistancePx() {
       return getCameraBareExposedPx() * CAMERA_ZOOM_FACTOR;
+    }
+
+    function getSplicerDockedPairLocal() {
+      if (!boundMachineId || !global.FtthLab ||
+          typeof FtthLab.getSplicerDockedPair !== 'function') {
+        return null;
+      }
+      return FtthLab.getSplicerDockedPair(boundMachineId);
+    }
+
+    function getDockedFiberForSide(side) {
+      var pair = getSplicerDockedPairLocal();
+      if (!pair) return null;
+      return side === 'L' ? pair.left : pair.right;
+    }
+
+    function drawBufferResidueOnBare(ctx, xStart, xEnd, yCenter, lineWidth, strokeColor) {
+      if (xEnd <= xStart) return;
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.setLineDash([4 * CAMERA_ZOOM_FACTOR, 6 * CAMERA_ZOOM_FACTOR]);
+      ctx.strokeStyle = strokeColor || BUFFER_RESIDUE_STROKE;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = Math.max(1, lineWidth);
+      ctx.beginPath();
+      ctx.moveTo(xStart, yCenter);
+      ctx.lineTo(xEnd, yCenter);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    function drawBareResidueForSide(ctx, side, edgeX, tipX, stripBoundaryX, yCenter, fiberWidths, fiber) {
+      if (isDockedFiberClean(fiber)) return;
+      var strokeColor = getFiberBufferResidueColor(fiber);
+      if (side === 'L') {
+        if (tipX > stripBoundaryX) {
+          drawBufferResidueOnBare(
+            ctx, stripBoundaryX, tipX, yCenter, fiberWidths.cladding, strokeColor
+          );
+        }
+        return;
+      }
+      if (tipX < stripBoundaryX) {
+        drawBufferResidueOnBare(
+          ctx, tipX, stripBoundaryX, yCenter, fiberWidths.cladding, strokeColor
+        );
+      }
     }
 
     function drawCoatingSegment(ctx, xStart, xEnd, yCenter, coatingWidth) {
@@ -1143,17 +1252,18 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       if (spliceComplete) {
         var lossLabel = state.spliceLossDb.toFixed(2) + ' dB';
         var lossFontSize = Math.max(28, Math.round(h * 0.28));
+        var dirtyLoss = !!state.spliceDirty;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '700 ' + lossFontSize + 'px "Share Tech Mono", monospace';
-        ctx.shadowColor = 'rgba(0, 229, 255, 0.55)';
+        ctx.shadowColor = dirtyLoss ? 'rgba(255, 152, 0, 0.55)' : 'rgba(0, 229, 255, 0.55)';
         ctx.shadowBlur = 14;
-        ctx.fillStyle = '#00e5ff';
+        ctx.fillStyle = dirtyLoss ? '#ff9800' : '#00e5ff';
         ctx.fillText(lossLabel, cx, cy);
         ctx.shadowBlur = 0;
         ctx.font = '500 ' + Math.max(10, Math.round(lossFontSize * 0.28)) + 'px "Orbitron", monospace';
-        ctx.fillStyle = 'rgba(0, 229, 255, 0.55)';
-        ctx.fillText('SPLICE LOSS', cx, cy + lossFontSize * 0.72);
+        ctx.fillStyle = dirtyLoss ? 'rgba(255, 152, 0, 0.65)' : 'rgba(0, 229, 255, 0.55)';
+        ctx.fillText(dirtyLoss ? 'HIGH LOSS' : 'SPLICE LOSS', cx, cy + lossFontSize * 0.72);
       } else if (state.fiberPlaced.L || state.fiberPlaced.R) {
         var gap = state.splicing ? Math.max(0, 8 * (1 - (t % 100) / 40)) : 8;
         var edgePad = Math.max(10, w * 0.02);
@@ -1165,26 +1275,34 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
 
         if (state.fiberPlaced.L) {
           var leftTip = cx - gap + offLX;
+          var leftStrip = cx - stripDist;
           drawCompositeFiber(
             ctx,
             'L',
             edgePad,
             leftTip,
-            cx - stripDist,
+            leftStrip,
             cy + offLY,
             fiberWidths
+          );
+          drawBareResidueForSide(
+            ctx, 'L', edgePad, leftTip, leftStrip, cy + offLY, fiberWidths, getDockedFiberForSide('L')
           );
         }
         if (state.fiberPlaced.R) {
           var rightTip = cx + gap - offRX;
+          var rightStrip = cx + stripDist;
           drawCompositeFiber(
             ctx,
             'R',
             w - edgePad,
             rightTip,
-            cx + stripDist,
+            rightStrip,
             cy + offRY,
             fiberWidths
+          );
+          drawBareResidueForSide(
+            ctx, 'R', w - edgePad, rightTip, rightStrip, cy + offRY, fiberWidths, getDockedFiberForSide('R')
           );
         }
       }
@@ -1379,7 +1497,10 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     var statusText = q('statusText');
     if (xVal) xVal.textContent = '0.000';
     if (yVal) yVal.textContent = '0.000';
-    if (lossEst) lossEst.textContent = 'EST.LOSS: —';
+    if (lossEst) {
+      lossEst.textContent = 'EST.LOSS: —';
+      lossEst.classList.remove('is-high-loss');
+    }
     if (statusText) statusText.textContent = 'READY';
     scheduleInitialCameraLayout();
     emit('ready', { empty: true });
