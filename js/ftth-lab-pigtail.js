@@ -70,6 +70,8 @@
   var PIGTAIL_FIBER_STROKE_JACKET_PX = 2.15;
   var PIGTAIL_FIBER_STROKE_BUFFER_PX = 1.65;
   var PIGTAIL_FIBER_STROKE_BARE_PX = 1.15;
+  /** 250µm buffer/coating (fiber #1 blue) — sync with .lab-pigtail-fiber--buffer in ftth-lab.css */
+  var PIGTAIL_BUFFER_STROKE_COLOR = '#7FB5F5';
 
   function getPigtailFiberRenderStrokeWidths() {
     return {
@@ -504,6 +506,7 @@
       if (p.stripStage < 0) p.stripStage = 0;
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
+      p.isCleaned = !!p.isCleaned;
       ensureFiberStrip(p);
       p.cleaved = !!p.cleaved;
       p.isCleaved = !!(p.isCleaved || p.cleaved);
@@ -1421,6 +1424,31 @@
     return stripArcOnRenderPath(p, bareTo);
   }
 
+  function cleanedBareClass(p) {
+    return p && p.isCleaned ? ' is-fiber-cleaned' : '';
+  }
+
+  function getPigtailBufferStrokeColor(p) {
+    if (p && typeof p.bufferColor === 'string' && p.bufferColor) return p.bufferColor;
+    if (p && p.fiberStrip && typeof p.fiberStrip.bufferColor === 'string' && p.fiberStrip.bufferColor) {
+      return p.fiberStrip.bufferColor;
+    }
+    return PIGTAIL_BUFFER_STROKE_COLOR;
+  }
+
+  function shouldShowPigtailResidue(p) {
+    if (!p || p.isCleaned) return false;
+    return isFullyStrippedPigtail(p) || !!(p.isCleaved || p.cleaved);
+  }
+
+  function buildPigtailResiduePathSvg(p, pathD) {
+    if (!shouldShowPigtailResidue(p) || !pathD) return '';
+    return (
+      '<path class="lab-pigtail-residue" data-pt-residue="' + p.id + '" data-pt-fiber="' + p.id +
+      '" d="' + pathD + '" fill="none" stroke="' + getPigtailBufferStrokeColor(p) + '" />'
+    );
+  }
+
   function buildPigtailFiberSvg(p, opts) {
     opts = opts || {};
     var fullPts = fiberRenderPathPoints(p);
@@ -1504,6 +1532,7 @@
       if (barePts.length < 2) {
         barePts = slicePolylineByDistance(densePts, dInner, Math.max(dBareEnd, dInner + bareLenPx));
       }
+      var barePathD = fiberSvgPathFromRenderPoints(p, barePts);
       html +=
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
@@ -1511,9 +1540,10 @@
         fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' + peelStyle('jacket') + ' />' +
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
         (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
-        (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls +
+        (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls + cleanedBareClass(p) +
         '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
-        fiberSvgPathFromRenderPoints(p, barePts) + '" fill="none"' + peelStyle('bare') + ' />';
+        barePathD + '" fill="none"' + peelStyle('bare') + ' />' +
+        buildPigtailResiduePathSvg(p, barePathD);
     } else {
     var jacketRender = stripArcOnRenderPath(p, jacketTo);
     var bareRender = stripArcOnRenderPath(p, bareTo);
@@ -1537,6 +1567,7 @@
         if (bufferLen < STRIP_BUFFER_COMPLETE_PX) {
           bufferSplit = false;
         } else {
+          var bufferBareD = segPathFromDenseSlice(dBareEnd, total);
           html +=
             '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' +
             (bad ? ' is-mismatch' : '') + peelClass('buffer') +
@@ -1544,24 +1575,28 @@
             segPathFromDenseSlice(dJacketEnd, dBareEnd) + '" fill="none"' + peelStyle('buffer') + ' />' +
             '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
             (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
-            (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls +
+            (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls + cleanedBareClass(p) +
             '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="bare" d="' +
-            segPathFromDenseSlice(dBareEnd, total) + '" fill="none"' + peelStyle('bare') + ' />';
+            bufferBareD + '" fill="none"' + peelStyle('bare') + ' />' +
+            buildPigtailResiduePathSvg(p, bufferBareD);
         }
       }
       if (!bufferSplit) {
         var tipBare = fullyStripped || bareComplete ||
           (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX && jacketRender > STRIP_TIP_EPS);
         var tipKind = tipBare ? 'bare' : (stripExposedKind(p) || 'buffer');
+        var tipPathD = segPathFromDenseSlice(dJacketEnd, total);
         html +=
           '<path class="lab-pigtail-fiber lab-pigtail-fiber--' + tipKind +
           (tipBare ? ' lab-pigtail-fiber--bare-tip' : '') +
           (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
           (bad ? ' is-mismatch' : '') + peelClass(tipBare ? 'bare' : 'buffer') + splicerCls +
+          (tipBare ? cleanedBareClass(p) : '') +
           '" data-pt-fiber-stripped="' + p.id + '" data-pt-fiber-seg="' +
           (tipBare ? 'bare' : 'stripped') + '" d="' +
-          segPathFromDenseSlice(dJacketEnd, total) + '" fill="none"' +
-          peelStyle(tipBare ? 'bare' : 'buffer') + ' />';
+          tipPathD + '" fill="none"' +
+          peelStyle(tipBare ? 'bare' : 'buffer') + ' />' +
+          (tipBare ? buildPigtailResiduePathSvg(p, tipPathD) : '');
       }
     } else {
       html +=
@@ -3984,6 +4019,7 @@
     var p = findPigtail(id);
     if (!p || !session) return;
     ensureFiberStrip(p);
+    p.isCleaned = false;
     var fs = p.fiberStrip;
     var maxLen = maxStripLenPx(p);
     var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
@@ -4422,6 +4458,7 @@
     var p = findPigtail(id);
     if (!p || p.isCleaved || p.cleaved) return false;
     ensureFiberStrip(p);
+    p.isCleaned = false;
     syncStripStageFromFiberStrip(p);
     p.fiberStrip.peel = 0;
     p.fiberStrip.peelLayer = null;
@@ -4496,6 +4533,7 @@
         n.getAttribute('data-pt-drag') === p.id ||
         n.getAttribute('data-pt-fiber') === p.id ||
         n.getAttribute('data-pt-fiber-stripped') === p.id ||
+        n.getAttribute('data-pt-residue') === p.id ||
         n.getAttribute('data-pt-ghost') === p.id ||
         n.getAttribute('data-pt-laser') === p.id
       );
@@ -4542,6 +4580,33 @@
     } else if (p.isSnappedToSplicer) {
       renderSplicerFiberOverlays(p.snappedSplicerId);
     }
+  }
+
+  function findCleanableStrippedFiberAtClient(clientX, clientY) {
+    var id = hitTestPigtailBareEnd(clientX, clientY);
+    if (!id) {
+      var world = clientToWorld(clientX, clientY);
+      var near = findBareTipNearWorld(world.x, world.y, 30);
+      id = near ? near.id : null;
+    }
+    if (!id) return null;
+    var p = findPigtail(id);
+    if (!p || !isFullyStrippedPigtail(p)) return null;
+    return p;
+  }
+
+  /** Mark a fully stripped pigtail bare fiber as cleaned. */
+  function markPigtailCleaned(id) {
+    var p = findPigtail(id);
+    if (!p || !isFullyStrippedPigtail(p)) return false;
+    if (p.isCleaned) return false;
+    p.isCleaned = true;
+    updateStripVisuals(p);
+    rebuildLayer();
+    pushHistory();
+    updateInspector();
+    selectPigtail(id);
+    return true;
   }
 
   function findBareTipProximity(clientX, clientY, thresholdPx) {
@@ -4734,6 +4799,7 @@
       routeMode: 'snake',
       fixedLength: SPAWN_LEN_PX,
       hasSleeve: false,
+      isCleaned: false,
       stripStage: 0,
       stripPeel: 0,
       stripLengthPx: 0,
@@ -6959,6 +7025,10 @@
       '</strong></div>' +
       '<div><span>Ends</span><strong>SC · Bare</strong></div>' +
       '<div><span>Strip</span><strong>' + stripStageLabel(p.stripStage || 0) + '</strong></div>' +
+      '<div><span>Clean</span><strong>' +
+      (isFullyStrippedPigtail(p)
+        ? (p.isCleaned ? 'Cleaned ✓' : 'Needs wipe')
+        : '—') + '</strong></div>' +
       '<div><span>Cleave</span><strong>' +
       (p.isCleaved || p.cleaved
         ? (p.cleaveAngle || 90) + '° face · ready to splice'
@@ -7212,6 +7282,8 @@
       FtthLab.mountSleeveOnPigtail = mountSleeve;
       FtthLab.ejectSleeveFromPigtail = ejectSleeve;
       FtthLab.findBareTipProximity = findBareTipProximity;
+      FtthLab.findCleanableStrippedFiberAtClient = findCleanableStrippedFiberAtClient;
+      FtthLab.markPigtailCleaned = markPigtailCleaned;
       FtthLab.hitTestPigtailAtClient = hitTestPigtailAtClient;
       FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
       FtthLab.findPigtailStripTarget = findStripTarget;

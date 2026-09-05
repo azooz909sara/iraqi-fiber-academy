@@ -403,6 +403,7 @@
     'sc-pigtail': 'FIBER JUMPERS',
     'splice-sleeve': 'FUSION SPLICING',
     'cfs-stripper': 'FUSION SPLICING',
+    'cleaning-wipe': 'FUSION SPLICING',
     'fiber-cleaver': 'FUSION SPLICING',
     'fusion-splicer-machine': 'FUSION SPLICING',
     'fiber-spool': 'FIBER JUMPERS',

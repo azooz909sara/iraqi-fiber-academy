@@ -3214,6 +3214,15 @@ body.lab-pigtail-dragging .lab-fusion-machine .fusion-splicer-machine .clamp-ass
   stroke-linejoin: miter;
 }
 
+/* Acrylic buffer/coating residue on bare glass — stroke color set inline in JS */
+.lab-pigtail-residue {
+  stroke-width: 1.5px;
+  stroke-dasharray: 2 3;
+  fill: none;
+  pointer-events: none;
+  opacity: 0.65;
+}
+
 .lab-pigtail-fiber--cleaved {
   stroke-linecap: butt;
   stroke-linejoin: miter;
@@ -3894,6 +3903,191 @@ body.lab-pigtail-dragging {
 .lab-tool--stripper:hover {
   border-color: rgba(250, 204, 21, 0.55);
   background: rgba(234, 179, 8, 0.12);
+}
+
+/* ── Cleaning Wipes (Kimwipes + alcohol) ── */
+.lab-tool__mark--cleaning-wipe {
+  width: 1.15rem;
+  height: 1.05rem;
+  position: relative;
+  border-radius: 0.1rem;
+  background:
+    linear-gradient(180deg, #f8fafc 0 18%, #e2e8f0 18% 22%, #f8fafc 22% 30%, #e2e8f0 30% 36%, #f8fafc 36% 100%);
+  border: 1px solid rgba(148, 163, 184, 0.65);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.lab-tool__mark--cleaning-wipe::before {
+  content: "";
+  position: absolute;
+  right: -0.34rem;
+  top: 0.08rem;
+  width: 0.34rem;
+  height: 0.82rem;
+  border-radius: 0.08rem 0.12rem 0.12rem 0.08rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(186, 230, 253, 0.35) 40%, rgba(14, 165, 233, 0.55));
+  border: 1px solid rgba(56, 189, 248, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.lab-tool__mark--cleaning-wipe::after {
+  content: "W";
+  position: absolute;
+  left: 0.14rem;
+  top: 0.12rem;
+  font-size: 0.42rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #64748b;
+  letter-spacing: -0.02em;
+}
+
+.lab-tool--cleaning-wipe .lab-tool__copy strong,
+.tool-item[data-tool="cleaning-wipe"] .lab-tool__copy strong {
+  color: #a5f3fc;
+}
+
+.tool-item[data-tool="cleaning-wipe"]:hover,
+.lab-tool--cleaning-wipe:hover {
+  border-color: rgba(34, 211, 238, 0.55);
+  background: rgba(6, 182, 212, 0.12);
+}
+
+/* ── Cleaning wipe workspace entity (force light paper — ignore OS dark mode) ── */
+.lab-cleaning-wipe {
+  background-color: #f8f9fa !important; /* Force white paper color regardless of Dark Mode */
+  border: 1px solid #ced4da !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5) !important;
+  border-radius: 4px !important;
+  color-scheme: light !important;
+}
+
+.lab-cleaning-wipe-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 500;
+  overflow: visible;
+  color-scheme: light;
+}
+
+.lab-cleaning-wipe-layer .lab-cleaning-wipe,
+.lab-cleaning-wipe-layer button.lab-cleaning-wipe {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: #f8f9fa !important;
+  background-color: #f8f9fa !important;
+  border: 1px solid #ced4da !important;
+  border-radius: 4px !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5) !important;
+  color: transparent;
+  color-scheme: light !important;
+  cursor: grab;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  z-index: 500;
+  transform: rotate(-6deg);
+  transform-origin: center center;
+}
+
+@media (prefers-color-scheme: dark) {
+  .lab-cleaning-wipe,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe,
+  .lab-cleaning-wipe-layer button.lab-cleaning-wipe,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe:hover,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe:focus,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe:focus-visible,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe:active,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe.is-selected,
+  .lab-cleaning-wipe-layer .lab-cleaning-wipe.is-dragging {
+    background: #f8f9fa !important;
+    background-color: #f8f9fa !important;
+    border: 1px solid #ced4da !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5) !important;
+    color-scheme: light !important;
+  }
+}
+
+.lab-cleaning-wipe-layer .lab-cleaning-wipe::after {
+  content: "";
+  position: absolute;
+  inset: 4px 5px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.65), rgba(248, 249, 250, 0.15));
+  pointer-events: none;
+}
+
+.lab-cleaning-wipe-layer .lab-cleaning-wipe:hover,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe:focus,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe:focus-visible,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe:active,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe.is-selected,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe.is-dragging {
+  background: #f8f9fa !important;
+  background-color: #f8f9fa !important;
+  border: 1px solid #ced4da !important;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.5) !important;
+}
+
+.lab-cleaning-wipe-layer .lab-cleaning-wipe.is-selected {
+  outline: 1.5px solid rgba(34, 211, 238, 0.75);
+  outline-offset: 2px;
+}
+
+.lab-cleaning-wipe-layer .lab-cleaning-wipe.is-dragging,
+.lab-cleaning-wipe-layer .lab-cleaning-wipe:active {
+  cursor: grabbing;
+  z-index: 510;
+  transform: rotate(-3deg) scale(1.04);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5) !important;
+}
+
+.lab-cleaning-wipe-ghost {
+  position: fixed;
+  left: -9999px;
+  top: -9999px;
+  width: 32px;
+  height: 22px;
+  border-radius: 2px 3px 3px 2px;
+  background: linear-gradient(145deg, #ffffff 0%, #f1f5f9 55%, #e2e8f0 100%);
+  border: 1px solid rgba(148, 163, 184, 0.75);
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.22),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+  pointer-events: none;
+  z-index: 99999;
+}
+
+.lab-cleaning-wipe-ghost::after {
+  content: "";
+  position: absolute;
+  inset: 3px 4px;
+  border-radius: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(226, 232, 240, 0.35));
+}
+
+body.lab-cleaning-wipe-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+body.lab-cleaning-wipe-dragging .lab-cleaning-wipe-layer {
+  z-index: 500;
+}
+
+body.lab-cleaning-wipe-dragging .lab-pigtail-fiber--bare[data-pt-fiber-stripped],
+body.lab-cleaning-wipe-dragging .lab-pigtail-fiber--bare-tip[data-pt-fiber-stripped] {
+  filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.45));
+}
+
+.lab-pigtail-fiber--bare.is-fiber-cleaned,
+.lab-pigtail-fiber--bare-tip.is-fiber-cleaned {
+  filter: drop-shadow(0 0 3px rgba(167, 243, 208, 0.85));
 }
 
 .lab-stripper-stages {
