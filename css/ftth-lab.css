@@ -376,6 +376,13 @@ body.lab-fusion-machine-dragging .lab-fusion-machine-layer {
   pointer-events: none;
 }
 
+/* When armed, drag from chassis chrome (heat oven housing, brand plate, chamber bezel) — not controls */
+.lab-fusion-machine.is-armed .fsm-heat-oven-module,
+.lab-fusion-machine.is-armed .fsm-brand-plate,
+.lab-fusion-machine.is-armed .fsm-chamber-panel {
+  cursor: grab;
+}
+
 .lab-fusion-machine.is-dragging .lab-fusion-machine__hit,
 .lab-fusion-machine:active .lab-fusion-machine__hit {
   cursor: grabbing;

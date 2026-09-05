@@ -1071,7 +1071,12 @@
 
     function onOutsidePointerDown(e) {
       if (isPointerOnFusionMachine(e.target)) return;
-      if (activeDrag) return;
+      if (activeDrag) {
+        var draggingNode = layer &&
+          layer.querySelector('[data-fusion-node="' + activeDrag + '"].is-dragging');
+        if (!draggingNode) recoverStaleDragState();
+        else return;
+      }
       disarmAllMachines({ blur: true });
     }
 
@@ -1335,12 +1340,38 @@
 
   function isClientOnMachineHit(node, clientX, clientY) {
     if (!node) return false;
-    var id = node.getAttribute('data-fusion-node');
-    if (armedMachineId === id) return false;
     var hit = node.querySelector('.lab-fusion-machine__hit');
     if (!hit) return false;
     var r = hit.getBoundingClientRect();
     return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  }
+
+  function isFusionMachineDragSuppressTarget(target) {
+    if (!target || !target.closest) return false;
+    return !!target.closest(
+      '.fsm-power-btn, .fsm-dpad, .dpad-btn, .fsm-dpad-center, .func-btn, .xo-btn, ' +
+      '.clamp-assembly, .fsm-heat-oven-channel, .fsm-heat-oven-lid, .fsm-screen-section, ' +
+      '.fsm-control-panel'
+    );
+  }
+
+  function recoverStaleDragState() {
+    activeDrag = null;
+    document.body.classList.remove('lab-fusion-machine-dragging');
+    if (layer) {
+      layer.querySelectorAll('.lab-fusion-machine.is-dragging').forEach(function (node) {
+        node.classList.remove('is-dragging');
+      });
+    }
+  }
+
+  function bindDragRecoveryGuards() {
+    if (global.__fsmDragRecoverBound) return;
+    global.__fsmDragRecoverBound = true;
+    window.addEventListener('blur', recoverStaleDragState);
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') recoverStaleDragState();
+    });
   }
 
   function bindLayerEvents(host) {
@@ -1348,13 +1379,15 @@
     layerEventsBound = true;
 
     host.addEventListener('pointerdown', function (e) {
-      var hit = e.target.closest && e.target.closest('.lab-fusion-machine__hit');
-      if (!hit) return;
       if (e.button !== 0) return;
-      var node = hit.closest('[data-fusion-node]');
-      if (!node || !isClientOnMachineHit(node, e.clientX, e.clientY)) return;
+      var node = e.target.closest && e.target.closest('[data-fusion-node]');
+      if (!node) return;
+      if (!isClientOnMachineHit(node, e.clientX, e.clientY)) return;
+      if (isFusionMachineDragSuppressTarget(e.target)) return;
       e.preventDefault();
       e.stopPropagation();
+
+      recoverStaleDragState();
 
       var id = node.getAttribute('data-fusion-node');
       var m = findMachine(id);
@@ -1378,9 +1411,11 @@
       document.body.classList.add('lab-fusion-machine-dragging');
       activeDrag = id;
       var pointerId = e.pointerId;
-      try { hit.setPointerCapture(pointerId); } catch (err) { /* ignore */ }
+      var hit = node.querySelector('.lab-fusion-machine__hit');
+      try { if (hit) hit.setPointerCapture(pointerId); } catch (err) { /* ignore */ }
 
       function onMove(ev) {
+        if (ev.pointerId !== pointerId) return;
         var dx = (ev.clientX - sx) / zoom;
         var dy = (ev.clientY - sy) / zoom;
         if (!moved && (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX)) {
@@ -1398,11 +1433,15 @@
         }
       }
 
-      function onUp() {
+      function onUp(ev) {
+        if (ev && ev.pointerId != null && ev.pointerId !== pointerId) return;
         window.removeEventListener('pointermove', onMove);
         window.removeEventListener('pointerup', onUp);
         window.removeEventListener('pointercancel', onUp);
-        try { hit.releasePointerCapture(pointerId); } catch (err2) { /* ignore */ }
+        if (hit) {
+          hit.removeEventListener('lostpointercapture', onUp);
+          try { hit.releasePointerCapture(pointerId); } catch (err2) { /* ignore */ }
+        }
         node.classList.remove('is-dragging');
         document.body.classList.remove('lab-fusion-machine-dragging');
         activeDrag = null;
@@ -1417,6 +1456,7 @@
       window.addEventListener('pointermove', onMove);
       window.addEventListener('pointerup', onUp);
       window.addEventListener('pointercancel', onUp);
+      if (hit) hit.addEventListener('lostpointercapture', onUp);
     }, true);
   }
 
@@ -1663,6 +1703,7 @@
     renderToolbox();
     bindStageDrop();
     bindOutsideIsolation();
+    bindDragRecoveryGuards();
     ensureLayer();
     rebuildLayer();
     pushHistory();
