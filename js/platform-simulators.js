@@ -19,9 +19,9 @@
     },
     {
       id: 'otdr-simulator',
-      label: 'محاكي OTDR افتراضي',
+      label: 'مختبر OTDR (OTDR Lab)',
       navLabel: 'OTDR',
-      href: '',
+      href: 'otdr-lab.html',
     },
     {
       id: 'power-meter',
@@ -93,9 +93,9 @@
         iconType: 'emoji',
       },
       'otdr-simulator': {
-        title: 'محاكي OTDR افتراضي',
+        title: 'مختبر OTDR (OTDR Lab)',
         description:
-          'تعلّم قراءة وتحليل منحنيات الانعكاس البصري (OTDR) وتحديد مواقع الأعطال بدقة دون معدات حقيقية.',
+          'ورشة OTDR كاملة بنفس مختبر لحام الألياف: بناء الشبكة، اللحام، القطع، ثم إضافة منحنيات الانعكاس واختبارات OTDR.',
         icon: '📊',
         iconType: 'emoji',
       },

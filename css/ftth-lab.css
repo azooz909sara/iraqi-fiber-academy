@@ -276,14 +276,16 @@ body.lab-page {
   gap: 0.95rem;
 }
 
-/* Fusion Splicer Lab — badge at bottom of left toolbox rail */
-.splicer-lab-page .lab-rail {
+/* Fusion Splicer Lab / OTDR Lab — badge at bottom of left toolbox rail */
+.splicer-lab-page .lab-rail,
+.otdr-lab-page .lab-rail {
   display: flex;
   flex-direction: column;
   direction: ltr;
 }
 
-.splicer-toolbox-title {
+.splicer-toolbox-title,
+.otdr-toolbox-title {
   margin: 1rem 0 0;
   margin-top: auto;
   padding: 0.55rem 0.75rem;

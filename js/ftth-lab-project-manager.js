@@ -41,6 +41,8 @@
       if (!data || typeof data !== 'object') return emptyStore();
       if (!data.projects || typeof data.projects !== 'object') data.projects = {};
       if (!Array.isArray(data.recent)) data.recent = [];
+      data.recent = data.recent.filter(function (id) { return !!data.projects[id]; });
+      if (data.current && !data.projects[data.current]) data.current = null;
       return data;
     } catch (err) {
       return emptyStore();
@@ -225,11 +227,16 @@
   }
 
   function loadProject(id) {
-    if (!id || !lab() || typeof lab().restoreProjectState !== 'function') return false;
+    if (!id) return false;
+    if (!lab() || typeof lab().restoreProjectState !== 'function') {
+      alert('Workspace is still loading. Please try again in a moment.');
+      return false;
+    }
     var store = readStore();
     var entry = store.projects[id];
     if (!entry || !entry.payload) {
       alert('Project not found.');
+      deleteProject(id);
       return false;
     }
     if (!lab().restoreProjectState(clone(entry.payload))) {
@@ -599,7 +606,28 @@
   }
 
   function boot() {
-    if (document.getElementById('lab-startup-view')) {
+    if (document.getElementById('lab-startup-view') && document.body.classList.contains('otdr-lab-page')) {
+      global.FtthLabProjectManager = createWorkspaceProjectManager({
+        storageKey: 'ifa_otdr_lab_projects',
+        kind: 'ifa-otdr-lab-project',
+        idPrefix: 'otdr',
+        pageClass: 'otdr-lab-page',
+        templateDesc: 'Blank canvas · OLT · Splitters · Jumpers · Fusion · OTDR test bench',
+        ids: {
+          startup: 'lab-startup-view',
+          back: 'lab-startup-back',
+          recentList: 'lab-startup-recent-list',
+          templates: 'lab-startup-templates-grid',
+          workspace: 'lab-app',
+          menuBar: 'lab-app-menu-bar',
+          recentMenu: 'lab-file-menu-recent-list',
+          saveStatus: 'lab-save-status',
+          projectName: 'lab-menu-project-name',
+          settingsModal: 'ftth-lab-settings-modal',
+          toast: 'lab-file-menu-toast',
+        },
+      });
+    } else if (document.getElementById('lab-startup-view')) {
       global.FtthLabProjectManager = createWorkspaceProjectManager({
         storageKey: 'ifa_ftth_lab_projects',
         kind: 'ifa-ftth-lab-project',

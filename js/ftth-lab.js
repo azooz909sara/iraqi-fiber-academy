@@ -664,6 +664,16 @@
     return !!(document.body && document.body.classList.contains('opm-page'));
   }
 
+  function isOtdrWorkspacePage() {
+    return !!(document.body && document.body.classList.contains('otdr-lab-page'));
+  }
+
+  function projectWorkspaceKind() {
+    if (isOpmWorkspacePage()) return 'ifa-opm-project';
+    if (isOtdrWorkspacePage()) return 'ifa-otdr-lab-project';
+    return 'ifa-ftth-lab-project';
+  }
+
   function activeLabSettings() {
     if (isOpmWorkspacePage() && global.OpmSettings) return global.OpmSettings;
     return global.FtthLabSettings || null;
@@ -1923,7 +1933,7 @@
     });
     return {
       version: 1,
-      kind: isOpmWorkspacePage() ? 'ifa-opm-project' : 'ifa-ftth-lab-project',
+      kind: projectWorkspaceKind(),
       savedAt: new Date().toISOString(),
       zoom2d: state.zoom2d,
       pan2dX: state.pan2dX,
@@ -1950,7 +1960,8 @@
 
   function restoreProjectState(payload) {
     if (!payload || typeof payload !== 'object') return false;
-    if (payload.kind && payload.kind !== 'ifa-ftth-lab-project' && payload.kind !== 'ifa-opm-project') {
+    var kind = payload.kind;
+    if (kind && kind !== projectWorkspaceKind()) {
       return false;
     }
     var toolsPayload = payload.tools && typeof payload.tools === 'object' ? payload.tools : {};
