@@ -25,10 +25,13 @@
   var BOOT_EXIT_OFFSET = END_H / 2;
   var BOOT_EXIT_STUB = 10;
   var STRAIN_RELIEF_PX = 22;
-  var UNPLUG_PULL_PX = 36;
+  var UNPLUG_PULL_PX = 22;
   var PLUG_SNAP_PX = 22;
   var OLS_MAGNET_SNAP_PX = 56;
   var OLS_MAGNET_LOCK_PX = 30;
+  var OPM_MAGNET_SNAP_PX = 52;
+  var OTDR_MAGNET_SNAP_PX = 68;
+  var OTDR_PLUG_SNAP_PX = 50;
   var TAIL_SNAP_PX = 18;
   var TAIL_W = 10;
   var TAIL_H = 16;
@@ -296,6 +299,32 @@
     return normalizePolish(cordPolish) === portPolishNorm(portPolish);
   }
 
+  /** VFL and OLP use 2.5 mm adapters that accept both SC/PC and SC/APC. */
+  function isUniversalPortOwner(owner) {
+    return owner === 'vfl' || owner === 'opm';
+  }
+
+  function isUniversalPortEl(el) {
+    if (!el || !el.closest) return false;
+    if (el.closest('[data-polish-universal="true"], [data-port-universal="true"]')) return true;
+    if (el.closest('.protruding-port[data-port-type="vfl"]')) return true;
+    return false;
+  }
+
+  function isUniversalPortHit(hit) {
+    if (!hit) return false;
+    if (isUniversalPortOwner(hit.owner)) return true;
+    if (hit.universal) return true;
+    return isUniversalPortEl(hit.el);
+  }
+
+  function isUniversalPortAttach(att) {
+    if (!att) return false;
+    if (isUniversalPortOwner(att.owner)) return true;
+    if (att.universal) return true;
+    return false;
+  }
+
   function findPigtail(id) {
     for (var i = 0; i < pigtails.length; i++) {
       if (pigtails[i].id === id) return pigtails[i];
@@ -403,6 +432,53 @@
     return OLS_MAGNET_SNAP_PX;
   }
 
+  function otdrPortMetaFromNode(node) {
+    if (!node || !node.closest) return null;
+    var wrap = node.closest('.protruding-port[data-port-type]');
+    if (!wrap) return null;
+    var t = (wrap.getAttribute('data-port-type') || '').toLowerCase();
+    if (t === 'apc') return { polish: 'APC', label: 'SmartOTDR · APC' };
+    if (t === 'apc-live') return { polish: 'APC', label: 'SmartOTDR · APC LIVE' };
+    if (t === 'vfl') return { polish: 'UPC', label: 'SmartOTDR · VFL' };
+    return { polish: 'UPC', label: 'SmartOTDR' };
+  }
+
+  function isOtdrPortEl(el) {
+    return !!(el && el.closest && el.closest('.lab-otdr-port, .lab-otdr-device .device-port'));
+  }
+
+  function isOtdrPortHit(hit) {
+    return !!(hit && (hit.otdr || isOtdrPortEl(hit.el)));
+  }
+
+  function magnetRadiusForEl(el) {
+    if (isOtdrPortEl(el)) return OTDR_MAGNET_SNAP_PX;
+    if (el && el.closest && el.closest('.lab-ols-port[data-ols-port]')) return olsMagnetRadius();
+    if (el && el.closest && el.closest('.lab-opm-port[data-opm-port]')) return OPM_MAGNET_SNAP_PX;
+    return PLUG_SNAP_PX * 3;
+  }
+
+  function plugSnapRadiusFor(hit) {
+    if (!hit) return PLUG_SNAP_PX * 3;
+    if (isOtdrPortHit(hit)) return OTDR_PLUG_SNAP_PX;
+    if (hit.owner === 'ols') return olsMagnetRadius();
+    if (hit.owner === 'opm' || hit.owner === 'vfl') return OPM_MAGNET_SNAP_PX;
+    return PLUG_SNAP_PX * 3;
+  }
+
+  function magnetLockPxFor(hit) {
+    if (isOtdrPortHit(hit)) return 28;
+    if (hit && hit.owner === 'opm') return 26;
+    return OLS_MAGNET_LOCK_PX;
+  }
+
+  function opmPortScreenCenter(el) {
+    if (!el) return null;
+    var knurl = el.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || el;
+    var r = knurl.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height * 0.35 };
+  }
+
   function enrichOlsHitDeepSeat(hit) {
     if (!hit || hit.owner !== 'ols' || !hit.olsId) return hit;
     if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
@@ -425,28 +501,71 @@
   }
 
   function findNearestOlsHit(clientX, clientY, maxPx) {
-    maxPx = maxPx != null ? maxPx : olsMagnetRadius();
     var nodes = document.querySelectorAll('.lab-ols-port[data-ols-port]');
     var best = null;
-    var bestD = maxPx;
+    var bestD = Infinity;
     var i;
     for (i = 0; i < nodes.length; i++) {
       var node = nodes[i];
       var c = olsPortScreenCenter(node);
       if (!c) continue;
+      var radius = maxPx != null ? maxPx : magnetRadiusForEl(node);
       var d = dist2(clientX, clientY, c.x, c.y);
-      if (d <= bestD) {
+      if (d <= radius && d < bestD) {
         bestD = d;
+        var otdrMeta = otdrPortMetaFromNode(node);
         best = {
           owner: 'ols',
           olsId: node.getAttribute('data-ols-port'),
-          polish: 'UPC',
+          polish: otdrMeta ? otdrMeta.polish : 'UPC',
           connectorType: 'SC',
-          label: 'Viavi OLS-35 · SC adapter',
+          label: otdrMeta ? otdrMeta.label : 'Viavi OLS-35 · SC adapter',
           el: node,
           screenDist: d,
+          otdr: isOtdrPortEl(node),
         };
         enrichOlsHitDeepSeat(best);
+      }
+    }
+    return best;
+  }
+
+  function findNearestOpmHit(clientX, clientY, maxPx) {
+    var nodes = document.querySelectorAll('.lab-opm-port[data-opm-port]');
+    var best = null;
+    var bestD = Infinity;
+    var i;
+    for (i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var c = opmPortScreenCenter(node);
+      if (!c) continue;
+      var radius = maxPx != null ? maxPx : magnetRadiusForEl(node);
+      var d = dist2(clientX, clientY, c.x, c.y);
+      if (d <= radius && d < bestD) {
+        bestD = d;
+        var oid = node.getAttribute('data-opm-port');
+        var otdrOpm = otdrPortMetaFromNode(node);
+        var cO = clientToWorld(c.x, c.y);
+        best = {
+          owner: 'opm',
+          opmId: oid,
+          polish: otdrOpm ? otdrOpm.polish : 'UPC',
+          universal: isUniversalPortEl(node),
+          connectorType: 'SC',
+          label: otdrOpm ? otdrOpm.label : 'Viavi OLP-38 · SC adapter',
+          wx: cO.x,
+          wy: cO.y,
+          el: node,
+          screenDist: d,
+          otdr: isOtdrPortEl(node),
+        };
+        if (global.FtthLab && typeof FtthLab.getOpmPortWorld === 'function') {
+          var pw = FtthLab.getOpmPortWorld(oid);
+          if (pw) {
+            best.wx = pw.x;
+            best.wy = pw.y;
+          }
+        }
       }
     }
     return best;
@@ -458,10 +577,19 @@
       enrichOlsHitDeepSeat(hit);
       var c = olsPortScreenCenter(hit.el);
       if (c) hit.screenDist = dist2(clientX, clientY, c.x, c.y);
+      if (isOtdrPortEl(hit.el)) hit.otdr = true;
+      return hit;
+    }
+    if (hit && hit.owner === 'opm') {
+      var cOpm = opmPortScreenCenter(hit.el);
+      if (cOpm) hit.screenDist = dist2(clientX, clientY, cOpm.x, cOpm.y);
+      if (isOtdrPortEl(hit.el)) hit.otdr = true;
       return hit;
     }
     var ols = findNearestOlsHit(clientX, clientY);
     if (ols) return ols;
+    var opm = findNearestOpmHit(clientX, clientY);
+    if (opm) return opm;
     return hit;
   }
 
@@ -472,12 +600,35 @@
     var d = hit.screenDist != null
       ? hit.screenDist
       : (c ? dist2(clientX, clientY, c.x, c.y) : 9999);
-    if (d > olsMagnetRadius()) return null;
+    var maxR = isOtdrPortHit(hit) ? OTDR_MAGNET_SNAP_PX : olsMagnetRadius();
+    if (d > maxR) return null;
     if (hit.el) hit.el.classList.add('is-plug-target');
     p.connector.liveRot = 180;
     seatConnectorAtPort(p, hit.wx, hit.wy);
     updateFiberPath(p);
-    if (d <= OLS_MAGNET_LOCK_PX) return 'lock';
+    if (d <= magnetLockPxFor(hit)) return 'lock';
+    return 'pull';
+  }
+
+  function applyOpmMagneticPull(p, hit, clientX, clientY) {
+    if (!hit || hit.owner !== 'opm' || !p) return null;
+    var c = opmPortScreenCenter(hit.el);
+    var d = hit.screenDist != null
+      ? hit.screenDist
+      : (c ? dist2(clientX, clientY, c.x, c.y) : 9999);
+    if (d > plugSnapRadiusFor(hit)) return null;
+    if (global.FtthLab && typeof FtthLab.getOpmPortWorld === 'function' && hit.opmId) {
+      var pw = FtthLab.getOpmPortWorld(hit.opmId);
+      if (pw) {
+        hit.wx = pw.x;
+        hit.wy = pw.y;
+      }
+    }
+    if (hit.el) hit.el.classList.add('is-plug-target');
+    p.connector.liveRot = 180;
+    seatConnectorAtPort(p, hit.wx, hit.wy);
+    updateFiberPath(p);
+    if (d <= magnetLockPxFor(hit)) return 'lock';
     return 'pull';
   }
 
@@ -4883,7 +5034,10 @@
     if (!p) return;
     p.polish = normalizePolish(polish);
     if (p.connector.attached) {
-      p.connector.mismatch = !polishMatch(p.polish, p.connector.attached.polish);
+      var universal = isUniversalPortAttach(p.connector.attached);
+      p.connector.mismatch = universal
+        ? false
+        : !polishMatch(p.polish, p.connector.attached.polish);
       p.connector.attached.mismatch = p.connector.mismatch;
       if (p.connector.mismatch) showWarning(MISMATCH_MSG);
     }
@@ -5057,15 +5211,19 @@
         var knurl = node.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || node;
         var rO = knurl.getBoundingClientRect();
         var cO = clientToWorld(rO.left + rO.width / 2, rO.top + rO.height * 0.35);
+        var otdrOpm = otdrPortMetaFromNode(node);
+        var universal = isUniversalPortEl(node);
         return {
           owner: 'opm',
           opmId: oid,
-          polish: 'UPC',
+          polish: otdrOpm ? otdrOpm.polish : 'UPC',
+          universal: universal,
           connectorType: 'SC',
-          label: 'Viavi OLP-38 · SC adapter',
+          label: otdrOpm ? otdrOpm.label : 'Viavi OLP-38 · SC adapter',
           wx: cO.x,
           wy: cO.y,
           el: node,
+          otdr: isOtdrPortEl(node),
         };
       }
 
@@ -5084,15 +5242,17 @@
         ) || node;
         var rS = olsSlot.getBoundingClientRect();
         var cS = clientToWorld(rS.left + rS.width / 2, rS.top + Math.max(1, rS.height * 0.2));
+        var otdrOls = otdrPortMetaFromNode(node);
         return {
           owner: 'ols',
           olsId: olsId,
-          polish: 'UPC',
+          polish: otdrOls ? otdrOls.polish : 'UPC',
           connectorType: 'SC',
-          label: 'Viavi OLS-35 · SC adapter',
+          label: otdrOls ? otdrOls.label : 'Viavi OLS-35 · SC adapter',
           wx: cS.x,
           wy: cS.y,
           el: node,
+          otdr: isOtdrPortEl(node),
         };
       }
     }
@@ -5137,8 +5297,7 @@
   function attachConnector(p, hit) {
     if (!p || !hit) return;
     if (hit.owner === 'ols') hit = enrichOlsHitDeepSeat(hit) || hit;
-    var mismatch = !polishMatch(p.polish, hit.polish);
-    if (hit.owner === 'vfl') mismatch = false;
+    var mismatch = isUniversalPortHit(hit) ? false : !polishMatch(p.polish, hit.polish);
     if (hit.owner === 'vfl' && global.FtthLab && typeof FtthLab.detachPcordsFromVfl === 'function') {
       FtthLab.detachPcordsFromVfl(hit.vflId, null, null);
     }
@@ -5147,6 +5306,7 @@
     p.connector.attached = {
       owner: hit.owner,
       polish: portPolishNorm(hit.polish) === 'APC' ? 'APC' : 'UPC',
+      universal: isUniversalPortHit(hit),
       label: hit.label,
       splitterId: hit.splitterId || null,
       couplerId: hit.couplerId || null,
@@ -6122,7 +6282,7 @@
   function clearPlugHighlights() {
     document.querySelectorAll(
       '.lab-fx-port.is-plug-target, .lab-cas-port.is-plug-target, .lab-cpl-port.is-plug-target, ' +
-      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
+      '.lab-vfl-port.is-plug-target, .lab-opm-port.is-plug-target, .lab-ols-port.is-plug-target, .lab-otdr-port.is-plug-target, .lab-splice-point.is-plug-target, .lab-term-point.is-plug-target, ' +
       '[data-lab-splice].is-plug-target, [data-lab-term].is-plug-target'
     ).forEach(function (n) { n.classList.remove('is-plug-target'); });
   }
@@ -6348,6 +6508,9 @@
         var home = p.connector.attached
           ? { x: p.connector.attached.wx, y: p.connector.attached.wy }
           : null;
+        var wasAttached = !!p.connector.attached;
+        var startClientX = e.clientX;
+        var startClientY = e.clientY;
         var unplugged = false;
         var moved = false;
         var snakeMode = getRouteMode(p) === 'snake';
@@ -6368,8 +6531,8 @@
           moved = true;
           var world = clientToWorld(ev.clientX, ev.clientY);
           if (p.connector.attached && !unplugged) {
-            var pull = dist2(world.x, world.y, home.x, home.y);
-            if (pull < UNPLUG_PULL_PX) {
+            var pullPx = dist2(ev.clientX, ev.clientY, startClientX, startClientY);
+            if (pullPx < UNPLUG_PULL_PX) {
               seatConnectorAtPort(p, home.x, home.y);
               updateFiberPath(p);
               return;
@@ -6413,11 +6576,40 @@
               updateInspector();
               pushHistory();
               refreshBudget();
-              setStatus('OLS-35 · magnetic dock · SC seated vertical');
+              setStatus(
+                isOtdrPortHit(hit)
+                  ? 'SmartOTDR · magnetic dock · SC seated'
+                  : 'OLS-35 · magnetic dock · SC seated vertical'
+              );
               return;
             }
-          } else if (!snakeMode && hit && (hit.owner === 'vfl' || hit.owner === 'opm') &&
-              dist2(p.ax, p.ay, hit.wx, hit.wy) < PLUG_SNAP_PX * 3) {
+          } else if (hit && hit.owner === 'opm') {
+            var magOpm = applyOpmMagneticPull(p, hit, ev.clientX, ev.clientY);
+            if (magOpm === 'lock' && !p.connector.attached) {
+              endOrthoSnake(p);
+              attachConnector(p, hit);
+              window.removeEventListener('pointermove', onMove);
+              window.removeEventListener('pointerup', onUp);
+              window.removeEventListener('pointercancel', onUp);
+              try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
+              btn.classList.remove('is-dragging');
+              document.body.classList.remove('lab-pigtail-dragging');
+              if (fusedMachineId) setFusedAssemblyDragPassthrough(p, false);
+              clearPlugHighlights();
+              p.connector.liveRot = null;
+              rebuildLayer();
+              updateInspector();
+              pushHistory();
+              refreshBudget();
+              setStatus(
+                isOtdrPortHit(hit)
+                  ? 'SmartOTDR · magnetic dock · SC seated'
+                  : 'OLP-38 · magnetic dock · SC seated'
+              );
+              return;
+            }
+          } else if (!snakeMode && hit && hit.owner === 'vfl' &&
+              dist2(p.ax, p.ay, hit.wx, hit.wy) < plugSnapRadiusFor(hit)) {
             p.connector.liveRot = 180;
           }
           if (fusedMachineId) {
@@ -6450,9 +6642,7 @@
 
           if (!p.connector.attached) {
             var hit = resolvePlugHit(ev.clientX, ev.clientY);
-            var snapR = (hit && hit.owner === 'ols')
-              ? olsMagnetRadius()
-              : PLUG_SNAP_PX * 3;
+            var snapR = plugSnapRadiusFor(hit);
             var d = hit
               ? (hit.screenDist != null
                 ? hit.screenDist
@@ -6461,6 +6651,9 @@
             if (hit && d < snapR) {
               attachConnector(p, hit);
             }
+          } else if (wasAttached && !unplugged && home) {
+            seatConnectorAtPort(p, home.x, home.y);
+            setStatus('Connector locked · pull farther to unplug');
           }
           rebuildLayer();
           updateInspector();

@@ -128,6 +128,32 @@
     return normalizePolish(cordPolish) === portPolishNorm(portPolish);
   }
 
+  /** VFL and OLP use 2.5 mm adapters that accept both SC/PC and SC/APC. */
+  function isUniversalPortOwner(owner) {
+    return owner === 'vfl' || owner === 'opm';
+  }
+
+  function isUniversalPortEl(el) {
+    if (!el || !el.closest) return false;
+    if (el.closest('[data-polish-universal="true"], [data-port-universal="true"]')) return true;
+    if (el.closest('.protruding-port[data-port-type="vfl"]')) return true;
+    return false;
+  }
+
+  function isUniversalPortHit(hit) {
+    if (!hit) return false;
+    if (isUniversalPortOwner(hit.owner)) return true;
+    if (hit.universal) return true;
+    return isUniversalPortEl(hit.el);
+  }
+
+  function isUniversalPortAttach(att) {
+    if (!att) return false;
+    if (isUniversalPortOwner(att.owner)) return true;
+    if (att.universal) return true;
+    return false;
+  }
+
   function findCord(id) {
     for (var i = 0; i < cords.length; i++) {
       if (cords[i].id === id) return cords[i];
@@ -337,7 +363,10 @@
     var side = cord[endKey(end)];
     side.polish = polish;
     if (side.attached) {
-      side.mismatch = !polishMatch(polish, side.attached.polish);
+      var universal = isUniversalPortAttach(side.attached);
+      side.mismatch = universal
+        ? false
+        : !polishMatch(polish, side.attached.polish);
       side.attached.mismatch = side.mismatch;
       if (side.mismatch) showWarning(MISMATCH_MSG);
     }
@@ -419,9 +448,7 @@
       hit = enrichOlsHitDeepSeat(hit) || hit;
     }
     var side = cord[endKey(end)];
-    var mismatch = !polishMatch(side.polish, hit.polish);
-    if (hit.owner === 'vfl') mismatch = false;
-    if (hit.owner === 'opm' || hit.owner === 'ols') mismatch = !polishMatch(side.polish, hit.polish);
+    var mismatch = isUniversalPortHit(hit) ? false : !polishMatch(side.polish, hit.polish);
     clearPortFromOthers(hit, cord.id, end);
     if (hit.owner === 'vfl' && global.FtthLab && typeof FtthLab.detachPigtailsFromVfl === 'function') {
       FtthLab.detachPigtailsFromVfl(hit.vflId, null);
@@ -442,6 +469,7 @@
     side.attached = {
       owner: hit.owner,
       polish: portPolishNorm(hit.polish) === 'APC' ? 'APC' : 'UPC',
+      universal: isUniversalPortHit(hit),
       label: hit.label,
       splitterId: hit.splitterId || null,
       couplerId: hit.couplerId || null,
@@ -626,12 +654,14 @@
         var knurl = node.querySelector('.viavi__adapter-knurl, .lab-opm__adapter-knurl') || node;
         var rO = knurl.getBoundingClientRect();
         var cO = clientToWorld(rO.left + rO.width / 2, rO.top + rO.height * 0.35);
+        var otdrOpm = otdrPortMetaFromNode(node);
         return {
           owner: 'opm',
           opmId: oid,
-          polish: 'UPC',
+          polish: otdrOpm ? otdrOpm.polish : 'UPC',
+          universal: isUniversalPortEl(node),
           connectorType: 'SC',
-          label: 'Viavi OLP-38 · SC adapter',
+          label: otdrOpm ? otdrOpm.label : 'Viavi OLP-38 · SC adapter',
           wx: cO.x,
           wy: cO.y,
           el: node,
@@ -655,12 +685,13 @@
         ) || node;
         var rS = olsSlot.getBoundingClientRect();
         var cS = clientToWorld(rS.left + rS.width / 2, rS.top + Math.max(1, rS.height * 0.2));
+        var otdrOls = otdrPortMetaFromNode(node);
         return {
           owner: 'ols',
           olsId: olsId,
-          polish: 'UPC',
+          polish: otdrOls ? otdrOls.polish : 'UPC',
           connectorType: 'SC',
-          label: 'Viavi OLS-35 · SC adapter',
+          label: otdrOls ? otdrOls.label : 'Viavi OLS-35 · SC adapter',
           wx: cS.x,
           wy: cS.y,
           el: node,
@@ -1530,6 +1561,17 @@
   }
 
   /** Refresh OLS hit to deep-seat metallic adapter center (ferrule flush inside). */
+  function otdrPortMetaFromNode(node) {
+    if (!node || !node.closest) return null;
+    var wrap = node.closest('.protruding-port[data-port-type]');
+    if (!wrap) return null;
+    var t = (wrap.getAttribute('data-port-type') || '').toLowerCase();
+    if (t === 'apc') return { polish: 'APC', label: 'SmartOTDR · APC' };
+    if (t === 'apc-live') return { polish: 'APC', label: 'SmartOTDR · APC LIVE' };
+    if (t === 'vfl') return { polish: 'UPC', label: 'SmartOTDR · VFL' };
+    return { polish: 'UPC', label: 'SmartOTDR' };
+  }
+
   function enrichOlsHitDeepSeat(hit) {
     if (!hit || hit.owner !== 'ols' || !hit.olsId) return hit;
     if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
@@ -1569,12 +1611,13 @@
       if (d <= bestD) {
         bestD = d;
         var olsId = node.getAttribute('data-ols-port');
+        var otdrMeta = otdrPortMetaFromNode(node);
         best = {
           owner: 'ols',
           olsId: olsId,
-          polish: 'UPC',
+          polish: otdrMeta ? otdrMeta.polish : 'UPC',
           connectorType: 'SC',
-          label: 'Viavi OLS-35 · SC adapter',
+          label: otdrMeta ? otdrMeta.label : 'Viavi OLS-35 · SC adapter',
           el: node,
           screenDist: d,
         };
