@@ -451,6 +451,53 @@
     return !!(hit && (hit.otdr || isOtdrPortEl(hit.el)));
   }
 
+  /** True when a plugged connector/cord end is seated on a SmartOTDR port. */
+  function isOtdrAttachment(att) {
+    if (!att) return false;
+    var id = String(att.olsId || att.opmId || att.id || att.portId || att.vflId || '');
+    if (id.indexOf('otdr') >= 0 ||
+        id.indexOf('port-apc') >= 0 ||
+        id.indexOf('port-vfl') >= 0) {
+      return true;
+    }
+    var label = att.label ? String(att.label) : '';
+    return label.indexOf('SmartOTDR') >= 0;
+  }
+
+  function otdrPortIdFromAttachment(att) {
+    if (!att || !isOtdrAttachment(att)) return null;
+    return att.portId || att.olsId || att.opmId || att.vflId || null;
+  }
+
+  function normalizeOtdrAttachmentFields(att) {
+    if (!att || !isOtdrAttachment(att)) return;
+    if (!att.portId) {
+      att.portId = att.olsId || att.opmId || att.vflId || null;
+    }
+    if (!att.otdrId && att.portId) {
+      var match = String(att.portId).match(/^(otdr-machine-\d+)/);
+      if (match) att.otdrId = match[1];
+    }
+  }
+
+  function resolveOtdrPortWorld(att) {
+    if (!att) return null;
+    normalizeOtdrAttachmentFields(att);
+    var portId = otdrPortIdFromAttachment(att);
+    if (!portId) return null;
+    var pw = null;
+    if (global.FtthLab && typeof FtthLab.getOtdrPortWorld === 'function') {
+      pw = FtthLab.getOtdrPortWorld(portId);
+    }
+    if (!pw && att.olsId && global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
+      pw = FtthLab.getOlsPortWorld(att.olsId);
+    }
+    if (!pw && att.opmId && global.FtthLab && typeof FtthLab.getOpmPortWorld === 'function') {
+      pw = FtthLab.getOpmPortWorld(att.opmId);
+    }
+    return pw;
+  }
+
   function magnetRadiusForEl(el) {
     if (isOtdrPortEl(el)) return OTDR_MAGNET_SNAP_PX;
     if (el && el.closest && el.closest('.lab-ols-port[data-ols-port]')) return olsMagnetRadius();
@@ -481,6 +528,18 @@
 
   function enrichOlsHitDeepSeat(hit) {
     if (!hit || hit.owner !== 'ols' || !hit.olsId) return hit;
+    if (isOtdrPortHit(hit) || String(hit.olsId).indexOf('otdr') >= 0) {
+      if (global.FtthLab && typeof FtthLab.getOtdrPortWorld === 'function') {
+        var pwOtdr = FtthLab.getOtdrPortWorld(hit.olsId);
+        if (pwOtdr) {
+          hit.wx = pwOtdr.x;
+          hit.wy = pwOtdr.y;
+          hit.rot = 180;
+          hit.deepSeat = true;
+          return hit;
+        }
+      }
+    }
     if (global.FtthLab && typeof FtthLab.getOlsPortWorld === 'function') {
       var pw = FtthLab.getOlsPortWorld(hit.olsId);
       if (pw) {
@@ -709,6 +768,9 @@
           p.fusedJacketEndDist = null;
           p.splicerFusedSide = null;
         }
+      }
+      if (p.connector && p.connector.attached) {
+        normalizeOtdrAttachmentFields(p.connector.attached);
       }
     });
     rebuildFusedAssemblyRegistry();
@@ -5321,6 +5383,10 @@
       mismatch: mismatch,
       lockedRot: lockedRot,
     };
+    if (isOtdrPortHit(hit)) {
+      p.connector.attached.portId = hit.olsId || hit.opmId || hit.vflId || null;
+      normalizeOtdrAttachmentFields(p.connector.attached);
+    }
     p.connector.lockedRot = lockedRot;
     p.connector.liveRot = null;
     p.drawLockRot = null;
@@ -5352,6 +5418,9 @@
     if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
       FtthLab.refreshOlsDocks();
     }
+    if (global.FtthLab && typeof FtthLab.refreshOtdrPorts === 'function') {
+      FtthLab.refreshOtdrPorts();
+    }
     refreshBudget();
   }
 
@@ -5368,6 +5437,9 @@
     }
     if (global.FtthLab && typeof FtthLab.refreshOlsDocks === 'function') {
       FtthLab.refreshOlsDocks();
+    }
+    if (global.FtthLab && typeof FtthLab.refreshOtdrPorts === 'function') {
+      FtthLab.refreshOtdrPorts();
     }
     refreshBudget();
   }
@@ -5399,7 +5471,17 @@
   function syncAttached(p) {
     if (p.connector.attached) {
       var att = p.connector.attached;
-      if (att.owner === 'coupler' && global.FtthLab &&
+      if (isOtdrAttachment(att)) {
+        var pwOtdr = resolveOtdrPortWorld(att);
+        if (pwOtdr) {
+          att.wx = pwOtdr.x;
+          att.wy = pwOtdr.y;
+          p.connector.lockedRot = 180;
+          att.lockedRot = 180;
+          p.connector.liveRot = null;
+          seatConnectorAtPort(p, pwOtdr.x, pwOtdr.y);
+        }
+      } else if (att.owner === 'coupler' && global.FtthLab &&
           typeof FtthLab.getCouplerPortWorld === 'function') {
         var pw = FtthLab.getCouplerPortWorld(att.couplerId, att.port);
         if (pw) {
@@ -6491,6 +6573,7 @@
         if (e.button !== 0) return;
         e.preventDefault();
         e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
         var id = btn.getAttribute('data-pt-id');
         var p = findPigtail(id);
         if (!p) return;
@@ -6512,6 +6595,7 @@
         var startClientX = e.clientX;
         var startClientY = e.clientY;
         var unplugged = false;
+        var breakFreeDrag = false;
         var moved = false;
         var snakeMode = getRouteMode(p) === 'snake';
 
@@ -6519,6 +6603,23 @@
           beginOrthoSnake(p, 'A');
         } else {
           p.snake = { dragEnd: 'A' };
+        }
+
+        if (wasAttached && isOtdrAttachment(p.connector.attached)) {
+          detachConnector(p);
+          unplugged = true;
+          breakFreeDrag = true;
+          btn.classList.remove('is-attached');
+          if (global.FtthLab && typeof FtthLab.refreshOtdrPorts === 'function') {
+            FtthLab.refreshOtdrPorts();
+          }
+          var w0 = clientToWorld(e.clientX, e.clientY);
+          if (snakeMode) {
+            updateOrthoSnake(p, w0.x, w0.y);
+          } else {
+            moveTipGravity(p, 'A', w0.x, w0.y);
+          }
+          setStatus('SmartOTDR · connector free · release over a port to plug');
         }
 
         btn.classList.add('is-dragging');
@@ -6530,7 +6631,7 @@
           if (fusedMachineId && isPigtailOvenDragLocked(p)) return;
           moved = true;
           var world = clientToWorld(ev.clientX, ev.clientY);
-          if (p.connector.attached && !unplugged) {
+          if (p.connector.attached && !unplugged && !breakFreeDrag) {
             var pullPx = dist2(ev.clientX, ev.clientY, startClientX, startClientY);
             if (pullPx < UNPLUG_PULL_PX) {
               seatConnectorAtPort(p, home.x, home.y);
@@ -6539,6 +6640,9 @@
             }
             detachConnector(p);
             unplugged = true;
+            if (global.FtthLab && typeof FtthLab.refreshOtdrPorts === 'function') {
+              FtthLab.refreshOtdrPorts();
+            }
             btn.classList.remove('is-attached');
             if (snakeMode) beginOrthoSnake(p, 'A');
             setStatus(
@@ -6557,60 +6661,69 @@
           }
 
           var hit = resolvePlugHit(ev.clientX, ev.clientY);
-          highlightPort(hit && hit.el);
-          if (hit && hit.owner === 'ols') {
-            var mag = applyOlsMagneticPull(p, hit, ev.clientX, ev.clientY);
-            if (mag === 'lock' && !p.connector.attached) {
-              endOrthoSnake(p);
-              attachConnector(p, hit);
-              window.removeEventListener('pointermove', onMove);
-              window.removeEventListener('pointerup', onUp);
-              window.removeEventListener('pointercancel', onUp);
-              try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
-              btn.classList.remove('is-dragging');
-              document.body.classList.remove('lab-pigtail-dragging');
-              if (fusedMachineId) setFusedAssemblyDragPassthrough(p, false);
-              clearPlugHighlights();
-              p.connector.liveRot = null;
-              rebuildLayer();
-              updateInspector();
-              pushHistory();
-              refreshBudget();
-              setStatus(
-                isOtdrPortHit(hit)
-                  ? 'SmartOTDR · magnetic dock · SC seated'
-                  : 'OLS-35 · magnetic dock · SC seated vertical'
-              );
-              return;
+          if (breakFreeDrag) {
+            if (hit && (hit.owner === 'ols' || hit.owner === 'opm' || hit.owner === 'vfl' || isOtdrPortHit(hit))) {
+              highlightPort(hit.el);
+              p.connector.liveRot = 180;
+            } else {
+              highlightPort(null);
             }
-          } else if (hit && hit.owner === 'opm') {
-            var magOpm = applyOpmMagneticPull(p, hit, ev.clientX, ev.clientY);
-            if (magOpm === 'lock' && !p.connector.attached) {
-              endOrthoSnake(p);
-              attachConnector(p, hit);
-              window.removeEventListener('pointermove', onMove);
-              window.removeEventListener('pointerup', onUp);
-              window.removeEventListener('pointercancel', onUp);
-              try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
-              btn.classList.remove('is-dragging');
-              document.body.classList.remove('lab-pigtail-dragging');
-              if (fusedMachineId) setFusedAssemblyDragPassthrough(p, false);
-              clearPlugHighlights();
-              p.connector.liveRot = null;
-              rebuildLayer();
-              updateInspector();
-              pushHistory();
-              refreshBudget();
-              setStatus(
-                isOtdrPortHit(hit)
-                  ? 'SmartOTDR · magnetic dock · SC seated'
-                  : 'OLP-38 · magnetic dock · SC seated'
-              );
-              return;
+          } else {
+            highlightPort(hit && hit.el);
+            if (hit && hit.owner === 'ols') {
+              var mag = applyOlsMagneticPull(p, hit, ev.clientX, ev.clientY);
+              if (mag === 'lock' && !p.connector.attached) {
+                endOrthoSnake(p);
+                attachConnector(p, hit);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
+                btn.classList.remove('is-dragging');
+                document.body.classList.remove('lab-pigtail-dragging');
+                if (fusedMachineId) setFusedAssemblyDragPassthrough(p, false);
+                clearPlugHighlights();
+                p.connector.liveRot = null;
+                rebuildLayer();
+                updateInspector();
+                pushHistory();
+                refreshBudget();
+                setStatus(
+                  isOtdrPortHit(hit)
+                    ? 'SmartOTDR · magnetic dock · SC seated'
+                    : 'OLS-35 · magnetic dock · SC seated vertical'
+                );
+                return;
+              }
+            } else if (hit && hit.owner === 'opm') {
+              var magOpm = applyOpmMagneticPull(p, hit, ev.clientX, ev.clientY);
+              if (magOpm === 'lock' && !p.connector.attached) {
+                endOrthoSnake(p);
+                attachConnector(p, hit);
+                window.removeEventListener('pointermove', onMove);
+                window.removeEventListener('pointerup', onUp);
+                window.removeEventListener('pointercancel', onUp);
+                try { btn.releasePointerCapture(ev.pointerId); } catch (errM) { /* ignore */ }
+                btn.classList.remove('is-dragging');
+                document.body.classList.remove('lab-pigtail-dragging');
+                if (fusedMachineId) setFusedAssemblyDragPassthrough(p, false);
+                clearPlugHighlights();
+                p.connector.liveRot = null;
+                rebuildLayer();
+                updateInspector();
+                pushHistory();
+                refreshBudget();
+                setStatus(
+                  isOtdrPortHit(hit)
+                    ? 'SmartOTDR · magnetic dock · SC seated'
+                    : 'OLP-38 · magnetic dock · SC seated'
+                );
+                return;
+              }
+            } else if (!snakeMode && hit && hit.owner === 'vfl' &&
+                dist2(p.ax, p.ay, hit.wx, hit.wy) < plugSnapRadiusFor(hit)) {
+              p.connector.liveRot = 180;
             }
-          } else if (!snakeMode && hit && hit.owner === 'vfl' &&
-              dist2(p.ax, p.ay, hit.wx, hit.wy) < plugSnapRadiusFor(hit)) {
-            p.connector.liveRot = 180;
           }
           if (fusedMachineId) {
             afterFusedEndDragFrame(p, fusedPartner, fusedMachineId);
@@ -6621,6 +6734,7 @@
         }
 
         function onUp(ev) {
+          breakFreeDrag = false;
           window.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', onUp);
           window.removeEventListener('pointercancel', onUp);
@@ -7284,6 +7398,18 @@
     });
   }
 
+  function resyncAllAttachments() {
+    if (!layer) return;
+    pigtails.forEach(function (p) {
+      syncAttached(p);
+      updateFiberPath(p);
+    });
+    refreshBudget();
+    if (global.FtthLab && typeof FtthLab.refreshOtdrPorts === 'function') {
+      FtthLab.refreshOtdrPorts();
+    }
+  }
+
   function refreshCouplerPolish(couplerId, polish) {
     polish = portPolishNorm(polish) === 'APC' ? 'APC' : 'UPC';
     var warned = false;
@@ -7672,6 +7798,7 @@
     },
     exportProjectState: captureSnapshot,
     importProjectState: applySnapshot,
+    resyncAllAttachments: resyncAllAttachments,
     resetProjectState: function () {
       applySnapshot({ pigtails: [], seq: 0 });
     },

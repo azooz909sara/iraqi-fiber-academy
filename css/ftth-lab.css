@@ -3417,6 +3417,17 @@ body.lab-pigtail-dragging .lab-splicer-fusion-bridge__joint-glow {
   pointer-events: auto;
 }
 
+.lab-pigtail__conn.is-attached {
+  z-index: 25;
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.lab-pigtail__conn.is-attached.is-dragging {
+  z-index: 30;
+  cursor: grabbing;
+}
+
 .lab-pigtail__tail {
   position: absolute;
   z-index: 3;

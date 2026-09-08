@@ -213,6 +213,8 @@
     if (target.closest('.lab-vfl')) return false;
     if (target.closest('.lab-opm') || target.closest('.lab-opm-port') ||
         target.closest('.lab-ols') || target.closest('.lab-ols-port') ||
+        target.closest('.lab-otdr-device') || target.closest('.lab-otdr-port') ||
+        target.closest('.otdr-protruding-ports') || target.closest('.protruding-port.device-port') ||
         target.closest('.viavi__key') || target.closest('.viavi__keys')) return false;
     if (target.closest('.lab-toolbox') || target.closest('.lab-tool')) return false;
     return true;
@@ -411,6 +413,7 @@
     'sc-coupler': 'ADAPTERS',
     'opm': 'TEST EQUIPMENT',
     'vfl': 'TEST EQUIPMENT',
+    'otdr-machine': 'TESTING EQUIPMENT',
   };
 
   function getToolboxCategory(toolId) {
@@ -1907,6 +1910,7 @@
     'ols',
     'opm',
     'vfl',
+    'otdr-machine',
     'sc-pigtail',
     'patch-cord',
   ];
@@ -1958,6 +1962,21 @@
     resetInspectorIdle();
   }
 
+  function resyncFiberAttachmentsAfterRestore() {
+    var pigTool = state.tools['sc-pigtail'];
+    var pcTool = state.tools['patch-cord'];
+    if (pigTool && typeof pigTool.resyncAllAttachments === 'function') {
+      try { pigTool.resyncAllAttachments(); } catch (err) {
+        console.warn('[FtthLab] pigtail resync failed:', err);
+      }
+    }
+    if (pcTool && typeof pcTool.resyncAllAttachments === 'function') {
+      try { pcTool.resyncAllAttachments(); } catch (err2) {
+        console.warn('[FtthLab] patch-cord resync failed:', err2);
+      }
+    }
+  }
+
   function restoreProjectState(payload) {
     if (!payload || typeof payload !== 'object') return false;
     var kind = payload.kind;
@@ -1988,6 +2007,13 @@
     if (typeof payload.pan2dY === 'number') state.pan2dY = payload.pan2dY;
     applyZoom2d();
     notifyTools('onLayoutChange', { source: 'project-restore' });
+    resyncFiberAttachmentsAfterRestore();
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(function () {
+        resyncFiberAttachmentsAfterRestore();
+        notifyTools('onLayoutChange', { source: 'project-restore-final' });
+      });
+    }
     return true;
   }
 
