@@ -970,15 +970,30 @@
 .lab-otdr-device .running-workspace {
   display: flex;
   flex-grow: 1;
+  flex: 1 1 auto;
+  height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .lab-otdr-device .running-main-content {
   flex-grow: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  max-height: 100%;
   border-right: 1px solid #cccccc;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.lab-otdr-device .running-main-content > .running-viewport,
+.lab-otdr-device .running-main-content > .trace-view-container {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .lab-otdr-device .running-tabs-header {
@@ -1215,6 +1230,413 @@
   pointer-events: none;
 }
 
+/* ── Trace view (OTDR graph + event table) ── */
+
+.lab-otdr-device .trace-view-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  width: 100%;
+  overflow: hidden;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: #e6e6e6;
+}
+
+.lab-otdr-device .trace-view-container[hidden] {
+  display: none;
+}
+
+.lab-otdr-device .running-viewport.smartlink-view[hidden] {
+  display: none;
+}
+
+.lab-otdr-device .trace-linear-view {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 2px 8px 0;
+  background: #f0f0f0;
+  border-bottom: 1px solid #cccccc;
+  box-sizing: border-box;
+}
+
+.lab-otdr-device .trace-linear-track {
+  position: relative;
+  height: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #e8e8e8 100%);
+  border: 1px solid #bbbbbb;
+  border-radius: 2px;
+}
+
+.lab-otdr-device .trace-linear-icon {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 8px;
+  line-height: 1;
+  color: #302060;
+  font-weight: 700;
+  pointer-events: none;
+}
+
+.lab-otdr-device .trace-linear-icon--start {
+  color: #2d2966;
+}
+
+.lab-otdr-device .trace-linear-icon--splice {
+  font-size: 7px;
+  color: #555555;
+}
+
+.lab-otdr-device .trace-linear-icon--end {
+  font-size: 7px;
+  color: #c62828;
+}
+
+.lab-otdr-device .trace-graph-area {
+  flex: 0 0 auto;
+  height: 65%;
+  max-height: calc(100% - 72px);
+  position: relative !important;
+  overflow: hidden;
+  min-height: 0;
+  margin: 0;
+  background-color: #ffffff;
+  border: 1px solid #bbbbbb;
+  border-top: none;
+  box-sizing: border-box;
+  transition: height 0.2s ease;
+  isolation: isolate;
+}
+
+.lab-otdr-device .trace-graph-area.is-graph-collapsed {
+  height: 0 !important;
+  min-height: 0 !important;
+  flex: 0 0 0 !important;
+  border: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.lab-otdr-device .otdr-trace-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  cursor: grab;
+  touch-action: none;
+}
+
+.lab-otdr-device .otdr-trace-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.lab-otdr-device .trace-graph-area .trace-floating-controls,
+.lab-otdr-device .trace-floating-controls,
+.trace-floating-controls {
+  position: absolute !important;
+  top: 8px !important;
+  right: 12px !important;
+  left: auto !important;
+  bottom: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  z-index: 9999 !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  pointer-events: auto !important;
+  transform: none !important;
+  flex-direction: row !important;
+  justify-content: flex-end !important;
+}
+
+.lab-otdr-device .trace-floating-controls button,
+.lab-otdr-device .trace-graph-area .trace-floating-controls button,
+.lab-otdr-device .trace-floating-controls .zoom-in-btn,
+.lab-otdr-device .trace-floating-controls .zoom-out-btn,
+.lab-otdr-device .trace-floating-controls .cursor-a-btn,
+.trace-floating-controls button {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
+  font-size: 11px !important;
+  font-weight: bold !important;
+  line-height: 1 !important;
+  border-radius: 50% !important;
+  background: rgba(245, 245, 245, 0.9) !important;
+  background-color: rgba(245, 245, 245, 0.9) !important;
+  background-image: none !important;
+  color: #302060 !important;
+  border: 1px solid rgba(0, 0, 0, 0.3) !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  flex: 0 0 auto !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  transform: none !important;
+  float: none !important;
+}
+
+.lab-otdr-device .trace-floating-controls button:hover,
+.trace-floating-controls button:hover {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #302060 !important;
+}
+
+.lab-otdr-device .trace-floating-controls .cursor-a-btn,
+.trace-floating-controls .cursor-a-btn {
+  margin-left: 6px !important;
+}
+
+.lab-otdr-device .trace-floating-controls .cursor-a-btn.is-active {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color: #302060 !important;
+  border-color: rgba(48, 32, 96, 0.35) !important;
+}
+
+.lab-otdr-device .trace-resizer {
+  flex: 0 0 auto;
+  min-height: max-content;
+  height: 12px;
+  background-color: #f2f2f2;
+  cursor: row-resize;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  z-index: 10;
+  position: relative;
+  user-select: none;
+  touch-action: none;
+  flex-shrink: 0;
+}
+
+.lab-otdr-device .purple-scroll-indicator {
+  height: 6px;
+  width: 40%;
+  background-color: #4a2377;
+  position: relative;
+  border-radius: 0 0 4px 4px;
+}
+
+.lab-otdr-device .purple-scroll-indicator::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #ffffff;
+}
+
+.lab-otdr-device .trace-summary-bar {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  min-height: max-content;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f4f4f0;
+  padding: 2px 8px;
+  margin: 0;
+  font-size: 9px;
+  font-family: Arial, sans-serif;
+  color: #000000;
+  font-weight: bold;
+  border-bottom: 1px solid #cccccc;
+  box-sizing: border-box;
+  gap: 6px;
+  line-height: 1.1;
+}
+
+.lab-otdr-device .trace-summary-item {
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.lab-otdr-device .trace-summary-icons {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  margin-left: auto;
+}
+
+.lab-otdr-device .trace-event-table-wrap {
+  flex: 1 1 auto;
+  min-height: 48px;
+  height: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: none;
+  background-color: #f4f4f0;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #888888 #e6e6e6;
+}
+
+.lab-otdr-device .trace-event-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  margin: 0;
+  background-color: #f4f4f0;
+}
+
+.lab-otdr-device .trace-event-table-wrap::-webkit-scrollbar,
+.lab-otdr-device .trace-event-table::-webkit-scrollbar {
+  width: 8px;
+}
+
+.lab-otdr-device .trace-event-table-wrap::-webkit-scrollbar-track,
+.lab-otdr-device .trace-event-table::-webkit-scrollbar-track {
+  background: #e6e6e6;
+}
+
+.lab-otdr-device .trace-event-table-wrap::-webkit-scrollbar-thumb,
+.lab-otdr-device .trace-event-table::-webkit-scrollbar-thumb {
+  background: #888888;
+  border-radius: 4px;
+}
+
+.lab-otdr-device .trace-view-container.is-table-only .trace-linear-view,
+.lab-otdr-device .trace-view-container.is-table-only .trace-graph-area,
+.lab-otdr-device .trace-view-container.is-table-only .trace-resizer {
+  display: none;
+}
+
+.lab-otdr-device .trace-view-container.is-table-only .trace-event-table-wrap {
+  flex: 1 1 auto;
+  height: auto;
+  max-height: none;
+}
+
+.lab-otdr-device .trace-view-container.is-graph-collapsed .trace-event-table-wrap {
+  flex: 1 1 auto;
+}
+
+.lab-otdr-device .trace-event-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #f4f4f0;
+  color: #000000;
+  font-size: 9px;
+  font-weight: bold;
+  text-align: center;
+  padding: 4px 2px;
+  border-bottom: 1px solid #999999;
+  border-right: none;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.15;
+}
+
+.lab-otdr-device .trace-event-table thead th:last-child {
+  border-right: none;
+}
+
+.lab-otdr-device .trace-event-table tbody td {
+  text-align: center;
+  padding: 6px 2px;
+  border-bottom: 1px solid #e0e0e0;
+  border-right: none;
+  color: #000000;
+  font-size: 11px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  background-color: #f4f4f0;
+  vertical-align: middle;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected td {
+  background-color: #302060;
+  color: #ffffff;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-num {
+  color: #ffffff;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon line,
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect {
+  stroke: #ffffff;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect {
+  fill: #302060;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect[fill="currentColor"] {
+  fill: #ffffff;
+}
+
+.lab-otdr-device .trace-event-table tbody td:last-child {
+  border-right: none;
+}
+
+.lab-otdr-device .trace-event-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  padding: 6px 4px !important;
+  text-align: left;
+  color: inherit;
+}
+
+.lab-otdr-device .trace-ev-num {
+  font-weight: 700;
+  color: #000000;
+  min-width: 8px;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-num {
+  color: #ffffff;
+}
+
+.lab-otdr-device .trace-event-cell .trace-ev-icon {
+  color: #222222;
+}
+
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-event-cell .trace-ev-icon {
+  color: #ffffff;
+}
+
+.lab-otdr-device .trace-ev-icon {
+  width: 24px;
+  height: 12px;
+  flex-shrink: 0;
+  display: block;
+}
+
 /* ── SMART TEST connection error popup ── */
 
 .lab-otdr-device .otdr-error-popup {
@@ -1298,7 +1720,7 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: #2d2966;
+  background: #302060;
 }
 
 .lab-otdr-device .sidebar-btn {
@@ -1314,19 +1736,35 @@
   min-height: 0;
   text-align: center;
   line-height: 1.1;
+  background: #302060;
 }
 
 .lab-otdr-device .sidebar-btn:last-child {
   border-bottom: none;
 }
 
-.lab-otdr-device .sidebar-btn.empty {
-  cursor: default;
+.lab-otdr-device .sidebar-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .lab-otdr-device .sidebar-btn .btn-text {
   font-size: 6.5px;
   font-weight: 700;
+}
+
+.lab-otdr-device .sidebar-btn .btn-icon {
+  font-size: 11px;
+  margin-top: 2px;
+  line-height: 1;
+}
+
+.lab-otdr-device .sidebar-btn .btn-icon-play {
+  font-size: 12px;
+  filter: saturate(1.4);
+}
+
+.lab-otdr-device .sidebar-btn.empty {
+  cursor: default;
 }
 
 .lab-otdr-device .sidebar-btn.btn-stop .btn-text {
@@ -1351,6 +1789,16 @@
 
 .lab-otdr-device .sidebar-btn.btn-stop:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+body.trace-resizing,
+body.trace-resizing * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+body.trace-resizing .lab-otdr-device .trace-graph-area {
+  transition: none;
 }
 
 /* ── Physical controls ── */
@@ -1552,4 +2000,56 @@
   margin-top: auto;
   background-image: radial-gradient(circle, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
   background-size: 3px 3px;
+}
+
+/* ── Trace float controls: forced small light theme (wins over inline + global resets) ── */
+
+#lab-2d-mount .lab-otdr-device[data-otdr-device] .trace-graph-area .trace-floating-controls,
+#lab-2d-mount .lab-otdr-device .trace-floating-controls,
+#lab-2d-mount .trace-floating-controls,
+.trace-floating-controls {
+  position: absolute !important;
+  top: 8px !important;
+  right: 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 2px !important;
+  z-index: 9999 !important;
+}
+
+#lab-2d-mount .lab-otdr-device[data-otdr-device] .trace-floating-controls button,
+#lab-2d-mount .lab-otdr-device .trace-graph-area .trace-floating-controls button,
+#lab-2d-mount .lab-otdr-device .trace-floating-controls .zoom-in-btn,
+#lab-2d-mount .lab-otdr-device .trace-floating-controls .zoom-out-btn,
+#lab-2d-mount .lab-otdr-device .trace-floating-controls .cursor-a-btn,
+.trace-floating-controls button {
+  width: 20px !important;
+  height: 20px !important;
+  min-width: 20px !important;
+  min-height: 20px !important;
+  max-width: 20px !important;
+  max-height: 20px !important;
+  font-size: 11px !important;
+  font-weight: bold !important;
+  border-radius: 50% !important;
+  background: rgba(245, 245, 245, 0.9) !important;
+  background-color: rgba(245, 245, 245, 0.9) !important;
+  background-image: none !important;
+  color: #302060 !important;
+  border: 1px solid rgba(0, 0, 0, 0.3) !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  cursor: pointer !important;
+  appearance: none !important;
+  -webkit-appearance: none !important;
+  flex: 0 0 auto !important;
+}
+
+#lab-2d-mount .lab-otdr-device[data-otdr-device] .trace-floating-controls .cursor-a-btn,
+.trace-floating-controls .cursor-a-btn {
+  margin-left: 6px !important;
 }

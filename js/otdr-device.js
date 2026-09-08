@@ -101,10 +101,144 @@
   var CONNECTION_STEP_MS = 1500;
   var CONNECTION_GREEN_FROM = 3;
   var CONNECTION_VALIDATION_DELAY_MS = 5000;
-  var ACQUISITION_DURATION_MS = 20000;
   var connectionAnimTimers = {};
   var connectionValidationTimers = {};
   var acquisitionTimers = {};
+
+  var currentOtdrTestState = {
+    configFile: '',
+    durationSec: 20,
+    laser: '1550 nm',
+    distanceUnit: 'meter',
+    launchCable: 'No',
+    alarms: 'Yes',
+  };
+
+  function parseDurationFromConfig(configFile) {
+    if (!configFile) return 20;
+    var match = configFile.match(/(\d+)s/i);
+    if (match) return parseInt(match[1], 10) || 20;
+    return 20;
+  }
+
+  function syncConfigToTestState(configFile) {
+    if (!configFile) return;
+    currentOtdrTestState.configFile = configFile;
+    currentOtdrTestState.durationSec = parseDurationFromConfig(configFile);
+  }
+
+  function getAcquisitionDurationMs() {
+    return (currentOtdrTestState.durationSec || 20) * 1000;
+  }
+
+  function laserDataValueFromState() {
+    var m = (currentOtdrTestState.laser || '').match(/(\d+)/);
+    return m ? m[1] : '1550';
+  }
+
+  function launchCableDataValue() {
+    return (currentOtdrTestState.launchCable || 'No').toLowerCase() === 'yes' ? 'yes' : 'no';
+  }
+
+  function alarmsDataValue() {
+    return (currentOtdrTestState.alarms || 'Yes').toLowerCase() === 'yes' ? 'yes' : 'no';
+  }
+
+  function resetTestStateToDefaults() {
+    currentOtdrTestState.laser = '1550 nm';
+    currentOtdrTestState.distanceUnit = 'meter';
+    currentOtdrTestState.launchCable = 'No';
+    currentOtdrTestState.alarms = 'Yes';
+  }
+
+  function setSetupRowValue(deviceNode, rowKey, dataValue) {
+    var row = deviceNode.querySelector('[data-sts-row="' + rowKey + '"]');
+    if (!row) return;
+    row.querySelectorAll('.sts-opt:not(.sts-opt--default)').forEach(function (opt) {
+      var match = opt.getAttribute('data-value') === dataValue;
+      opt.classList.toggle('is-active', match);
+      opt.classList.toggle('selected', match);
+    });
+  }
+
+  function syncSetupRowToTestState(row, opt) {
+    if (!row || !opt) return;
+    var rowKey = row.getAttribute('data-sts-row');
+    var val = opt.getAttribute('data-value');
+    if (rowKey === 'laser') currentOtdrTestState.laser = val + ' nm';
+    else if (rowKey === 'distance') currentOtdrTestState.distanceUnit = val || 'meter';
+    else if (rowKey === 'launch-cable') {
+      currentOtdrTestState.launchCable = val === 'yes' ? 'Yes' : 'No';
+    } else if (rowKey === 'alarms') {
+      currentOtdrTestState.alarms = val === 'yes' ? 'Yes' : 'No';
+    }
+  }
+
+  function readSetupSelectionsFromDevice(deviceNode) {
+    if (!deviceNode) return;
+    var laserOpt = deviceNode.querySelector('[data-sts-row="laser"] .sts-opt.is-active');
+    if (laserOpt) currentOtdrTestState.laser = laserOpt.getAttribute('data-value') + ' nm';
+    var distOpt = deviceNode.querySelector('[data-sts-row="distance"] .sts-opt.is-active');
+    if (distOpt) currentOtdrTestState.distanceUnit = distOpt.getAttribute('data-value') || 'meter';
+    var lcOpt = deviceNode.querySelector('[data-sts-row="launch-cable"] .sts-opt.is-active');
+    if (lcOpt) currentOtdrTestState.launchCable = lcOpt.getAttribute('data-value') === 'yes' ? 'Yes' : 'No';
+    var alarmOpt = deviceNode.querySelector('[data-sts-row="alarms"] .sts-opt.is-active:not(.sts-opt--default)');
+    if (alarmOpt) {
+      currentOtdrTestState.alarms = alarmOpt.getAttribute('data-value') === 'yes' ? 'Yes' : 'No';
+    }
+    var configLabel = deviceNode.querySelector('.sts-config-name');
+    if (configLabel && configLabel.textContent.trim()) {
+      syncConfigToTestState(configLabel.textContent.trim());
+    }
+  }
+
+  function applyTestStateToSetupUI(deviceNode) {
+    if (!deviceNode) return;
+    setSetupRowValue(deviceNode, 'laser', laserDataValueFromState());
+    setSetupRowValue(deviceNode, 'distance', currentOtdrTestState.distanceUnit || 'meter');
+    setSetupRowValue(deviceNode, 'launch-cable', launchCableDataValue());
+    setSetupRowValue(deviceNode, 'alarms', alarmsDataValue());
+    if (currentOtdrTestState.configFile) {
+      updateSetupConfigLabel(deviceNode, currentOtdrTestState.configFile);
+    }
+  }
+
+  function getDistanceDisplayScale() {
+    var unit = currentOtdrTestState.distanceUnit || 'meter';
+    if (unit === 'km') return { factor: 0.001, label: 'km', decimals: 3 };
+    if (unit === 'feet') return { factor: 3.28084, label: 'ft', decimals: 1 };
+    if (unit === 'kfeet') return { factor: 3.28084 / 1000, label: 'kft', decimals: 3 };
+    if (unit === 'miles') return { factor: 0.000621371, label: 'mi', decimals: 3 };
+    return { factor: 1, label: 'm', decimals: 3 };
+  }
+
+  function formatTraceDistance(meters, digits) {
+    if (meters == null || !isFinite(meters)) return '—';
+    var scale = getDistanceDisplayScale();
+    var val = meters * scale.factor;
+    var d = typeof digits === 'number' ? digits : scale.decimals;
+    return val.toFixed(d);
+  }
+
+  function updateAcquisitionTimerUI(deviceNode) {
+    if (!deviceNode) return;
+    var dur = currentOtdrTestState.durationSec || 20;
+    var timerRight = deviceNode.querySelector('.acq-timer-right');
+    if (timerRight) timerRight.textContent = formatAcqTimer(dur, dur);
+  }
+
+  function updateTraceUIFromTestState(deviceNode) {
+    if (!deviceNode) return;
+    var scale = getDistanceDisplayScale();
+    var distTh = deviceNode.querySelector('.trace-event-table thead th:nth-child(2)');
+    if (distTh) distTh.textContent = 'Distance ' + scale.label;
+    var secTh = deviceNode.querySelector('.trace-event-table thead th:nth-child(6)');
+    if (secTh) secTh.textContent = 'Section ' + scale.label;
+    var lambdaVal = deviceNode.querySelector('.trace-summary-lambda-val');
+    if (lambdaVal) {
+      lambdaVal.textContent = (currentOtdrTestState.laser || '1550 nm').replace(/\s+/g, '');
+    }
+  }
 
   function resolveFiberAttachment(record) {
     if (!record) return null;
@@ -188,7 +322,7 @@
   function isOtdrControlTarget(e) {
     return !!closestEl(
       e.target,
-      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .running-tabs-header .tab, .otdr-error-popup'
+      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup'
     );
   }
 
@@ -464,7 +598,8 @@
     return html;
   }
 
-  function buildSmartTestRunningMarkup() {
+  function buildSmartTestRunningMarkup(deviceId) {
+    var canvasId = deviceId + '-otdr-trace-canvas';
     return (
       '<div class="otdr-smart-test-running" aria-label="SMART TEST running">' +
       '<div class="str-top-bar">' +
@@ -476,9 +611,9 @@
       '<div class="running-main-content">' +
       '<div class="running-tabs-header">' +
       '<div class="tabs-left">' +
-      '<span class="tab active" role="button" tabindex="0">SmartLink</span>' +
-      '<span class="tab" role="button" tabindex="0">Trace</span>' +
-      '<span class="tab" role="button" tabindex="0">Table</span>' +
+      '<span class="tab active" data-running-tab="smartlink" role="button" tabindex="0">SmartLink</span>' +
+      '<span class="tab" data-running-tab="trace" role="button" tabindex="0">Trace</span>' +
+      '<span class="tab" data-running-tab="table" role="button" tabindex="0">Table</span>' +
       '</div>' +
       '<div class="tabs-right">' +
       '<span class="event-line-text">Event line</span>' +
@@ -486,7 +621,7 @@
       '<div class="toggle-circle"></div></div>' +
       '<span class="info-text">Info</span>' +
       '</div></div>' +
-      '<div class="running-viewport">' +
+      '<div class="running-viewport smartlink-view" data-running-panel="smartlink">' +
       '<div class="viewport-top"></div>' +
       '<div class="viewport-bottom">' +
       '<div class="connection-indicator">' +
@@ -506,18 +641,60 @@
       '<span class="acq-progress-pct">0%</span>' +
       '</div></div>' +
       '<span class="acq-timer acq-timer-right">00:20</span>' +
-      '</div></div></div></div></div></div>' +
+      '</div></div></div></div></div>' +
+      '<div class="trace-view-container" hidden data-running-panel="trace">' +
+      '<div class="trace-linear-view" aria-label="Event line">' +
+      '<div class="trace-linear-track">' +
+      '<span class="trace-linear-icon trace-linear-icon--start" data-trace-icon="start" title="Source">⚡</span>' +
+      '<span class="trace-linear-icon trace-linear-icon--splice" data-trace-icon="splice" title="Splice">◇</span>' +
+      '<span class="trace-linear-icon trace-linear-icon--end" data-trace-icon="end" title="End">▲</span>' +
+      '</div></div>' +
+      '<div class="trace-graph-area">' +
+      '<canvas class="otdr-trace-canvas" id="' + canvasId + '" width="600" height="300" aria-label="OTDR trace graph"></canvas>' +
+      '<div class="trace-floating-controls">' +
+      '<button type="button" class="zoom-in-btn" aria-label="Zoom in">+</button>' +
+      '<button type="button" class="zoom-out-btn" aria-label="Zoom out">-</button>' +
+      '<button type="button" class="cursor-a-btn is-active" aria-label="Cursor A">A</button>' +
+      '</div></div>' +
+      '<div class="trace-resizer" role="separator" aria-label="Resize graph and table">' +
+      '<div class="purple-scroll-indicator"></div></div>' +
+      '<div class="trace-summary-bar">' +
+      '<div class="trace-summary-item trace-summary-evts"><strong>Nm Evts :</strong> ' +
+      '<span class="trace-summary-evts-val">3</span></div>' +
+      '<div class="trace-summary-item trace-summary-orl"><strong>ORL enlace :</strong> ' +
+      '<span class="trace-summary-orl-val">40.84 dB</span></div>' +
+      '<div class="trace-summary-item trace-summary-lambda"><strong>λ: <span class="trace-summary-lambda-val">1625nm</span></strong></div>' +
+      '<div class="trace-summary-icons"><span aria-hidden="true">📍</span> ' +
+      '<span aria-hidden="true">📌</span> <span aria-hidden="true">↻</span></div>' +
+      '</div>' +
+      '<div class="trace-event-table-wrap">' +
+      '<table class="trace-event-table">' +
+      '<thead><tr>' +
+      '<th>Event</th><th>Distance m</th><th>Loss dB</th><th>Reflect. dB</th>' +
+      '<th>Section Att. dB</th><th>Section m</th><th>T. Loss dB</th>' +
+      '</tr></thead>' +
+      '<tbody class="trace-event-tbody"></tbody>' +
+      '</table></div>' +
+      '</div></div>' +
       '<div class="running-sidebar">' +
-      '<div class="sidebar-btn btn-stop" data-sts-action="stop-test" role="button" tabindex="0">' +
-      '<span class="btn-text">STOP</span>' +
-      '<span class="red-square" aria-hidden="true"></span></div>' +
-      '<div class="sidebar-btn empty"></div>' +
-      '<div class="sidebar-btn">' +
-      '<span class="btn-text">File<br>Explorer</span>' +
-      '<span class="icon" aria-hidden="true">📁</span></div>' +
-      '<div class="sidebar-btn empty"></div>' +
-      '<div class="sidebar-btn empty"></div>' +
-      '<div class="sidebar-btn empty"></div>' +
+      '<div class="sidebar-btn sidebar-btn-start" role="button" tabindex="0">' +
+      '<span class="btn-text">START</span>' +
+      '<span class="btn-icon btn-icon-play" aria-hidden="true">▶️</span></div>' +
+      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<span class="btn-text">Tiempo<br>Real</span>' +
+      '<span class="btn-icon" aria-hidden="true">⏱️</span></div>' +
+      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<span class="btn-text">Config.</span>' +
+      '<span class="btn-icon" aria-hidden="true">⚙️</span></div>' +
+      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<span class="btn-text">Explorador<br>Archivos</span>' +
+      '<span class="btn-icon" aria-hidden="true">📁</span></div>' +
+      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<span class="btn-text">Reportes</span>' +
+      '<span class="btn-icon" aria-hidden="true">📄</span></div>' +
+      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<span class="btn-text">Análisis</span>' +
+      '<span class="btn-icon" aria-hidden="true">📐</span></div>' +
       '</div></div>' +
       '<div class="otdr-error-popup" hidden role="alertdialog" aria-labelledby="otdr-error-title">' +
       '<div class="otdr-error-modal">' +
@@ -548,10 +725,791 @@
     if (boxes[0]) boxes[0].classList.add('bg-orange');
   }
 
-  function formatAcqTimer(seconds) {
-    var total = Math.max(0, Math.min(20, Math.floor(seconds)));
+  function formatAcqTimer(seconds, maxSeconds) {
+    var max = typeof maxSeconds === 'number' ? maxSeconds : (currentOtdrTestState.durationSec || 20);
+    var total = Math.max(0, Math.min(max, Math.floor(seconds)));
     var ss = total < 10 ? '0' + total : String(total);
     return '00:' + ss;
+  }
+
+  var TRACE_MAX_M = 2000;
+  var TRACE_DB_MIN = -30;
+  var TRACE_DB_MAX = 15;
+  var TRACE_Y_TICKS = [15, 10, 5, 0, -5, -10, -15, -30];
+  var TRACE_X_TICKS = [500, 1000, 1500, 2000];
+  var TRACE_LINE_COLOR = '#302060';
+  var TRACE_GRID_COLOR = '#e0e0e0';
+  var TRACE_ZOOM_FACTOR_IN = 1.2;
+  var TRACE_ZOOM_FACTOR_OUT = 0.8;
+  var TRACE_ZOOM_MIN = 0.35;
+  var TRACE_ZOOM_MAX = 5;
+  var TRACE_GRAPH_COLLAPSE_THRESHOLD = 60;
+  var TRACE_DEFAULT_GRAPH_HEIGHT = '65%';
+
+  var DEFAULT_TRACE_EVENTS = [
+    {
+      eventNum: 1,
+      event: '1',
+      type: 'start',
+      label: 'Source',
+      distance: 0.000,
+      loss: null,
+      reflect: -42.5,
+      sectionAtt: null,
+      sectionM: null,
+      totalLoss: 0.00,
+      linearPos: 0.02,
+    },
+    {
+      eventNum: 2,
+      event: '2',
+      type: 'splice',
+      label: 'Splice',
+      distance: 484.090,
+      loss: 0.12,
+      reflect: null,
+      sectionAtt: 0.35,
+      sectionM: 484.090,
+      totalLoss: 0.47,
+      linearPos: 0.242,
+    },
+    {
+      eventNum: 3,
+      event: '3',
+      type: 'reflective',
+      label: 'Connector',
+      distance: 2000.000,
+      loss: null,
+      reflect: -14.8,
+      sectionAtt: 0.28,
+      sectionM: 1515.910,
+      totalLoss: 0.75,
+      linearPos: 0.98,
+    },
+  ];
+
+  function getDefaultTraceEvents() {
+    return JSON.parse(JSON.stringify(DEFAULT_TRACE_EVENTS));
+  }
+
+  function formatTraceCell(value, digits) {
+    if (value == null || value === '') return '—';
+    if (typeof value === 'number' && isFinite(value)) {
+      return typeof digits === 'number' ? value.toFixed(digits) : String(value);
+    }
+    return String(value);
+  }
+
+  function getTraceViewport(deviceId) {
+    var d = findDevice(deviceId);
+    if (!d) {
+      return {
+        zoomX: 1, zoomY: 1, offsetX: 0, offsetY: 0,
+        isDragging: false, selectedEventIndex: 0, activeCursor: 'A',
+      };
+    }
+    if (!d.traceViewport) {
+      d.traceViewport = {
+        zoomX: 1,
+        zoomY: 1,
+        offsetX: 0,
+        offsetY: 0,
+        isDragging: false,
+        selectedEventIndex: 0,
+        activeCursor: 'A',
+      };
+    }
+    return d.traceViewport;
+  }
+
+  function resetTraceViewport(deviceId) {
+    var d = findDevice(deviceId);
+    if (!d) return;
+    d.traceViewport = {
+      zoomX: 1,
+      zoomY: 1,
+      offsetX: 0,
+      offsetY: 0,
+      isDragging: false,
+      selectedEventIndex: 0,
+      activeCursor: 'A',
+    };
+  }
+
+  function traceEventIconSvg(type) {
+    var c = 'currentColor';
+    if (type === 'splice') {
+      return (
+        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<line x1="1" y1="7" x2="10" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<rect x="10" y="3.5" width="12" height="7" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<line x1="22" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '</svg>'
+      );
+    }
+    if (type === 'reflective') {
+      return (
+        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<line x1="1" y1="7" x2="8" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<rect x="8" y="2.5" width="16" height="9" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<line x1="16" y1="2.5" x2="16" y2="11.5" stroke="' + c + '" stroke-width="1.4"/>' +
+        '<line x1="24" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '</svg>'
+      );
+    }
+    if (type === 'end') {
+      return (
+        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<line x1="1" y1="7" x2="18" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<rect x="18" y="2" width="6" height="10" fill="' + c + '"/>' +
+        '<rect x="24" y="3.5" width="3" height="7" fill="' + c + '"/>' +
+        '<rect x="27" y="4.5" width="2" height="5" fill="' + c + '"/>' +
+        '</svg>'
+      );
+    }
+    /* start / OTDR connector — line ending in filled block */
+    return (
+      '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+      '<line x1="1" y1="7" x2="12" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+      '<rect x="12" y="3" width="10" height="8" fill="' + c + '"/>' +
+      '<line x1="22" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+      '</svg>'
+    );
+  }
+
+  function populateTraceEventTable(deviceNode, eventsData, selectedIndex) {
+    var tbody = deviceNode && deviceNode.querySelector('.trace-event-tbody');
+    if (!tbody) return;
+    eventsData = eventsData || getDefaultTraceEvents();
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var vp = getTraceViewport(deviceId);
+    if (typeof selectedIndex === 'number') {
+      vp.selectedEventIndex = selectedIndex;
+    }
+    var sel = vp.selectedEventIndex != null ? vp.selectedEventIndex : 0;
+    var html = '';
+    var i;
+    for (i = 0; i < eventsData.length; i++) {
+      var ev = eventsData[i];
+      var num = ev.eventNum != null ? ev.eventNum : (i + 1);
+      var icon = traceEventIconSvg(ev.type);
+      var rowCls = i === sel ? ' class="selected"' : '';
+      html +=
+        '<tr' + rowCls + ' data-trace-event-row="' + i + '">' +
+        '<td class="trace-event-cell">' +
+        '<span class="trace-ev-num">' + num + '</span>' +
+        icon +
+        '</td>' +
+        '<td>' + formatTraceDistance(ev.distance) + '</td>' +
+        '<td>' + formatTraceCell(ev.loss, 2) + '</td>' +
+        '<td>' + formatTraceCell(ev.reflect, 1) + '</td>' +
+        '<td>' + formatTraceCell(ev.sectionAtt, 2) + '</td>' +
+        '<td>' + formatTraceDistance(ev.sectionM) + '</td>' +
+        '<td>' + formatTraceCell(ev.totalLoss, 2) + '</td></tr>';
+    }
+    tbody.innerHTML = html;
+    updateTraceSummaryBar(deviceNode, eventsData);
+    updateTraceUIFromTestState(deviceNode);
+  }
+
+  function updateTraceSummaryBar(deviceNode, eventsData) {
+    if (!deviceNode) return;
+    eventsData = eventsData || getDefaultTraceEvents();
+    var evtsVal = deviceNode.querySelector('.trace-summary-evts-val');
+    if (evtsVal) evtsVal.textContent = String(eventsData.length);
+  }
+
+  function applyDefaultTraceSplitLayout(deviceNode) {
+    if (!deviceNode) return;
+    var container = deviceNode.querySelector('.trace-view-container');
+    var graphArea = container && container.querySelector('.trace-graph-area');
+    var tableWrap = container && container.querySelector('.trace-event-table-wrap');
+    if (!container || !graphArea || !tableWrap) return;
+
+    setTraceGraphCollapsed(graphArea, container, false);
+
+    graphArea.style.flex = '0 0 auto';
+    graphArea.style.height = TRACE_DEFAULT_GRAPH_HEIGHT;
+    graphArea.style.maxHeight = 'calc(100% - 72px)';
+    tableWrap.style.flex = '1 1 auto';
+    tableWrap.style.minHeight = '48px';
+    tableWrap.style.height = 'auto';
+    tableWrap.style.overflowY = 'auto';
+  }
+
+  function resetTraceGraphLayout(deviceNode) {
+    if (!deviceNode) return;
+    var container = deviceNode.querySelector('.trace-view-container');
+    var graphArea = container && container.querySelector('.trace-graph-area');
+    if (!graphArea || !container) return;
+    graphArea.style.height = '';
+    graphArea.style.maxHeight = '';
+    graphArea.style.flex = '';
+    setTraceGraphCollapsed(graphArea, container, false);
+  }
+
+  function setTraceGraphCollapsed(graphArea, container, collapsed) {
+    if (!graphArea || !container) return;
+    graphArea.classList.toggle('is-graph-collapsed', collapsed);
+    container.classList.toggle('is-graph-collapsed', collapsed);
+    if (collapsed) {
+      graphArea.style.flex = '0 0 0';
+      graphArea.style.height = '0px';
+      graphArea.style.minHeight = '0';
+      graphArea.style.display = '';
+    } else {
+      graphArea.style.flex = '0 0 auto';
+      graphArea.style.minHeight = '0';
+      graphArea.style.display = '';
+    }
+  }
+
+  function applyTraceGraphHeight(graphArea, tableWrap, heightPx, container) {
+    if (!graphArea || !tableWrap || !container) return;
+    if (heightPx < TRACE_GRAPH_COLLAPSE_THRESHOLD) {
+      setTraceGraphCollapsed(graphArea, container, true);
+      return;
+    }
+    setTraceGraphCollapsed(graphArea, container, false);
+    graphArea.style.height = heightPx + 'px';
+    tableWrap.style.flex = '1 1 auto';
+    tableWrap.style.minHeight = '0';
+  }
+
+  function resolveTraceGraphHeight(container, linearHeight, pointerY, isCollapsed) {
+    var containerRect = container.getBoundingClientRect();
+    var containerTotalHeight = containerRect.height;
+    var calculatedHeight = pointerY - containerRect.top - linearHeight;
+    var maxHeight = Math.max(TRACE_GRAPH_COLLAPSE_THRESHOLD, containerTotalHeight - 100);
+
+    if (isCollapsed) {
+      if (calculatedHeight <= TRACE_GRAPH_COLLAPSE_THRESHOLD) return 0;
+      return Math.min(calculatedHeight, maxHeight);
+    }
+
+    if (calculatedHeight < TRACE_GRAPH_COLLAPSE_THRESHOLD) return 0;
+    return Math.min(calculatedHeight, maxHeight);
+  }
+
+  function bindTraceResizer(host) {
+    host.querySelectorAll('.trace-resizer').forEach(function (resizer) {
+      if (resizer.dataset.traceResizerBound === '1') return;
+      resizer.dataset.traceResizerBound = '1';
+
+      function beginResize(e) {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        var container = resizer.closest('.trace-view-container');
+        if (!container) return;
+        var graphArea = container.querySelector('.trace-graph-area');
+        var tableWrap = container.querySelector('.trace-event-table-wrap');
+        if (!graphArea || !tableWrap) return;
+
+        var linearView = container.querySelector('.trace-linear-view');
+        var linearHeight = linearView ? linearView.offsetHeight : 0;
+        var deviceNode = container.closest('[data-otdr-node]');
+        var deviceId = deviceNode ? deviceNode.getAttribute('data-otdr-node') : null;
+        var activePointerId = e.pointerId;
+
+        function pointerClientY(ev) {
+          return ev.clientY;
+        }
+
+        function onMove(ev) {
+          if (ev.pointerId !== activePointerId) return;
+          ev.preventDefault();
+          var isCollapsed = graphArea.classList.contains('is-graph-collapsed');
+          var nextHeight = resolveTraceGraphHeight(
+            container,
+            linearHeight,
+            pointerClientY(ev),
+            isCollapsed
+          );
+          if (nextHeight === 0) {
+            setTraceGraphCollapsed(graphArea, container, true);
+            return;
+          }
+          applyTraceGraphHeight(graphArea, tableWrap, nextHeight, container);
+        }
+
+        function onEnd(ev) {
+          if (ev.pointerId !== activePointerId) return;
+          resizer.removeEventListener('pointermove', onMove);
+          resizer.removeEventListener('pointerup', onEnd);
+          resizer.removeEventListener('pointercancel', onEnd);
+          document.body.classList.remove('trace-resizing');
+          if (resizer.releasePointerCapture) {
+            try { resizer.releasePointerCapture(activePointerId); } catch (err) { /* ignore */ }
+          }
+          if (deviceId && deviceNode && !graphArea.classList.contains('is-graph-collapsed')) {
+            renderTraceForDevice(deviceId, deviceNode);
+          }
+        }
+
+        document.body.classList.add('trace-resizing');
+        if (resizer.setPointerCapture) {
+          try { resizer.setPointerCapture(activePointerId); } catch (err) { /* ignore */ }
+        }
+        onMove(e);
+        resizer.addEventListener('pointermove', onMove);
+        resizer.addEventListener('pointerup', onEnd);
+        resizer.addEventListener('pointercancel', onEnd);
+      }
+
+      resizer.addEventListener('pointerdown', beginResize);
+
+      resizer.addEventListener('mousedown', function (e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+      });
+
+      resizer.addEventListener('touchstart', function (e) {
+        e.stopPropagation();
+      }, { passive: false });
+    });
+  }
+
+  function bindTraceEventTableRows(host) {
+    host.querySelectorAll('.trace-event-tbody').forEach(function (tbody) {
+      if (tbody.dataset.traceRowBound === '1') return;
+      tbody.dataset.traceRowBound = '1';
+      tbody.addEventListener('click', function (e) {
+        var row = e.target.closest('[data-trace-event-row]');
+        if (!row) return;
+        e.stopPropagation();
+        var deviceNode = tbody.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var idx = parseInt(row.getAttribute('data-trace-event-row'), 10);
+        var d = findDevice(deviceId);
+        var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
+        populateTraceEventTable(deviceNode, events, idx);
+      });
+    });
+  }
+
+  function positionTraceLinearIcons(deviceNode, eventsData) {
+    if (!deviceNode) return;
+    eventsData = eventsData || getDefaultTraceEvents();
+    eventsData.forEach(function (ev) {
+      if (!ev.type) return;
+      var iconType = ev.type === 'start' || ev.type === 'connector' ? 'start'
+        : ev.type === 'reflective' ? 'end' : ev.type;
+      var icon = deviceNode.querySelector('[data-trace-icon="' + iconType + '"]');
+      if (!icon) return;
+      var pos = typeof ev.linearPos === 'number'
+        ? ev.linearPos
+        : (typeof ev.distance === 'number' ? ev.distance / TRACE_MAX_M : 0);
+      icon.style.left = (Math.max(0, Math.min(1, pos)) * 100) + '%';
+    });
+  }
+
+  function buildTracePolyline(events) {
+    events = events || getDefaultTraceEvents();
+    var spliceM = 484.09;
+    var endM = 2000;
+    var i;
+    for (i = 0; i < events.length; i++) {
+      if (events[i].type === 'splice' && typeof events[i].distance === 'number') {
+        spliceM = events[i].distance;
+      }
+      if (events[i].type === 'end' || events[i].type === 'reflective') {
+        if (typeof events[i].distance === 'number') endM = events[i].distance;
+      }
+    }
+    return [
+      { m: 0, db: 14 },
+      { m: 0, db: 0 },
+      { m: spliceM * 0.85, db: -0.2 },
+      { m: spliceM, db: -0.2 },
+      { m: spliceM + 3, db: -0.55 },
+      { m: endM * 0.92, db: -1.1 },
+      { m: endM * 0.96, db: -1.2 },
+      { m: endM * 0.985, db: 12 },
+      { m: endM, db: -8 },
+      { m: endM, db: -6 },
+    ];
+  }
+
+  function deterministicNoise(i, seed) {
+    var x = Math.sin(i * 12.9898 + seed * 78.233) * 43758.5453;
+    return x - Math.floor(x);
+  }
+
+  function prepareTraceCanvas(canvas) {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = canvas.getBoundingClientRect();
+    var cssW = rect.width;
+    var cssH = rect.height;
+    if (!cssW || !cssH) return null;
+    var bufW = Math.max(1, Math.round(cssW * dpr));
+    var bufH = Math.max(1, Math.round(cssH * dpr));
+    if (canvas.width !== bufW || canvas.height !== bufH) {
+      canvas.width = bufW;
+      canvas.height = bufH;
+    }
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    return { ctx: ctx, w: cssW, h: cssH, dpr: dpr };
+  }
+
+  function fitCanvasToDisplay(canvas) {
+    return prepareTraceCanvas(canvas);
+  }
+
+  /**
+   * Draw OTDR trace — fixed axes/grid, transformed trace line + event markers.
+   * @param {string} canvasId
+   * @param {Array|null} eventsData
+   * @param {{zoomX?: number, zoomY?: number, offsetX?: number, offsetY?: number}} [viewport]
+   */
+  function drawOTDRTrace(canvasId, eventsData, viewport) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    var prepared = prepareTraceCanvas(canvas);
+    if (!prepared) return;
+    var ctx = prepared.ctx;
+    viewport = viewport || { zoomX: 1, zoomY: 1, offsetX: 0, offsetY: 0 };
+    var zoomX = viewport.zoomX != null ? viewport.zoomX : 1;
+    var zoomY = viewport.zoomY != null ? viewport.zoomY : 1;
+    var offsetX = viewport.offsetX || 0;
+    var offsetY = viewport.offsetY || 0;
+
+    var w = prepared.w;
+    var h = prepared.h;
+    var padL = Math.round(w * 0.1);
+    var padR = Math.round(w * 0.06);
+    var padT = Math.round(h * 0.1);
+    var padB = Math.round(h * 0.16);
+    var plotW = w - padL - padR;
+    var plotH = h - padT - padB;
+    var events = eventsData || getDefaultTraceEvents();
+    var labelSize = Math.max(8, Math.round(h * 0.042));
+    var distScale = getDistanceDisplayScale();
+    var gi;
+    var ti;
+
+    function metersToX(m) {
+      return (m / TRACE_MAX_M) * plotW;
+    }
+    function dbToY(db) {
+      var norm = (TRACE_DB_MAX - db) / (TRACE_DB_MAX - TRACE_DB_MIN);
+      return norm * plotH;
+    }
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.strokeStyle = TRACE_GRID_COLOR;
+    ctx.lineWidth = 1;
+    for (gi = 0; gi < TRACE_X_TICKS.length; gi++) {
+      var xg = padL + metersToX(TRACE_X_TICKS[gi]);
+      ctx.beginPath();
+      ctx.moveTo(xg, padT);
+      ctx.lineTo(xg, padT + plotH);
+      ctx.stroke();
+    }
+    for (gi = 0; gi < TRACE_Y_TICKS.length; gi++) {
+      var yg = padT + dbToY(TRACE_Y_TICKS[gi]);
+      ctx.beginPath();
+      ctx.moveTo(padL, yg);
+      ctx.lineTo(padL + plotW, yg);
+      ctx.stroke();
+    }
+
+    ctx.strokeStyle = '#666666';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padL, padT);
+    ctx.lineTo(padL, padT + plotH);
+    ctx.lineTo(padL + plotW, padT + plotH);
+    ctx.stroke();
+
+    ctx.fillStyle = '#333333';
+    ctx.font = labelSize + 'px Arial, sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (ti = 0; ti < TRACE_Y_TICKS.length; ti++) {
+      ctx.fillText(String(TRACE_Y_TICKS[ti]), padL - 5, padT + dbToY(TRACE_Y_TICKS[ti]));
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.font = 'bold ' + labelSize + 'px Arial, sans-serif';
+    ctx.fillText('dB', padL - 2, padT - 3);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.font = labelSize + 'px Arial, sans-serif';
+    for (ti = 0; ti < TRACE_X_TICKS.length; ti++) {
+      var xm = TRACE_X_TICKS[ti];
+      ctx.fillText(formatTraceDistance(xm), padL + metersToX(xm), padT + plotH + 4);
+    }
+    ctx.textAlign = 'right';
+    ctx.fillText(distScale.label, padL + plotW + 2, padT + plotH + 4);
+
+    ctx.save();
+    ctx.translate(padL + offsetX, padT + offsetY);
+    ctx.scale(zoomX, zoomY);
+
+    var polyline = buildTracePolyline(events);
+    ctx.strokeStyle = TRACE_LINE_COLOR;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (var pi = 0; pi < polyline.length; pi++) {
+      var px = metersToX(polyline[pi].m);
+      var py = dbToY(polyline[pi].db);
+      if (pi === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    var endM = TRACE_MAX_M;
+    events.forEach(function (ev) {
+      if (ev.type === 'end' || ev.type === 'reflective') {
+        if (typeof ev.distance === 'number') endM = ev.distance;
+      }
+    });
+    var noiseStartX = metersToX(endM * 0.992);
+    var noiseY = dbToY(-6);
+    var noiseEndX = plotW;
+    ctx.strokeStyle = TRACE_LINE_COLOR;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(noiseStartX, noiseY);
+    var ns;
+    for (ns = 1; ns <= 40; ns++) {
+      noiseStartX += (noiseEndX - metersToX(endM * 0.992)) / 40;
+      noiseY += (deterministicNoise(ns, 7) - 0.5) * 4;
+      ctx.lineTo(noiseStartX, noiseY);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    events.forEach(function (ev) {
+      if (typeof ev.distance !== 'number') return;
+      var mx = metersToX(ev.distance);
+      ctx.strokeStyle = 'rgba(48, 32, 96, 0.22)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(mx, 0);
+      ctx.lineTo(mx, plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      var evNum = ev.eventNum != null ? ev.eventNum : 1;
+      var markerY = dbToY(0) + 14;
+      ctx.fillStyle = '#ffffff';
+      ctx.strokeStyle = TRACE_LINE_COLOR;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(mx, markerY, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = TRACE_LINE_COLOR;
+      ctx.font = 'bold 9px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(evNum), mx, markerY);
+    });
+
+    ctx.restore();
+  }
+
+  function renderTraceForDevice(deviceId, deviceNode) {
+    if (!deviceNode) deviceNode = document.getElementById(deviceId);
+    if (!deviceId) return;
+    var d = findDevice(deviceId);
+    var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
+    var vp = getTraceViewport(deviceId);
+    if (deviceNode) {
+      var graphArea = deviceNode.querySelector('.trace-graph-area');
+      ensureTraceFloatingControls(graphArea);
+      enforceTraceFloatingControlStyles(deviceNode);
+    }
+    drawOTDRTrace(deviceId + '-otdr-trace-canvas', events, vp);
+  }
+
+  function bindTraceCanvasInteractions(host) {
+    host.querySelectorAll('.otdr-trace-canvas').forEach(function (canvas) {
+      if (canvas.dataset.traceBound === '1') return;
+      canvas.dataset.traceBound = '1';
+
+      var lastX = 0;
+      var lastY = 0;
+
+      canvas.addEventListener('mousedown', function (e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var deviceNode = canvas.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var vp = getTraceViewport(deviceId);
+        vp.isDragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        canvas.classList.add('is-panning');
+      });
+
+      canvas.addEventListener('mousemove', function (e) {
+        var deviceNode = canvas.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var vp = getTraceViewport(deviceId);
+        if (!vp.isDragging) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var deltaX = e.clientX - lastX;
+        var deltaY = e.clientY - lastY;
+        vp.offsetX += deltaX;
+        vp.offsetY += deltaY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        renderTraceForDevice(deviceId, deviceNode);
+      });
+
+      function endPan() {
+        var deviceNode = canvas.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var vp = getTraceViewport(deviceId);
+        if (!vp.isDragging) return;
+        vp.isDragging = false;
+        canvas.classList.remove('is-panning');
+      }
+
+      canvas.addEventListener('mouseup', endPan);
+      canvas.addEventListener('mouseleave', endPan);
+
+      canvas.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+      });
+    });
+  }
+
+  function switchRunningTab(deviceNode, tabName) {
+    if (!deviceNode) return;
+    var tabs = deviceNode.querySelectorAll('.tabs-left .tab[data-running-tab]');
+    var i;
+    for (i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('active', tabs[i].getAttribute('data-running-tab') === tabName);
+    }
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    var trace = deviceNode.querySelector('.trace-view-container');
+    if (tabName === 'smartlink') {
+      if (smartlink) smartlink.hidden = false;
+      if (trace) {
+        trace.hidden = true;
+        trace.classList.remove('is-table-only');
+      }
+    } else {
+      if (smartlink) smartlink.hidden = true;
+      if (trace) {
+        trace.hidden = false;
+        trace.classList.toggle('is-table-only', tabName === 'table');
+      }
+      if (tabName === 'trace') {
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var d = findDevice(deviceId);
+        var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
+        applyDefaultTraceSplitLayout(deviceNode);
+        enforceTraceFloatingControlStyles(deviceNode);
+        renderTraceForDevice(deviceId, deviceNode);
+      }
+    }
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = findDevice(deviceId);
+    if (d) d.runningTab = tabName;
+  }
+
+  function finishAcquisitionAndShowTrace(deviceId, deviceNode) {
+    var d = findDevice(deviceId);
+    if (d) {
+      d.acquisitionActive = false;
+      d.acquisitionComplete = true;
+      d.traceEvents = getDefaultTraceEvents();
+      d.runningTab = 'trace';
+      resetTraceViewport(deviceId);
+    }
+    if (!deviceNode) return;
+
+    stopAcquisitionProgress(deviceId);
+
+    var acqInd = deviceNode.querySelector('.acquisition-indicator');
+    if (acqInd) acqInd.hidden = true;
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    if (smartlink) smartlink.hidden = true;
+    var viewportBottom = deviceNode.querySelector('.viewport-bottom');
+    if (viewportBottom) viewportBottom.hidden = true;
+    var connInd = deviceNode.querySelector('.connection-indicator');
+    if (connInd) connInd.hidden = true;
+
+    var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
+    populateTraceEventTable(deviceNode, events);
+    positionTraceLinearIcons(deviceNode, events);
+    updateTraceUIFromTestState(deviceNode);
+
+    var tabs = deviceNode.querySelectorAll('.tabs-left .tab[data-running-tab]');
+    var ti;
+    for (ti = 0; ti < tabs.length; ti++) {
+      var tabName = tabs[ti].getAttribute('data-running-tab');
+      tabs[ti].classList.toggle('active', tabName === 'trace');
+    }
+    var trace = deviceNode.querySelector('.trace-view-container');
+    if (trace) {
+      trace.hidden = false;
+      trace.classList.remove('is-table-only');
+    }
+
+    applyDefaultTraceSplitLayout(deviceNode);
+    enforceTraceFloatingControlStyles(deviceNode);
+    renderTraceForDevice(deviceId, deviceNode);
+
+    requestAnimationFrame(function () {
+      applyDefaultTraceSplitLayout(deviceNode);
+      enforceTraceFloatingControlStyles(deviceNode);
+      renderTraceForDevice(deviceId, deviceNode);
+      requestAnimationFrame(function () {
+        applyDefaultTraceSplitLayout(deviceNode);
+        enforceTraceFloatingControlStyles(deviceNode);
+        renderTraceForDevice(deviceId, deviceNode);
+      });
+    });
+
+    setStatus('SMART TEST · trace acquired');
+  }
+
+  function resetTraceViewUI(deviceNode) {
+    if (!deviceNode) return;
+    resetTraceGraphLayout(deviceNode);
+    switchRunningTab(deviceNode, 'smartlink');
+    var trace = deviceNode.querySelector('.trace-view-container');
+    if (trace) trace.hidden = true;
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    if (smartlink) smartlink.hidden = false;
+    var viewportBottom = deviceNode.querySelector('.viewport-bottom');
+    if (viewportBottom) viewportBottom.hidden = false;
+    var tbody = deviceNode.querySelector('.trace-event-tbody');
+    if (tbody) tbody.innerHTML = '';
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = findDevice(deviceId);
+    if (d) {
+      d.acquisitionComplete = false;
+      d.traceEvents = null;
+      d.runningTab = 'smartlink';
+      resetTraceViewport(deviceId);
+    }
   }
 
   function resetAcquisitionUI(deviceNode) {
@@ -562,6 +1520,7 @@
     if (fill) fill.style.width = '0%';
     if (pctEl) pctEl.textContent = '0%';
     if (timerLeft) timerLeft.textContent = '00:00';
+    updateAcquisitionTimerUI(deviceNode);
   }
 
   function resetRunningViewportUI(deviceNode) {
@@ -571,6 +1530,7 @@
     if (connInd) connInd.hidden = false;
     if (acqInd) acqInd.hidden = true;
     resetAcquisitionUI(deviceNode);
+    resetTraceViewUI(deviceNode);
   }
 
   function showConnectionErrorState(deviceId, deviceNode) {
@@ -600,6 +1560,7 @@
     var acqInd = deviceNode.querySelector('.acquisition-indicator');
     if (connInd) connInd.hidden = true;
     if (acqInd) acqInd.hidden = false;
+    updateAcquisitionTimerUI(deviceNode);
     startAcquisitionProgress(deviceId, deviceNode);
     setStatus('SMART TEST · acquisition in progress');
   }
@@ -643,18 +1604,21 @@
     if (!fill) return;
     resetAcquisitionUI(deviceNode);
     var started = Date.now();
+    var durationMs = getAcquisitionDurationMs();
+    var durationSec = currentOtdrTestState.durationSec || 20;
     acquisitionTimers[deviceId] = setInterval(function () {
       var elapsed = Date.now() - started;
-      var pct = Math.min(100, (elapsed / ACQUISITION_DURATION_MS) * 100);
+      var pct = Math.min(100, (elapsed / durationMs) * 100);
       var elapsedSec = elapsed / 1000;
       fill.style.width = pct + '%';
       if (pctEl) pctEl.textContent = Math.round(pct) + '%';
-      if (timerLeft) timerLeft.textContent = formatAcqTimer(elapsedSec);
+      if (timerLeft) timerLeft.textContent = formatAcqTimer(elapsedSec, durationSec);
       if (pct >= 100) {
         fill.style.width = '100%';
         if (pctEl) pctEl.textContent = '100%';
-        if (timerLeft) timerLeft.textContent = '00:20';
+        if (timerLeft) timerLeft.textContent = formatAcqTimer(durationSec, durationSec);
         stopAcquisitionProgress(deviceId);
+        finishAcquisitionAndShowTrace(deviceId, deviceNode);
       }
     }, 120);
   }
@@ -686,6 +1650,24 @@
     }
     if (d && d.acquisitionActive) {
       showAcquisitionPhase(deviceId, deviceNode);
+      return;
+    }
+    if (d && d.acquisitionComplete) {
+      hideErrorPopup(deviceNode);
+      var connInd = deviceNode.querySelector('.connection-indicator');
+      var acqInd = deviceNode.querySelector('.acquisition-indicator');
+      if (connInd) connInd.hidden = true;
+      if (acqInd) acqInd.hidden = true;
+      var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+      if (smartlink) smartlink.hidden = true;
+      var viewportBottom = deviceNode.querySelector('.viewport-bottom');
+      if (viewportBottom) viewportBottom.hidden = true;
+      var events = d.traceEvents || getDefaultTraceEvents();
+      populateTraceEventTable(deviceNode, events);
+      positionTraceLinearIcons(deviceNode, events);
+      switchRunningTab(deviceNode, d.runningTab || 'trace');
+      applyDefaultTraceSplitLayout(deviceNode);
+      renderTraceForDevice(deviceId, deviceNode);
       return;
     }
     resetRunningViewportUI(deviceNode);
@@ -764,7 +1746,10 @@
     var d = findDevice(deviceId);
     if (!d) return;
     d.screen = screenName || 'home';
-    if (opts.selectedConfig) d.selectedConfig = opts.selectedConfig;
+    if (opts.selectedConfig) {
+      d.selectedConfig = opts.selectedConfig;
+      syncConfigToTestState(opts.selectedConfig);
+    }
     if (opts.connectionError !== undefined) d.connectionError = !!opts.connectionError;
     if (!layer) return;
     var node = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
@@ -774,6 +1759,7 @@
     applyDeviceScreenClasses(screen, d.screen);
     if (d.screen === 'smart-test-setup' && d.selectedConfig) {
       updateSetupConfigLabel(node, d.selectedConfig);
+      applyTestStateToSetupUI(node);
     }
     if (d.screen === 'smart-test-running') {
       applyRunningConnectionState(deviceId, node);
@@ -849,7 +1835,7 @@
       buildOsHomeMarkup() +
       buildSmartTestAppMarkup() +
       buildSmartTestSetupMarkup(configName) +
-      buildSmartTestRunningMarkup() +
+      buildSmartTestRunningMarkup(deviceId) +
       '</div>' +
       '<div class="otdr-controls" aria-label="Physical controls">' +
       '<div class="otdr-controls__row">' +
@@ -911,6 +1897,98 @@
     });
   }
 
+  function ensureTraceFloatingControls(graphArea) {
+    if (!graphArea) return;
+    var wrap = graphArea.querySelector('.trace-floating-controls');
+    if (wrap) return;
+    wrap = document.createElement('div');
+    wrap.className = 'trace-floating-controls';
+    wrap.innerHTML =
+      '<button type="button" class="zoom-in-btn" aria-label="Zoom in">+</button>' +
+      '<button type="button" class="zoom-out-btn" aria-label="Zoom out">-</button>' +
+      '<button type="button" class="cursor-a-btn is-active" aria-label="Cursor A">A</button>';
+    graphArea.appendChild(wrap);
+  }
+
+  function enforceTraceFloatingControlStyles(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('.trace-graph-area').forEach(function (graphArea) {
+      ensureTraceFloatingControls(graphArea);
+      graphArea.style.position = 'relative';
+      var wrap = graphArea.querySelector('.trace-floating-controls');
+      if (!wrap) return;
+      wrap.style.position = 'absolute';
+      wrap.style.top = '12px';
+      wrap.style.right = '20px';
+      wrap.style.display = 'flex';
+      wrap.style.alignItems = 'center';
+      wrap.style.gap = '4px';
+      wrap.style.zIndex = '100';
+      wrap.querySelectorAll('button').forEach(function (btn) {
+        btn.style.width = '28px';
+        btn.style.height = '28px';
+        btn.style.borderRadius = '50%';
+        btn.style.backgroundColor = 'rgba(245, 245, 245, 0.85)';
+        btn.style.color = '#302060';
+        btn.style.border = '1px solid rgba(0, 0, 0, 0.2)';
+        btn.style.fontSize = '16px';
+        btn.style.fontWeight = 'bold';
+        btn.style.display = 'flex';
+        btn.style.justifyContent = 'center';
+        btn.style.alignItems = 'center';
+        btn.style.cursor = 'pointer';
+        btn.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.15)';
+        btn.style.padding = '0';
+        btn.style.margin = '0';
+        btn.style.marginLeft = btn.classList.contains('cursor-a-btn') ? '12px' : '0';
+      });
+    });
+  }
+
+  function bindTraceFloatingControls(host) {
+    host.querySelectorAll('.trace-graph-area').forEach(function (graphArea) {
+      if (graphArea.dataset.otdrFloatBound === '1') return;
+      graphArea.dataset.otdrFloatBound = '1';
+      graphArea.addEventListener('click', function (e) {
+        var zoomIn = e.target.closest('.zoom-in-btn');
+        var zoomOut = e.target.closest('.zoom-out-btn');
+        var cursorA = e.target.closest('.cursor-a-btn');
+        if (!zoomIn && !zoomOut && !cursorA) return;
+        e.stopPropagation();
+        var deviceNode = graphArea.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var vp = getTraceViewport(deviceId);
+        if (zoomIn) {
+          vp.zoomX *= TRACE_ZOOM_FACTOR_IN;
+          vp.zoomY *= TRACE_ZOOM_FACTOR_IN;
+          vp.zoomX = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomX));
+          vp.zoomY = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomY));
+          renderTraceForDevice(deviceId, deviceNode);
+          return;
+        }
+        if (zoomOut) {
+          vp.zoomX *= TRACE_ZOOM_FACTOR_OUT;
+          vp.zoomY *= TRACE_ZOOM_FACTOR_OUT;
+          vp.zoomX = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomX));
+          vp.zoomY = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomY));
+          renderTraceForDevice(deviceId, deviceNode);
+          return;
+        }
+        if (cursorA) {
+          vp.activeCursor = 'A';
+          var wrap = graphArea.querySelector('.trace-floating-controls');
+          if (wrap) {
+            wrap.querySelectorAll('.cursor-a-btn').forEach(function (b) {
+              b.classList.remove('is-active');
+            });
+          }
+          cursorA.classList.add('is-active');
+        }
+      });
+    });
+  }
+
   function bindScreenNavigation(host) {
     host.querySelectorAll('.app-btn[data-app="smart-test"]').forEach(function (btn) {
       if (btn.dataset.otdrScreenBound === '1') return;
@@ -947,6 +2025,7 @@
           li.classList.remove('selected');
         });
         item.classList.add('selected');
+        syncConfigToTestState(item.textContent.trim());
       });
     });
 
@@ -959,6 +2038,7 @@
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
         var configName = getSelectedConfigName(deviceNode);
+        syncConfigToTestState(configName);
         setDeviceScreen(deviceId, 'smart-test-setup', { selectedConfig: configName });
         setStatus('SMART TEST setup · ' + configName);
       });
@@ -985,13 +2065,19 @@
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
         var d = findDevice(deviceId);
+        readSetupSelectionsFromDevice(deviceNode);
         if (d) {
           d.connectionError = false;
           d.acquisitionActive = false;
+          d.acquisitionComplete = false;
+          d.traceEvents = null;
+          d.runningTab = 'smartlink';
+          resetTraceViewport(deviceId);
         }
         refreshPortOccupancy(deviceNode);
         setDeviceScreen(deviceId, 'smart-test-running');
-        setStatus('SMART TEST running · SmartLink');
+        updateAcquisitionTimerUI(deviceNode);
+        setStatus('SMART TEST running · SmartLink · ' + (currentOtdrTestState.configFile || 'test'));
       });
     });
 
@@ -1023,7 +2109,25 @@
       });
     });
 
-    host.querySelectorAll('.running-tabs-header .tab').forEach(function (tab) {
+    host.querySelectorAll('.tabs-left .tab[data-running-tab]').forEach(function (tab) {
+      if (tab.dataset.otdrScreenBound === '1') return;
+      tab.dataset.otdrScreenBound = '1';
+      tab.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = tab.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var tabName = tab.getAttribute('data-running-tab');
+        if (!tabName) return;
+        switchRunningTab(deviceNode, tabName);
+      });
+    });
+
+    bindTraceFloatingControls(host);
+    bindTraceCanvasInteractions(host);
+    bindTraceEventTableRows(host);
+    bindTraceResizer(host);
+
+    host.querySelectorAll('.running-tabs-header .tab:not([data-running-tab])').forEach(function (tab) {
       if (tab.dataset.otdrScreenBound === '1') return;
       tab.dataset.otdrScreenBound = '1';
       tab.addEventListener('click', function (e) {
@@ -1048,8 +2152,23 @@
           activeOpt.classList.remove('is-active', 'selected');
         });
         opt.classList.add('is-active', 'selected');
+        syncSetupRowToTestState(row, opt);
       });
     });
+
+    host.querySelectorAll('[data-sts-action="default"]').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        resetTestStateToDefaults();
+        applyTestStateToSetupUI(deviceNode);
+      });
+    });
+
+    enforceTraceFloatingControlStyles(host);
   }
 
   function bindLayerEvents(host) {
@@ -1131,6 +2250,10 @@
       layer.appendChild(el);
       if (d.screen === 'smart-test-running') {
         applyRunningConnectionState(d.id, el);
+      }
+      if (d.screen === 'smart-test-setup') {
+        if (d.selectedConfig) syncConfigToTestState(d.selectedConfig);
+        applyTestStateToSetupUI(el);
       }
     });
     bindLayerEvents(layer);
@@ -1475,6 +2598,12 @@
     place: placeOTDR,
     getPortWorld: getOtdrPortWorld,
     isOtdrPortId: isOtdrPortId,
+    drawOTDRTrace: drawOTDRTrace,
+    renderTraceForDevice: renderTraceForDevice,
+    getDefaultTraceEvents: getDefaultTraceEvents,
+    getTestState: function () {
+      return JSON.parse(JSON.stringify(currentOtdrTestState));
+    },
     VIAVI_FIT: VIAVI_FIT,
     PORT_WIDTH: PORT_WIDTH,
     PORT_HEIGHT: PORT_HEIGHT,
