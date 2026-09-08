@@ -322,7 +322,7 @@
   function isOtdrControlTarget(e) {
     return !!closestEl(
       e.target,
-      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup'
+      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .sidebar-btn-start, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup'
     );
   }
 
@@ -677,9 +677,9 @@
       '</table></div>' +
       '</div></div>' +
       '<div class="running-sidebar">' +
-      '<div class="sidebar-btn sidebar-btn-start" role="button" tabindex="0">' +
+      '<div class="sidebar-btn sidebar-btn-start" role="button" tabindex="0" data-sidebar-mode="start" aria-label="Start test">' +
       '<span class="btn-text">START</span>' +
-      '<span class="btn-icon btn-icon-play" aria-hidden="true">▶️</span></div>' +
+      '<span class="btn-icon btn-icon-play" aria-hidden="true"><span class="play-triangle"></span></span></div>' +
       '<div class="sidebar-btn" role="button" tabindex="0">' +
       '<span class="btn-text">Tiempo<br>Real</span>' +
       '<span class="btn-icon" aria-hidden="true">⏱️</span></div>' +
@@ -1488,6 +1488,132 @@
     });
 
     setStatus('SMART TEST · trace acquired');
+    updateSidebarStartStopButton(deviceNode, false);
+  }
+
+  function isOtdrTestInProgress(deviceId) {
+    if (connectionAnimTimers[deviceId] || connectionValidationTimers[deviceId] || acquisitionTimers[deviceId]) {
+      return true;
+    }
+    var d = findDevice(deviceId);
+    return !!(d && d.acquisitionActive && !d.acquisitionComplete);
+  }
+
+  function updateSidebarStartStopButton(deviceNode, isRunning) {
+    if (!deviceNode) return;
+    var btn = deviceNode.querySelector('.sidebar-btn-start');
+    if (!btn) return;
+    var textEl = btn.querySelector('.btn-text');
+    var iconEl = btn.querySelector('.btn-icon-play, .btn-icon-stop');
+    if (isRunning) {
+      btn.classList.add('btn-stop');
+      btn.setAttribute('data-sidebar-mode', 'stop');
+      btn.setAttribute('aria-label', 'Stop test');
+      if (textEl) textEl.textContent = 'STOP';
+      if (iconEl) {
+        iconEl.className = 'btn-icon btn-icon-stop';
+        iconEl.innerHTML = '<span class="red-square" aria-hidden="true"></span>';
+      }
+    } else {
+      btn.classList.remove('btn-stop');
+      btn.setAttribute('data-sidebar-mode', 'start');
+      btn.setAttribute('aria-label', 'Start test');
+      if (textEl) textEl.textContent = 'START';
+      if (iconEl) {
+        iconEl.className = 'btn-icon btn-icon-play';
+        iconEl.innerHTML = '<span class="play-triangle" aria-hidden="true"></span>';
+      }
+    }
+  }
+
+  function resetRunningViewToSmartLink(deviceNode) {
+    if (!deviceNode) return;
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = findDevice(deviceId);
+    if (d) {
+      d.acquisitionComplete = false;
+      d.acquisitionActive = false;
+      d.connectionError = false;
+      d.traceEvents = null;
+      d.runningTab = 'smartlink';
+      resetTraceViewport(deviceId);
+    }
+    hideErrorPopup(deviceNode);
+    var trace = deviceNode.querySelector('.trace-view-container');
+    if (trace) {
+      trace.hidden = true;
+      trace.classList.remove('is-table-only');
+    }
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    if (smartlink) smartlink.hidden = false;
+    var viewportBottom = deviceNode.querySelector('.viewport-bottom');
+    if (viewportBottom) viewportBottom.hidden = false;
+    var tabs = deviceNode.querySelectorAll('.tabs-left .tab[data-running-tab]');
+    var ti;
+    for (ti = 0; ti < tabs.length; ti++) {
+      tabs[ti].classList.toggle('active', tabs[ti].getAttribute('data-running-tab') === 'smartlink');
+    }
+    stopConnectionAnimation(deviceId);
+    stopAcquisitionProgress(deviceId);
+    var connInd = deviceNode.querySelector('.connection-indicator');
+    var acqInd = deviceNode.querySelector('.acquisition-indicator');
+    if (connInd) connInd.hidden = false;
+    if (acqInd) acqInd.hidden = true;
+    resetAcquisitionUI(deviceNode);
+    var boxesContainer = deviceNode.querySelector('.conn-boxes');
+    if (boxesContainer) resetConnectionBoxes(boxesContainer);
+    resetTraceGraphLayout(deviceNode);
+    var tbody = deviceNode.querySelector('.trace-event-tbody');
+    if (tbody) tbody.innerHTML = '';
+  }
+
+  function stopOtdrAcquisition(deviceId, deviceNode) {
+    if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
+    if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
+    if (!deviceId || !deviceNode) return;
+    var d = findDevice(deviceId);
+    stopConnectionAnimation(deviceId);
+    stopAcquisitionProgress(deviceId);
+    if (d) {
+      d.acquisitionActive = false;
+      d.acquisitionComplete = false;
+      d.connectionError = false;
+    }
+    var boxesContainer = deviceNode.querySelector('.conn-boxes');
+    if (boxesContainer) resetConnectionBoxes(boxesContainer);
+    resetRunningViewportUI(deviceNode);
+    hideErrorPopup(deviceNode);
+    updateSidebarStartStopButton(deviceNode, false);
+    setStatus('SMART TEST · stopped');
+  }
+
+  function startOtdrAcquisition(deviceId, deviceNode) {
+    if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
+    if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
+    if (!deviceId || !deviceNode) return;
+    var d = findDevice(deviceId);
+    readSetupSelectionsFromDevice(deviceNode);
+    if (d) {
+      d.connectionError = false;
+      d.acquisitionActive = false;
+      d.acquisitionComplete = false;
+      d.traceEvents = null;
+      d.runningTab = 'smartlink';
+      resetTraceViewport(deviceId);
+    }
+    refreshPortOccupancy(deviceNode);
+    if (!d || d.screen !== 'smart-test-running') {
+      setDeviceScreen(deviceId, 'smart-test-running');
+    } else {
+      stopConnectionAnimation(deviceId);
+      stopAcquisitionProgress(deviceId);
+      hideErrorPopup(deviceNode);
+      resetRunningViewportUI(deviceNode);
+      applyRunningConnectionState(deviceId, deviceNode);
+    }
+    updateAcquisitionTimerUI(deviceNode);
+    updateSidebarStartStopButton(deviceNode, true);
+    setStatus('SMART TEST running · SmartLink · ' + (currentOtdrTestState.configFile || 'test'));
   }
 
   function resetTraceViewUI(deviceNode) {
@@ -1545,6 +1671,7 @@
     resetRunningViewportUI(deviceNode);
     showConnectionBadState(deviceNode);
     showErrorPopup(deviceNode);
+    updateSidebarStartStopButton(deviceNode, false);
     setStatus('FO-1128 · Connection to test instrument is bad');
   }
 
@@ -1668,6 +1795,7 @@
       switchRunningTab(deviceNode, d.runningTab || 'trace');
       applyDefaultTraceSplitLayout(deviceNode);
       renderTraceForDevice(deviceId, deviceNode);
+      updateSidebarStartStopButton(deviceNode, false);
       return;
     }
     resetRunningViewportUI(deviceNode);
@@ -2064,20 +2192,24 @@
         var deviceNode = btn.closest('[data-otdr-node]');
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
-        var d = findDevice(deviceId);
-        readSetupSelectionsFromDevice(deviceNode);
-        if (d) {
-          d.connectionError = false;
-          d.acquisitionActive = false;
-          d.acquisitionComplete = false;
-          d.traceEvents = null;
-          d.runningTab = 'smartlink';
-          resetTraceViewport(deviceId);
+        startOtdrAcquisition(deviceId, deviceNode);
+      });
+    });
+
+    host.querySelectorAll('.sidebar-btn-start').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        if (isOtdrTestInProgress(deviceId)) {
+          stopOtdrAcquisition(deviceId, deviceNode);
+          return;
         }
-        refreshPortOccupancy(deviceNode);
-        setDeviceScreen(deviceId, 'smart-test-running');
-        updateAcquisitionTimerUI(deviceNode);
-        setStatus('SMART TEST running · SmartLink · ' + (currentOtdrTestState.configFile || 'test'));
+        resetRunningViewToSmartLink(deviceNode);
+        startOtdrAcquisition(deviceId, deviceNode);
       });
     });
 
@@ -2098,12 +2230,7 @@
         var deviceNode = btn.closest('[data-otdr-node]');
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
-        stopConnectionAnimation(deviceId);
-        stopAcquisitionProgress(deviceId);
-        var boxesContainer = deviceNode.querySelector('.conn-boxes');
-        if (boxesContainer) resetConnectionBoxes(boxesContainer);
-        resetRunningViewportUI(deviceNode);
-        hideErrorPopup(deviceNode);
+        stopOtdrAcquisition(deviceId, deviceNode);
         setDeviceScreen(deviceId, 'smart-test-setup');
         setStatus('SMART TEST setup');
       });
@@ -2250,6 +2377,7 @@
       layer.appendChild(el);
       if (d.screen === 'smart-test-running') {
         applyRunningConnectionState(d.id, el);
+        updateSidebarStartStopButton(el, isOtdrTestInProgress(d.id));
       }
       if (d.screen === 'smart-test-setup') {
         if (d.selectedConfig) syncConfigToTestState(d.selectedConfig);
@@ -2601,6 +2729,8 @@
     drawOTDRTrace: drawOTDRTrace,
     renderTraceForDevice: renderTraceForDevice,
     getDefaultTraceEvents: getDefaultTraceEvents,
+    startOtdrAcquisition: startOtdrAcquisition,
+    stopOtdrAcquisition: stopOtdrAcquisition,
     getTestState: function () {
       return JSON.parse(JSON.stringify(currentOtdrTestState));
     },
@@ -2611,6 +2741,8 @@
     TOOL_ID: TOOL_ID,
   };
   global.initOTDRMachine = initOTDRMachine;
+  global.startOtdrAcquisition = startOtdrAcquisition;
+  global.stopOtdrAcquisition = stopOtdrAcquisition;
 
   if (!tryRegister()) {
     document.addEventListener('DOMContentLoaded', function () {

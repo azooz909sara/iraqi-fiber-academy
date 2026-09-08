@@ -1739,6 +1739,51 @@
   background: #302060;
 }
 
+.lab-otdr-device .sidebar-btn-start {
+  gap: 2px;
+  padding: 4px 2px;
+}
+
+.lab-otdr-device .sidebar-btn-start .btn-text {
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lab-otdr-device .sidebar-btn-start .btn-icon-play {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  line-height: 1;
+}
+
+.lab-otdr-device .sidebar-btn-start .play-triangle {
+  display: block;
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid #4da3ff;
+  filter: drop-shadow(0 0 1px rgba(77, 163, 255, 0.45));
+}
+
+.lab-otdr-device .sidebar-btn-start.btn-stop .btn-text {
+  letter-spacing: 0.04em;
+}
+
+.lab-otdr-device .sidebar-btn-start .btn-icon-stop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+}
+
 .lab-otdr-device .sidebar-btn:last-child {
   border-bottom: none;
 }
