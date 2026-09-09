@@ -2230,6 +2230,7 @@
     getOpmWavelength: getOpmWavelengthNm,
     setOpmWavelength: setOpmWavelength,
     fiberSpanLossDb: fiberSpanLossDb,
+    fiberAttenuationDbPerKm: fiberAttenuationDbPerKm,
     registerOpmRefresh: function (fn) {
       if (typeof fn !== 'function') return;
       var prev = opmRefreshHook;

@@ -319,7 +319,8 @@
       pathLocked: false,
       fixedLength: null, /* locked mid-span length once both ends first connect */
       lengthMode: 'free', /* 'free' | 'meter' */
-      lengthMeters: 3, /* Meter Mode target length */
+      lengthMeters: 3, /* Meter Mode target length (stored in meters) */
+      lengthUnit: 'm', /* 'm' | 'km' — display / input unit for Cable Length */
       relocating: false, /* true while moving a plugged end to a new port */
       spoolWrap: {}, /* DEPRECATED latch — shadow when USE_CONTACT_TOPOLOGY */
       contacts: [],
@@ -869,6 +870,23 @@
   }
 
   /* ─── Loss / budget ─── */
+
+  function cordLengthUnit(cord) {
+    return cord && cord.lengthUnit === 'km' ? 'km' : 'm';
+  }
+
+  function cordLengthDisplayValue(cord) {
+    if (!cord || typeof cord.lengthMeters !== 'number') return 3;
+    return cordLengthUnit(cord) === 'km'
+      ? cord.lengthMeters / 1000
+      : cord.lengthMeters;
+  }
+
+  function cordLengthInputToMeters(value, unit) {
+    var n = Number(value);
+    if (!isFinite(n) || n < 0) n = 0;
+    return unit === 'km' ? n * 1000 : n;
+  }
 
   function cordFiberLengthM(cord) {
     if (!cord) return 0;
@@ -2907,11 +2925,23 @@
     pushHistory();
   }
 
-  function setLengthMeters(id, meters) {
+  function setLengthUnit(id, unit) {
+    var cord = findCord(id);
+    if (!cord) return;
+    cord.lengthUnit = unit === 'km' ? 'km' : 'm';
+    updateInspector();
+  }
+
+  function setLengthMeters(id, meters, unit) {
     var cord = findCord(id);
     if (!cord) return;
     cord.lengthMode = 'meter';
-    cord.lengthMeters = normalizeLengthMeters(meters);
+    if (unit) cord.lengthUnit = unit === 'km' ? 'km' : 'm';
+    cord.lengthMeters = normalizeLengthMeters(
+      typeof unit === 'string'
+        ? cordLengthInputToMeters(meters, unit)
+        : meters
+    );
     clearRopePhysics(cord.id);
     applyMeterLengthToCord(cord);
     /* Instant canvas update — geometry already rebuilt above */
@@ -5441,15 +5471,21 @@
       '</div>' +
       '<div class="lab-pcord-meter"' + (meter ? '' : ' hidden') + '>' +
       '<label class="lab-pcord-meter-label" for="lab-pcord-len-input-' + c.id +
-      '">Length (meters)</label>' +
+      '">Cable Length</label>' +
+      '<div class="lab-cable-len-row">' +
       '<div class="lab-pcord-meter-stepper">' +
       '<button type="button" class="lab-pcord-meter-btn" data-pc-len-step="' +
       c.id + ':-0.5" aria-label="Decrease length">−</button>' +
       '<input id="lab-pcord-len-input-' + c.id +
       '" class="lab-pcord-meter-input" type="number" min="0.5" max="100" step="0.5" ' +
-      'value="' + meters + '" data-pc-len-meters="' + c.id + '">' +
+      'value="' + cordLengthDisplayValue(c) + '" data-pc-len-meters="' + c.id + '">' +
       '<button type="button" class="lab-pcord-meter-btn" data-pc-len-step="' +
       c.id + ':0.5" aria-label="Increase length">+</button>' +
+      '</div>' +
+      '<select class="lab-cable-len-unit" data-pc-len-unit="' + c.id + '" aria-label="Cable length unit">' +
+      '<option value="m"' + (cordLengthUnit(c) === 'm' ? ' selected' : '') + '>m</option>' +
+      '<option value="km"' + (cordLengthUnit(c) === 'km' ? ' selected' : '') + '>km</option>' +
+      '</select>' +
       '</div>' +
       '<div class="lab-pcord-len-presets">' + presetHtml + '</div>' +
       '<p class="lab-pcord-meter-hint">' +
@@ -5505,19 +5541,26 @@
         setLengthMode(parts[0], parts[1]);
       });
     });
+    detail.querySelectorAll('[data-pc-len-unit]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        setLengthUnit(c.id, sel.value);
+      });
+    });
     detail.querySelectorAll('[data-pc-len-step]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pc-len-step').split(':');
-        var cur = normalizeLengthMeters(
-          typeof c.lengthMeters === 'number' ? c.lengthMeters : meters
-        );
-        setLengthMeters(parts[0], cur + Number(parts[1]));
+        var unitSel = detail.querySelector('[data-pc-len-unit="' + c.id + '"]');
+        var unit = unitSel ? unitSel.value : cordLengthUnit(c);
+        var cur = cordLengthDisplayValue(c);
+        var step = Number(parts[1]);
+        if (unit === 'km') step = step / 1000;
+        setLengthMeters(parts[0], cur + step, unit);
       });
     });
     detail.querySelectorAll('[data-pc-len-preset]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pc-len-preset').split(':');
-        setLengthMeters(parts[0], parts[1]);
+        setLengthMeters(parts[0], parts[1], 'm');
       });
     });
     var lenInput = detail.querySelector('[data-pc-len-meters]');
@@ -5525,20 +5568,25 @@
       lenInput.addEventListener('input', function () {
         var v = Number(lenInput.value);
         if (!isFinite(v) || v < 0.5) return;
+        var unitSel = detail.querySelector('[data-pc-len-unit="' + c.id + '"]');
+        var unit = unitSel ? unitSel.value : cordLengthUnit(c);
         cord.lengthMode = 'meter';
-        cord.lengthMeters = normalizeLengthMeters(v);
+        cord.lengthUnit = unit === 'km' ? 'km' : 'm';
+        cord.lengthMeters = normalizeLengthMeters(cordLengthInputToMeters(v, unit));
         clearRopePhysics(cord.id);
         applyMeterLengthToCord(cord);
         rebuildLayer();
         updateFiberPath(cord);
       });
       lenInput.addEventListener('change', function () {
-        setLengthMeters(c.id, lenInput.value);
+        var unitSel = detail.querySelector('[data-pc-len-unit="' + c.id + '"]');
+        setLengthMeters(c.id, lenInput.value, unitSel ? unitSel.value : cordLengthUnit(c));
       });
       lenInput.addEventListener('keydown', function (ev) {
         if (ev.key === 'Enter') {
           ev.preventDefault();
-          setLengthMeters(c.id, lenInput.value);
+          var unitSel = detail.querySelector('[data-pc-len-unit="' + c.id + '"]');
+          setLengthMeters(c.id, lenInput.value, unitSel ? unitSel.value : cordLengthUnit(c));
         }
       });
     }

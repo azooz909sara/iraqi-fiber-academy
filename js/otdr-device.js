@@ -220,6 +220,56 @@
     return val.toFixed(d);
   }
 
+  function formatTraceAxisDistance(meters) {
+    if (meters == null || !isFinite(meters)) return '';
+    var unit = currentOtdrTestState.distanceUnit || 'meter';
+    var scale = getDistanceDisplayScale();
+    var val = meters * scale.factor;
+    if (unit === 'km') {
+      if (Math.abs(val) < 0.0005) return '0';
+      if (val >= 10) return String(Math.round(val));
+      if (val >= 1) return val.toFixed(1).replace(/\.0$/, '');
+      return val.toFixed(2).replace(/\.?0+$/, '');
+    }
+    if (unit === 'kfeet' || unit === 'miles') {
+      if (Math.abs(val) < 0.0005) return '0';
+      if (val >= 10) return String(Math.round(val));
+      if (val >= 1) return val.toFixed(1).replace(/\.0$/, '');
+      return val.toFixed(3).replace(/\.?0+$/, '');
+    }
+    return String(Math.round(val));
+  }
+
+  function getTraceDistanceMeterStep(distMin, distMax) {
+    var distScale = getDistanceDisplayScale();
+    var displaySpan = Math.max((distMax - distMin) * distScale.factor, 0.001);
+    var displayStep = pickTraceAxisStep(displaySpan);
+    var unit = currentOtdrTestState.distanceUnit || 'meter';
+    if (unit === 'meter' && displayStep > 50) {
+      var meterSteps = [10, 25, 50, 100, 200, 500, 1000];
+      var mi;
+      for (mi = 0; mi < meterSteps.length; mi++) {
+        if (meterSteps[mi] >= displayStep / distScale.factor * 0.85) {
+          displayStep = meterSteps[mi] * distScale.factor;
+          break;
+        }
+      }
+    }
+    if (unit === 'km' && displayStep > 1) {
+      var kmSteps = [0.1, 0.2, 0.5, 1, 2, 5];
+      var ki;
+      for (ki = 0; ki < kmSteps.length; ki++) {
+        if (kmSteps[ki] >= displayStep * 0.85) {
+          displayStep = kmSteps[ki];
+          break;
+        }
+      }
+    }
+    var meterStep = displayStep / distScale.factor;
+    if (!isFinite(meterStep) || meterStep <= 0) meterStep = 1;
+    return meterStep;
+  }
+
   function updateAcquisitionTimerUI(deviceNode) {
     if (!deviceNode) return;
     var dur = currentOtdrTestState.durationSec || 20;
@@ -337,6 +387,511 @@
     return (global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function')
       ? FtthLab.getFiberLaserGraph()
       : { pcords: [], pigtails: [] };
+  }
+
+  var OTDR_CONNECTOR_LOSS_DB = 0.2;
+  var OTDR_LAUNCH_REFLECT_DB = -45;
+  var OTDR_FAR_REFLECT_DB = -14.8;
+  var OTDR_FUSION_SPLICE_DB = 0.05;
+  var OTDR_COUPLER_PASS_DB = 0.3;
+  var OTDR_MISMATCH_DB = 3.0;
+
+  function roundTrace2(n) {
+    return Math.round(n * 100) / 100;
+  }
+
+  function roundTrace3(n) {
+    return Math.round(n * 1000) / 1000;
+  }
+
+  function parseOtdrWavelengthNm() {
+    var m = (currentOtdrTestState.laser || '1550 nm').match(/(\d+)/);
+    return m ? parseInt(m[1], 10) : 1550;
+  }
+
+  function labFiberAttenuationDbKm(wavelengthNm) {
+    if (global.FtthLab && typeof FtthLab.fiberAttenuationDbPerKm === 'function') {
+      return FtthLab.fiberAttenuationDbPerKm(wavelengthNm);
+    }
+    if (global.FtthLab && typeof FtthLab.fiberSpanLossDb === 'function') {
+      return FtthLab.fiberSpanLossDb(1000, wavelengthNm);
+    }
+    return 0.2;
+  }
+
+  function labFiberSpanLossDb(lengthM, wavelengthNm) {
+    if (global.FtthLab && typeof FtthLab.fiberSpanLossDb === 'function') {
+      return FtthLab.fiberSpanLossDb(lengthM, wavelengthNm);
+    }
+    return (Math.max(0, lengthM) / 1000) * labFiberAttenuationDbKm(wavelengthNm);
+  }
+
+  function portKeyFromFiberSnap(att) {
+    if (!att || !att.owner) return null;
+    if (att.owner === 'olt') {
+      return 'olt:' + att.slot + ':' + att.oltPort;
+    }
+    if (att.owner === 'splitter') {
+      return 'spl:' + att.splitterId + ':' + att.port;
+    }
+    if (att.owner === 'coupler') {
+      var face = (att.port === 'B' || att.port === 'b' || att.port === '2') ? 'B' : 'A';
+      return 'cpl:' + att.couplerId + ':' + face;
+    }
+    if (att.owner === 'vfl') return 'vfl:' + att.vflId;
+    if (att.owner === 'opm') return 'opm:' + att.opmId;
+    if (att.owner === 'ols') return 'ols:' + att.olsId;
+    return null;
+  }
+
+  function couplerOppositeKey(key) {
+    var m = /^cpl:([^:]+):([AB])$/.exec(key || '');
+    if (!m) return null;
+    return 'cpl:' + m[1] + ':' + (m[2] === 'A' ? 'B' : 'A');
+  }
+
+  function findPigtailInGraph(graph, id) {
+    var pts = graph.pigtails || [];
+    var i;
+    for (i = 0; i < pts.length; i++) {
+      if (pts[i].id === id) return pts[i];
+    }
+    return null;
+  }
+
+  function lookupFusionSpliceLoss(assemblyId) {
+    if (global.FtthLab && typeof FtthLab.getFusedAssemblyOpticalPairs === 'function') {
+      var pairs = FtthLab.getFusedAssemblyOpticalPairs() || [];
+      var i;
+      for (i = 0; i < pairs.length; i++) {
+        var pair = pairs[i];
+        if (pair.assemblyId === assemblyId || pair.fusionAssemblyId === assemblyId) {
+          if (typeof pair.spliceLossDb === 'number' && isFinite(pair.spliceLossDb)) {
+            return pair.spliceLossDb;
+          }
+        }
+      }
+    }
+    return OTDR_FUSION_SPLICE_DB;
+  }
+
+  function getMockFiberEventsSeven() {
+    return [
+      { id: 1, distance: 0, type: 'start', loss: 0.0, reflect: -45.0 },
+      { id: 2, distance: 500, type: 'connector', loss: 0.5, reflect: -35.0 },
+      { id: 3, distance: 1000, type: 'splice', loss: 0.1, reflect: 0 },
+      { id: 4, distance: 1500, type: 'connector', loss: 0.4, reflect: -40.0 },
+      { id: 5, distance: 2000, type: 'splice', loss: 0.2, reflect: 0 },
+      { id: 6, distance: 2500, type: 'connector', loss: 0.6, reflect: -30.0 },
+      { id: 7, distance: 3000, type: 'splitter', loss: 3.5, reflect: -45.0 },
+    ];
+  }
+
+  function traceEventLabelFromType(type) {
+    if (type === 'start') return 'OTDR Port';
+    if (type === 'connector' || type === 'reflective') return 'Connector';
+    if (type === 'splice') return 'Splice';
+    if (type === 'splitter') return 'Splitter';
+    if (type === 'end') return 'End of fiber';
+    return 'Event';
+  }
+
+  function normalizeMockEventType(type, label) {
+    if (type === 'reflective') {
+      if (label === 'End' || label === 'Open Tail' || label === 'End of fiber') return 'end';
+      if (label === 'Splitter') return 'splitter';
+      return 'connector';
+    }
+    return type || 'connector';
+  }
+
+  function buildTraceTableEventsFromMock(mockEvents) {
+    var attPerKm = labFiberAttenuationDbKm(parseOtdrWavelengthNm());
+    var rows = [];
+    var totalLoss = 0;
+    var prevDist = 0;
+    var i;
+    var maxDist = 3000;
+    for (i = 0; i < mockEvents.length; i++) {
+      var m = mockEvents[i];
+      var sectionM = i === 0 ? 0 : Math.max(0, m.distance - prevDist);
+      var sectionFiberLoss = i === 0 ? 0 : (sectionM / 1000) * attPerKm;
+      if (i > 0) totalLoss += sectionFiberLoss + (m.loss || 0);
+      rows.push({
+        eventNum: m.id != null ? m.id : (i + 1),
+        event: String(m.id != null ? m.id : (i + 1)),
+        type: normalizeMockEventType(m.type, traceEventLabelFromType(m.type)),
+        label: traceEventLabelFromType(m.type),
+        distance: m.distance,
+        loss: i === 0 ? null : (m.loss != null ? roundTrace2(m.loss) : null),
+        reflect: m.reflect != null ? roundTrace2(m.reflect) : null,
+        sectionAtt: sectionM > 0.001
+          ? roundTrace2(sectionFiberLoss / (sectionM / 1000)) : null,
+        sectionM: sectionM > 0.001 ? roundTrace3(sectionM) : null,
+        totalLoss: roundTrace2(totalLoss),
+        linearPos: Math.min(0.99, Math.max(0.02, m.distance / maxDist)),
+      });
+      prevDist = m.distance;
+    }
+    return rows;
+  }
+
+  function syncMockFiberEventsFromTrace(events, totalLengthM) {
+    if (!events || !events.length) {
+      mockFiberEvents = getMockFiberEventsSeven();
+      return;
+    }
+    var mock = [];
+    var i;
+    for (i = 0; i < events.length; i++) {
+      var ev = events[i];
+      mock.push({
+        id: ev.eventNum != null ? ev.eventNum : (i + 1),
+        distance: ev.distance,
+        type: normalizeMockEventType(ev.type, ev.label),
+        loss: ev.loss || 0,
+        reflect: ev.reflect != null ? ev.reflect : 0,
+      });
+    }
+    mockFiberEvents = mock;
+  }
+
+  function getSplitterLossDb(splitterId) {
+    var splitterLoss = 3.5;
+    if (global.FtthLab && typeof FtthLab.getOpticalSplitters === 'function') {
+      var splitters = FtthLab.getOpticalSplitters() || [];
+      var si;
+      for (si = 0; si < splitters.length; si++) {
+        if (splitters[si].id === splitterId) {
+          splitterLoss = splitters[si].lossDb || splitterLoss;
+          break;
+        }
+      }
+    }
+    return splitterLoss;
+  }
+
+  function findFiberStepFromPort(currentKey, graph, visitedPc, visitedPt) {
+    if (!currentKey) return null;
+    var pcords = graph.pcords || [];
+    var ci;
+    for (ci = 0; ci < pcords.length; ci++) {
+      var c = pcords[ci];
+      if (visitedPc[c.id]) continue;
+      var ka = portKeyFromFiberSnap(c.sideA);
+      var kb = portKeyFromFiberSnap(c.sideB);
+      var exitKey = null;
+      var openEnd = false;
+      if (ka === currentKey) {
+        exitKey = kb;
+        if (!exitKey && c.freeB) openEnd = true;
+      } else if (kb === currentKey) {
+        exitKey = ka;
+        if (!exitKey && c.freeA) openEnd = true;
+      }
+      if (!exitKey && !openEnd) continue;
+      var mismatchLoss = 0;
+      if (c.sideA && c.sideA.mismatch) mismatchLoss += OTDR_MISMATCH_DB;
+      if (c.sideB && c.sideB.mismatch) mismatchLoss += OTDR_MISMATCH_DB;
+      return {
+        kind: 'pcord',
+        linkId: c.id,
+        lengthM: Math.max(0, Number(c.fiberLengthM) || 0),
+        exitKey: exitKey,
+        openEnd: openEnd,
+        mismatchLoss: mismatchLoss,
+      };
+    }
+
+    var pigtails = graph.pigtails || [];
+    var pi;
+    for (pi = 0; pi < pigtails.length; pi++) {
+      var p = pigtails[pi];
+      if (visitedPt[p.id]) continue;
+      var pk = portKeyFromFiberSnap(p.connector);
+      if (pk !== currentKey) continue;
+      return {
+        kind: 'pigtail',
+        linkId: p.id,
+        lengthM: Math.max(0, Number(p.fiberLengthM) || 0),
+        pigtail: p,
+      };
+    }
+    return null;
+  }
+
+  function registerNodeEventAtKey(exitKey, atM, sectionM, secFiberLoss, ctx) {
+    if (!exitKey) {
+      ctx.connectorLossTotal += OTDR_CONNECTOR_LOSS_DB;
+      ctx.pushEvent('end', 'End of fiber', atM, {
+        loss: OTDR_CONNECTOR_LOSS_DB,
+        reflect: OTDR_FAR_REFLECT_DB,
+        sectionM: sectionM,
+        sectionFiberLoss: secFiberLoss,
+      });
+      return null;
+    }
+
+    if (exitKey.indexOf('cpl:') === 0) {
+      var cplParts = exitKey.split(':');
+      var couplerId = cplParts[1];
+      if (ctx.visitedCouplers[couplerId]) {
+        ctx.pushEvent('end', 'End of fiber', atM, {
+          reflect: OTDR_FAR_REFLECT_DB,
+          sectionM: sectionM,
+          sectionFiberLoss: secFiberLoss,
+        });
+        return null;
+      }
+      ctx.visitedCouplers[couplerId] = true;
+      var oppKey = couplerOppositeKey(exitKey);
+      ctx.connectorLossTotal += OTDR_COUPLER_PASS_DB;
+      ctx.pushEvent('connector', 'Coupler', atM, {
+        loss: OTDR_COUPLER_PASS_DB,
+        reflect: -35,
+        sectionM: sectionM,
+        sectionFiberLoss: secFiberLoss,
+      });
+      return oppKey || null;
+    }
+
+    if (exitKey.indexOf('spl:') === 0) {
+      var sid = exitKey.split(':')[1];
+      var splitterLoss = getSplitterLossDb(sid);
+      ctx.connectorLossTotal += splitterLoss;
+      ctx.pushEvent('splitter', 'Splitter', atM, {
+        loss: splitterLoss,
+        reflect: -45,
+        sectionM: sectionM,
+        sectionFiberLoss: secFiberLoss,
+      });
+      return null;
+    }
+
+    var mismatch = ctx.pendingMismatchLoss || 0;
+    ctx.connectorLossTotal += OTDR_CONNECTOR_LOSS_DB + mismatch;
+    ctx.pushEvent('connector', 'Connector', atM, {
+      loss: OTDR_CONNECTOR_LOSS_DB + mismatch,
+      reflect: -22,
+      sectionM: sectionM,
+      sectionFiberLoss: secFiberLoss,
+    });
+    ctx.pendingMismatchLoss = 0;
+    return exitKey;
+  }
+
+  function buildDynamicOtdrEvents(deviceId, graph, wavelengthNm) {
+    var visitedPc = {};
+    var visitedPt = {};
+    var visitedCouplers = {};
+    var fusedSeen = {};
+    var currentKey = 'ols:' + deviceId + '-port-apc';
+    var cumulativeDistance = 0;
+    var fiberLossTotal = 0;
+    var connectorLossTotal = 0;
+    var spliceLossTotal = 0;
+    var events = [];
+    var sectionStartM = 0;
+    var sectionFiberLoss = 0;
+    var maxTraceM = 50000;
+    traceEventCounter = 1;
+
+    function linearPos(atM) {
+      return Math.min(0.99, Math.max(0.02, atM / Math.max(atM + 100, 2500)));
+    }
+
+    function pushEvent(type, label, atM, opts) {
+      opts = opts || {};
+      var eventNum = traceEventCounter;
+      traceEventCounter += 1;
+      var sectionM = opts.sectionM != null ? opts.sectionM : Math.max(0, atM - sectionStartM);
+      var secFiber = opts.sectionFiberLoss != null ? opts.sectionFiberLoss : sectionFiberLoss;
+      var eventLoss = opts.loss != null ? opts.loss : 0;
+      var cumulative = (events.length ? events[events.length - 1].totalLoss : 0) + eventLoss + secFiber;
+      events.push({
+        eventNum: eventNum,
+        event: String(eventNum),
+        type: type,
+        label: label,
+        distance: roundTrace3(atM),
+        loss: type === 'start' ? null
+          : (eventLoss > 0 ? roundTrace2(eventLoss) : (type === 'splice' ? roundTrace2(eventLoss) : null)),
+        reflect: opts.reflect != null ? roundTrace2(opts.reflect) : null,
+        sectionAtt: sectionM > 0.001 && secFiber > 0
+          ? roundTrace2(secFiber / (sectionM / 1000)) : null,
+        sectionM: sectionM > 0.001 ? roundTrace3(sectionM) : null,
+        totalLoss: roundTrace2(cumulative),
+        linearPos: linearPos(atM),
+      });
+      sectionStartM = atM;
+      sectionFiberLoss = 0;
+    }
+
+    function addFiberSpan(lengthM) {
+      if (lengthM <= 0) return 0;
+      var loss = labFiberSpanLossDb(lengthM, wavelengthNm);
+      cumulativeDistance += lengthM;
+      fiberLossTotal += loss;
+      sectionFiberLoss += loss;
+      return loss;
+    }
+
+    var ctx = {
+      visitedCouplers: visitedCouplers,
+      connectorLossTotal: connectorLossTotal,
+      spliceLossTotal: spliceLossTotal,
+      pendingMismatchLoss: 0,
+      pushEvent: pushEvent,
+    };
+
+    pushEvent('start', 'OTDR Port', 0, {
+      reflect: OTDR_LAUNCH_REFLECT_DB,
+      sectionM: 0,
+      sectionFiberLoss: 0,
+      loss: 0,
+    });
+
+    var guard;
+    for (guard = 0; guard < 80 && currentKey && cumulativeDistance < maxTraceM; guard++) {
+      var step = findFiberStepFromPort(currentKey, graph, visitedPc, visitedPt);
+      if (!step) break;
+
+      if (step.kind === 'pcord') {
+        visitedPc[step.linkId] = true;
+        var spanM = step.lengthM;
+        addFiberSpan(spanM);
+        var spanFiberLoss = sectionFiberLoss;
+        ctx.pendingMismatchLoss = step.mismatchLoss || 0;
+        ctx.connectorLossTotal = connectorLossTotal;
+        ctx.spliceLossTotal = spliceLossTotal;
+
+        if (step.openEnd || !step.exitKey) {
+          connectorLossTotal += OTDR_CONNECTOR_LOSS_DB + ctx.pendingMismatchLoss;
+          pushEvent('end', 'End of fiber', cumulativeDistance, {
+            loss: OTDR_CONNECTOR_LOSS_DB + ctx.pendingMismatchLoss,
+            reflect: OTDR_FAR_REFLECT_DB,
+            sectionM: spanM,
+            sectionFiberLoss: spanFiberLoss,
+          });
+          currentKey = null;
+          break;
+        }
+
+        currentKey = registerNodeEventAtKey(
+          step.exitKey, cumulativeDistance, spanM, spanFiberLoss, ctx
+        );
+        connectorLossTotal = ctx.connectorLossTotal;
+        spliceLossTotal = ctx.spliceLossTotal;
+        continue;
+      }
+
+      if (step.kind === 'pigtail') {
+        var p = step.pigtail;
+        visitedPt[p.id] = true;
+        var plen = step.lengthM;
+        addFiberSpan(plen);
+        var ptSpanFiberLoss = sectionFiberLoss;
+
+        if (p.fusedPartnerId) {
+          var fuseKey = p.fusionAssemblyId || (p.id + '|' + p.fusedPartnerId);
+          if (!fusedSeen[fuseKey]) {
+            fusedSeen[fuseKey] = true;
+            var spLoss = lookupFusionSpliceLoss(p.fusionAssemblyId);
+            spliceLossTotal += spLoss;
+            ctx.spliceLossTotal = spliceLossTotal;
+            pushEvent('splice', 'Fusion Splice', cumulativeDistance, {
+              loss: spLoss,
+              reflect: 0,
+              sectionM: plen,
+              sectionFiberLoss: ptSpanFiberLoss,
+            });
+          }
+          var partner = findPigtailInGraph(graph, p.fusedPartnerId);
+          if (partner && !visitedPt[partner.id]) {
+            visitedPt[partner.id] = true;
+            var partnerLen = Math.max(0, Number(partner.fiberLengthM) || 0);
+            addFiberSpan(partnerLen);
+            var partnerSpanFiber = sectionFiberLoss;
+            ctx.connectorLossTotal = connectorLossTotal;
+            ctx.spliceLossTotal = spliceLossTotal;
+            currentKey = registerNodeEventAtKey(
+              portKeyFromFiberSnap(partner.connector),
+              cumulativeDistance,
+              partnerLen,
+              partnerSpanFiber,
+              ctx
+            );
+            connectorLossTotal = ctx.connectorLossTotal;
+            spliceLossTotal = ctx.spliceLossTotal;
+            if (!currentKey) break;
+          } else {
+            pushEvent('end', 'End of fiber', cumulativeDistance, {
+              reflect: OTDR_FAR_REFLECT_DB,
+              sectionM: plen,
+              sectionFiberLoss: ptSpanFiberLoss,
+            });
+            currentKey = null;
+          }
+        } else {
+          pushEvent('end', 'End of fiber', cumulativeDistance, {
+            reflect: OTDR_FAR_REFLECT_DB,
+            loss: OTDR_CONNECTOR_LOSS_DB,
+            sectionM: plen,
+            sectionFiberLoss: ptSpanFiberLoss,
+          });
+          currentKey = null;
+        }
+      }
+    }
+
+    return {
+      events: events,
+      totalLengthM: cumulativeDistance,
+      fiberLossTotal: roundTrace2(fiberLossTotal),
+      spliceLossTotal: roundTrace2(spliceLossTotal),
+      connectorLossTotal: roundTrace2(connectorLossTotal),
+    };
+  }
+
+  function computeLabOtdrTrace(deviceId) {
+    var wavelengthNm = parseOtdrWavelengthNm();
+    var attCoeff = labFiberAttenuationDbKm(wavelengthNm);
+    if (!isApcPortConnected(deviceId)) {
+      mockFiberEvents = getMockFiberEventsSeven();
+      var fallback = getDefaultTraceEvents();
+      return {
+        events: fallback,
+        totalLengthM: 3000,
+        totalLoss: fallback[fallback.length - 1].totalLoss || 5.3,
+        orl: 40.84,
+        attCoeff: attCoeff,
+      };
+    }
+
+    var graph = fiberGraph();
+    var built = buildDynamicOtdrEvents(deviceId, graph, wavelengthNm);
+    var events = built.events;
+    var totalLengthM = built.totalLengthM;
+
+    var lengthKm = totalLengthM / 1000;
+    var totalLoss = events.length ? events[events.length - 1].totalLoss : 0;
+    if (totalLoss == null) {
+      totalLoss = roundTrace2(
+        (lengthKm * attCoeff) + built.spliceLossTotal + built.connectorLossTotal
+      );
+    }
+    var orl = roundTrace2(Math.max(28, 48.5 - totalLoss * 0.38));
+
+    return {
+      events: events,
+      totalLengthM: totalLengthM,
+      totalLoss: totalLoss,
+      orl: orl,
+      attCoeff: attCoeff,
+      fiberLossTotal: built.fiberLossTotal,
+      spliceLossTotal: built.spliceLossTotal,
+      connectorLossTotal: built.connectorLossTotal,
+    };
   }
 
   function isPortOccupied(portId) {
@@ -650,17 +1205,20 @@
       '<span class="trace-linear-icon trace-linear-icon--end" data-trace-icon="end" title="End">▲</span>' +
       '</div></div>' +
       '<div class="trace-graph-area">' +
-      '<canvas class="otdr-trace-canvas" id="' + canvasId + '" width="600" height="300" aria-label="OTDR trace graph"></canvas>' +
       '<div class="trace-floating-controls">' +
       '<button type="button" class="zoom-in-btn" aria-label="Zoom in">+</button>' +
       '<button type="button" class="zoom-out-btn" aria-label="Zoom out">-</button>' +
-      '<button type="button" class="cursor-a-btn is-active" aria-label="Cursor A">A</button>' +
-      '</div></div>' +
+      '<button type="button" class="cursor-a-btn" aria-label="Cursor A">A</button>' +
+      '</div>' +
+      '<canvas class="otdr-trace-canvas" id="otdrTraceCanvas" data-trace-canvas="' + canvasId + '" aria-label="OTDR trace graph"></canvas>' +
+      '</div>' +
       '<div class="trace-resizer" role="separator" aria-label="Resize graph and table">' +
       '<div class="purple-scroll-indicator"></div></div>' +
       '<div class="trace-summary-bar">' +
       '<div class="trace-summary-item trace-summary-evts"><strong>Nm Evts :</strong> ' +
-      '<span class="trace-summary-evts-val">3</span></div>' +
+      '<span class="trace-summary-evts-val">7</span></div>' +
+      '<div class="trace-summary-item trace-summary-tloss"><strong>Total Loss :</strong> ' +
+      '<span class="trace-summary-tloss-val">0.00 dB</span></div>' +
       '<div class="trace-summary-item trace-summary-orl"><strong>ORL enlace :</strong> ' +
       '<span class="trace-summary-orl-val">40.84 dB</span></div>' +
       '<div class="trace-summary-item trace-summary-lambda"><strong>λ: <span class="trace-summary-lambda-val">1625nm</span></strong></div>' +
@@ -732,7 +1290,7 @@
     return '00:' + ss;
   }
 
-  var TRACE_MAX_M = 2000;
+  var TRACE_MAX_M = 3000;
   var TRACE_DB_MIN = -30;
   var TRACE_DB_MAX = 15;
   var TRACE_Y_TICKS = [15, 10, 5, 0, -5, -10, -15, -30];
@@ -746,50 +1304,151 @@
   var TRACE_GRAPH_COLLAPSE_THRESHOLD = 60;
   var TRACE_DEFAULT_GRAPH_HEIGHT = '65%';
 
-  var DEFAULT_TRACE_EVENTS = [
-    {
-      eventNum: 1,
-      event: '1',
-      type: 'start',
-      label: 'Source',
-      distance: 0.000,
-      loss: null,
-      reflect: -42.5,
-      sectionAtt: null,
-      sectionM: null,
-      totalLoss: 0.00,
-      linearPos: 0.02,
-    },
-    {
-      eventNum: 2,
-      event: '2',
-      type: 'splice',
-      label: 'Splice',
-      distance: 484.090,
-      loss: 0.12,
-      reflect: null,
-      sectionAtt: 0.35,
-      sectionM: 484.090,
-      totalLoss: 0.47,
-      linearPos: 0.242,
-    },
-    {
-      eventNum: 3,
-      event: '3',
-      type: 'reflective',
-      label: 'Connector',
-      distance: 2000.000,
-      loss: null,
-      reflect: -14.8,
-      sectionAtt: 0.28,
-      sectionM: 1515.910,
-      totalLoss: 0.75,
-      linearPos: 0.98,
-    },
-  ];
+  var traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
+  var isTraceDragging = false;
+  var lastTracePan = { x: 0, y: 0 };
+  var mockFiberEvents = getMockFiberEventsSeven();
+  var traceEventCounter = 1;
+  var traceRedrawPending = null;
+  var traceRedrawTarget = null;
+
+  function resetOtdrTraceAcquisitionState(deviceId, deviceNode) {
+    mockFiberEvents = [];
+    traceEventCounter = 1;
+    var d = deviceId ? findDevice(deviceId) : null;
+    if (d) {
+      d.traceEvents = null;
+      d.traceTotalLoss = null;
+      d.traceOrl = null;
+      d.traceLengthM = null;
+      d.acquisitionComplete = false;
+    }
+    if (deviceNode) {
+      var tbody = deviceNode.querySelector('.trace-event-table tbody');
+      if (!tbody) tbody = deviceNode.querySelector('.trace-event-tbody');
+      if (tbody) tbody.innerHTML = '';
+      var evtsVal = deviceNode.querySelector('.trace-summary-evts-val');
+      if (evtsVal) evtsVal.textContent = '0';
+      var tlossVal = deviceNode.querySelector('.trace-summary-tloss-val');
+      if (tlossVal) tlossVal.textContent = '0.00 dB';
+    }
+  }
+
+  function ensureTraceEvents(events) {
+    if (!events || !events.length) return getDefaultTraceEvents();
+    return events;
+  }
+
+  function toCanvasX(d, w) {
+    return (d - traceCamera.x) * traceCamera.scaleX;
+  }
+
+  function toCanvasY(db, h) {
+    return (h / 2) - ((db - traceCamera.y) * traceCamera.scaleY);
+  }
+
+  function clampTraceZoomInScales(canvas) {
+    if (!canvas) return;
+    var rect = canvas.getBoundingClientRect();
+    var canvasWidth = rect.width || canvas.clientWidth || 1;
+    var canvasHeight = rect.height || canvas.clientHeight || 1;
+    var maxScaleX = canvasWidth / 0.5;
+    var maxScaleY = canvasHeight / 0.1;
+    if (traceCamera.scaleX > maxScaleX) traceCamera.scaleX = maxScaleX;
+    if (traceCamera.scaleY > maxScaleY) traceCamera.scaleY = maxScaleY;
+  }
+
+  function pickTraceAxisStep(range) {
+    var rough = range / 8;
+    if (!isFinite(rough) || rough <= 0) return 1;
+    var pow = Math.pow(10, Math.floor(Math.log10(rough)));
+    var norm = rough / pow;
+    var nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+    return nice * pow;
+  }
+
+  function calcTraceDBAtDistance(distance) {
+    if (distance <= 0) return 0;
+
+    var currentDB = -(distance * 0.0002);
+    var launchSpanM = 18;
+    var launchPeakDb = 4.2;
+    if (distance < launchSpanM) {
+      var launchPhase = distance / launchSpanM;
+      var launchShape = Math.sin(Math.PI * launchPhase);
+      currentDB += launchPeakDb * launchShape * launchShape;
+    }
+
+    var ei;
+    for (ei = 0; ei < mockFiberEvents.length; ei++) {
+      var ev = mockFiberEvents[ei];
+      var delta = distance - ev.distance;
+      if (ev.type === 'start') {
+        if (ev.reflect != null) {
+          var startWidth = 10;
+          currentDB += Math.abs(ev.reflect) * 0.12 *
+            Math.exp(-(delta * delta) / (startWidth * startWidth));
+        }
+        continue;
+      }
+      if (ev.type === 'connector' || ev.type === 'reflective') {
+        var width = 14;
+        var amp = Math.abs(ev.reflect || 35) * 0.12;
+        currentDB += amp * Math.exp(-(delta * delta) / (width * width));
+        if (delta >= 0 && delta < 3 && ev.loss) {
+          currentDB -= ev.loss * 0.5;
+        }
+      } else if (ev.type === 'splice') {
+        if (delta >= 0 && delta < 4) {
+          currentDB -= ev.loss || 0.1;
+        }
+      } else if (ev.type === 'splitter') {
+        if (delta >= -10 && delta <= 2) {
+          currentDB -= ev.loss || 3.5;
+          currentDB += Math.abs(ev.reflect || 45) * 0.1 *
+            Math.exp(-(delta * delta) / 30);
+        }
+      } else if (ev.type === 'end' && delta >= -6 && delta <= 0) {
+        currentDB += Math.abs(ev.reflect || 45) * 0.2 *
+          Math.exp(-(delta * delta) / 36);
+      }
+    }
+    var traceEndM = mockFiberEvents.length
+      ? mockFiberEvents[mockFiberEvents.length - 1].distance
+      : TRACE_MAX_M;
+    if (distance > traceEndM) {
+      currentDB += (Math.random() - 0.5) * 12;
+    }
+    return currentDB;
+  }
+
+  function scheduleTraceRedraw(canvas) {
+    traceRedrawTarget = canvas;
+    if (traceRedrawPending) return;
+    traceRedrawPending = requestAnimationFrame(function () {
+      traceRedrawPending = null;
+      if (traceRedrawTarget) {
+        drawOTDRTrace(traceRedrawTarget);
+        traceRedrawTarget = null;
+      }
+    });
+  }
+
+  function resolveTraceCanvas(canvasIdOrEl, deviceNode) {
+    if (canvasIdOrEl && canvasIdOrEl.tagName === 'CANVAS') return canvasIdOrEl;
+    if (typeof canvasIdOrEl === 'string' && canvasIdOrEl) {
+      var byId = document.getElementById(canvasIdOrEl);
+      if (byId) return byId;
+    }
+    if (deviceNode) {
+      var scoped = deviceNode.querySelector('.trace-graph-area canvas');
+      if (scoped) return scoped;
+    }
+    return document.getElementById('otdrTraceCanvas');
+  }
 
   function getDefaultTraceEvents() {
-    return JSON.parse(JSON.stringify(DEFAULT_TRACE_EVENTS));
+    return buildTraceTableEventsFromMock(getMockFiberEventsSeven());
   }
 
   function formatTraceCell(value, digits) {
@@ -824,6 +1483,9 @@
 
   function resetTraceViewport(deviceId) {
     var d = findDevice(deviceId);
+    traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
+    isTraceDragging = false;
+    lastTracePan = { x: 0, y: 0 };
     if (!d) return;
     d.traceViewport = {
       zoomX: 1,
@@ -834,53 +1496,94 @@
       selectedEventIndex: 0,
       activeCursor: 'A',
     };
+    d.traceCamera = {
+      x: traceCamera.x,
+      y: traceCamera.y,
+      scaleX: traceCamera.scaleX,
+      scaleY: traceCamera.scaleY,
+    };
   }
 
-  function traceEventIconSvg(type) {
-    var c = 'currentColor';
-    if (type === 'splice') {
+  function traceEventIconSvg(type, label) {
+    var stroke = '#302060';
+    var fill = '#302060';
+    var t = type || 'connector';
+    if (t === 'reflective') {
+      t = label === 'Splitter' ? 'splitter'
+        : (label === 'End' || label === 'Open Tail' || label === 'End of fiber' ? 'end' : 'connector');
+    }
+
+    if (t === 'splice') {
       return (
         '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
-        '<line x1="1" y1="7" x2="10" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
-        '<rect x="10" y="3.5" width="12" height="7" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
-        '<line x1="22" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<line x1="1" y1="7" x2="11" y2="7" stroke="' + stroke + '" stroke-width="1.4"/>' +
+        '<rect x="11" y="4" width="10" height="6" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.4"/>' +
+        '<line x1="21" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="1.4"/>' +
         '</svg>'
       );
     }
-    if (type === 'reflective') {
+
+    if (t === 'connector') {
       return (
         '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
-        '<line x1="1" y1="7" x2="8" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
-        '<rect x="8" y="2.5" width="16" height="9" fill="none" stroke="' + c + '" stroke-width="1.6"/>' +
-        '<line x1="16" y1="2.5" x2="16" y2="11.5" stroke="' + c + '" stroke-width="1.4"/>' +
-        '<line x1="24" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+        '<line x1="1" y1="7" x2="6" y2="7" stroke="' + stroke + '" stroke-width="1.2"/>' +
+        '<rect x="5.5" y="3" width="3" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.2"/>' +
+        '<rect x="8.5" y="2.5" width="15" height="9" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.3"/>' +
+        '<path d="M13.5 4.8 L15.8 7 L13.5 9.2 Z" fill="' + fill + '"/>' +
+        '<path d="M18.5 4.8 L16.2 7 L18.5 9.2 Z" fill="' + fill + '"/>' +
+        '<rect x="23.5" y="3" width="3" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.2"/>' +
+        '<line x1="26.5" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="1.2"/>' +
         '</svg>'
       );
     }
-    if (type === 'end') {
+
+    if (t === 'splitter') {
       return (
         '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
-        '<line x1="1" y1="7" x2="18" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
-        '<rect x="18" y="2" width="6" height="10" fill="' + c + '"/>' +
-        '<rect x="24" y="3.5" width="3" height="7" fill="' + c + '"/>' +
-        '<rect x="27" y="4.5" width="2" height="5" fill="' + c + '"/>' +
+        '<line x1="1" y1="7" x2="7" y2="7" stroke="' + stroke + '" stroke-width="1.2"/>' +
+        '<path d="M27 2.5 L27 11.5 L11 7 Z" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.3" stroke-linejoin="round"/>' +
+        '<line x1="21.5" y1="3.2" x2="21.5" y2="10.8" stroke="' + stroke + '" stroke-width="1.1"/>' +
+        '<text x="24.2" y="8.2" font-size="4.2" font-weight="700" font-family="Arial,sans-serif" fill="' + fill + '" text-anchor="middle">2</text>' +
         '</svg>'
       );
     }
-    /* start / OTDR connector — line ending in filled block */
+
+    if (t === 'end') {
+      return (
+        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<line x1="1" y1="5" x2="5" y2="5" stroke="' + fill + '" stroke-width="1.6"/>' +
+        '<line x1="1" y1="7" x2="5" y2="7" stroke="' + fill + '" stroke-width="1.6"/>' +
+        '<line x1="1" y1="9" x2="5" y2="9" stroke="' + fill + '" stroke-width="1.6"/>' +
+        '<rect x="5" y="3" width="10" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.2"/>' +
+        '<line x1="10" y1="5.5" x2="10" y2="8.5" stroke="' + fill + '" stroke-width="1.4"/>' +
+        '<line x1="10" y1="7" x2="13" y2="7" stroke="' + fill + '" stroke-width="1.4"/>' +
+        '<rect x="15" y="5.5" width="2.5" height="3" fill="' + fill + '"/>' +
+        '</svg>'
+      );
+    }
+
     return (
       '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
-      '<line x1="1" y1="7" x2="12" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
-      '<rect x="12" y="3" width="10" height="8" fill="' + c + '"/>' +
-      '<line x1="22" y1="7" x2="31" y2="7" stroke="' + c + '" stroke-width="1.6"/>' +
+      '<rect x="5" y="5.5" width="2.5" height="3" fill="' + fill + '"/>' +
+      '<rect x="7.5" y="3" width="10" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="1.2"/>' +
+      '<line x1="12.5" y1="5.5" x2="12.5" y2="8.5" stroke="' + fill + '" stroke-width="1.4"/>' +
+      '<line x1="12.5" y1="7" x2="9.5" y2="7" stroke="' + fill + '" stroke-width="1.4"/>' +
+      '<line x1="19" y1="5" x2="23" y2="5" stroke="' + fill + '" stroke-width="1.6"/>' +
+      '<line x1="19" y1="7" x2="23" y2="7" stroke="' + fill + '" stroke-width="1.6"/>' +
+      '<line x1="19" y1="9" x2="23" y2="9" stroke="' + fill + '" stroke-width="1.6"/>' +
+      '<line x1="23" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="1.2"/>' +
       '</svg>'
     );
   }
 
   function populateTraceEventTable(deviceNode, eventsData, selectedIndex) {
     var tbody = deviceNode && deviceNode.querySelector('.trace-event-tbody');
+    if (!tbody && deviceNode) {
+      tbody = deviceNode.querySelector('.trace-event-table tbody');
+    }
     if (!tbody) return;
-    eventsData = eventsData || getDefaultTraceEvents();
+    tbody.innerHTML = '';
+    eventsData = ensureTraceEvents(eventsData || null);
     var deviceId = deviceNode.getAttribute('data-otdr-node');
     var vp = getTraceViewport(deviceId);
     if (typeof selectedIndex === 'number') {
@@ -892,7 +1595,7 @@
     for (i = 0; i < eventsData.length; i++) {
       var ev = eventsData[i];
       var num = ev.eventNum != null ? ev.eventNum : (i + 1);
-      var icon = traceEventIconSvg(ev.type);
+      var icon = traceEventIconSvg(ev.type, ev.label);
       var rowCls = i === sel ? ' class="selected"' : '';
       html +=
         '<tr' + rowCls + ' data-trace-event-row="' + i + '">' +
@@ -917,6 +1620,22 @@
     eventsData = eventsData || getDefaultTraceEvents();
     var evtsVal = deviceNode.querySelector('.trace-summary-evts-val');
     if (evtsVal) evtsVal.textContent = String(eventsData.length);
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = deviceId ? findDevice(deviceId) : null;
+    var tlossVal = deviceNode.querySelector('.trace-summary-tloss-val');
+    var orlVal = deviceNode.querySelector('.trace-summary-orl-val');
+    if (tlossVal) {
+      var tloss = d && typeof d.traceTotalLoss === 'number' ? d.traceTotalLoss : null;
+      if (tloss == null && eventsData.length) {
+        var last = eventsData[eventsData.length - 1];
+        tloss = last && typeof last.totalLoss === 'number' ? last.totalLoss : null;
+      }
+      tlossVal.textContent = (tloss != null ? tloss.toFixed(2) : '0.00') + ' dB';
+    }
+    if (orlVal) {
+      var orl = d && typeof d.traceOrl === 'number' ? d.traceOrl : 40.84;
+      orlVal.textContent = orl.toFixed(2) + ' dB';
+    }
   }
 
   function applyDefaultTraceSplitLayout(deviceNode) {
@@ -930,7 +1649,7 @@
 
     graphArea.style.flex = '0 0 auto';
     graphArea.style.height = TRACE_DEFAULT_GRAPH_HEIGHT;
-    graphArea.style.maxHeight = 'calc(100% - 72px)';
+    graphArea.style.maxHeight = '';
     tableWrap.style.flex = '1 1 auto';
     tableWrap.style.minHeight = '48px';
     tableWrap.style.height = 'auto';
@@ -1096,8 +1815,10 @@
     eventsData = eventsData || getDefaultTraceEvents();
     eventsData.forEach(function (ev) {
       if (!ev.type) return;
-      var iconType = ev.type === 'start' || ev.type === 'connector' ? 'start'
-        : ev.type === 'reflective' ? 'end' : ev.type;
+      var iconType = ev.type === 'start' ? 'start'
+        : ev.type === 'splice' ? 'splice'
+        : ev.type === 'splitter' ? 'splice'
+        : (ev.type === 'end' || ev.label === 'End of fiber') ? 'end' : 'start';
       var icon = deviceNode.querySelector('[data-trace-icon="' + iconType + '"]');
       if (!icon) return;
       var pos = typeof ev.linearPos === 'number'
@@ -1163,44 +1884,31 @@
   }
 
   /**
-   * Draw OTDR trace — fixed axes/grid, transformed trace line + event markers.
-   * @param {string} canvasId
-   * @param {Array|null} eventsData
-   * @param {{zoomX?: number, zoomY?: number, offsetX?: number, offsetY?: number}} [viewport]
+   * Draw OTDR trace — physics-based camera trace with dynamic axes.
+   * @param {string|HTMLCanvasElement} canvasIdOrEl
+   * @param {Array|null} [eventsData]
+   * @param {object} [viewport]
    */
-  function drawOTDRTrace(canvasId, eventsData, viewport) {
-    var canvas = document.getElementById(canvasId);
+  function drawOTDRTrace(canvasIdOrEl, eventsData, viewport) {
+    var canvas = resolveTraceCanvas(canvasIdOrEl);
     if (!canvas) return;
     var prepared = prepareTraceCanvas(canvas);
     if (!prepared) return;
     var ctx = prepared.ctx;
-    viewport = viewport || { zoomX: 1, zoomY: 1, offsetX: 0, offsetY: 0 };
-    var zoomX = viewport.zoomX != null ? viewport.zoomX : 1;
-    var zoomY = viewport.zoomY != null ? viewport.zoomY : 1;
-    var offsetX = viewport.offsetX || 0;
-    var offsetY = viewport.offsetY || 0;
-
     var w = prepared.w;
     var h = prepared.h;
-    var padL = Math.round(w * 0.1);
-    var padR = Math.round(w * 0.06);
-    var padT = Math.round(h * 0.1);
-    var padB = Math.round(h * 0.16);
-    var plotW = w - padL - padR;
-    var plotH = h - padT - padB;
-    var events = eventsData || getDefaultTraceEvents();
-    var labelSize = Math.max(8, Math.round(h * 0.042));
-    var distScale = getDistanceDisplayScale();
-    var gi;
-    var ti;
-
-    function metersToX(m) {
-      return (m / TRACE_MAX_M) * plotW;
-    }
-    function dbToY(db) {
-      var norm = (TRACE_DB_MAX - db) / (TRACE_DB_MAX - TRACE_DB_MIN);
-      return norm * plotH;
-    }
+    var labelSize = Math.max(8, Math.round(Math.min(w, h) * 0.08));
+    var distMin = traceCamera.x;
+    var distMax = traceCamera.x + w / traceCamera.scaleX;
+    var dbMin = traceCamera.y - (h / 2) / traceCamera.scaleY;
+    var dbMax = traceCamera.y + (h / 2) / traceCamera.scaleY;
+    var distStep = getTraceDistanceMeterStep(distMin, distMax);
+    var dbStep = pickTraceAxisStep(dbMax - dbMin);
+    var distStart = Math.floor(distMin / distStep) * distStep;
+    var distanceUnitLabel = currentOtdrTestState.distanceUnit || 'meter';
+    var dbStart = Math.floor(dbMin / dbStep) * dbStep;
+    var dist;
+    var dbVal;
 
     ctx.clearRect(0, 0, w, h);
     ctx.fillStyle = '#ffffff';
@@ -1208,121 +1916,105 @@
 
     ctx.strokeStyle = TRACE_GRID_COLOR;
     ctx.lineWidth = 1;
-    for (gi = 0; gi < TRACE_X_TICKS.length; gi++) {
-      var xg = padL + metersToX(TRACE_X_TICKS[gi]);
+    for (dist = distStart; dist <= distMax; dist += distStep) {
+      if (dist < 0) continue;
+      var gx = toCanvasX(dist, w);
+      if (gx < 0 || gx > w) continue;
       ctx.beginPath();
-      ctx.moveTo(xg, padT);
-      ctx.lineTo(xg, padT + plotH);
+      ctx.moveTo(gx, 0);
+      ctx.lineTo(gx, h);
       ctx.stroke();
     }
-    for (gi = 0; gi < TRACE_Y_TICKS.length; gi++) {
-      var yg = padT + dbToY(TRACE_Y_TICKS[gi]);
+    for (dbVal = dbStart; dbVal <= dbMax; dbVal += dbStep) {
+      if (dbVal > 50 || dbVal < -50) continue;
+      var gy = toCanvasY(dbVal, h);
+      if (gy < 0 || gy > h) continue;
       ctx.beginPath();
-      ctx.moveTo(padL, yg);
-      ctx.lineTo(padL + plotW, yg);
+      ctx.moveTo(0, gy);
+      ctx.lineTo(w, gy);
       ctx.stroke();
     }
-
-    ctx.strokeStyle = '#666666';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(padL, padT);
-    ctx.lineTo(padL, padT + plotH);
-    ctx.lineTo(padL + plotW, padT + plotH);
-    ctx.stroke();
 
     ctx.fillStyle = '#333333';
     ctx.font = labelSize + 'px Arial, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
-    for (ti = 0; ti < TRACE_Y_TICKS.length; ti++) {
-      ctx.fillText(String(TRACE_Y_TICKS[ti]), padL - 5, padT + dbToY(TRACE_Y_TICKS[ti]));
+    for (dbVal = dbStart; dbVal <= dbMax; dbVal += dbStep) {
+      if (dbVal > 50 || dbVal < -50) continue;
+      var ly = toCanvasY(dbVal, h);
+      if (ly < labelSize || ly > h - labelSize) continue;
+      ctx.fillText(String(Math.round(dbVal * 10) / 10), 28, ly);
     }
     ctx.textAlign = 'left';
-    ctx.textBaseline = 'bottom';
-    ctx.font = 'bold ' + labelSize + 'px Arial, sans-serif';
-    ctx.fillText('dB', padL - 2, padT - 3);
-
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.font = labelSize + 'px Arial, sans-serif';
-    for (ti = 0; ti < TRACE_X_TICKS.length; ti++) {
-      var xm = TRACE_X_TICKS[ti];
-      ctx.fillText(formatTraceDistance(xm), padL + metersToX(xm), padT + plotH + 4);
+    for (dist = distStart; dist <= distMax; dist += distStep) {
+      if (dist < 0) continue;
+      var lx = toCanvasX(dist, w);
+      if (lx < 0 || lx > w - 24) continue;
+      ctx.fillText(formatTraceAxisDistance(dist), lx - 8, h - labelSize - 2);
     }
-    ctx.textAlign = 'right';
-    ctx.fillText(distScale.label, padL + plotW + 2, padT + plotH + 4);
 
-    ctx.save();
-    ctx.translate(padL + offsetX, padT + offsetY);
-    ctx.scale(zoomX, zoomY);
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#999999';
+    ctx.lineWidth = 1;
+    ctx.fillRect(5, 5, 22, 16);
+    ctx.strokeRect(5, 5, 22, 16);
+    ctx.fillStyle = '#000000';
+    ctx.font = 'bold ' + Math.max(9, labelSize - 1) + 'px Arial, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('dB', 8, 16);
 
-    var polyline = buildTracePolyline(events);
+    var unitBoxFont = 'bold ' + Math.max(8, labelSize - 2) + 'px Arial, sans-serif';
+    ctx.font = unitBoxFont;
+    var unitBoxW = Math.max(20, Math.ceil(ctx.measureText(distanceUnitLabel).width) + 8);
+    var unitBoxH = 16;
+    var unitBoxX = w - unitBoxW - 5;
+    var unitBoxY = h - 25;
+    ctx.fillStyle = '#ffffff';
+    ctx.strokeStyle = '#999999';
+    ctx.fillRect(unitBoxX, unitBoxY, unitBoxW, unitBoxH);
+    ctx.strokeRect(unitBoxX, unitBoxY, unitBoxW, unitBoxH);
+    ctx.fillStyle = '#000000';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(distanceUnitLabel, unitBoxX + unitBoxW / 2, unitBoxY + unitBoxH / 2);
+
     ctx.strokeStyle = TRACE_LINE_COLOR;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
+    var initialX = toCanvasX(0, w);
+    var initialY = toCanvasY(0, h);
     ctx.beginPath();
-    for (var pi = 0; pi < polyline.length; pi++) {
-      var px = metersToX(polyline[pi].m);
-      var py = dbToY(polyline[pi].db);
-      if (pi === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.stroke();
-
-    var endM = TRACE_MAX_M;
-    events.forEach(function (ev) {
-      if (ev.type === 'end' || ev.type === 'reflective') {
-        if (typeof ev.distance === 'number') endM = ev.distance;
+    ctx.moveTo(initialX, initialY);
+    var traceMaxDist = 2500;
+    if (mockFiberEvents.length) {
+      var mockEnd = mockFiberEvents[mockFiberEvents.length - 1];
+      if (mockEnd && typeof mockEnd.distance === 'number') {
+        traceMaxDist = Math.max(100, Math.min(50000, Math.ceil(mockEnd.distance + 20)));
       }
-    });
-    var noiseStartX = metersToX(endM * 0.992);
-    var noiseY = dbToY(-6);
-    var noiseEndX = plotW;
-    ctx.strokeStyle = TRACE_LINE_COLOR;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.85;
-    ctx.beginPath();
-    ctx.moveTo(noiseStartX, noiseY);
-    var ns;
-    for (ns = 1; ns <= 40; ns++) {
-      noiseStartX += (noiseEndX - metersToX(endM * 0.992)) / 40;
-      noiseY += (deterministicNoise(ns, 7) - 0.5) * 4;
-      ctx.lineTo(noiseStartX, noiseY);
+    }
+    for (dist = 1; dist <= traceMaxDist; dist += 1) {
+      var currentDB = calcTraceDBAtDistance(dist);
+      ctx.lineTo(toCanvasX(dist, w), toCanvasY(currentDB, h));
     }
     ctx.stroke();
-    ctx.globalAlpha = 1;
 
+    var events = eventsData || getDefaultTraceEvents();
     events.forEach(function (ev) {
       if (typeof ev.distance !== 'number') return;
-      var mx = metersToX(ev.distance);
+      var mx = toCanvasX(ev.distance, w);
+      if (mx < -8 || mx > w + 8) return;
       ctx.strokeStyle = 'rgba(48, 32, 96, 0.22)';
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.moveTo(mx, 0);
-      ctx.lineTo(mx, plotH);
+      ctx.lineTo(mx, h);
       ctx.stroke();
       ctx.setLineDash([]);
-
-      var evNum = ev.eventNum != null ? ev.eventNum : 1;
-      var markerY = dbToY(0) + 14;
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = TRACE_LINE_COLOR;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(mx, markerY, 7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.fillStyle = TRACE_LINE_COLOR;
-      ctx.font = 'bold 9px Arial, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(evNum), mx, markerY);
     });
-
-    ctx.restore();
   }
 
   function renderTraceForDevice(deviceId, deviceNode) {
@@ -1330,66 +2022,125 @@
     if (!deviceId) return;
     var d = findDevice(deviceId);
     var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
-    var vp = getTraceViewport(deviceId);
     if (deviceNode) {
       var graphArea = deviceNode.querySelector('.trace-graph-area');
       ensureTraceFloatingControls(graphArea);
-      enforceTraceFloatingControlStyles(deviceNode);
     }
-    drawOTDRTrace(deviceId + '-otdr-trace-canvas', events, vp);
+    var canvas = resolveTraceCanvas(null, deviceNode);
+    if (canvas) drawOTDRTrace(canvas, events);
+  }
+
+  function getTracePointerClient(ev) {
+    if (ev.touches && ev.touches.length) {
+      return { x: ev.touches[0].clientX, y: ev.touches[0].clientY };
+    }
+    if (ev.changedTouches && ev.changedTouches.length) {
+      return { x: ev.changedTouches[0].clientX, y: ev.changedTouches[0].clientY };
+    }
+    return { x: ev.clientX, y: ev.clientY };
   }
 
   function bindTraceCanvasInteractions(host) {
-    host.querySelectorAll('.otdr-trace-canvas').forEach(function (canvas) {
+    host.querySelectorAll('.otdr-trace-canvas, #otdrTraceCanvas').forEach(function (canvas) {
       if (canvas.dataset.traceBound === '1') return;
       canvas.dataset.traceBound = '1';
 
-      var lastX = 0;
-      var lastY = 0;
+      var isPinching = false;
+      var pinchStartDist = 0;
+      var pinchStartScaleX = 1;
+      var pinchStartScaleY = 1;
 
-      canvas.addEventListener('mousedown', function (e) {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var deviceNode = canvas.closest('[data-otdr-node]');
-        if (!deviceNode) return;
-        var deviceId = deviceNode.getAttribute('data-otdr-node');
-        var vp = getTraceViewport(deviceId);
-        vp.isDragging = true;
-        lastX = e.clientX;
-        lastY = e.clientY;
-        canvas.classList.add('is-panning');
-      });
-
-      canvas.addEventListener('mousemove', function (e) {
-        var deviceNode = canvas.closest('[data-otdr-node]');
-        if (!deviceNode) return;
-        var deviceId = deviceNode.getAttribute('data-otdr-node');
-        var vp = getTraceViewport(deviceId);
-        if (!vp.isDragging) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var deltaX = e.clientX - lastX;
-        var deltaY = e.clientY - lastY;
-        vp.offsetX += deltaX;
-        vp.offsetY += deltaY;
-        lastX = e.clientX;
-        lastY = e.clientY;
-        renderTraceForDevice(deviceId, deviceNode);
-      });
-
-      function endPan() {
-        var deviceNode = canvas.closest('[data-otdr-node]');
-        if (!deviceNode) return;
-        var deviceId = deviceNode.getAttribute('data-otdr-node');
-        var vp = getTraceViewport(deviceId);
-        if (!vp.isDragging) return;
-        vp.isDragging = false;
-        canvas.classList.remove('is-panning');
+      function getTouchSpan(touches) {
+        var dx = touches[0].clientX - touches[1].clientX;
+        var dy = touches[0].clientY - touches[1].clientY;
+        return Math.sqrt(dx * dx + dy * dy);
       }
 
+      function onPinchMove(e) {
+        if (!isPinching || !e.touches || e.touches.length < 2) return;
+        e.preventDefault();
+        var span = getTouchSpan(e.touches);
+        if (!pinchStartDist) return;
+        var zoomRatio = span / pinchStartDist;
+        traceCamera.scaleX = pinchStartScaleX * zoomRatio;
+        traceCamera.scaleY = pinchStartScaleY * zoomRatio;
+        traceCamera.scaleX = Math.max(TRACE_ZOOM_MIN, traceCamera.scaleX);
+        traceCamera.scaleY = Math.max(TRACE_ZOOM_MIN, traceCamera.scaleY);
+        clampTraceZoomInScales(canvas);
+        scheduleTraceRedraw(canvas);
+      }
+
+      function endPinch(e) {
+        if (!e.touches || e.touches.length < 2) {
+          isPinching = false;
+          pinchStartDist = 0;
+        }
+      }
+
+      function onPanMove(e) {
+        if (isPinching) return;
+        if (!isTraceDragging) return;
+        e.preventDefault();
+        var p = getTracePointerClient(e);
+        var deltaX = p.x - lastTracePan.x;
+        var deltaY = p.y - lastTracePan.y;
+        traceCamera.x -= deltaX / traceCamera.scaleX;
+        traceCamera.y += deltaY / traceCamera.scaleY;
+        if (traceCamera.x < 0) traceCamera.x = 0;
+        traceCamera.y = Math.max(-50, Math.min(50, traceCamera.y));
+        lastTracePan.x = p.x;
+        lastTracePan.y = p.y;
+        scheduleTraceRedraw(canvas);
+      }
+
+      function endPan() {
+        if (!isTraceDragging) return;
+        isTraceDragging = false;
+        canvas.classList.remove('is-panning');
+        window.removeEventListener('mousemove', onPanMove);
+        window.removeEventListener('mouseup', endPan);
+      }
+
+      function beginPan(e) {
+        if (e.touches && e.touches.length >= 2) {
+          e.preventDefault();
+          isPinching = true;
+          isTraceDragging = false;
+          pinchStartDist = getTouchSpan(e.touches);
+          pinchStartScaleX = traceCamera.scaleX;
+          pinchStartScaleY = traceCamera.scaleY;
+          canvas.classList.remove('is-panning');
+          return;
+        }
+        if (e.type === 'mousedown' && e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        isTraceDragging = true;
+        var p = getTracePointerClient(e);
+        lastTracePan.x = p.x;
+        lastTracePan.y = p.y;
+        canvas.classList.add('is-panning');
+        window.addEventListener('mousemove', onPanMove);
+        window.addEventListener('mouseup', endPan);
+      }
+
+      canvas.addEventListener('mousedown', beginPan);
+      canvas.addEventListener('touchstart', beginPan, { passive: false });
+      canvas.addEventListener('mousemove', onPanMove);
+      canvas.addEventListener('touchmove', function (e) {
+        if (isPinching) onPinchMove(e);
+        else onPanMove(e);
+      }, { passive: false });
       canvas.addEventListener('mouseup', endPan);
       canvas.addEventListener('mouseleave', endPan);
+      canvas.addEventListener('touchend', function (e) {
+        endPinch(e);
+        endPan();
+      });
+      canvas.addEventListener('touchcancel', function (e) {
+        endPinch(e);
+        endPan();
+      });
 
       canvas.addEventListener('pointerdown', function (e) {
         if (e.button !== 0) return;
@@ -1434,11 +2185,18 @@
   }
 
   function finishAcquisitionAndShowTrace(deviceId, deviceNode) {
+    var traceResult = computeLabOtdrTrace(deviceId);
+    traceResult.events = ensureTraceEvents(traceResult.events);
+    syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
+    traceEventCounter = 1;
     var d = findDevice(deviceId);
     if (d) {
       d.acquisitionActive = false;
       d.acquisitionComplete = true;
-      d.traceEvents = getDefaultTraceEvents();
+      d.traceEvents = traceResult.events;
+      d.traceTotalLoss = traceResult.totalLoss;
+      d.traceOrl = traceResult.orl;
+      d.traceLengthM = traceResult.totalLengthM;
       d.runningTab = 'trace';
       resetTraceViewport(deviceId);
     }
@@ -1591,6 +2349,7 @@
     if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
+    resetOtdrTraceAcquisitionState(deviceId, deviceNode);
     var d = findDevice(deviceId);
     readSetupSelectionsFromDevice(deviceNode);
     if (d) {
@@ -2028,48 +2787,22 @@
   function ensureTraceFloatingControls(graphArea) {
     if (!graphArea) return;
     var wrap = graphArea.querySelector('.trace-floating-controls');
+    var canvas = graphArea.querySelector('canvas');
     if (wrap) return;
     wrap = document.createElement('div');
     wrap.className = 'trace-floating-controls';
     wrap.innerHTML =
       '<button type="button" class="zoom-in-btn" aria-label="Zoom in">+</button>' +
       '<button type="button" class="zoom-out-btn" aria-label="Zoom out">-</button>' +
-      '<button type="button" class="cursor-a-btn is-active" aria-label="Cursor A">A</button>';
-    graphArea.appendChild(wrap);
+      '<button type="button" class="cursor-a-btn" aria-label="Cursor A">A</button>';
+    if (canvas) graphArea.insertBefore(wrap, canvas);
+    else graphArea.appendChild(wrap);
   }
 
   function enforceTraceFloatingControlStyles(root) {
     if (!root || !root.querySelectorAll) return;
     root.querySelectorAll('.trace-graph-area').forEach(function (graphArea) {
       ensureTraceFloatingControls(graphArea);
-      graphArea.style.position = 'relative';
-      var wrap = graphArea.querySelector('.trace-floating-controls');
-      if (!wrap) return;
-      wrap.style.position = 'absolute';
-      wrap.style.top = '12px';
-      wrap.style.right = '20px';
-      wrap.style.display = 'flex';
-      wrap.style.alignItems = 'center';
-      wrap.style.gap = '4px';
-      wrap.style.zIndex = '100';
-      wrap.querySelectorAll('button').forEach(function (btn) {
-        btn.style.width = '28px';
-        btn.style.height = '28px';
-        btn.style.borderRadius = '50%';
-        btn.style.backgroundColor = 'rgba(245, 245, 245, 0.85)';
-        btn.style.color = '#302060';
-        btn.style.border = '1px solid rgba(0, 0, 0, 0.2)';
-        btn.style.fontSize = '16px';
-        btn.style.fontWeight = 'bold';
-        btn.style.display = 'flex';
-        btn.style.justifyContent = 'center';
-        btn.style.alignItems = 'center';
-        btn.style.cursor = 'pointer';
-        btn.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.15)';
-        btn.style.padding = '0';
-        btn.style.margin = '0';
-        btn.style.marginLeft = btn.classList.contains('cursor-a-btn') ? '12px' : '0';
-      });
     });
   }
 
@@ -2087,20 +2820,24 @@
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
         var vp = getTraceViewport(deviceId);
+        var canvas = graphArea.querySelector('canvas');
         if (zoomIn) {
-          vp.zoomX *= TRACE_ZOOM_FACTOR_IN;
-          vp.zoomY *= TRACE_ZOOM_FACTOR_IN;
-          vp.zoomX = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomX));
-          vp.zoomY = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomY));
-          renderTraceForDevice(deviceId, deviceNode);
+          traceCamera.scaleX *= TRACE_ZOOM_FACTOR_IN;
+          traceCamera.scaleY *= TRACE_ZOOM_FACTOR_IN;
+          traceCamera.scaleX = Math.max(TRACE_ZOOM_MIN, traceCamera.scaleX);
+          traceCamera.scaleY = Math.max(TRACE_ZOOM_MIN, traceCamera.scaleY);
+          clampTraceZoomInScales(canvas);
+          if (canvas) scheduleTraceRedraw(canvas);
+          else renderTraceForDevice(deviceId, deviceNode);
           return;
         }
         if (zoomOut) {
-          vp.zoomX *= TRACE_ZOOM_FACTOR_OUT;
-          vp.zoomY *= TRACE_ZOOM_FACTOR_OUT;
-          vp.zoomX = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomX));
-          vp.zoomY = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, vp.zoomY));
-          renderTraceForDevice(deviceId, deviceNode);
+          traceCamera.scaleX *= TRACE_ZOOM_FACTOR_OUT;
+          traceCamera.scaleY *= TRACE_ZOOM_FACTOR_OUT;
+          traceCamera.scaleX = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, traceCamera.scaleX));
+          traceCamera.scaleY = Math.max(TRACE_ZOOM_MIN, Math.min(TRACE_ZOOM_MAX, traceCamera.scaleY));
+          if (canvas) scheduleTraceRedraw(canvas);
+          else renderTraceForDevice(deviceId, deviceNode);
           return;
         }
         if (cursorA) {
@@ -2280,6 +3017,17 @@
         });
         opt.classList.add('is-active', 'selected');
         syncSetupRowToTestState(row, opt);
+        var deviceNode = opt.closest('[data-otdr-node]');
+        if (deviceNode && row.getAttribute('data-sts-row') === 'distance') {
+          var deviceId = deviceNode.getAttribute('data-otdr-node');
+          var d = findDevice(deviceId);
+          var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
+          populateTraceEventTable(deviceNode, events);
+          var trace = deviceNode.querySelector('.trace-view-container');
+          if (trace && !trace.hidden) {
+            renderTraceForDevice(deviceId, deviceNode);
+          }
+        }
       });
     });
 
@@ -2728,6 +3476,7 @@
     isOtdrPortId: isOtdrPortId,
     drawOTDRTrace: drawOTDRTrace,
     renderTraceForDevice: renderTraceForDevice,
+    computeLabOtdrTrace: computeLabOtdrTrace,
     getDefaultTraceEvents: getDefaultTraceEvents,
     startOtdrAcquisition: startOtdrAcquisition,
     stopOtdrAcquisition: stopOtdrAcquisition,
