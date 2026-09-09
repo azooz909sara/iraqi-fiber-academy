@@ -98,6 +98,27 @@
     return n;
   }
 
+  function normalizeOtdrCableLengthMeters(m) {
+    var n = Number(m);
+    if (!isFinite(n) || n < 0) n = 0;
+    if (n > 50000) n = 50000;
+    return Math.round(n * 1000) / 1000;
+  }
+
+  function applyPatchCordCableLengthModel(cord, value, unit) {
+    if (!cord) return 0;
+    unit = unit === 'km' ? 'km' : 'm';
+    var displayVal = parseFloat(value);
+    if (!isFinite(displayVal) || displayVal < 0) displayVal = 0;
+    cord.cableLength = displayVal;
+    cord.lengthUnit = unit;
+    cord.otdrLengthUnit = unit;
+    cord.otdrCableLengthM = normalizeOtdrCableLengthMeters(
+      cordLengthInputToMeters(displayVal, unit)
+    );
+    return cord.otdrCableLengthM;
+  }
+
   function claimSelection() {
     if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
       FtthLab.setSelectionOwner('patch-cord');
@@ -888,7 +909,7 @@
     return unit === 'km' ? n * 1000 : n;
   }
 
-  function cordFiberLengthM(cord) {
+  function cordFiberLengthMFromGeometry(cord) {
     if (!cord) return 0;
     if (isMeterMode(cord) && typeof cord.lengthMeters === 'number') {
       return cord.lengthMeters;
@@ -899,6 +920,59 @@
     var dx = cord.bx - cord.ax;
     var dy = cord.by - cord.ay;
     return pxToMeters(Math.sqrt(dx * dx + dy * dy));
+  }
+
+  function cordFiberLengthM(cord) {
+    if (!cord) return 0;
+    if (typeof cord.cableLength === 'number' && isFinite(cord.cableLength)) {
+      return normalizeOtdrCableLengthMeters(
+        cordLengthInputToMeters(cord.cableLength, cord.lengthUnit || cord.otdrLengthUnit || 'm')
+      );
+    }
+    if (typeof cord.otdrCableLengthM === 'number' && isFinite(cord.otdrCableLengthM)) {
+      return Math.max(0, cord.otdrCableLengthM);
+    }
+    return cordFiberLengthMFromGeometry(cord);
+  }
+
+  function cordOtdrLengthUnit(cord) {
+    if (cord && cord.otdrLengthUnit === 'km') return 'km';
+    return cordLengthUnit(cord);
+  }
+
+  function cordOtdrLengthDisplayValue(cord) {
+    if (cord && typeof cord.cableLength === 'number' && isFinite(cord.cableLength)) {
+      return cord.cableLength;
+    }
+    var meters = typeof cord.otdrCableLengthM === 'number'
+      ? cord.otdrCableLengthM
+      : cordFiberLengthMFromGeometry(cord);
+    return cordOtdrLengthUnit(cord) === 'km' ? meters / 1000 : meters;
+  }
+
+  function setOtdrCableLength(id, value, unit) {
+    var cord = findCord(id);
+    if (!cord) return;
+    var meters = applyPatchCordCableLengthModel(cord, value, unit);
+    if (isMeterMode(cord)) {
+      cord.lengthMeters = normalizeLengthMeters(meters);
+      cord.lengthUnit = cord.otdrLengthUnit;
+      clearRopePhysics(cord.id);
+      applyMeterLengthToCord(cord);
+      rebuildLayer();
+      updateFiberPath(cord);
+    }
+    refreshBudget();
+    updateInspector();
+    pushHistory();
+    setStatus('Cable length · ' + meters.toFixed(2) + ' m (OTDR)');
+  }
+
+  function setOtdrCableLengthUnit(id, unit) {
+    var cord = findCord(id);
+    if (!cord) return;
+    cord.otdrLengthUnit = unit === 'km' ? 'km' : 'm';
+    updateInspector();
   }
 
   function cordLossDb(cord) {
@@ -975,6 +1049,9 @@
         sideA: sideSnap(c.sideA),
         sideB: sideSnap(c.sideB),
         lossDb: cordLossDb(c),
+        cableLength: cordOtdrLengthDisplayValue(c),
+        lengthUnit: cordOtdrLengthUnit(c),
+        otdrCableLengthM: cordFiberLengthM(c),
         fiberLengthM: cordFiberLengthM(c),
         bendJigId: c.bendJigId || null,
         freeA: !c.sideA.attached,
@@ -2942,6 +3019,7 @@
         ? cordLengthInputToMeters(meters, unit)
         : meters
     );
+    cord.otdrCableLengthM = cord.lengthMeters;
     clearRopePhysics(cord.id);
     applyMeterLengthToCord(cord);
     /* Instant canvas update — geometry already rebuilt above */
@@ -5509,6 +5587,20 @@
           (c.sideB.mismatch ? ' · MISMATCH +' + MISMATCH_PENALTY_DB + ' dB' : '')
         : 'B · unplugged') +
       '</p>' +
+      '<div class="property-group lab-pcord-otdr-len-group">' +
+      '<label class="lab-inspector__label" for="patchCordLengthInput-' + c.id + '">Cable Length</label>' +
+      '<div class="lab-cable-len-row">' +
+      '<input type="number" id="patchCordLengthInput-' + c.id +
+      '" class="lab-pcord-otdr-len-input" data-pc-otdr-len="' + c.id +
+      '" value="' + cordOtdrLengthDisplayValue(c).toFixed(1) + '" min="0" step="0.1">' +
+      '<select id="patchCordUnitSelect-' + c.id +
+      '" class="lab-cable-len-unit" data-pc-otdr-len-unit="' + c.id +
+      '" aria-label="Cable length unit">' +
+      '<option value="m"' + (cordOtdrLengthUnit(c) === 'm' ? ' selected' : '') + '>m</option>' +
+      '<option value="km"' + (cordOtdrLengthUnit(c) === 'km' ? ' selected' : '') + '>km</option>' +
+      '</select>' +
+      '</div>' +
+      '</div>' +
       '<div class="lab-spl-sheet">' +
       '<div><span>Side A</span><strong class="' +
       (normalizePolish(c.sideA.polish) === 'APC' ? 'is-apc-text' : 'is-upc-text') + '">' +
@@ -5546,6 +5638,34 @@
         setLengthUnit(c.id, sel.value);
       });
     });
+    detail.querySelectorAll('[data-pc-otdr-len-unit]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        var lenInput = detail.querySelector('[data-pc-otdr-len="' + c.id + '"]');
+        setOtdrCableLengthUnit(c.id, sel.value);
+        if (lenInput) {
+          setOtdrCableLength(c.id, lenInput.value, sel.value);
+        }
+      });
+    });
+    var otdrLenInput = detail.querySelector('[data-pc-otdr-len]');
+    if (otdrLenInput) {
+      otdrLenInput.addEventListener('input', function () {
+        var unitSel = detail.querySelector('[data-pc-otdr-len-unit="' + c.id + '"]');
+        var unit = unitSel ? unitSel.value : cordOtdrLengthUnit(c);
+        applyPatchCordCableLengthModel(c, otdrLenInput.value, unit);
+      });
+      otdrLenInput.addEventListener('change', function () {
+        var unitSel = detail.querySelector('[data-pc-otdr-len-unit="' + c.id + '"]');
+        setOtdrCableLength(c.id, otdrLenInput.value, unitSel ? unitSel.value : cordOtdrLengthUnit(c));
+      });
+      otdrLenInput.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var unitSel = detail.querySelector('[data-pc-otdr-len-unit="' + c.id + '"]');
+          setOtdrCableLength(c.id, otdrLenInput.value, unitSel ? unitSel.value : cordOtdrLengthUnit(c));
+        }
+      });
+    }
     detail.querySelectorAll('[data-pc-len-step]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pc-len-step').split(':');
@@ -5573,6 +5693,8 @@
         cord.lengthMode = 'meter';
         cord.lengthUnit = unit === 'km' ? 'km' : 'm';
         cord.lengthMeters = normalizeLengthMeters(cordLengthInputToMeters(v, unit));
+        cord.otdrCableLengthM = cord.lengthMeters;
+        cord.otdrLengthUnit = cord.lengthUnit;
         clearRopePhysics(cord.id);
         applyMeterLengthToCord(cord);
         rebuildLayer();

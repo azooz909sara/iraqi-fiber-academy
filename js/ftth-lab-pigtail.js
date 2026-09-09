@@ -7086,6 +7086,9 @@
   }
 
   function pigtailLengthDisplayValue(p) {
+    if (p && typeof p.cableLength === 'number' && isFinite(p.cableLength)) {
+      return p.cableLength;
+    }
     var meters = pigtailFiberLengthM(p);
     return pigtailLengthUnit(p) === 'km' ? meters / 1000 : meters;
   }
@@ -7108,11 +7111,28 @@
     updateFiberPath(p);
   }
 
+  function normalizeOtdrCableLengthMeters(m) {
+    var n = Number(m);
+    if (!isFinite(n) || n < 0) n = 0;
+    if (n > 50000) n = 50000;
+    return Math.round(n * 1000) / 1000;
+  }
+
+  function applyPigtailCableLengthModel(p, value, unit) {
+    if (!p) return 0;
+    unit = unit === 'km' ? 'km' : 'm';
+    var displayVal = parseFloat(value);
+    if (!isFinite(displayVal) || displayVal < 0) displayVal = 0;
+    p.cableLength = displayVal;
+    p.lengthUnit = unit;
+    p.lengthMeters = normalizeOtdrCableLengthMeters(pigtailLengthInputToMeters(displayVal, unit));
+    return p.lengthMeters;
+  }
+
   function setPigtailCableLength(id, value, unit) {
     var p = findPigtail(id);
     if (!p) return;
-    p.lengthUnit = unit === 'km' ? 'km' : 'm';
-    p.lengthMeters = Math.max(0.1, pigtailLengthInputToMeters(value, p.lengthUnit));
+    applyPigtailCableLengthModel(p, value, unit);
     applyPigtailCableLength(p);
     updateInspector();
     pushHistory();
@@ -7128,6 +7148,11 @@
 
   function pigtailFiberLengthM(p) {
     if (!p) return 0;
+    if (typeof p.cableLength === 'number' && isFinite(p.cableLength)) {
+      return normalizeOtdrCableLengthMeters(
+        pigtailLengthInputToMeters(p.cableLength, p.lengthUnit || 'm')
+      );
+    }
     if (typeof p.lengthMeters === 'number' && p.lengthMeters > 0) {
       return p.lengthMeters;
     }
@@ -7229,6 +7254,9 @@
               termId: p.tail.attached.termId || null,
             }
           : null,
+        cableLength: pigtailLengthDisplayValue(p),
+        lengthUnit: pigtailLengthUnit(p),
+        lengthMeters: pigtailFiberLengthM(p),
         fiberLengthM: pigtailFiberLengthM(p),
       };
     });
@@ -7347,21 +7375,6 @@
     detail.hidden = false;
     detail.innerHTML =
       '<div class="lab-pigtail-config">' +
-      '<p class="lab-inspector__label">Cable Length</p>' +
-      '<div class="lab-cable-len-row">' +
-      '<div class="lab-pcord-meter-stepper">' +
-      '<button type="button" class="lab-pcord-meter-btn" data-pt-len-step="' +
-      p.id + ':-0.5" aria-label="Decrease length">−</button>' +
-      '<input class="lab-pcord-meter-input" type="number" min="0.1" max="10000" step="0.1" ' +
-      'value="' + pigtailLengthDisplayValue(p).toFixed(2) + '" data-pt-len-meters="' + p.id + '">' +
-      '<button type="button" class="lab-pcord-meter-btn" data-pt-len-step="' +
-      p.id + ':0.5" aria-label="Increase length">+</button>' +
-      '</div>' +
-      '<select class="lab-cable-len-unit" data-pt-len-unit="' + p.id + '" aria-label="Cable length unit">' +
-      '<option value="m"' + (pigtailLengthUnit(p) === 'm' ? ' selected' : '') + '>m</option>' +
-      '<option value="km"' + (pigtailLengthUnit(p) === 'km' ? ' selected' : '') + '>km</option>' +
-      '</select>' +
-      '</div>' +
       '<p class="lab-inspector__label">Cable route mode</p>' +
       '<div class="lab-route-mode-toggle" role="group" aria-label="Pigtail route mode">' +
       '<button type="button" class="lab-route-mode-btn' +
@@ -7384,6 +7397,20 @@
           (p.connector.mismatch ? ' · MISMATCH +' + MISMATCH_PENALTY_DB + ' dB' : '')
         : 'A · unplugged') +
       '</p>' +
+      '<div class="property-group lab-pigtail-otdr-len-group">' +
+      '<label class="lab-inspector__label" for="pigtailCordLengthInput-' + p.id + '">Cable Length</label>' +
+      '<div class="lab-cable-len-row">' +
+      '<input type="number" id="pigtailCordLengthInput-' + p.id +
+      '" class="lab-pcord-otdr-len-input" data-pt-otdr-len="' + p.id +
+      '" value="' + pigtailLengthDisplayValue(p).toFixed(1) + '" min="0" step="0.1">' +
+      '<select id="pigtailCordUnitSelect-' + p.id +
+      '" class="lab-cable-len-unit" data-pt-otdr-len-unit="' + p.id +
+      '" aria-label="Cable length unit">' +
+      '<option value="m"' + (pigtailLengthUnit(p) === 'm' ? ' selected' : '') + '>m</option>' +
+      '<option value="km"' + (pigtailLengthUnit(p) === 'km' ? ' selected' : '') + '>km</option>' +
+      '</select>' +
+      '</div>' +
+      '</div>' +
       '<p class="lab-pcord-attach">' +
       (p.tail.attached
         ? 'Tail → ' + p.tail.attached.label
@@ -7413,26 +7440,32 @@
       '">Remove Pigtail</button>' +
       '</div>';
 
-    detail.querySelectorAll('[data-pt-len-unit]').forEach(function (sel) {
+    detail.querySelectorAll('[data-pt-otdr-len-unit]').forEach(function (sel) {
       sel.addEventListener('change', function () {
         setPigtailLengthUnit(p.id, sel.value);
+        var lenInput = detail.querySelector('[data-pt-otdr-len="' + p.id + '"]');
+        if (lenInput) {
+          setPigtailCableLength(p.id, lenInput.value, sel.value);
+        }
       });
     });
-    detail.querySelectorAll('[data-pt-len-step]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var parts = btn.getAttribute('data-pt-len-step').split(':');
-        var unitSel = detail.querySelector('[data-pt-len-unit="' + p.id + '"]');
-        var unit = unitSel ? unitSel.value : pigtailLengthUnit(p);
-        var step = Number(parts[1]);
-        if (unit === 'km') step = step / 1000;
-        setPigtailCableLength(parts[0], pigtailLengthDisplayValue(p) + step, unit);
-      });
-    });
-    var ptLenInput = detail.querySelector('[data-pt-len-meters]');
+    var ptLenInput = detail.querySelector('[data-pt-otdr-len]');
     if (ptLenInput) {
+      ptLenInput.addEventListener('input', function () {
+        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
+        var unit = unitSel ? unitSel.value : pigtailLengthUnit(p);
+        applyPigtailCableLengthModel(p, ptLenInput.value, unit);
+      });
       ptLenInput.addEventListener('change', function () {
-        var unitSel = detail.querySelector('[data-pt-len-unit="' + p.id + '"]');
+        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
         setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
+      });
+      ptLenInput.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
+          setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
+        }
       });
     }
     detail.querySelectorAll('[data-pt-route-mode]').forEach(function (btn) {

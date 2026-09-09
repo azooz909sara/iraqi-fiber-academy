@@ -1415,7 +1415,7 @@
   min-height: max-content;
   z-index: 50;
   display: flex;
-  justify-content: space-between;
+  justify-content: space-around;
   align-items: center;
   background-color: #f4f4f0;
   padding: 2px 8px;
@@ -1435,12 +1435,8 @@
   white-space: nowrap;
 }
 
-.lab-otdr-device .trace-summary-icons {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 9px;
-  margin-left: auto;
+.lab-otdr-device .trace-summary-orl {
+  color: #6da363;
 }
 
 .lab-otdr-device .trace-event-table-wrap {
@@ -1457,6 +1453,7 @@
 }
 
 .lab-otdr-device .trace-event-table {
+  position: relative;
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
@@ -1499,15 +1496,16 @@
 .lab-otdr-device .trace-event-table thead th {
   position: sticky;
   top: 0;
-  z-index: 2;
-  background-color: transparent;
+  z-index: 10;
+  background-color: #f4f4f0;
   color: #000000;
   font-size: 9px;
   font-weight: bold;
   text-align: center;
-  padding: 4px 2px;
+  padding: 6px 4px !important;
   border-bottom: 1px solid #999999;
   border-right: none;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
   white-space: normal;
   overflow: visible;
   text-overflow: clip;
@@ -1541,9 +1539,20 @@
   color: #ffffff;
 }
 
+.lab-otdr-device .trace-event-table .trace-ev-icon line,
+.lab-otdr-device .trace-event-table .trace-ev-icon rect,
+.lab-otdr-device .trace-event-table .trace-ev-icon polyline,
+.lab-otdr-device .trace-event-table .trace-ev-icon path[stroke] {
+  stroke: #302060;
+  stroke-width: 1.5;
+}
+
 .lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon line,
-.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect {
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect,
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon polyline,
+.lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon path[stroke] {
   stroke: #ffffff;
+  stroke-width: 1.5;
 }
 
 .lab-otdr-device .trace-event-table tbody tr.selected .trace-ev-icon rect {
@@ -1581,7 +1590,7 @@
 }
 
 .lab-otdr-device .trace-event-cell .trace-ev-icon {
-  color: #222222;
+  color: #302060;
 }
 
 .lab-otdr-device .trace-event-table tbody tr.selected .trace-event-cell .trace-ev-icon {

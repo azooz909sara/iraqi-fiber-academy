@@ -2668,6 +2668,34 @@ body.lab-pcord-stretching .lab-pcord-fiber-hit {
   margin-bottom: 0.3rem;
 }
 
+.property-group {
+  margin: 0.5rem 0 0.65rem;
+}
+
+.property-group > label,
+.property-group > .lab-inspector__label {
+  display: block;
+  margin-bottom: 0.35rem;
+}
+
+.lab-pcord-otdr-len-input {
+  flex: 1;
+  min-width: 0;
+  height: 2rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid rgba(68, 68, 68, 0.85);
+  border-radius: 0.35rem;
+  background: #222222;
+  color: #ffffff;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.lab-pcord-otdr-len-input:focus {
+  outline: none;
+  border-color: rgba(96, 165, 250, 0.65);
+}
+
 .lab-cable-len-row {
   display: flex;
   align-items: center;
