@@ -1852,11 +1852,17 @@
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(toCanvasX(0, w), toCanvasY(floorDb, h));
+    ctx.moveTo(
+      toCanvasX(0, w),
+      toCanvasY(applyRayleighBackscatterNoiseDb(floorDb, 0), h)
+    );
+    var stepM = getRayleighTraceStepM(w);
     var d;
-    for (d = 0; d <= distMax; d += 6) {
-      var wiggle = Math.sin(d * 0.21) * 0.12 + Math.sin(d * 0.53) * 0.08;
-      ctx.lineTo(toCanvasX(d, w), toCanvasY(floorDb + wiggle, h));
+    for (d = stepM; d <= distMax; d += stepM) {
+      ctx.lineTo(
+        toCanvasX(d, w),
+        toCanvasY(applyRayleighBackscatterNoiseDb(floorDb, d), h)
+      );
     }
     ctx.stroke();
   }
@@ -2319,6 +2325,7 @@
   var TRACE_DEFAULT_GRAPH_HEIGHT = '65%';
   var TRACE_PLOT_MARGIN_LEFT = 36;
   var TRACE_OPTICAL_BASELINE_DB = 5;
+  var TRACE_RAYLEIGH_AMP_DB = 2.75;
 
   var traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
   var currentTraceEventIndex = -1;
@@ -3215,6 +3222,55 @@
     return x - Math.floor(x);
   }
 
+  function getRayleighTraceStepM(w) {
+    var viewSpanM = (w - TRACE_PLOT_MARGIN_LEFT) / Math.max(traceCamera.scaleX, 0.01);
+    var targetSamples = Math.max(96, Math.min(420, w * 1.35));
+    var stepM = viewSpanM / targetSamples;
+    if (traceLiveNoiseActive) stepM *= 0.72;
+    return Math.max(1.1, Math.min(7.5, stepM));
+  }
+
+  function applyRayleighBackscatterNoiseDb(db, distM) {
+    var amp = TRACE_RAYLEIGH_AMP_DB;
+    var n1 = deterministicNoise(distM * 0.41, 17);
+    var n2 = deterministicNoise(distM * 0.97, 91);
+    var n3 = deterministicNoise(distM * 1.73, 53);
+    var n4 = deterministicNoise(distM * 2.31, 31);
+    var texture = (n1 + n2 * 0.75 + n3 * 0.5 + n4 * 0.35) / 2.6 - 0.5;
+    var out = db + texture * amp;
+    if (traceLiveNoiseActive) {
+      var liveAmp = amp * (0.9 + (traceLiveNoiseAmplitude || 1) * 0.22);
+      out += (Math.random() - 0.5) * liveAmp;
+      out += (Math.random() - 0.5) * liveAmp * 0.62;
+      out += (deterministicNoise(distM * 0.13 + traceLiveNoisePhase, 7) - 0.5) * liveAmp * 0.45;
+    }
+    return out;
+  }
+
+  function traceNoisySegmentTo(ctx, w, h, fromDistM, toDistM, fromDb, toDb) {
+    var segLenM = Math.max(0, toDistM - fromDistM);
+    if (segLenM <= 0.001) {
+      ctx.lineTo(
+        toCanvasX(toDistM, w),
+        toCanvasY(applyRayleighBackscatterNoiseDb(toDb, toDistM), h)
+      );
+      return;
+    }
+    var stepM = getRayleighTraceStepM(w);
+    var steps = Math.max(2, Math.ceil(segLenM / stepM));
+    if (traceLiveNoiseActive) {
+      steps = Math.max(steps, Math.min(180, Math.round(segLenM / Math.max(1, stepM * 0.6))));
+    }
+    var si;
+    for (si = 1; si <= steps; si++) {
+      var t = si / steps;
+      var midDist = fromDistM + segLenM * t;
+      var midDb = fromDb + (toDb - fromDb) * t;
+      midDb = applyRayleighBackscatterNoiseDb(midDb, midDist);
+      ctx.lineTo(toCanvasX(midDist, w), toCanvasY(midDb, h));
+    }
+  }
+
   function parseTraceEventLoss(ev) {
     if (!ev) return 0;
     var v = ev.loss;
@@ -3279,12 +3335,14 @@
     var currentDb = TRACE_OPTICAL_BASELINE_DB;
     var defaultSlope = getViaviFiberSlopeDbKm();
     var lastEventDist = 0;
-    var noiseSeed = 42;
     var i;
     var ended = false;
 
     ctx.beginPath();
-    ctx.moveTo(toCanvasX(0, w), toCanvasY(currentDb, h));
+    ctx.moveTo(
+      toCanvasX(0, w),
+      toCanvasY(applyRayleighBackscatterNoiseDb(currentDb, 0), h)
+    );
 
     for (i = 0; i < drawEvents.length && !ended; i++) {
       var ev = drawEvents[i];
@@ -3304,17 +3362,7 @@
         var slopeDbKm = resolveTraceEventSlopeDbKm(ev, defaultSlope);
         var dbDrop = sectionKm * slopeDbKm;
         var segStartDb = currentDb;
-        var segSteps = traceLiveNoiseActive
-          ? Math.max(6, Math.min(48, Math.round(Math.max(0, eventDist - lastEventDist) / 10)))
-          : 1;
-        var si;
-        for (si = 1; si <= segSteps; si++) {
-          var t = si / segSteps;
-          var midDist = lastEventDist + (eventDist - lastEventDist) * t;
-          var midDb = segStartDb - dbDrop * t;
-          midDb = applyLiveTraceNoiseDb(midDb, midDist);
-          ctx.lineTo(toCanvasX(midDist, w), toCanvasY(midDb, h));
-        }
+        traceNoisySegmentTo(ctx, w, h, lastEventDist, eventDist, segStartDb, segStartDb - dbDrop);
         currentDb -= dbDrop;
       }
 
@@ -3349,11 +3397,7 @@
         ctx.lineTo(eventX, toCanvasY(currentDb, h));
         var plotWidth = Math.max(1, w - TRACE_PLOT_MARGIN_LEFT);
         var noiseEndDist = eventDist + Math.max(80, plotWidth / Math.max(traceCamera.scaleX, 0.01) * 0.12);
-        var nd;
-        for (nd = eventDist + 6; nd <= noiseEndDist; nd += 7) {
-          var jitter = (deterministicNoise(nd, noiseSeed) - 0.5) * 10;
-          ctx.lineTo(toCanvasX(nd, w), toCanvasY(currentDb + jitter, h));
-        }
+        traceNoisySegmentTo(ctx, w, h, eventDist, noiseEndDist, currentDb, currentDb);
         ended = true;
       }
 
@@ -3362,8 +3406,9 @@
 
     if (!ended && lastEventDist >= 0) {
       var tailDist = lastEventDist + 40;
+      var tailStartDb = currentDb;
       currentDb -= (40 / 1000) * defaultSlope;
-      ctx.lineTo(toCanvasX(tailDist, w), toCanvasY(currentDb, h));
+      traceNoisySegmentTo(ctx, w, h, lastEventDist, tailDist, tailStartDb, currentDb);
     }
 
     ctx.stroke();
@@ -3904,15 +3949,6 @@
     return getWorstNetworkBendAngle(deviceId);
   }
 
-  function applyLiveTraceNoiseDb(db, distM) {
-    if (!traceLiveNoiseActive) return db;
-    var amp = traceLiveNoiseAmplitude || 1;
-    var phase = traceLiveNoisePhase || 0;
-    var n1 = deterministicNoise(distM * 0.13 + phase, 17);
-    var n2 = deterministicNoise(distM * 0.27 + phase * 1.3, 91);
-    return db + (n1 - 0.5) * amp + (n2 - 0.5) * amp * 0.5;
-  }
-
   function updateRealTimeButtonState(deviceNode, active) {
     if (!deviceNode) return;
     var btn = deviceNode.querySelector('[data-sts-action="real-time"]');
@@ -3983,7 +4019,7 @@
     realTimeNoisePhase += 1;
     traceLiveNoiseActive = true;
     traceLiveNoisePhase = realTimeNoisePhase;
-    traceLiveNoiseAmplitude = 1.2 + (100 - realTimeQualityScore) * 0.14;
+    traceLiveNoiseAmplitude = 2.4 + (100 - realTimeQualityScore) * 0.18;
 
     updateRealtimeHudFromAngle(deviceNode, worstAngle);
 
