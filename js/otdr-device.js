@@ -104,6 +104,16 @@
   var connectionAnimTimers = {};
   var connectionValidationTimers = {};
   var acquisitionTimers = {};
+  var isRealTimeActive = false;
+  var realTimeInterval = null;
+  var realTimeDeviceId = null;
+  var realTimeNoisePhase = 0;
+  var realTimeQualityScore = 100;
+  var traceLiveNoiseActive = false;
+  var traceLiveNoiseAmplitude = 0;
+  var traceLiveNoisePhase = 0;
+  var REAL_TIME_SCAN_MS = 300;
+  var fiberDisconnectWarnedFor = null;
 
   var currentOtdrTestState = {
     configFile: '',
@@ -835,22 +845,54 @@
     if (!global.FtthLab || typeof FtthLab.listBendJigSlots !== 'function') return null;
     var slots = FtthLab.listBendJigSlots();
     var i;
+    var matched = null;
     for (i = 0; i < slots.length; i++) {
       var slot = slots[i];
       if (slot.id !== pcord.bendJigId) continue;
+      matched = slot;
       if (!slot.isCableDocked) continue;
       if (slot.dockedCordId && slot.dockedCordId !== pcord.id) continue;
       return slot;
     }
+    return matched;
+  }
+
+  function findBendComponentOnGraphForLink(graph, linkId) {
+    if (!graph || !linkId) return null;
+    var lists = [graph.bends, graph.bendComponents, graph.components];
+    var li;
+    var bi;
+    for (li = 0; li < lists.length; li++) {
+      var list = lists[li];
+      if (!list || !list.length) continue;
+      for (bi = 0; bi < list.length; bi++) {
+        var comp = list[bi];
+        if (!comp) continue;
+        var compType = comp.type || comp.componentType;
+        if (compType !== 'bend' && compType !== 'micro-bend') continue;
+        if (comp.pcordId === linkId || comp.linkId === linkId || comp.id === linkId) {
+          return {
+            type: compType,
+            angle: comp.angle != null ? comp.angle : (comp.theta != null ? comp.theta : 90),
+          };
+        }
+      }
+    }
     return null;
   }
 
-  function resolveBendComponentOnLink(link) {
+  function resolveBendComponentOnLink(link, graph) {
     if (!link) return null;
     if (link.type === 'bend' || link.type === 'micro-bend') {
       return {
         type: link.type,
         angle: link.angle != null ? link.angle : (link.theta != null ? link.theta : 90),
+      };
+    }
+    if (link.bendAngle != null || link.theta != null) {
+      return {
+        type: 'micro-bend',
+        angle: link.bendAngle != null ? link.bendAngle : link.theta,
       };
     }
     if (link.bendComponent && (link.bendComponent.type === 'bend' || link.bendComponent.type === 'micro-bend')) {
@@ -859,6 +901,8 @@
         angle: link.bendComponent.angle != null ? link.bendComponent.angle : 90,
       };
     }
+    var graphBend = findBendComponentOnGraphForLink(graph, link.id);
+    if (graphBend) return graphBend;
     var jigSlot = findBendJigSlotForPcord(link);
     if (jigSlot) {
       return { type: 'micro-bend', angle: jigSlot.theta };
@@ -1372,7 +1416,7 @@
     }
 
     function tryEmitBendEventOnTraversedLink(link, branchState) {
-      var bendComponent = resolveBendComponentOnLink(link);
+      var bendComponent = resolveBendComponentOnLink(link, graph);
       if (!bendComponent) return;
       var angle = bendComponent.angle || 90;
       if (angle >= 90) return;
@@ -1656,16 +1700,14 @@
   function computeLabOtdrTrace(deviceId) {
     var wavelengthNm = parseOtdrWavelengthNm();
     var attCoeff = labFiberAttenuationDbKm(wavelengthNm);
-    if (!isApcPortConnected(deviceId)) {
-      var mockSeven = getMockFiberEventsSeven();
-      mockFiberEvents = mockSeven;
-      var fallback = buildTraceTableEventsFromMock(mockSeven);
+    if (!isPigtailConnectedToPort(deviceId)) {
       return {
-        events: fallback,
-        totalLengthM: 3000,
-        totalLoss: computeMockFinalTotalLoss(mockSeven),
-        orl: 40.84,
+        events: [],
+        totalLengthM: 0,
+        totalLoss: 0,
+        orl: null,
         attCoeff: attCoeff,
+        disconnected: true,
       };
     }
 
@@ -1725,6 +1767,141 @@
     return false;
   }
 
+  function isPigtailConnectedToPort(deviceId) {
+    if (!deviceId) return false;
+    if (layer) {
+      var node = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
+      if (node) refreshPortOccupancy(node);
+    }
+    return isApcPortConnected(deviceId);
+  }
+
+  function setOtdrErrorPopupContent(deviceNode, code, title, desc) {
+    if (!deviceNode) return;
+    var popup = deviceNode.querySelector('.otdr-error-popup');
+    if (!popup) return;
+    var codeEl = popup.querySelector('.otdr-error-code');
+    var titleEl = popup.querySelector('.otdr-error-title');
+    var descEl = popup.querySelector('.otdr-error-desc');
+    if (codeEl && code) codeEl.textContent = code;
+    if (titleEl && title) titleEl.textContent = title;
+    if (descEl && desc) descEl.textContent = desc;
+  }
+
+  function restoreOtdrErrorPopupDefaults(deviceNode) {
+    setOtdrErrorPopupContent(
+      deviceNode,
+      'FO-1128',
+      'Connection to test instrument is bad',
+      'Check that the fiber is connected to the right test port first then inspect test port and patchcord fiber ends'
+    );
+  }
+
+  function showFiberDisconnectedNotice(deviceId, deviceNode) {
+    if (!deviceNode) return;
+    setOtdrErrorPopupContent(
+      deviceNode,
+      'FO-1129',
+      'Fiber Disconnected',
+      'Check launch cable connection to the test port.'
+    );
+    showErrorPopup(deviceNode);
+    setStatus('FO-1129 · Fiber Disconnected · Check launch cable connection');
+    var d = findDevice(deviceId);
+    if (d) d.fiberDisconnected = true;
+  }
+
+  function clearFiberDisconnectedNotice(deviceId, deviceNode) {
+    if (fiberDisconnectWarnedFor === deviceId) fiberDisconnectWarnedFor = null;
+    var d = findDevice(deviceId);
+    if (d) d.fiberDisconnected = false;
+    if (!deviceNode) return;
+    var stillError = d && d.connectionError;
+    if (!stillError) {
+      hideErrorPopup(deviceNode);
+      restoreOtdrErrorPopupDefaults(deviceNode);
+    }
+  }
+
+  function resetRealtimeHudDisconnected(deviceNode) {
+    var hud = getRealtimeHudEl(deviceNode);
+    if (!hud) return;
+    var track = hud.querySelector('.rt-track');
+    var thumb = hud.querySelector('.rt-thumb');
+    if (thumb) {
+      thumb.style.left = '50%';
+      thumb.style.backgroundColor = '#95a5a6';
+      thumb.classList.remove('is-red', 'is-orange', 'is-green');
+    }
+    if (track) {
+      track.setAttribute('aria-valuenow', '0');
+      track.setAttribute('aria-valuetext', 'No signal');
+    }
+    hud.classList.remove('is-bad', 'is-fair', 'is-good');
+    hud.classList.add('is-no-signal');
+  }
+
+  function drawNoiseFloorTraceLine(ctx, w, h) {
+    var floorDb = -28;
+    var distMax = Math.max(
+      120,
+      traceCamera.x + (w - TRACE_PLOT_MARGIN_LEFT) / Math.max(traceCamera.scaleX, 0.01)
+    );
+    ctx.strokeStyle = TRACE_LINE_COLOR;
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(0, w), toCanvasY(floorDb, h));
+    var d;
+    for (d = 0; d <= distMax; d += 6) {
+      var wiggle = Math.sin(d * 0.21) * 0.12 + Math.sin(d * 0.53) * 0.08;
+      ctx.lineTo(toCanvasX(d, w), toCanvasY(floorDb + wiggle, h));
+    }
+    ctx.stroke();
+  }
+
+  function applyFiberDisconnectedRealtimeState(deviceId, deviceNode) {
+    traceLiveNoiseActive = false;
+    traceLiveNoiseAmplitude = 0;
+    traceLiveNoisePhase = 0;
+    resetRealtimeHudDisconnected(deviceNode);
+    var d = findDevice(deviceId);
+    if (d) {
+      d.fiberDisconnected = true;
+      d.traceEvents = [];
+    }
+    var tableWrap = getOtdrTableContainer(deviceNode, deviceId);
+    var tbody = tableWrap && tableWrap.querySelector('.trace-event-tbody');
+    if (tbody) tbody.innerHTML = '';
+    if (fiberDisconnectWarnedFor !== deviceId) {
+      fiberDisconnectWarnedFor = deviceId;
+      showFiberDisconnectedNotice(deviceId, deviceNode);
+    }
+    renderTraceForDevice(deviceId, deviceNode, { disconnected: true });
+  }
+
+  function abortOtdrTestFiberDisconnected(deviceId, deviceNode) {
+    stopAcquisitionProgress(deviceId);
+    var d = findDevice(deviceId);
+    if (d) {
+      d.acquisitionActive = false;
+      d.acquisitionComplete = false;
+      d.connectionError = true;
+      d.fiberDisconnected = true;
+      d.traceEvents = [];
+    }
+    if (deviceNode) {
+      showFiberDisconnectedNotice(deviceId, deviceNode);
+      showConnectionBadState(deviceNode);
+      resetRealtimeHudDisconnected(deviceNode);
+      var tbody = deviceNode.querySelector('.trace-event-tbody');
+      if (tbody) tbody.innerHTML = '';
+      renderTraceForDevice(deviceId, deviceNode, { disconnected: true });
+    }
+    setStatus('FO-1129 · Test aborted · Fiber disconnected');
+  }
+
   function refreshPortOccupancy(root) {
     if (!root) return;
     root.querySelectorAll('.lab-otdr-port').forEach(function (port) {
@@ -1778,6 +1955,7 @@
   }
 
   function removeOtdr(id) {
+    stopRealTimeMode(id);
     stopConnectionAnimation(id);
     stopAcquisitionProgress(id);
     stopConnectionValidationTimer(id);
@@ -2052,7 +2230,16 @@
       '<span id="summary-orl-' + deviceId + '">33.11</span> dB</span>' +
       '<span class="trace-summary-item trace-summary-lambda">λ: <span class="trace-summary-lambda-val">1550nm</span></span>' +
       '</div>' +
-      '<div class="trace-event-table-wrap">' +
+      '<div class="realtime-hud hidden" id="realtime-hud-' + deviceId + '" aria-label="Real Time connection alignment">' +
+      '<div class="rt-connection-title">Connection</div>' +
+      '<div class="rt-connection-row">' +
+      '<span class="rt-connection-label rt-connection-label--bad">Bad</span>' +
+      '<div class="rt-track" id="rt-track-' + deviceId + '" role="meter" aria-valuemin="0" aria-valuemax="100">' +
+      '<div class="rt-thumb" id="rt-thumb-' + deviceId + '"></div>' +
+      '</div>' +
+      '<span class="rt-connection-label rt-connection-label--good">Good</span>' +
+      '</div></div>' +
+      '<div class="trace-event-table-wrap" id="otdr-table-container-' + deviceId + '">' +
       '<table class="trace-event-table">' +
       '<thead><tr>' +
       '<th>Event</th><th>Distance m</th><th>Loss dB</th><th>Reflect. dB</th>' +
@@ -3115,8 +3302,20 @@
           sectionKm = Math.max(0, (eventDist - lastEventDist) / 1000);
         }
         var slopeDbKm = resolveTraceEventSlopeDbKm(ev, defaultSlope);
-        currentDb -= sectionKm * slopeDbKm;
-        ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        var dbDrop = sectionKm * slopeDbKm;
+        var segStartDb = currentDb;
+        var segSteps = traceLiveNoiseActive
+          ? Math.max(6, Math.min(48, Math.round(Math.max(0, eventDist - lastEventDist) / 10)))
+          : 1;
+        var si;
+        for (si = 1; si <= segSteps; si++) {
+          var t = si / segSteps;
+          var midDist = lastEventDist + (eventDist - lastEventDist) * t;
+          var midDb = segStartDb - dbDrop * t;
+          midDb = applyLiveTraceNoiseDb(midDb, midDist);
+          ctx.lineTo(toCanvasX(midDist, w), toCanvasY(midDb, h));
+        }
+        currentDb -= dbDrop;
       }
 
       if (isStart) {
@@ -3290,6 +3489,11 @@
     ctx.textBaseline = 'middle';
     ctx.fillText(distanceUnitLabel, unitBoxX + unitBoxW / 2, unitBoxY + unitBoxH / 2);
 
+    if (viewport && viewport.disconnected) {
+      drawNoiseFloorTraceLine(ctx, w, h);
+      return;
+    }
+
     ctx.strokeStyle = TRACE_LINE_COLOR;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
@@ -3321,17 +3525,25 @@
     });
   }
 
-  function renderTraceForDevice(deviceId, deviceNode) {
-    if (!deviceNode) deviceNode = document.getElementById(deviceId);
+  function renderTraceForDevice(deviceId, deviceNode, opts) {
+    opts = opts || {};
+    if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
+    if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId) return;
-    var d = findDevice(deviceId);
-    var events = (d && d.traceEvents) ? d.traceEvents : getDefaultTraceEvents();
     if (deviceNode) {
       var graphArea = deviceNode.querySelector('.trace-graph-area');
       ensureTraceFloatingControls(graphArea);
     }
     var canvas = resolveTraceCanvas(null, deviceNode);
-    if (canvas) drawOTDRTrace(canvas, events);
+    if (!canvas) return;
+    if (opts.disconnected || !isPigtailConnectedToPort(deviceId)) {
+      drawOTDRTrace(canvas, [], { disconnected: true });
+      return;
+    }
+    var d = findDevice(deviceId);
+    var events = opts.previewEvents ||
+      (d && d.traceEvents && d.traceEvents.length ? d.traceEvents : getDefaultTraceEvents());
+    drawOTDRTrace(canvas, events);
   }
 
   function getTracePointerClient(ev) {
@@ -3455,6 +3667,10 @@
 
   function switchRunningTab(deviceNode, tabName) {
     if (!deviceNode) return;
+    var switchDeviceId = deviceNode.getAttribute('data-otdr-node');
+    if (isRealTimeActive && realTimeDeviceId === switchDeviceId && tabName === 'table') {
+      tabName = 'trace';
+    }
     var tabs = deviceNode.querySelectorAll('.tabs-left .tab[data-running-tab]');
     var i;
     for (i = 0; i < tabs.length; i++) {
@@ -3493,16 +3709,416 @@
     var deviceId = deviceNode.getAttribute('data-otdr-node');
     var d = findDevice(deviceId);
     if (d) d.runningTab = tabName;
+    if (isRealTimeActive && realTimeDeviceId === deviceId) {
+      if (tabName === 'trace') showRealtimeHud(deviceNode);
+      else hideRealtimeHud(deviceNode);
+    }
   }
 
-  function runOtdrTest(deviceId, deviceNode) {
+  function getRealtimeHudEl(deviceNode, deviceId) {
+    if (!deviceNode) return null;
+    var id = deviceId || deviceNode.getAttribute('data-otdr-node');
+    return deviceNode.querySelector('#realtime-hud-' + id) ||
+      deviceNode.querySelector('.realtime-hud');
+  }
+
+  function getOtdrTableContainer(deviceNode, deviceId) {
+    if (!deviceNode) return null;
+    var id = deviceId || deviceNode.getAttribute('data-otdr-node');
+    return deviceNode.querySelector('#otdr-table-container-' + id) ||
+      deviceNode.querySelector('.trace-event-table-wrap');
+  }
+
+  function applyRealTimeUILayout(deviceNode, active) {
+    if (!deviceNode) return;
+    var traceContainer = deviceNode.querySelector('.trace-view-container');
+    var tableWrap = getOtdrTableContainer(deviceNode);
+    var resizer = deviceNode.querySelector('.trace-resizer');
+    var summary = deviceNode.querySelector('.trace-summary-bar');
+    var hud = getRealtimeHudEl(deviceNode);
+    if (active) {
+      deviceNode.classList.add('is-realtime-active');
+      if (traceContainer) traceContainer.classList.add('is-realtime-mode');
+      if (tableWrap) {
+        tableWrap.hidden = true;
+        tableWrap.style.display = 'none';
+      }
+      if (resizer) resizer.hidden = true;
+      if (summary) summary.hidden = true;
+      if (hud) hud.classList.remove('hidden');
+      var graphArea = deviceNode.querySelector('.trace-graph-area');
+      if (graphArea) {
+        graphArea.style.height = '';
+        graphArea.classList.add('is-realtime-expanded');
+      }
+    } else {
+      deviceNode.classList.remove('is-realtime-active');
+      if (traceContainer) traceContainer.classList.remove('is-realtime-mode');
+      if (tableWrap) {
+        tableWrap.hidden = false;
+        tableWrap.style.display = '';
+      }
+      if (resizer) resizer.hidden = false;
+      if (summary) summary.hidden = false;
+      if (hud) hud.classList.add('hidden');
+      var graphAreaOff = deviceNode.querySelector('.trace-graph-area');
+      if (graphAreaOff) graphAreaOff.classList.remove('is-realtime-expanded');
+      applyDefaultTraceSplitLayout(deviceNode);
+    }
+  }
+
+  function showRealtimeHud(deviceNode) {
+    if (!deviceNode) return;
+    applyRealTimeUILayout(deviceNode, true);
+  }
+
+  function hideRealtimeHud(deviceNode) {
+    if (!deviceNode) return;
+    applyRealTimeUILayout(deviceNode, false);
+  }
+
+  function mapWorstAngleToTrackPercent(deg) {
+    if (!isFinite(deg)) return 85;
+    if (deg >= 120) return 85;
+    if (deg >= 90) return 45 + ((deg - 90) / 30) * 35;
+    return 5 + (Math.max(0, deg) / 90) * 37;
+  }
+
+  function clampRealtimeThumbToZone(deg, pos) {
+    if (deg >= 120) return Math.max(82, Math.min(88, pos));
+    if (deg >= 90) return Math.max(45, Math.min(80, pos));
+    return Math.max(5, Math.min(42, pos));
+  }
+
+  function updateRealtimeHudFromAngle(deviceNode, worstAngle) {
+    var hud = getRealtimeHudEl(deviceNode);
+    if (!hud) return;
+    var track = hud.querySelector('.rt-track');
+    var thumb = hud.querySelector('.rt-thumb');
+    if (!track || !thumb) return;
+
+    var deg = Number(worstAngle);
+    if (!isFinite(deg)) deg = 120;
+    var calculatedPos = mapWorstAngleToTrackPercent(deg);
+    var jitter = (Math.random() - 0.5) * 4;
+    var clampedPos = clampRealtimeThumbToZone(deg, calculatedPos + jitter);
+
+    var color;
+    var stateClass;
+    var label;
+    if (deg >= 120) {
+      color = '#2ecc71';
+      stateClass = 'is-good';
+      label = 'Good';
+    } else if (deg >= 90) {
+      color = '#d35400';
+      stateClass = 'is-fair';
+      label = 'Fair';
+    } else {
+      color = '#e74c3c';
+      stateClass = 'is-bad';
+      label = 'Bad';
+    }
+
+    thumb.style.left = clampedPos + '%';
+    thumb.style.backgroundColor = color;
+    thumb.classList.remove('is-red', 'is-orange', 'is-green');
+    if (deg >= 120) thumb.classList.add('is-green');
+    else if (deg >= 90) thumb.classList.add('is-orange');
+    else thumb.classList.add('is-red');
+
+    track.setAttribute('aria-valuenow', String(Math.round(clampedPos)));
+    track.setAttribute('aria-valuetext', label);
+    hud.classList.remove('is-bad', 'is-fair', 'is-good', 'is-no-signal');
+    hud.classList.add(stateClass);
+  }
+
+  function computeRealTimeQualityScore(angle) {
+    var deg = Number(angle);
+    if (!isFinite(deg)) return 100;
+    if (deg >= 120) return 100;
+    if (deg >= 90) return Math.round(50 + ((deg - 90) / 30) * 50);
+    return Math.round(Math.max(0, Math.min(50, (deg / 90) * 50)));
+  }
+
+  function collectAllNetworkBendAngles() {
+    var angles = [];
+    var graph = fiberGraph();
+    var seenJigIds = {};
+    var pcords = graph.pcords || [];
+    var pigtails = graph.pigtails || [];
+    var lists = [graph.bends, graph.bendComponents, graph.components];
+    var i;
+    var li;
+    var bi;
+
+    for (i = 0; i < pcords.length; i++) {
+      var pcBend = resolveBendComponentOnLink(pcords[i], graph);
+      if (pcBend && isFinite(pcBend.angle)) angles.push(Number(pcBend.angle));
+    }
+
+    for (i = 0; i < pigtails.length; i++) {
+      var ptBend = resolveBendComponentOnLink(pigtails[i], graph);
+      if (ptBend && isFinite(ptBend.angle)) angles.push(Number(ptBend.angle));
+    }
+
+    for (li = 0; li < lists.length; li++) {
+      var list = lists[li];
+      if (!list || !list.length) continue;
+      for (bi = 0; bi < list.length; bi++) {
+        var comp = list[bi];
+        if (!comp) continue;
+        var compType = comp.type || comp.componentType;
+        if (compType !== 'bend' && compType !== 'micro-bend') continue;
+        var compAngle = comp.angle != null ? comp.angle : (comp.theta != null ? comp.theta : null);
+        if (compAngle != null && isFinite(compAngle)) angles.push(Number(compAngle));
+      }
+    }
+
+    if (global.FtthLab && typeof FtthLab.listBendJigSlots === 'function') {
+      var slots = FtthLab.listBendJigSlots();
+      for (i = 0; i < slots.length; i++) {
+        var slot = slots[i];
+        if (!slot || seenJigIds[slot.id]) continue;
+        if (!slot.isCableDocked) continue;
+        seenJigIds[slot.id] = true;
+        if (isFinite(slot.theta)) angles.push(Number(slot.theta));
+      }
+    }
+
+    return angles;
+  }
+
+  function getWorstNetworkBendAngle(deviceId) {
+    var angles = collectAllNetworkBendAngles();
+    if (!angles.length) return 120;
+    var worstAngle = angles[0];
+    var i;
+    for (i = 1; i < angles.length; i++) {
+      if (angles[i] < worstAngle) worstAngle = angles[i];
+    }
+    return worstAngle;
+  }
+
+  function getActiveNetworkBendAngle(deviceId) {
+    return getWorstNetworkBendAngle(deviceId);
+  }
+
+  function applyLiveTraceNoiseDb(db, distM) {
+    if (!traceLiveNoiseActive) return db;
+    var amp = traceLiveNoiseAmplitude || 1;
+    var phase = traceLiveNoisePhase || 0;
+    var n1 = deterministicNoise(distM * 0.13 + phase, 17);
+    var n2 = deterministicNoise(distM * 0.27 + phase * 1.3, 91);
+    return db + (n1 - 0.5) * amp + (n2 - 0.5) * amp * 0.5;
+  }
+
+  function updateRealTimeButtonState(deviceNode, active) {
+    if (!deviceNode) return;
+    var btn = deviceNode.querySelector('[data-sts-action="real-time"]');
+    if (!btn) return;
+    btn.classList.toggle('is-active', !!active);
+    btn.classList.toggle('active', !!active);
+    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    updateSidebarStartStopButton(deviceNode, false);
+  }
+
+  function stopRealTimeMode(deviceId) {
+    if (realTimeInterval) {
+      clearInterval(realTimeInterval);
+      realTimeInterval = null;
+    }
+    var stopId = deviceId || realTimeDeviceId;
+    isRealTimeActive = false;
+    realTimeDeviceId = null;
+    realTimeNoisePhase = 0;
+    realTimeQualityScore = 100;
+    traceLiveNoiseActive = false;
+    traceLiveNoiseAmplitude = 0;
+    traceLiveNoisePhase = 0;
+    if (stopId) {
+      var stoppedDevice = findDevice(stopId);
+      if (stoppedDevice) {
+        stoppedDevice.realTimePreviewEvents = null;
+        stoppedDevice.realTimePreviewLoss = null;
+        stoppedDevice.realTimePreviewOrl = null;
+        stoppedDevice.realTimePreviewLengthM = null;
+      }
+    }
+    if (stopId && layer) {
+      var node = layer.querySelector('[data-otdr-node="' + stopId + '"]');
+      if (node) {
+        updateRealTimeButtonState(node, false);
+        hideRealtimeHud(node);
+        renderTraceForDevice(stopId, node);
+      }
+    }
+  }
+
+  function commitRealTimeMeasurement(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    if (!isPigtailConnectedToPort(deviceId)) {
+      applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
+      return;
+    }
+    stopRealTimeMode(deviceId);
+    runOtdrTest(deviceId, deviceNode);
+    switchRunningTab(deviceNode, 'trace');
+    setStatus('SMART TEST · Real Time measurement committed');
+  }
+
+  function tickRealTimePreview(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode || !isRealTimeActive || realTimeDeviceId !== deviceId) return;
+    var d = findDevice(deviceId);
+    if (!d || d.screen !== 'smart-test-running') return;
+
+    if (!isPigtailConnectedToPort(deviceId)) {
+      applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
+      return;
+    }
+    clearFiberDisconnectedNotice(deviceId, deviceNode);
+
+    var worstAngle = getWorstNetworkBendAngle(deviceId);
+    realTimeQualityScore = computeRealTimeQualityScore(worstAngle);
+    realTimeNoisePhase += 1;
+    traceLiveNoiseActive = true;
+    traceLiveNoisePhase = realTimeNoisePhase;
+    traceLiveNoiseAmplitude = 1.2 + (100 - realTimeQualityScore) * 0.14;
+
+    updateRealtimeHudFromAngle(deviceNode, worstAngle);
+
+    var trace = deviceNode.querySelector('.trace-view-container');
+    if (trace && !trace.hidden) {
+      enforceTraceFloatingControlStyles(deviceNode);
+      renderTraceForDevice(deviceId, deviceNode);
+    }
+  }
+
+  function refreshOtdrLiveScan(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    var d = findDevice(deviceId);
+    if (!d || d.screen !== 'smart-test-running') return;
+    if (!isPigtailConnectedToPort(deviceId)) {
+      applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
+      return;
+    }
+    clearFiberDisconnectedNotice(deviceId, deviceNode);
+
+    var traceResult = computeLabOtdrTrace(deviceId);
+    traceResult.events = ensureTraceEvents(traceResult.events);
+    syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
+
+    var activeTab = d.runningTab || 'trace';
+    var smartLinkSelection = d.smartLinkSelection;
+
+    d.acquisitionActive = false;
+    d.acquisitionComplete = true;
+    d.traceEvents = traceResult.events;
+    d.traceTotalLoss = traceResult.totalLoss;
+    d.traceOrl = traceResult.orl;
+    d.traceLengthM = traceResult.totalLengthM;
+
+    populateTraceEventTable(deviceNode, traceResult.events);
+    positionTraceLinearIcons(deviceNode, traceResult.events);
+    updateTraceUIFromTestState(deviceNode);
+    renderSmartLinkView(deviceNode, {
+      events: traceResult.events,
+      totalLoss: traceResult.totalLoss,
+      orl: traceResult.orl,
+      lengthM: traceResult.totalLengthM,
+      selection: smartLinkSelection,
+    });
+
+    var trace = deviceNode.querySelector('.trace-view-container');
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    if (activeTab === 'smartlink') {
+      if (smartlink) smartlink.hidden = false;
+      if (trace) trace.hidden = true;
+    } else {
+      if (smartlink) smartlink.hidden = true;
+      if (trace) {
+        trace.hidden = false;
+        trace.classList.toggle('is-table-only', activeTab === 'table');
+      }
+      if (activeTab === 'trace' || activeTab === 'table') {
+        applyDefaultTraceSplitLayout(deviceNode);
+        enforceTraceFloatingControlStyles(deviceNode);
+        renderTraceForDevice(deviceId, deviceNode);
+      }
+    }
+  }
+
+  function startRealTimeMode(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    stopRealTimeMode(realTimeDeviceId);
+    isRealTimeActive = true;
+    realTimeDeviceId = deviceId;
+    updateRealTimeButtonState(deviceNode, true);
+
+    readSetupSelectionsFromDevice(deviceNode);
+    var d = findDevice(deviceId);
+    if (!d || d.screen !== 'smart-test-running') {
+      setDeviceScreen(deviceId, 'smart-test-running');
+      deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
+      d = findDevice(deviceId);
+    }
+
+    switchRunningTab(deviceNode, 'trace');
+    showRealtimeHud(deviceNode);
+    enforceTraceFloatingControlStyles(deviceNode);
+    renderTraceForDevice(deviceId, deviceNode);
+    tickRealTimePreview(deviceId, deviceNode);
+    requestAnimationFrame(function () {
+      if (isRealTimeActive && realTimeDeviceId === deviceId) {
+        tickRealTimePreview(deviceId, deviceNode);
+      }
+    });
+
+    realTimeInterval = setInterval(function () {
+      if (!isRealTimeActive || realTimeDeviceId !== deviceId) return;
+      var liveNode = layer && layer.querySelector('[data-otdr-node="' + deviceId + '"]');
+      var liveDevice = findDevice(deviceId);
+      if (!liveNode || !liveDevice || liveDevice.screen !== 'smart-test-running') {
+        stopRealTimeMode(deviceId);
+        return;
+      }
+      tickRealTimePreview(deviceId, liveNode);
+    }, REAL_TIME_SCAN_MS);
+
+    setStatus('SMART TEST · Real Time active · adjust bend and press MEASURE to commit');
+  }
+
+  function toggleRealTimeMode(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    if (isRealTimeActive && realTimeDeviceId === deviceId) {
+      stopRealTimeMode(deviceId);
+      setStatus('SMART TEST · Real Time stopped');
+      return;
+    }
+    startRealTimeMode(deviceId, deviceNode);
+  }
+
+  function runOtdrTest(deviceId, deviceNode, opts) {
+    opts = opts || {};
     if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
+    if (opts.realTimeRefresh) {
+      refreshOtdrLiveScan(deviceId, deviceNode);
+      return;
+    }
+    if (!isPigtailConnectedToPort(deviceId)) {
+      abortOtdrTestFiberDisconnected(deviceId, deviceNode);
+      return;
+    }
     resetTraceEventCycleIndex();
     finishAcquisitionAndShowTrace(deviceId, deviceNode);
   }
 
   function finishAcquisitionAndShowTrace(deviceId, deviceNode) {
+    if (!isPigtailConnectedToPort(deviceId)) {
+      abortOtdrTestFiberDisconnected(deviceId, deviceNode);
+      return;
+    }
     var traceResult = computeLabOtdrTrace(deviceId);
     traceResult.events = ensureTraceEvents(traceResult.events);
     syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
@@ -3591,8 +4207,20 @@
     if (!deviceNode) return;
     var btn = deviceNode.querySelector('.sidebar-btn-start');
     if (!btn) return;
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
     var textEl = btn.querySelector('.btn-text');
     var iconEl = btn.querySelector('.btn-icon-play, .btn-icon-stop');
+    if (isRealTimeActive && realTimeDeviceId === deviceId) {
+      btn.classList.remove('btn-stop');
+      btn.setAttribute('data-sidebar-mode', 'measure');
+      btn.setAttribute('aria-label', 'Measure and commit');
+      if (textEl) textEl.textContent = 'MEASURE';
+      if (iconEl) {
+        iconEl.className = 'btn-icon btn-icon-play';
+        iconEl.innerHTML = '<span class="play-triangle" aria-hidden="true"></span>';
+      }
+      return;
+    }
     if (isRunning) {
       btn.classList.add('btn-stop');
       btn.setAttribute('data-sidebar-mode', 'stop');
@@ -3662,6 +4290,7 @@
     if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
+    stopRealTimeMode(deviceId);
     var d = findDevice(deviceId);
     stopConnectionAnimation(deviceId);
     stopAcquisitionProgress(deviceId);
@@ -3682,6 +4311,7 @@
     if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
+    stopRealTimeMode(deviceId);
     resetOtdrTraceAcquisitionState(deviceId, deviceNode);
     var d = findDevice(deviceId);
     readSetupSelectionsFromDevice(deviceNode);
@@ -3787,7 +4417,7 @@
   function finishConnectionValidation(deviceId, deviceNode) {
     if (!deviceNode) return;
     refreshPortOccupancy(deviceNode);
-    if (isApcPortConnected(deviceId)) {
+    if (isPigtailConnectedToPort(deviceId)) {
       showAcquisitionPhase(deviceId, deviceNode);
     } else {
       showConnectionErrorState(deviceId, deviceNode);
@@ -4164,6 +4794,9 @@
     opts = opts || {};
     var d = findDevice(deviceId);
     if (!d) return;
+    if ((screenName || 'home') !== 'smart-test-running') {
+      stopRealTimeMode(deviceId);
+    }
     d.screen = screenName || 'home';
     if (opts.selectedConfig) {
       d.selectedConfig = opts.selectedConfig;
@@ -4454,7 +5087,23 @@
         var deviceNode = btn.closest('[data-otdr-node]');
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
+        if (isRealTimeActive && realTimeDeviceId === deviceId) {
+          commitRealTimeMeasurement(deviceId, deviceNode);
+          return;
+        }
         startOtdrAcquisition(deviceId, deviceNode);
+      });
+    });
+
+    host.querySelectorAll('[data-sts-action="real-time"]').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        toggleRealTimeMode(deviceId, deviceNode);
       });
     });
 
@@ -4466,6 +5115,10 @@
         var deviceNode = btn.closest('[data-otdr-node]');
         if (!deviceNode) return;
         var deviceId = deviceNode.getAttribute('data-otdr-node');
+        if (isRealTimeActive && realTimeDeviceId === deviceId) {
+          commitRealTimeMeasurement(deviceId, deviceNode);
+          return;
+        }
         if (isOtdrTestInProgress(deviceId)) {
           stopOtdrAcquisition(deviceId, deviceNode);
           return;
@@ -4835,6 +5488,10 @@
     layer.querySelectorAll('[data-otdr-node]').forEach(function (node) {
       refreshPortOccupancy(node);
     });
+    if (isRealTimeActive && realTimeDeviceId) {
+      var rtNode = layer.querySelector('[data-otdr-node="' + realTimeDeviceId + '"]');
+      if (rtNode) tickRealTimePreview(realTimeDeviceId, rtNode);
+    }
   }
 
   function isOtdrPortId(portId) {
