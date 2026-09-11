@@ -824,9 +824,53 @@
     if (type === 'start') return 'OTDR Port';
     if (type === 'connector' || type === 'reflective') return 'Connector';
     if (type === 'splice') return 'Splice';
+    if (type === 'bend') return 'Bend';
     if (type === 'splitter') return 'Splitter';
     if (type === 'end') return 'End of fiber';
     return 'Event';
+  }
+
+  function findBendJigSlotForPcord(pcord) {
+    if (!pcord || !pcord.bendJigId) return null;
+    if (!global.FtthLab || typeof FtthLab.listBendJigSlots !== 'function') return null;
+    var slots = FtthLab.listBendJigSlots();
+    var i;
+    for (i = 0; i < slots.length; i++) {
+      var slot = slots[i];
+      if (slot.id !== pcord.bendJigId) continue;
+      if (!slot.isCableDocked) continue;
+      if (slot.dockedCordId && slot.dockedCordId !== pcord.id) continue;
+      return slot;
+    }
+    return null;
+  }
+
+  function resolveBendComponentOnLink(link) {
+    if (!link) return null;
+    if (link.type === 'bend' || link.type === 'micro-bend') {
+      return {
+        type: link.type,
+        angle: link.angle != null ? link.angle : (link.theta != null ? link.theta : 90),
+      };
+    }
+    if (link.bendComponent && (link.bendComponent.type === 'bend' || link.bendComponent.type === 'micro-bend')) {
+      return {
+        type: link.bendComponent.type,
+        angle: link.bendComponent.angle != null ? link.bendComponent.angle : 90,
+      };
+    }
+    var jigSlot = findBendJigSlotForPcord(link);
+    if (jigSlot) {
+      return { type: 'micro-bend', angle: jigSlot.theta };
+    }
+    return null;
+  }
+
+  function computeOtdrMicroBendLossDb(angle) {
+    var deg = Number(angle);
+    if (!isFinite(deg)) deg = 90;
+    if (deg >= 90) return 0;
+    return parseFloat(((90 - deg) * 0.03 + 0.05).toFixed(3));
   }
 
   function normalizeMockEventType(type, label) {
@@ -1038,6 +1082,7 @@
     if (ev.type === 'splitter' && ev.label === 'End Splitter') return 50;
     if (ev.type === 'splitter') return 10;
     if (ev.type === 'splice') return 20;
+    if (ev.type === 'bend') return 22;
     if (ev.type === 'connector') return 30;
     if (ev.type === 'end') return 60;
     return 40;
@@ -1211,6 +1256,7 @@
     var fiberLossTotal = 0;
     var connectorLossTotal = 0;
     var spliceLossTotal = 0;
+    var bendLossTotal = 0;
     var events = [];
     var maxTraceM = 50000;
     traceEventCounter = 1;
@@ -1260,6 +1306,7 @@
         branchPath: branchState.branchPath || '0',
       };
       if (internalOpts.reflectance != null) row._reflectance = internalOpts.reflectance;
+      if (internalOpts.icon) row.icon = internalOpts.icon;
       if (internalOpts.polishMismatch) {
         row._polishMismatch = true;
         row._alarm = true;
@@ -1293,6 +1340,9 @@
         row.loss = insertionLoss > 0 ? insertionLoss : null;
         if (type === 'splice') {
           row.reflect = null;
+        } else if (type === 'bend') {
+          row.reflect = '--';
+          row.icon = row.icon || 'bend';
         } else if (row._reflectance != null && isFinite(row._reflectance)) {
           row.reflect = row._reflectance;
         } else {
@@ -1319,6 +1369,17 @@
 
     function traversePigtailFiberSpan(pigtail, branchState) {
       traverseFiberSpan(resolveOtdrFiberLengthM(pigtail), branchState);
+    }
+
+    function tryEmitBendEventOnTraversedLink(link, branchState) {
+      var bendComponent = resolveBendComponentOnLink(link);
+      if (!bendComponent) return;
+      var angle = bendComponent.angle || 90;
+      if (angle >= 90) return;
+      var bendLoss = computeOtdrMicroBendLossDb(angle);
+      if (bendLoss <= 0) return;
+      bendLossTotal += bendLoss;
+      pushTraceEvent('bend', 'Bend', bendLoss, { icon: 'bend' }, branchState);
     }
 
     function pushNodeEventAtKey(exitKey, branchState) {
@@ -1454,6 +1515,7 @@
         if (step.kind === 'pcord') {
           branchState.pc[step.linkId] = true;
           traverseFiberSpan(step.lengthM, branchState);
+          tryEmitBendEventOnTraversedLink(step.pcord || findPcordInGraph(graph, step.linkId), branchState);
           branchState.lastConnectorSide = step.exitSide || null;
           branchState.lastConnectorComponent = step.pcord || findPcordInGraph(graph, step.linkId);
 
@@ -2407,6 +2469,16 @@
       );
     }
 
+    if (t === 'bend') {
+      return (
+        '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<line x1="1" y1="10" x2="8" y2="10" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<path d="M8 10 Q16 2.5 24 10" fill="none" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<line x1="24" y1="10" x2="31" y2="10" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '</svg>'
+      );
+    }
+
     if (t === 'connector' || t === 'coupler') {
       return (
         '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
@@ -2467,6 +2539,7 @@
   function getSmartLinkEventIconHtml(type, label, failed, active) {
     var iconType = type || 'connector';
     if (label === 'Coupler') iconType = 'connector';
+    if (type === 'bend' || label === 'Bend') iconType = 'bend';
     var themeColor = active ? '#ffffff' : (failed ? '#d32f2f' : '#5c3a92');
     return getEventIconHtml(iconType, label, {
       stroke: themeColor,
@@ -2686,7 +2759,7 @@
       var isReflectAlarm = false;
       if (currentOtdrTestState.alarmsEnabled && ev.loss != null && ev.loss !== '--') {
         var lossVal = parseFloat(ev.loss);
-        if (ev.type === 'splice') {
+        if (ev.type === 'splice' || ev.type === 'bend') {
           if (lossVal > 0.30) isLossAlarm = true;
         } else {
           if (lossVal > 0.50) isLossAlarm = true;
@@ -3052,7 +3125,7 @@
           ctx.lineTo(eventX, toCanvasY(currentDb + startSpike, h));
           ctx.lineTo(eventX, toCanvasY(currentDb, h));
         }
-      } else if (eventType === 'splice') {
+      } else if (eventType === 'splice' || eventType === 'bend') {
         if (eventLoss > 0) {
           currentDb -= eventLoss;
           ctx.lineTo(eventX, toCanvasY(currentDb, h));
@@ -3822,6 +3895,7 @@
     if (ev.type === 'start') return 'Front Connector (Test Port)';
     if (ev.label === 'Coupler') return 'Coupler';
     if (ev.type === 'splice') return 'Fusion Splice';
+    if (ev.type === 'bend') return 'Bend';
     if (ev.type === 'splitter') return ev.label || 'Splitter';
     if (ev.type === 'end' || ev.label === 'End of fiber') return 'End of fiber';
     if (ev.type === 'connector') return 'Connector (possible mechanical splice)';
@@ -3847,7 +3921,7 @@
     if (!ev) return false;
     if (ev._polishMismatch || ev._alarm) return true;
     if (currentOtdrTestState.alarmsEnabled && ev.loss != null && isFinite(ev.loss)) {
-      if (ev.type === 'splice') return ev.loss > 0.30;
+      if (ev.type === 'splice' || ev.type === 'bend') return ev.loss > 0.30;
       if (ev.type !== 'start') return ev.loss > 0.50;
     }
     if (currentOtdrTestState.alarmsEnabled && ev.reflect != null && isFinite(ev.reflect)) {
@@ -3867,6 +3941,7 @@
 
   function smartLinkEventClassName(type, label) {
     if (type === 'splice') return 'sl-event--splice';
+    if (type === 'bend') return 'sl-event--bend';
     if (type === 'splitter') return 'sl-event--splitter';
     if (type === 'end' || label === 'End of fiber') return 'sl-event--end';
     if (label === 'Coupler') return 'sl-event--coupler';
