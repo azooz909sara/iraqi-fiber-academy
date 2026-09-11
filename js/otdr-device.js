@@ -557,71 +557,216 @@
     return 'UPC';
   }
 
-  function detectPolishMismatch(incomingSide, explicitPortPolish) {
-    if (!incomingSide) return false;
-    if (incomingSide.mismatch === true) return true;
-    if (incomingSide.attached && incomingSide.attached.mismatch === true) return true;
-    var cablePolish = incomingSide.polish;
-    var portPolish = explicitPortPolish;
-    if (portPolish == null && incomingSide.attached && incomingSide.attached.polish) {
-      portPolish = incomingSide.attached.polish;
-    }
-    if (cablePolish == null || portPolish == null) return false;
-    return normalizeOtdrPolish(cablePolish) !== normalizeOtdrPolish(portPolish);
+  function readPolishDescriptor(source) {
+    if (!source) return null;
+    if (source.connectorType != null) return source.connectorType;
+    if (source.color != null) return source.color;
+    if (source.polish != null) return source.polish;
+    if (source.portType != null) return source.portType;
+    if (source.type != null) return source.type;
+    return null;
   }
 
-  function standardMatedConnectionLossDb(baseLoss) {
-    if (typeof baseLoss === 'number' && isFinite(baseLoss) && baseLoss >= 0.10 && baseLoss <= 0.45) {
-      return roundTrace3(baseLoss);
+  function readCableConnectorPolish(incomingSide, component) {
+    var sources = [];
+    if (component) sources.push(component);
+    if (incomingSide) sources.push(incomingSide);
+    var si;
+    for (si = 0; si < sources.length; si++) {
+      var descriptor = readPolishDescriptor(sources[si]);
+      if (descriptor != null) return descriptor;
     }
-    return roundTrace3(Math.random() * 0.35 + 0.10);
+    return null;
   }
 
-  function computeOtdrMatedConnectionOptics(incomingSide, opts) {
-    opts = opts || {};
-    var portPolish = opts.portPolish;
-    if (portPolish == null && incomingSide && incomingSide.attached && incomingSide.attached.polish) {
-      portPolish = incomingSide.attached.polish;
+  function readCouplerReceivingPortPolish(couplerId, couplerPortKey, incomingSide, component) {
+    var portFace = 'A';
+    if (couplerPortKey) {
+      var keyMatch = /^cpl:[^:]+:([AB])$/i.exec(couplerPortKey);
+      if (keyMatch) portFace = keyMatch[1].toUpperCase();
     }
-    if (portPolish == null && incomingSide && incomingSide.polish) {
-      portPolish = incomingSide.polish;
+    if (global.FtthLab && typeof FtthLab.getCouplerPortWorld === 'function') {
+      var portWorld = FtthLab.getCouplerPortWorld(couplerId, portFace);
+      if (portWorld) {
+        if (portWorld.portType != null) return portWorld.portType;
+        if (portWorld.color != null) return portWorld.color;
+        if (portWorld.polish != null) return portWorld.polish;
+      }
     }
+    var attached = null;
+    if (incomingSide && incomingSide.attached && incomingSide.attached.owner === 'coupler' &&
+        incomingSide.attached.couplerId === couplerId) {
+      attached = incomingSide.attached;
+    } else if (component && component.connector && component.connector.attached &&
+        component.connector.attached.owner === 'coupler' &&
+        component.connector.attached.couplerId === couplerId) {
+      attached = component.connector.attached;
+    }
+    if (attached) return readPolishDescriptor(attached);
+    return null;
+  }
 
-    if (detectPolishMismatch(incomingSide, portPolish)) {
+  function readPortPolishDescriptor(incomingSide, explicitPortPolish) {
+    if (explicitPortPolish != null) return explicitPortPolish;
+    if (incomingSide && incomingSide.attached) {
+      var fromAttached = readPolishDescriptor(incomingSide.attached);
+      if (fromAttached != null) return fromAttached;
+    }
+    return null;
+  }
+
+  function detectPolishMismatchBetween(cableDescriptor, portDescriptor) {
+    var leftType = (cableDescriptor != null ? String(cableDescriptor) : 'blue').toLowerCase();
+    var rightType = (portDescriptor != null ? String(portDescriptor) : 'blue').toLowerCase();
+    var isLeftAPC = leftType.indexOf('green') >= 0 || leftType.indexOf('apc') >= 0;
+    var isRightAPC = rightType.indexOf('green') >= 0 || rightType.indexOf('apc') >= 0;
+    return isLeftAPC !== isRightAPC;
+  }
+
+  function syncPolishMismatchFlags(incomingSide, component, hasMismatch) {
+    if (incomingSide) incomingSide.mismatch = hasMismatch;
+    if (component && component.connector) component.connector.mismatch = hasMismatch;
+    if (incomingSide && incomingSide.attached) incomingSide.attached.mismatch = hasMismatch;
+  }
+
+  function couplerPortKeyFromFace(couplerId, portFace) {
+    var face = String(portFace || 'A').charAt(0).toUpperCase();
+    if (face !== 'A' && face !== 'B') face = 'A';
+    return 'cpl:' + couplerId + ':' + face;
+  }
+
+  function detectCouplerPortSideMismatch(couplerId, portFace, graph) {
+    if (!couplerId || !graph) return false;
+    var portKey = couplerPortKeyFromFace(couplerId, portFace);
+    var fiber = findIncomingFiberAtPortKey(portKey, graph);
+    if (!fiber.side && !fiber.component) return false;
+    var cableDescriptor = readCableConnectorPolish(fiber.side, fiber.component);
+    var portDescriptor = readCouplerReceivingPortPolish(
+      couplerId,
+      portKey,
+      fiber.side,
+      fiber.component
+    );
+    var hasMismatch = detectPolishMismatchBetween(cableDescriptor, portDescriptor);
+    syncPolishMismatchFlags(fiber.side, fiber.component, hasMismatch);
+    return hasMismatch;
+  }
+
+  function evaluateCouplerDualSidePolish(couplerId, graph) {
+    var leftMismatch = detectCouplerPortSideMismatch(couplerId, 'A', graph);
+    var rightMismatch = detectCouplerPortSideMismatch(couplerId, 'B', graph);
+    return leftMismatch || rightMismatch;
+  }
+
+  function detectConnectionPolishMismatch(incomingSide, component, explicitPortPolish, couplerId, couplerPortKey) {
+    var cableDescriptor = readCableConnectorPolish(incomingSide, component);
+    var portDescriptor = couplerId
+      ? readCouplerReceivingPortPolish(couplerId, couplerPortKey, incomingSide, component)
+      : readPortPolishDescriptor(incomingSide, explicitPortPolish);
+    var hasMismatch = detectPolishMismatchBetween(cableDescriptor, portDescriptor);
+    syncPolishMismatchFlags(incomingSide, component, hasMismatch);
+    return hasMismatch;
+  }
+
+  function healthyMatedConnectionLossDb() {
+    return roundTrace3(Math.random() * 0.15 + 0.10);
+  }
+
+  function evaluateMatedConnectorPolish(cablePolishRaw, portPolishRaw, incomingSide, component, couplerId, couplerPortKey) {
+    var hasMismatch = couplerId
+      ? detectConnectionPolishMismatch(incomingSide, component, null, couplerId, couplerPortKey)
+      : detectConnectionPolishMismatch(incomingSide, component, portPolishRaw);
+    if (hasMismatch) {
       return {
-        loss: roundTrace3(Math.random() * 2.0 + 3.5),
+        loss: roundTrace3(Math.random() * 1.5 + 3.5),
         reflectance: -14.0,
         mismatch: true,
+        polishMismatch: true,
       };
     }
-
-    var matchedPolish = normalizeOtdrPolish(portPolish || (incomingSide && incomingSide.polish) || 'UPC');
-    var configuredLoss = opts.baseLoss;
-    if (configuredLoss == null && incomingSide) {
-      configuredLoss = readComponentLossDb(incomingSide, null);
-    }
+    var matchedPolish = normalizeOtdrPolish(portPolishRaw || cablePolishRaw || 'UPC');
     return {
-      loss: standardMatedConnectionLossDb(configuredLoss),
+      loss: healthyMatedConnectionLossDb(),
       reflectance: matchedPolish === 'APC' ? -65.0 : -45.0,
       mismatch: false,
+      polishMismatch: false,
     };
   }
 
   function resolveConnectorEventOptics(side, component) {
-    var configuredLoss = readComponentLossDb(component, null);
-    if (configuredLoss == null && side) configuredLoss = readComponentLossDb(side, null);
-    return computeOtdrMatedConnectionOptics(side, {
-      portPolish: side && side.attached ? side.attached.polish : (side ? side.polish : null),
-      baseLoss: configuredLoss,
-    });
+    var portPolishRaw = null;
+    if (side && side.attached) portPolishRaw = readPolishDescriptor(side.attached);
+    if (portPolishRaw == null && component && component.connector && component.connector.attached) {
+      portPolishRaw = readPolishDescriptor(component.connector.attached);
+    }
+    var cablePolishRaw = readCableConnectorPolish(side, component);
+    return evaluateMatedConnectorPolish(cablePolishRaw, portPolishRaw, side, component);
   }
 
-  function resolveCouplerPassOptics(couplerId, incomingSide) {
-    var baseLoss = lookupCouplerPassLossDb(couplerId);
-    return computeOtdrMatedConnectionOptics(incomingSide, {
-      portPolish: incomingSide && incomingSide.attached ? incomingSide.attached.polish : null,
-      baseLoss: baseLoss,
-    });
+  function resolveCouplerPassOptics(couplerId, incomingSide, couplerPortKey, component, graph) {
+    var hasAnyMismatch = evaluateCouplerDualSidePolish(couplerId, graph);
+    if (!hasAnyMismatch && (incomingSide || component)) {
+      hasAnyMismatch = detectConnectionPolishMismatch(
+        incomingSide,
+        component,
+        null,
+        couplerId,
+        couplerPortKey
+      );
+    }
+    if (hasAnyMismatch) {
+      return {
+        loss: roundTrace3(Math.random() * 1.5 + 3.5),
+        reflectance: -14.0,
+        mismatch: true,
+        polishMismatch: true,
+      };
+    }
+    var portPolishRaw = readCouplerReceivingPortPolish(
+      couplerId,
+      couplerPortKey,
+      incomingSide,
+      component
+    );
+    var cablePolishRaw = readCableConnectorPolish(incomingSide, component);
+    var matchedPolish = normalizeOtdrPolish(portPolishRaw || cablePolishRaw || 'UPC');
+    return {
+      loss: healthyMatedConnectionLossDb(),
+      reflectance: matchedPolish === 'APC' ? -65.0 : -45.0,
+      mismatch: false,
+      polishMismatch: false,
+    };
+  }
+
+  function findIncomingFiberAtPortKey(portKey, graph) {
+    if (!portKey || !graph) return { side: null, component: null };
+    var pigtails = graph.pigtails || [];
+    var pi;
+    var cplMatch = /^cpl:([^:]+):([AB])$/i.exec(portKey);
+    for (pi = 0; pi < pigtails.length; pi++) {
+      var pigtail = pigtails[pi];
+      if (portKeyFromFiberSnap(pigtail.connector) === portKey) {
+        return { side: pigtail.connector || null, component: pigtail };
+      }
+      if (cplMatch && pigtail.connector && pigtail.connector.attached &&
+          pigtail.connector.attached.owner === 'coupler' &&
+          pigtail.connector.attached.couplerId === cplMatch[1]) {
+        var attachedPort = String(pigtail.connector.attached.port || 'A').toUpperCase();
+        if (attachedPort.charAt(0) === cplMatch[2].toUpperCase()) {
+          return { side: pigtail.connector || null, component: pigtail };
+        }
+      }
+    }
+    var pcords = graph.pcords || [];
+    var ci;
+    for (ci = 0; ci < pcords.length; ci++) {
+      var pc = pcords[ci];
+      var ka = portKeyFromFiberSnap(pc.sideA);
+      var kb = portKeyFromFiberSnap(pc.sideB);
+      if (ka === portKey) return { side: pc.sideA || null, component: pc };
+      if (kb === portKey) return { side: pc.sideB || null, component: pc };
+    }
+    return { side: null, component: null };
   }
 
   function lookupCouplerPassLossDb(couplerId) {
@@ -1115,6 +1260,10 @@
         branchPath: branchState.branchPath || '0',
       };
       if (internalOpts.reflectance != null) row._reflectance = internalOpts.reflectance;
+      if (internalOpts.polishMismatch) {
+        row._polishMismatch = true;
+        row._alarm = true;
+      }
       if (insertionLoss > 0) row._insertionLoss = insertionLoss;
 
       if (type === 'start') {
@@ -1191,6 +1340,12 @@
         var cplParts = exitKey.split(':');
         var couplerId = cplParts[1];
         var incomingCouplerSide = branchState.lastConnectorSide;
+        var incomingCouplerComponent = branchState.lastConnectorComponent;
+        if (!incomingCouplerSide) {
+          var incomingFiber = findIncomingFiberAtPortKey(exitKey, graph);
+          incomingCouplerSide = incomingFiber.side;
+          incomingCouplerComponent = incomingFiber.component;
+        }
         if (branchState.couplers[couplerId]) {
           branchState.lastConnectorSide = null;
           branchState.lastConnectorComponent = null;
@@ -1199,12 +1354,19 @@
         }
         branchState.couplers[couplerId] = true;
         var oppKey = couplerOppositeKey(exitKey);
-        var couplerOptics = resolveCouplerPassOptics(couplerId, incomingCouplerSide);
+        var couplerOptics = resolveCouplerPassOptics(
+          couplerId,
+          incomingCouplerSide,
+          exitKey,
+          incomingCouplerComponent,
+          graph
+        );
         branchState.lastConnectorSide = null;
         branchState.lastConnectorComponent = null;
         connectorLossTotal += couplerOptics.loss;
         pushTraceEvent('connector', 'Coupler', couplerOptics.loss, {
           reflectance: couplerOptics.reflectance,
+          polishMismatch: couplerOptics.polishMismatch === true,
         }, branchState);
         return oppKey || null;
       }
@@ -1234,6 +1396,7 @@
       connectorLossTotal += connectorOptics.loss;
       pushTraceEvent('connector', 'Connector', connectorOptics.loss, {
         reflectance: connectorOptics.reflectance,
+        polishMismatch: connectorOptics.polishMismatch === true,
       }, branchState);
       branchState.lastConnectorSide = null;
       branchState.lastConnectorComponent = null;
@@ -1318,6 +1481,12 @@
             branchState.pt
           );
           if (cableExitStep && cableExitStep.kind === 'pigtail') {
+            if (exitKey.indexOf('cpl:') === 0) {
+              activeKey = pushNodeEventAtKey(exitKey, branchState);
+              if (!activeKey) return;
+              if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+              continue;
+            }
             branchState.lastConnectorSide = null;
             branchState.lastConnectorComponent = null;
             activeKey = exitKey;
@@ -1355,6 +1524,8 @@
                 return;
               }
               if (partnerPortKey && partnerPortKey.indexOf('cpl:') === 0) {
+                branchState.lastConnectorSide = partner.connector || null;
+                branchState.lastConnectorComponent = partner;
                 activeKey = pushNodeEventAtKey(partnerPortKey, branchState);
                 if (!activeKey) return;
                 if (tryAdvanceSplitterInput(activeKey, branchState)) return;
