@@ -502,7 +502,7 @@
     font-family: 'Orbitron', sans-serif;
     font-weight: 700;
     letter-spacing: 2px;
-  }.lab-fusion-machine .fusion-splicer-machine .loss-est{ color: var(--accent-green); }.lab-fusion-machine .fusion-splicer-machine .loss-est.is-high-loss{ color: var(--accent-orange); font-weight: 700; }.lab-fusion-machine .fusion-splicer-machine .fsm-fusion-chamber{
+  }.lab-fusion-machine .fusion-splicer-machine .loss-est{ color: var(--accent-green); }.lab-fusion-machine .fusion-splicer-machine .loss-est.is-high-loss,.lab-fusion-machine .fusion-splicer-machine .loss-est.is-splice-dirty{ color: var(--accent-orange); font-weight: 700; }.lab-fusion-machine .fusion-splicer-machine .loss-est.is-splice-failed{ color: #f44336; font-weight: 700; }.lab-fusion-machine .fusion-splicer-machine .status-text.is-splice-failed{ color: #f44336 !important; }.lab-fusion-machine .fusion-splicer-machine .status-text.is-splice-dirty{ color: var(--accent-orange) !important; }.lab-fusion-machine .fusion-splicer-machine .fsm-fusion-chamber{
     margin: 12px 18px 0;
     position: relative;
   }.lab-fusion-machine .fusion-splicer-machine .fsm-chamber-label{

@@ -20,31 +20,96 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
   var FALLBACK_STROKE_BUFFER_PX = 1.65;
   var FALLBACK_STROKE_BARE_PX = 1.15;
   var FALLBACK_BARE_EXPOSED_PX = 16;
-  var SM_SPLICE_LOSS_OPTIONS = [0.00, 0.01, 0.01, 0.02, 0.02, 0.03];
-  var SM_SPLICE_LOSS_DIRTY_MIN = 0.15;
-  var SM_SPLICE_LOSS_DIRTY_MAX = 0.45;
   var BUFFER_RESIDUE_STROKE = '#7FB5F5';
 
-  function pickRandomSmSpliceLossDb() {
-    return SM_SPLICE_LOSS_OPTIONS[Math.floor(Math.random() * SM_SPLICE_LOSS_OPTIONS.length)];
-  }
-
-  function pickRandomDirtySpliceLossDb() {
-    var n = SM_SPLICE_LOSS_DIRTY_MIN +
-      Math.random() * (SM_SPLICE_LOSS_DIRTY_MAX - SM_SPLICE_LOSS_DIRTY_MIN);
-    return Math.round(n * 100) / 100;
+  function isDockedFiberStripped(fiber) {
+    if (!fiber) return false;
+    if (fiber.isStripped === true) return true;
+    return (Number(fiber.stripStage) || 0) >= 2 || !!fiber.stripFrontierLock;
   }
 
   function isDockedFiberClean(fiber) {
     return !!(fiber && fiber.isCleaned === true);
   }
 
-  function pickSpliceLossForDockedPair(pair) {
-    if (!pair || !pair.left || !pair.right) return pickRandomSmSpliceLossDb();
-    if (isDockedFiberClean(pair.left) && isDockedFiberClean(pair.right)) {
-      return pickRandomSmSpliceLossDb();
+  function isDockedFiberCleaved(fiber) {
+    return !!(fiber && (fiber.isCleaved === true || fiber.cleaved === true));
+  }
+
+  /** Loss hierarchy: uncleaved → dirty → perfect. Never blocks on uncleaved. */
+  function calculateSpliceLoss(fiberA, fiberB) {
+    if (!isDockedFiberCleaved(fiberA) || !isDockedFiberCleaved(fiberB)) {
+      return Math.round((Math.random() * 2.0 + 1.5) * 100) / 100;
     }
-    return pickRandomDirtySpliceLossDb();
+    if (!isDockedFiberClean(fiberA) || !isDockedFiberClean(fiberB)) {
+      return Math.round((Math.random() * 0.7 + 0.5) * 100) / 100;
+    }
+    return Math.round((Math.random() * 0.04 + 0.01) * 100) / 100;
+  }
+
+  /**
+   * Preparation-state hierarchy for fusion splice loss.
+   * Returns { canSplice, reason, lossDb, statusLabel, cameraLabel, warnUi, criticalFail }.
+   */
+  function evaluateSpliceOutcome(pair) {
+    if (!pair || !pair.left || !pair.right) {
+      return {
+        canSplice: false,
+        reason: 'missing',
+        lossDb: null,
+        statusLabel: 'SPLICE REJECTED: NO FIBER',
+        cameraLabel: 'NO FIBER',
+        warnUi: true,
+        criticalFail: true,
+      };
+    }
+    if (!isDockedFiberStripped(pair.left) || !isDockedFiberStripped(pair.right)) {
+      return {
+        canSplice: false,
+        reason: 'unstripped',
+        lossDb: null,
+        statusLabel: 'SPLICE REJECTED: NOT STRIPPED',
+        cameraLabel: 'NOT STRIPPED',
+        warnUi: true,
+        criticalFail: true,
+      };
+    }
+    var uncleaved = !isDockedFiberCleaved(pair.left) || !isDockedFiberCleaved(pair.right);
+    var dirty = !uncleaved &&
+      (!isDockedFiberClean(pair.left) || !isDockedFiberClean(pair.right));
+    var reason = uncleaved ? 'uncleaved' : (dirty ? 'dirty' : 'perfect');
+    var lossDb = calculateSpliceLoss(pair.left, pair.right);
+    if (reason === 'uncleaved') {
+      return {
+        canSplice: true,
+        reason: 'uncleaved',
+        lossDb: lossDb,
+        statusLabel: 'SPLICE FAILED: UNCLEAVED FIBER',
+        cameraLabel: 'SPLICE FAILED: BAD CLEAVE',
+        warnUi: true,
+        criticalFail: true,
+      };
+    }
+    if (reason === 'dirty') {
+      return {
+        canSplice: true,
+        reason: 'dirty',
+        lossDb: lossDb,
+        statusLabel: 'SPLICE OK (DIRTY)',
+        cameraLabel: 'SPLICE OK (DIRTY)',
+        warnUi: true,
+        criticalFail: false,
+      };
+    }
+    return {
+      canSplice: true,
+      reason: 'perfect',
+      lossDb: lossDb,
+      statusLabel: 'SPLICE OK',
+      cameraLabel: 'SPLICE LOSS',
+      warnUi: false,
+      criticalFail: false,
+    };
   }
 
   function getFiberBufferResidueColor(fiber) {
@@ -272,6 +337,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       fibersFused: false,
       spliceLossDb: null,
       spliceDirty: false,
+      spliceOutcomeReason: null,
     };
 
     var CLAMP_BASE = { L: { left: 4, top: 18 }, R: { right: 4, top: 18 } };
@@ -687,6 +753,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       state.fibersFused = false;
       state.spliceLossDb = null;
       state.spliceDirty = false;
+      state.spliceOutcomeReason = null;
       var stage = q('alignmentStage');
       if (stage) {
         stage.classList.remove('is-fibers-fused');
@@ -702,31 +769,118 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       }
     }
 
-    function fuseFibersVisual() {
-      if (state.fibersFused) return;
-      state.fibersFused = true;
-      global.isFiberFused = true;
-      var stage = q('alignmentStage');
-      if (stage) {
-        stage.classList.add('is-fibers-fused');
-        var bridge = stage.querySelector('.fsm-fusion-weld-bridge');
-        if (!bridge) {
-          bridge = document.createElement('div');
-          bridge.className = 'fsm-fusion-weld-bridge';
-          bridge.setAttribute('aria-hidden', 'true');
-          var vGroove = stage.querySelector('.fsm-v-groove');
-          if (vGroove) vGroove.appendChild(bridge);
-          else stage.appendChild(bridge);
+    function fuseFibersVisual(lossDbOverride) {
+      var lossDb = typeof lossDbOverride === 'number' && isFinite(lossDbOverride)
+        ? lossDbOverride
+        : state.spliceLossDb;
+      if (!state.fibersFused) {
+        state.fibersFused = true;
+        global.isFiberFused = true;
+        var stage = q('alignmentStage');
+        if (stage) {
+          stage.classList.add('is-fibers-fused');
+          var bridge = stage.querySelector('.fsm-fusion-weld-bridge');
+          if (!bridge) {
+            bridge = document.createElement('div');
+            bridge.className = 'fsm-fusion-weld-bridge';
+            bridge.setAttribute('aria-hidden', 'true');
+            var vGroove = stage.querySelector('.fsm-v-groove');
+            if (vGroove) vGroove.appendChild(bridge);
+            else stage.appendChild(bridge);
+          }
+          bridge.classList.add('is-active');
         }
-        bridge.classList.add('is-active');
       }
+      state.spliceLossDb = lossDb;
       if (boundMachineId && global.FtthLab && typeof global.FtthLab.fuseSplicerFibers === 'function') {
         global.FtthLab.fuseSplicerFibers(boundMachineId, {
-          lossDb: state.spliceLossDb,
+          lossDb: lossDb,
+          loss: lossDb,
         });
       } else {
-        emit('fuseFibers', { machineId: boundMachineId, lossDb: state.spliceLossDb });
+        emit('fuseFibers', { machineId: boundMachineId, lossDb: lossDb, loss: lossDb });
       }
+    }
+
+    function ensureFiberPlacedFromDock() {
+      if (state.fiberPlaced.L && state.fiberPlaced.R) return true;
+      var pair = getSplicerDockedPairLocal();
+      if (pair && pair.left && pair.right) {
+        state.fiberPlaced.L = true;
+        state.fiberPlaced.R = true;
+        return true;
+      }
+      return false;
+    }
+
+    function updateSplicerScreen(outcome, lossDb) {
+      var splicerScreen = q('lossEst');
+      if (!splicerScreen || lossDb == null || !isFinite(lossDb)) return;
+      splicerScreen.classList.remove('is-high-loss', 'is-splice-failed', 'is-splice-dirty');
+      if (outcome.reason === 'uncleaved') {
+        splicerScreen.innerHTML =
+          '<span style="color: #ff4444; font-weight: bold;">SPLICE FAILED: UNCLEAVED FIBER<br>LOSS: ' +
+          lossDb.toFixed(2) + ' dB</span>';
+        splicerScreen.classList.add('is-splice-failed');
+        return;
+      }
+      if (outcome.reason === 'dirty') {
+        splicerScreen.innerHTML =
+          '<span style="color: #ff9800; font-weight: bold;">SPLICE OK (DIRTY)<br>LOSS: ' +
+          lossDb.toFixed(2) + ' dB</span>';
+        splicerScreen.classList.add('is-splice-dirty', 'is-high-loss');
+        return;
+      }
+      splicerScreen.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
+    }
+
+    function applySpliceOutcomeUi(outcome, lossDb) {
+      var statusText = q('statusText');
+      state.spliceLossDb = lossDb;
+      state.spliceOutcomeReason = outcome.reason;
+      state.spliceDirty = outcome.warnUi;
+      if (statusText) {
+        statusText.textContent = outcome.statusLabel;
+        statusText.classList.remove('is-splice-failed', 'is-splice-dirty');
+        if (outcome.reason === 'perfect') {
+          statusText.style.color = 'var(--accent-green)';
+        } else if (outcome.reason === 'dirty') {
+          statusText.style.color = 'var(--accent-orange)';
+          statusText.classList.add('is-splice-dirty');
+        } else {
+          statusText.style.color = '#ff4444';
+          statusText.classList.add('is-splice-failed');
+        }
+      }
+      updateSplicerScreen(outcome, lossDb);
+      showToast(
+        outcome.reason === 'perfect'
+          ? 'Splice Complete — Loss: ' + lossDb.toFixed(2) + ' dB'
+          : outcome.statusLabel + ' — ' + lossDb.toFixed(2) + ' dB',
+        outcome.reason === 'perfect' ? 'success' : 'warning'
+      );
+    }
+
+    function completeSpliceExecution(cachedPair) {
+      var dockedPair = getSplicerDockedPairLocal();
+      if (!dockedPair || !dockedPair.left || !dockedPair.right) {
+        dockedPair = cachedPair;
+      }
+      var outcome = evaluateSpliceOutcome(dockedPair);
+      if (!outcome.canSplice || outcome.lossDb == null) {
+        console.warn('Splice completion blocked — fibers not ready for weld', outcome.reason);
+        return;
+      }
+      applySpliceOutcomeUi(outcome, outcome.lossDb);
+      fuseFibersVisual(outcome.lossDb);
+      emit('spliceComplete', {
+        lossDb: outcome.lossDb,
+        loss: outcome.lossDb,
+        machineId: boundMachineId,
+        dirty: outcome.reason === 'dirty',
+        uncleaved: outcome.reason === 'uncleaved',
+        outcomeReason: outcome.reason,
+      });
     }
 
     function finishSystemReset() {
@@ -763,11 +917,12 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       if (statusText) {
         statusText.textContent = 'READY';
         statusText.style.color = '';
+        statusText.classList.remove('is-splice-failed', 'is-splice-dirty');
       }
       var lossEst = q('lossEst');
       if (lossEst) {
         lossEst.textContent = 'EST.LOSS: —';
-        lossEst.classList.remove('is-high-loss');
+        lossEst.classList.remove('is-high-loss', 'is-splice-failed', 'is-splice-dirty');
       }
       var moveIndicator = q('moveIndicator');
       var offsetDisplay = q('offsetDisplay');
@@ -880,7 +1035,20 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       state.aligning = false;
       if (state.splicing) return;
       if (!state.clampsClosed.L || !state.clampsClosed.R) return;
-      if (!state.fiberPlaced.L || !state.fiberPlaced.R) return;
+      if (!ensureFiberPlacedFromDock()) return;
+
+      var cachedDockedPair = getSplicerDockedPairLocal();
+      var preOutcome = evaluateSpliceOutcome(cachedDockedPair);
+      if (!preOutcome.canSplice) {
+        var rejectStatus = q('statusText');
+        if (rejectStatus) {
+          rejectStatus.textContent = preOutcome.statusLabel;
+          rejectStatus.style.color = '#f44336';
+          rejectStatus.classList.add('is-splice-failed');
+        }
+        showToast(preOutcome.statusLabel, 'error');
+        return;
+      }
 
       state.splicing = true;
       var ledArc = q('ledArc');
@@ -931,46 +1099,11 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
           if (stage) stage.style.transform = 'translate(0, 0)';
           if (xVal) xVal.textContent = '0.000';
           if (yVal) yVal.textContent = '0.000';
-          var dockedPair = null;
-          if (boundMachineId && global.FtthLab &&
-              typeof FtthLab.getSplicerDockedPair === 'function') {
-            dockedPair = FtthLab.getSplicerDockedPair(boundMachineId);
-          }
-          var dirtySplice = !!(dockedPair && dockedPair.left && dockedPair.right &&
-            (!isDockedFiberClean(dockedPair.left) || !isDockedFiberClean(dockedPair.right)));
-          state.spliceDirty = dirtySplice;
-          var lossDb = pickSpliceLossForDockedPair(dockedPair);
-          state.spliceLossDb = lossDb;
-          if (statusText) {
-            if (dirtySplice) {
-              statusText.textContent = 'SPLICE OK (DIRTY)';
-              statusText.style.color = 'var(--accent-orange)';
-            } else {
-              statusText.textContent = 'SPLICE OK';
-              statusText.style.color = 'var(--accent-green)';
-            }
-          }
-          var lossEst = q('lossEst');
-          if (lossEst) {
-            lossEst.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
-            lossEst.classList.toggle('is-high-loss', dirtySplice);
-          }
-          showToast(
-            dirtySplice
-              ? 'Splice Complete — HIGH LOSS: ' + lossDb.toFixed(2) + ' dB (dirty fiber)'
-              : 'Splice Complete — Loss: ' + lossDb.toFixed(2) + ' dB',
-            dirtySplice ? 'warning' : 'success'
-          );
-          fuseFibersVisual();
+          completeSpliceExecution(cachedDockedPair);
           setTimeout(function () {
             if (ledArc) ledArc.classList.remove('orange-on');
             if (arcGlow) arcGlow.classList.remove('active');
           }, 3000);
-          emit('spliceComplete', {
-            lossDb: lossDb,
-            machineId: boundMachineId,
-            dirty: dirtySplice,
-          });
         }
       }, 80);
     }
@@ -1252,18 +1385,32 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       if (spliceComplete) {
         var lossLabel = state.spliceLossDb.toFixed(2) + ' dB';
         var lossFontSize = Math.max(28, Math.round(h * 0.28));
-        var dirtyLoss = !!state.spliceDirty;
+        var outcomeReason = state.spliceOutcomeReason;
+        var warnLoss = outcomeReason === 'dirty' || outcomeReason === 'uncleaved';
+        var criticalLoss = outcomeReason === 'uncleaved';
+        var dirtyLoss = outcomeReason === 'dirty';
+        var lossColor = criticalLoss ? '#f44336' : (dirtyLoss ? '#ff9800' : '#00e5ff');
+        var lossShadow = criticalLoss
+          ? 'rgba(244, 67, 54, 0.55)'
+          : (dirtyLoss ? 'rgba(255, 152, 0, 0.55)' : 'rgba(0, 229, 255, 0.55)');
+        var cameraLabel = outcomeReason === 'uncleaved'
+          ? 'SPLICE FAILED: BAD CLEAVE'
+          : (outcomeReason === 'dirty'
+            ? 'SPLICE OK (DIRTY)'
+            : 'SPLICE LOSS');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '700 ' + lossFontSize + 'px "Share Tech Mono", monospace';
-        ctx.shadowColor = dirtyLoss ? 'rgba(255, 152, 0, 0.55)' : 'rgba(0, 229, 255, 0.55)';
+        ctx.shadowColor = warnLoss ? lossShadow : 'rgba(0, 229, 255, 0.55)';
         ctx.shadowBlur = 14;
-        ctx.fillStyle = dirtyLoss ? '#ff9800' : '#00e5ff';
+        ctx.fillStyle = lossColor;
         ctx.fillText(lossLabel, cx, cy);
         ctx.shadowBlur = 0;
         ctx.font = '500 ' + Math.max(10, Math.round(lossFontSize * 0.28)) + 'px "Orbitron", monospace';
-        ctx.fillStyle = dirtyLoss ? 'rgba(255, 152, 0, 0.65)' : 'rgba(0, 229, 255, 0.55)';
-        ctx.fillText(dirtyLoss ? 'HIGH LOSS' : 'SPLICE LOSS', cx, cy + lossFontSize * 0.72);
+        ctx.fillStyle = warnLoss
+          ? (criticalLoss ? 'rgba(244, 67, 54, 0.75)' : 'rgba(255, 152, 0, 0.75)')
+          : 'rgba(0, 229, 255, 0.55)';
+        ctx.fillText(cameraLabel, cx, cy + lossFontSize * 0.72);
       } else if (state.fiberPlaced.L || state.fiberPlaced.R) {
         var gap = state.splicing ? Math.max(0, 8 * (1 - (t % 100) / 40)) : 8;
         var edgePad = Math.max(10, w * 0.02);
@@ -1499,9 +1646,12 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     if (yVal) yVal.textContent = '0.000';
     if (lossEst) {
       lossEst.textContent = 'EST.LOSS: —';
-      lossEst.classList.remove('is-high-loss');
+      lossEst.classList.remove('is-high-loss', 'is-splice-failed', 'is-splice-dirty');
     }
-    if (statusText) statusText.textContent = 'READY';
+    if (statusText) {
+      statusText.textContent = 'READY';
+      statusText.classList.remove('is-splice-failed', 'is-splice-dirty');
+    }
     scheduleInitialCameraLayout();
     emit('ready', { empty: true });
 

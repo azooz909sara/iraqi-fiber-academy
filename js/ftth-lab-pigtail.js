@@ -716,6 +716,7 @@
       if (p.stripStage < 0) p.stripStage = 0;
       if (p.stripStage > 2) p.stripStage = 2;
       if (typeof p.stripLengthPx !== 'number') p.stripLengthPx = 0;
+      p.isStripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1 || p.stripFrontierLock);
       p.isCleaned = !!p.isCleaned;
       ensureFiberStrip(p);
       p.cleaved = !!p.cleaved;
@@ -1445,6 +1446,7 @@
     } else {
       p.stripStage = 1;
     }
+    if ((Number(p.stripStage) || 0) >= 1) p.isStripped = true;
     p.stripLengthPx = j;
     p.stripPeel = fs.peel || 0;
   }
@@ -2396,7 +2398,9 @@
       : pair.left.by;
     var spliceLossDb = typeof opts.lossDb === 'number' && isFinite(opts.lossDb)
       ? opts.lossDb
-      : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null);
+      : (typeof opts.loss === 'number' && isFinite(opts.loss)
+        ? opts.loss
+        : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null));
     fusedAssemblies[fusionId] = {
       fusionAssemblyId: fusionId,
       machineId: machineId,
@@ -2407,6 +2411,7 @@
       bridgeY: grooveY,
       meetX: meetX,
       spliceLossDb: spliceLossDb,
+      loss: spliceLossDb,
       isOvenDocked: false,
       ovenPreviewSlot: null,
       heatPhase: 'idle',
@@ -4233,6 +4238,7 @@
     if (!p || !session) return;
     ensureFiberStrip(p);
     p.isCleaned = false;
+    p.isStripped = true;
     var fs = p.fiberStrip;
     var maxLen = maxStripLenPx(p);
     var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
@@ -4804,14 +4810,14 @@
     }
     if (!id) return null;
     var p = findPigtail(id);
-    if (!p || !isFullyStrippedPigtail(p)) return null;
+    if (!p || !p.isStripped || !isFullyStrippedPigtail(p)) return null;
     return p;
   }
 
   /** Mark a fully stripped pigtail bare fiber as cleaned. */
   function markPigtailCleaned(id) {
     var p = findPigtail(id);
-    if (!p || !isFullyStrippedPigtail(p)) return false;
+    if (!p || !p.isStripped || !isFullyStrippedPigtail(p)) return false;
     if (p.isCleaned) return false;
     p.isCleaned = true;
     updateStripVisuals(p);
@@ -5014,7 +5020,9 @@
       lengthUnit: 'm',
       fixedLength: SPAWN_LEN_PX,
       hasSleeve: false,
+      isStripped: false,
       isCleaned: false,
+      isCleaved: false,
       stripStage: 0,
       stripPeel: 0,
       stripLengthPx: 0,
@@ -7189,6 +7197,11 @@
         spliceLossDb: typeof spliceLossDb === 'number' && isFinite(spliceLossDb)
           ? spliceLossDb
           : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null),
+        loss: typeof spliceLossDb === 'number' && isFinite(spliceLossDb)
+          ? spliceLossDb
+          : (existing && typeof existing.loss === 'number'
+            ? existing.loss
+            : (existing && typeof existing.spliceLossDb === 'number' ? existing.spliceLossDb : null)),
       };
     }
     Object.keys(fusedAssemblies).forEach(function (assemblyId) {
@@ -7812,9 +7825,9 @@
         var machineId = detail.machineId;
         var lossDb = typeof detail.lossDb === 'number' && isFinite(detail.lossDb)
           ? detail.lossDb
-          : null;
+          : (typeof detail.loss === 'number' && isFinite(detail.loss) ? detail.loss : null);
         if (machineId && !isSplicerWeldedPair(machineId)) {
-          fuseSplicerFibers(machineId, { lossDb: lossDb });
+          fuseSplicerFibers(machineId, { lossDb: lossDb, loss: lossDb });
         } else if (machineId) {
           if (lossDb != null) {
             var docked = getSplicerDockedPair(machineId);
@@ -7822,6 +7835,7 @@
               var fusionId = makeFusionAssemblyId(docked.left.id, docked.right.id);
               if (fusionId && fusedAssemblies[fusionId]) {
                 fusedAssemblies[fusionId].spliceLossDb = lossDb;
+                fusedAssemblies[fusionId].loss = lossDb;
               }
             }
           }
@@ -7832,8 +7846,13 @@
         }
       });
       document.addEventListener('fusion-splicer:fuseFibers', function (ev) {
-        var machineId = ev.detail && ev.detail.machineId;
-        if (machineId) fuseSplicerFibers(machineId);
+        var detail = ev.detail || {};
+        var machineId = detail.machineId;
+        if (!machineId) return;
+        var lossDb = typeof detail.lossDb === 'number' && isFinite(detail.lossDb)
+          ? detail.lossDb
+          : (typeof detail.loss === 'number' && isFinite(detail.loss) ? detail.loss : null);
+        fuseSplicerFibers(machineId, { lossDb: lossDb, loss: lossDb });
       });
       document.addEventListener('fusion-splicer:reset', function (ev) {
         var machineId = ev.detail && ev.detail.machineId;

@@ -290,11 +290,7 @@
   }
 
   function getTraceEventSectionHeaderLabel() {
-    var unit = currentOtdrTestState.distanceUnit || 'meter';
-    if (unit === 'km') return 'Section km';
-    if (unit === 'meter' || unit === 'm') return 'Section m';
-    var scale = getDistanceDisplayScale();
-    return 'Section ' + scale.label;
+    return 'Section km';
   }
 
   function formatTraceNumeric(value, digits) {
@@ -432,8 +428,8 @@
   var OTDR_FAR_REFLECT_DB = -14.8;
   var OTDR_FUSION_SPLICE_DB = 0.05;
   var OTDR_COUPLER_PASS_DB = 0.3;
-  var OTDR_MISMATCH_DB = 3.0;
   var FIBER_ATTENUATION = 0.210;
+  var VIAVI_MIN_SECTION_KM_FOR_SLOPE = 0.02;
 
   function roundTrace2(n) {
     return Math.round(n * 100) / 100;
@@ -554,21 +550,78 @@
     return null;
   }
 
-  function mismatchLossForSide(side) {
-    return (side && side.mismatch) ? OTDR_MISMATCH_DB : 0;
+  function normalizeOtdrPolish(value) {
+    var s = String(value || '').toUpperCase();
+    if (s === 'APC' || s === 'SC/APC' || s === 'SCAPC' || s === 'GREEN') return 'APC';
+    if (s === 'PC' || s === 'UPC' || s === 'SC/PC' || s === 'BLUE') return 'UPC';
+    return 'UPC';
+  }
+
+  function detectPolishMismatch(incomingSide, explicitPortPolish) {
+    if (!incomingSide) return false;
+    if (incomingSide.mismatch === true) return true;
+    if (incomingSide.attached && incomingSide.attached.mismatch === true) return true;
+    var cablePolish = incomingSide.polish;
+    var portPolish = explicitPortPolish;
+    if (portPolish == null && incomingSide.attached && incomingSide.attached.polish) {
+      portPolish = incomingSide.attached.polish;
+    }
+    if (cablePolish == null || portPolish == null) return false;
+    return normalizeOtdrPolish(cablePolish) !== normalizeOtdrPolish(portPolish);
+  }
+
+  function standardMatedConnectionLossDb(baseLoss) {
+    if (typeof baseLoss === 'number' && isFinite(baseLoss) && baseLoss >= 0.10 && baseLoss <= 0.45) {
+      return roundTrace3(baseLoss);
+    }
+    return roundTrace3(Math.random() * 0.35 + 0.10);
+  }
+
+  function computeOtdrMatedConnectionOptics(incomingSide, opts) {
+    opts = opts || {};
+    var portPolish = opts.portPolish;
+    if (portPolish == null && incomingSide && incomingSide.attached && incomingSide.attached.polish) {
+      portPolish = incomingSide.attached.polish;
+    }
+    if (portPolish == null && incomingSide && incomingSide.polish) {
+      portPolish = incomingSide.polish;
+    }
+
+    if (detectPolishMismatch(incomingSide, portPolish)) {
+      return {
+        loss: roundTrace3(Math.random() * 2.0 + 3.5),
+        reflectance: -14.0,
+        mismatch: true,
+      };
+    }
+
+    var matchedPolish = normalizeOtdrPolish(portPolish || (incomingSide && incomingSide.polish) || 'UPC');
+    var configuredLoss = opts.baseLoss;
+    if (configuredLoss == null && incomingSide) {
+      configuredLoss = readComponentLossDb(incomingSide, null);
+    }
+    return {
+      loss: standardMatedConnectionLossDb(configuredLoss),
+      reflectance: matchedPolish === 'APC' ? -65.0 : -45.0,
+      mismatch: false,
+    };
   }
 
   function resolveConnectorEventOptics(side, component) {
-    var loss = readComponentLossDb(component, null);
-    if (loss == null && side) loss = readComponentLossDb(side, null);
-    if (loss == null) {
-      loss = OTDR_CONNECTOR_LOSS_DB + mismatchLossForSide(side);
-    }
-    var reflect = readComponentReflectanceDb(component, null);
-    if (reflect == null && side) reflect = readComponentReflectanceDb(side, null);
-    if (reflect == null && side && side.mismatch) reflect = -22;
-    if (reflect == null) reflect = -45;
-    return { loss: loss, reflectance: reflect };
+    var configuredLoss = readComponentLossDb(component, null);
+    if (configuredLoss == null && side) configuredLoss = readComponentLossDb(side, null);
+    return computeOtdrMatedConnectionOptics(side, {
+      portPolish: side && side.attached ? side.attached.polish : (side ? side.polish : null),
+      baseLoss: configuredLoss,
+    });
+  }
+
+  function resolveCouplerPassOptics(couplerId, incomingSide) {
+    var baseLoss = lookupCouplerPassLossDb(couplerId);
+    return computeOtdrMatedConnectionOptics(incomingSide, {
+      portPolish: incomingSide && incomingSide.attached ? incomingSide.attached.polish : null,
+      baseLoss: baseLoss,
+    });
   }
 
   function lookupCouplerPassLossDb(couplerId) {
@@ -577,10 +630,6 @@
       if (isFinite(n)) return n;
     }
     return OTDR_COUPLER_PASS_DB;
-  }
-
-  function lookupCouplerReflectanceDb(couplerId) {
-    return -35;
   }
 
   function findSplitterById(splitterId) {
@@ -638,7 +687,7 @@
   function normalizeMockEventType(type, label) {
     if (type === 'reflective') {
       if (label === 'End' || label === 'Open Tail' || label === 'End of fiber') return 'end';
-      if (label === 'Splitter') return 'splitter';
+      if (label === 'Splitter' || label === 'End Splitter') return 'splitter';
       return 'connector';
     }
     return type || 'connector';
@@ -649,8 +698,42 @@
     return roundTrace3(labFiberAttenuationDbKm(parseOtdrWavelengthNm()));
   }
 
+  /**
+   * VIAVI traversal engine: Section km, Slope dB/km, T.Loss dB.
+   * T.Loss(N) = Parent T.Loss + Parent Loss dB + (Section km × Slope).
+   * Current-event Loss dB is excluded from its own T.Loss (carried to the next event).
+   */
+  function computeViaviTraversalMetrics(parentDistM, parentTLossDb, parentLossDb, currentDistM, fiberSlopeDbKm) {
+    var sectionM = Math.max(0, Number(currentDistM) - Number(parentDistM));
+    var sectionKm = roundTrace3(sectionM / 1000);
+    var slopeDbKm = typeof fiberSlopeDbKm === 'number' && isFinite(fiberSlopeDbKm)
+      ? fiberSlopeDbKm
+      : getViaviFiberSlopeDbKm();
+    var displaySlope = sectionKm < VIAVI_MIN_SECTION_KM_FOR_SLOPE ? null : slopeDbKm;
+    var fiberAttenLoss = sectionKm * slopeDbKm;
+    var parentLoss = typeof parentLossDb === 'number' && isFinite(parentLossDb) ? parentLossDb : 0;
+    var parentTLoss = typeof parentTLossDb === 'number' && isFinite(parentTLossDb) ? parentTLossDb : 0;
+    var tLoss = roundTrace3(parentTLoss + parentLoss + fiberAttenLoss);
+    return {
+      sectionM: roundTrace3(sectionM),
+      sectionKm: sectionKm,
+      sectionAtt: displaySlope,
+      tLoss: tLoss,
+    };
+  }
+
   function applyViaviOtdrEventMetrics(events) {
     if (!events || !events.length) return 0;
+    var allPathComputed = true;
+    var checkIdx;
+    for (checkIdx = 0; checkIdx < events.length; checkIdx++) {
+      if (!events[checkIdx]._pathComputed) {
+        allPathComputed = false;
+        break;
+      }
+    }
+    if (allPathComputed) return computeMaxBranchEndpointLoss(events);
+
     var slope = getViaviFiberSlopeDbKm();
     var prevDistance = 0;
     var prevTLoss = 0;
@@ -659,6 +742,7 @@
 
     for (i = 0; i < events.length; i++) {
       var ev = events[i];
+      if (ev._pathComputed) continue;
       var currentDistance = typeof ev.distance === 'number' ? ev.distance : 0;
 
       if (i === 0) {
@@ -667,6 +751,7 @@
         ev.reflect = ev._reflectance != null ? ev._reflectance : OTDR_LAUNCH_REFLECT_DB;
         ev.sectionAtt = null;
         ev.sectionM = 0;
+        ev.sectionKm = 0;
         ev.tLoss = 0;
         ev.totalLoss = 0;
         prevDistance = 0;
@@ -675,17 +760,22 @@
         continue;
       }
 
-      var sectionM = Math.max(0, currentDistance - prevDistance);
-      var sectionKm = sectionM / 1000;
-      var tLoss = prevTLoss + prevEventLoss + (sectionKm * slope);
       var insertionLoss = 0;
       if (ev._insertionLoss != null && isFinite(ev._insertionLoss)) {
         insertionLoss = ev._insertionLoss;
       }
 
-      ev.sectionM = roundTrace3(sectionM);
-      ev.sectionAtt = slope;
-      ev.tLoss = roundTrace3(tLoss);
+      var viaviMetrics = computeViaviTraversalMetrics(
+        prevDistance,
+        prevTLoss,
+        prevEventLoss,
+        currentDistance,
+        slope
+      );
+      ev.sectionM = viaviMetrics.sectionM;
+      ev.sectionKm = viaviMetrics.sectionKm;
+      ev.sectionAtt = viaviMetrics.sectionAtt;
+      ev.tLoss = viaviMetrics.tLoss;
       ev.totalLoss = ev.tLoss;
       ev.loss = insertionLoss > 0 ? insertionLoss : null;
 
@@ -775,6 +865,132 @@
     return readComponentReflectanceDb(splitter, -45);
   }
 
+  function isPortKeyConnected(portKey, graph) {
+    return !!findFiberStepFromPort(portKey, graph, {}, {});
+  }
+
+  function isSplitterInputPortKey(key) {
+    if (!key || key.indexOf('spl:') !== 0) return false;
+    var portId = (key.split(':')[2] || '');
+    return portId.indexOf('IN') === 0;
+  }
+
+  function splitterIdFromPortKey(key) {
+    var parts = (key || '').split(':');
+    return parts.length >= 2 ? parts[1] : null;
+  }
+
+  function compareBranchPaths(pathA, pathB) {
+    var a = pathA || '0';
+    var b = pathB || '0';
+    if (a === b) return 0;
+    return a.localeCompare(b, undefined, { numeric: true });
+  }
+
+  function traceEventPhysicalSortRank(ev) {
+    if (!ev) return 99;
+    if (ev.type === 'start') return 0;
+    if (ev.type === 'splitter' && ev.label === 'End Splitter') return 50;
+    if (ev.type === 'splitter') return 10;
+    if (ev.type === 'splice') return 20;
+    if (ev.type === 'connector') return 30;
+    if (ev.type === 'end') return 60;
+    return 40;
+  }
+
+  function shouldEmitConnectorAtPort(exitKey, graph, visitedPc, visitedPt, fromSplitterBranch) {
+    if (!exitKey) return false;
+    if (exitKey.indexOf('cpl:') === 0) return true;
+    if (isSplitterInputPortKey(exitKey) || exitKey.indexOf('spl:') === 0) return false;
+    var nextStep = findFiberStepFromPort(exitKey, graph, visitedPc || {}, visitedPt || {});
+    if (nextStep && nextStep.kind === 'pigtail') return false;
+    if (fromSplitterBranch) return false;
+    return true;
+  }
+
+  function finalizeTraceEventOrdering(eventList) {
+    if (!eventList || !eventList.length) return;
+    eventList.sort(function (a, b) {
+      var pathCmp = compareBranchPaths(a.branchPath, b.branchPath);
+      if (pathCmp !== 0) return pathCmp;
+      var da = typeof a.distance === 'number' ? a.distance : 0;
+      var db = typeof b.distance === 'number' ? b.distance : 0;
+      if (da !== db) return da - db;
+      var rankDiff = traceEventPhysicalSortRank(a) - traceEventPhysicalSortRank(b);
+      if (rankDiff !== 0) return rankDiff;
+      return (a._traversalSeq || 0) - (b._traversalSeq || 0);
+    });
+    var idx;
+    for (idx = 0; idx < eventList.length; idx++) {
+      eventList[idx].eventNum = idx + 1;
+      eventList[idx].event = String(idx + 1);
+    }
+  }
+
+  function shallowCopyObj(obj) {
+    var copy = {};
+    var k;
+    for (k in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, k)) copy[k] = obj[k];
+    }
+    return copy;
+  }
+
+  function cloneBranchTraversalState(src) {
+    return {
+      pc: shallowCopyObj(src.pc),
+      pt: shallowCopyObj(src.pt),
+      couplers: shallowCopyObj(src.couplers),
+      fusedSeen: shallowCopyObj(src.fusedSeen),
+      distanceM: src.distanceM,
+      lastTraversedSpanM: src.lastTraversedSpanM,
+      lastConnectorSide: src.lastConnectorSide,
+      lastConnectorComponent: src.lastConnectorComponent,
+      lastEventDistanceM: src.lastEventDistanceM,
+      tLossDb: src.tLossDb,
+      lastInsertionLoss: src.lastInsertionLoss,
+      fromSplitterBranch: !!src.fromSplitterBranch,
+      branchPath: src.branchPath || '0',
+    };
+  }
+
+  function branchSnapshotAtSplitter(branchState) {
+    return {
+      distanceM: branchState.distanceM,
+      tLossDb: branchState.tLossDb,
+      lastEventDistanceM: branchState.lastEventDistanceM,
+      lastInsertionLoss: branchState.lastInsertionLoss,
+    };
+  }
+
+  function applyBranchSnapshotToState(branchState, snapshot) {
+    branchState.distanceM = snapshot.distanceM;
+    branchState.tLossDb = snapshot.tLossDb;
+    branchState.lastEventDistanceM = snapshot.lastEventDistanceM;
+    branchState.lastInsertionLoss = snapshot.lastInsertionLoss;
+    branchState.lastTraversedSpanM = 0;
+  }
+
+  function computeMaxBranchEndpointLoss(events) {
+    var max = 0;
+    var i;
+    for (i = 0; i < events.length; i++) {
+      var ev = events[i];
+      if (ev.type !== 'end') continue;
+      var ins = 0;
+      if (ev._insertionLoss != null && isFinite(ev._insertionLoss)) ins = ev._insertionLoss;
+      var total = (ev.tLoss || 0) + ins;
+      if (total > max) max = total;
+    }
+    if (!max && events.length) {
+      var last = events[events.length - 1];
+      var lastIns = 0;
+      if (last._insertionLoss != null && isFinite(last._insertionLoss)) lastIns = last._insertionLoss;
+      max = (last.tLoss || 0) + lastIns;
+    }
+    return roundTrace3(max);
+  }
+
   function findFiberStepFromPort(currentKey, graph, visitedPc, visitedPt) {
     if (!currentKey) return null;
     var pcords = graph.pcords || [];
@@ -799,7 +1015,6 @@
         if (ka === currentKey && c.freeB) exitSide = c.sideB;
         else if (kb === currentKey && c.freeA) exitSide = c.sideA;
       }
-      var mismatchLoss = mismatchLossForSide(exitSide);
       return {
         kind: 'pcord',
         linkId: c.id,
@@ -808,7 +1023,6 @@
         exitKey: exitKey,
         exitSide: exitSide,
         openEnd: openEnd,
-        mismatchLoss: mismatchLoss,
       };
     }
 
@@ -848,217 +1062,351 @@
   }
 
   function buildDynamicOtdrEvents(deviceId, graph) {
-    var visitedPc = {};
-    var visitedPt = {};
-    var visitedCouplers = {};
-    var fusedSeen = {};
     var currentKey = 'ols:' + deviceId + '-port-apc';
-    var cumulativeCableDistance = 0;
     var fiberLossTotal = 0;
     var connectorLossTotal = 0;
     var spliceLossTotal = 0;
     var events = [];
     var maxTraceM = 50000;
-    var lastTraversedSpanM = 0;
-    var lastConnectorSide = null;
-    var lastConnectorComponent = null;
     traceEventCounter = 1;
 
     function linearPos(atM) {
       return Math.min(0.99, Math.max(0.02, atM / Math.max(atM + 100, 2500)));
     }
 
-    function pushTraceEvent(type, label, insertionLossAfter, internalOpts) {
-      internalOpts = internalOpts || {};
-      var eventNum = traceEventCounter;
-      traceEventCounter += 1;
-      var spanM = type === 'start' ? 0 : lastTraversedSpanM;
-      var row = {
-        eventNum: eventNum,
-        event: String(eventNum),
-        type: type,
-        label: label,
-        distance: type === 'start' ? 0 : roundTrace3(cumulativeCableDistance),
-        linearPos: linearPos(type === 'start' ? 0 : cumulativeCableDistance),
-        _spanLengthM: spanM > 0 ? spanM : 0,
+    function makeBranchState() {
+      return {
+        pc: {},
+        pt: {},
+        couplers: {},
+        fusedSeen: {},
+        distanceM: 0,
+        lastTraversedSpanM: 0,
+        lastConnectorSide: null,
+        lastConnectorComponent: null,
+        lastEventDistanceM: 0,
+        tLossDb: 0,
+        lastInsertionLoss: 0,
+        fromSplitterBranch: false,
+        branchPath: '0',
       };
-      if (internalOpts.reflectance != null) row._reflectance = internalOpts.reflectance;
-      if (typeof insertionLossAfter === 'number' && isFinite(insertionLossAfter)) {
-        row._insertionLoss = insertionLossAfter;
-      }
-      events.push(row);
-      lastTraversedSpanM = 0;
     }
 
-    function traverseFiberSpan(lengthM) {
+    function pushTraceEvent(type, label, insertionLossAfter, internalOpts, branchState) {
+      internalOpts = internalOpts || {};
+      var traversalSeq = traceEventCounter;
+      traceEventCounter += 1;
+      var spanM = type === 'start' ? 0 : branchState.lastTraversedSpanM;
+      var distM = type === 'start' ? 0 : roundTrace3(branchState.distanceM);
+      var insertionLoss = 0;
+      if (typeof insertionLossAfter === 'number' && isFinite(insertionLossAfter)) {
+        insertionLoss = insertionLossAfter;
+      }
+      var row = {
+        eventNum: traversalSeq,
+        event: String(traversalSeq),
+        _traversalSeq: traversalSeq,
+        type: type,
+        label: label,
+        distance: distM,
+        linearPos: linearPos(distM),
+        _spanLengthM: spanM > 0 ? spanM : 0,
+        _pathComputed: true,
+        branchPath: branchState.branchPath || '0',
+      };
+      if (internalOpts.reflectance != null) row._reflectance = internalOpts.reflectance;
+      if (insertionLoss > 0) row._insertionLoss = insertionLoss;
+
+      if (type === 'start') {
+        row.loss = null;
+        row.reflect = row._reflectance != null ? row._reflectance : OTDR_LAUNCH_REFLECT_DB;
+        row.sectionAtt = null;
+        row.sectionM = 0;
+        row.sectionKm = 0;
+        row.tLoss = 0;
+        row.totalLoss = 0;
+        branchState.lastEventDistanceM = 0;
+        branchState.tLossDb = 0;
+        branchState.lastInsertionLoss = 0;
+      } else {
+        var viaviMetrics = computeViaviTraversalMetrics(
+          branchState.lastEventDistanceM,
+          branchState.tLossDb,
+          branchState.lastInsertionLoss,
+          distM,
+          getViaviFiberSlopeDbKm()
+        );
+        row.sectionM = viaviMetrics.sectionM;
+        row.sectionKm = viaviMetrics.sectionKm;
+        row.sectionAtt = viaviMetrics.sectionAtt;
+        row.tLoss = viaviMetrics.tLoss;
+        row.totalLoss = row.tLoss;
+        row.loss = insertionLoss > 0 ? insertionLoss : null;
+        if (type === 'splice') {
+          row.reflect = null;
+        } else if (row._reflectance != null && isFinite(row._reflectance)) {
+          row.reflect = row._reflectance;
+        } else {
+          row.reflect = null;
+        }
+        branchState.tLossDb = row.tLoss;
+        branchState.lastEventDistanceM = distM;
+        branchState.lastInsertionLoss = insertionLoss;
+      }
+
+      events.push(row);
+      branchState.lastTraversedSpanM = 0;
+    }
+
+    function traverseFiberSpan(lengthM, branchState) {
       var span = Math.max(0, Number(lengthM) || 0);
-      lastTraversedSpanM = span;
+      branchState.lastTraversedSpanM = span;
       if (span <= 0) return 0;
-      cumulativeCableDistance += span;
+      branchState.distanceM += span;
       var segmentLoss = (span / 1000) * FIBER_ATTENUATION;
       fiberLossTotal += segmentLoss;
       return segmentLoss;
     }
 
-    function pushPigtailConnectorIfNeeded(pigtail) {
-      var entryDistanceM = cumulativeCableDistance;
-      if (events.length) {
-        var prev = events[events.length - 1];
-        var prevDist = typeof prev.distance === 'number' ? prev.distance : entryDistanceM;
-        if (prev.type === 'connector' && roundTrace3(prevDist) === roundTrace3(entryDistanceM)) {
-          prev.label = 'Pigtail';
-          return;
-        }
-      }
-      lastTraversedSpanM = 0;
-      var pigtailOptics = resolveConnectorEventOptics(
-        pigtail && pigtail.connector,
-        pigtail
-      );
-      connectorLossTotal += pigtailOptics.loss;
-      pushTraceEvent('connector', 'Pigtail', pigtailOptics.loss, {
-        reflectance: pigtailOptics.reflectance,
-      });
+    function traversePigtailFiberSpan(pigtail, branchState) {
+      traverseFiberSpan(resolveOtdrFiberLengthM(pigtail), branchState);
     }
 
-    function traversePigtailFiberToSplice(pigtail) {
-      var pigtailLenM = resolveOtdrFiberLengthM(pigtail);
-      pushPigtailConnectorIfNeeded(pigtail);
-      traverseFiberSpan(pigtailLenM);
-      return pigtailLenM;
-    }
-
-    function pushNodeEventAtKey(exitKey) {
+    function pushNodeEventAtKey(exitKey, branchState) {
       if (!exitKey) {
-        var endOptics = resolveConnectorEventOptics(lastConnectorSide, lastConnectorComponent);
-        var endReflect = readComponentReflectanceDb(lastConnectorComponent, null);
-        if (endReflect == null && lastConnectorSide) {
-          endReflect = readComponentReflectanceDb(lastConnectorSide, null);
-        }
-        if (endReflect == null) endReflect = OTDR_FAR_REFLECT_DB;
+        var endOptics = resolveConnectorEventOptics(
+          branchState.lastConnectorSide,
+          branchState.lastConnectorComponent
+        );
         connectorLossTotal += endOptics.loss;
         pushTraceEvent('end', 'End of fiber', endOptics.loss, {
-          reflectance: endReflect,
-        });
-        lastConnectorSide = null;
-        lastConnectorComponent = null;
+          reflectance: endOptics.reflectance != null ? endOptics.reflectance : OTDR_FAR_REFLECT_DB,
+        }, branchState);
+        branchState.lastConnectorSide = null;
+        branchState.lastConnectorComponent = null;
         return null;
       }
 
       if (exitKey.indexOf('cpl:') === 0) {
         var cplParts = exitKey.split(':');
         var couplerId = cplParts[1];
-        lastConnectorSide = null;
-        lastConnectorComponent = null;
-        if (visitedCouplers[couplerId]) {
-          pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB });
+        var incomingCouplerSide = branchState.lastConnectorSide;
+        if (branchState.couplers[couplerId]) {
+          branchState.lastConnectorSide = null;
+          branchState.lastConnectorComponent = null;
+          pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
           return null;
         }
-        visitedCouplers[couplerId] = true;
+        branchState.couplers[couplerId] = true;
         var oppKey = couplerOppositeKey(exitKey);
-        var couplerLoss = lookupCouplerPassLossDb(couplerId);
-        connectorLossTotal += couplerLoss;
-        pushTraceEvent('connector', 'Coupler', couplerLoss, {
-          reflectance: lookupCouplerReflectanceDb(couplerId),
-        });
+        var couplerOptics = resolveCouplerPassOptics(couplerId, incomingCouplerSide);
+        branchState.lastConnectorSide = null;
+        branchState.lastConnectorComponent = null;
+        connectorLossTotal += couplerOptics.loss;
+        pushTraceEvent('connector', 'Coupler', couplerOptics.loss, {
+          reflectance: couplerOptics.reflectance,
+        }, branchState);
         return oppKey || null;
       }
 
       if (exitKey.indexOf('spl:') === 0) {
-        var sid = exitKey.split(':')[1];
-        lastConnectorSide = null;
-        lastConnectorComponent = null;
-        var splitterLoss = getSplitterLossDb(sid);
-        connectorLossTotal += splitterLoss;
-        pushTraceEvent('splitter', 'Splitter', splitterLoss, {
-          reflectance: getSplitterReflectanceDb(sid),
-        });
-        return null;
+        branchState.lastConnectorSide = null;
+        branchState.lastConnectorComponent = null;
+        return exitKey;
       }
 
-      var connectorOptics = resolveConnectorEventOptics(lastConnectorSide, lastConnectorComponent);
+      if (!shouldEmitConnectorAtPort(
+        exitKey,
+        graph,
+        branchState.pc,
+        branchState.pt,
+        branchState.fromSplitterBranch
+      )) {
+        branchState.lastConnectorSide = null;
+        branchState.lastConnectorComponent = null;
+        return exitKey;
+      }
+
+      var connectorOptics = resolveConnectorEventOptics(
+        branchState.lastConnectorSide,
+        branchState.lastConnectorComponent
+      );
       connectorLossTotal += connectorOptics.loss;
       pushTraceEvent('connector', 'Connector', connectorOptics.loss, {
         reflectance: connectorOptics.reflectance,
-      });
-      lastConnectorSide = null;
-      lastConnectorComponent = null;
+      }, branchState);
+      branchState.lastConnectorSide = null;
+      branchState.lastConnectorComponent = null;
       return exitKey;
     }
 
-    pushTraceEvent('start', 'OTDR Port', 0, { reflectance: OTDR_LAUNCH_REFLECT_DB });
+    function tryAdvanceSplitterInput(activeKey, branchState) {
+      if (!isSplitterInputPortKey(activeKey)) return false;
+      branchState.lastConnectorSide = null;
+      branchState.lastConnectorComponent = null;
+      handleSplitterBranching(splitterIdFromPortKey(activeKey), branchState);
+      return true;
+    }
 
-    var guard;
-    for (guard = 0; guard < 80 && currentKey && cumulativeCableDistance < maxTraceM; guard++) {
-      var step = findFiberStepFromPort(currentKey, graph, visitedPc, visitedPt);
-      if (!step) break;
+    function scanSplitterOutPortsDepthFirst(splitterId, branchState) {
+      var splitter = findSplitterById(splitterId);
+      if (!splitter || !splitter.outputs || !splitter.outputs.length) return;
 
-      if (step.kind === 'pcord') {
-        visitedPc[step.linkId] = true;
-        traverseFiberSpan(step.lengthM);
-        lastConnectorSide = step.exitSide || null;
-        lastConnectorComponent = step.pcord || findPcordInGraph(graph, step.linkId);
+      var forkSnapshot = branchSnapshotAtSplitter(branchState);
+      var parentBranchPath = branchState.branchPath || '0';
+      var outPorts = splitter.outputs;
+      var pi;
 
-        if (step.openEnd || !step.exitKey) {
-          pushNodeEventAtKey(null);
-          currentKey = null;
-          break;
+      for (pi = 0; pi < outPorts.length; pi++) {
+        var portKey = 'spl:' + splitterId + ':' + outPorts[pi];
+        if (!isPortKeyConnected(portKey, graph)) continue;
+
+        var branchSuffix = String(pi + 1);
+        var childState = cloneBranchTraversalState(branchState);
+        applyBranchSnapshotToState(childState, forkSnapshot);
+        childState.fromSplitterBranch = true;
+        childState.branchPath = parentBranchPath + '.' + branchSuffix;
+        tracePath(portKey, childState);
+      }
+    }
+
+    function handleSplitterBranching(splitterId, branchState) {
+      var splitterLoss = getSplitterLossDb(splitterId);
+      var splitterLabel = branchState.fromSplitterBranch ? 'End Splitter' : 'Splitter';
+      connectorLossTotal += splitterLoss;
+      pushTraceEvent('splitter', splitterLabel, splitterLoss, {
+        reflectance: getSplitterReflectanceDb(splitterId),
+      }, branchState);
+
+      scanSplitterOutPortsDepthFirst(splitterId, branchState);
+    }
+
+    function tracePath(pathKey, branchState) {
+      var guard;
+      var activeKey = pathKey;
+      for (guard = 0; guard < 80 && activeKey && branchState.distanceM < maxTraceM; guard++) {
+        var step = findFiberStepFromPort(activeKey, graph, branchState.pc, branchState.pt);
+        if (!step) break;
+
+        if (step.kind === 'pcord') {
+          branchState.pc[step.linkId] = true;
+          traverseFiberSpan(step.lengthM, branchState);
+          branchState.lastConnectorSide = step.exitSide || null;
+          branchState.lastConnectorComponent = step.pcord || findPcordInGraph(graph, step.linkId);
+
+          if (step.openEnd || !step.exitKey) {
+            pushNodeEventAtKey(null, branchState);
+            return;
+          }
+
+          var exitKey = step.exitKey;
+          if (exitKey.indexOf('spl:') === 0) {
+            var splParts = exitKey.split(':');
+            var splPortId = splParts[2] || '';
+            if (splPortId.indexOf('IN') === 0) {
+              branchState.lastConnectorSide = null;
+              branchState.lastConnectorComponent = null;
+              handleSplitterBranching(splParts[1], branchState);
+              return;
+            }
+          }
+
+          var cableExitStep = findFiberStepFromPort(
+            exitKey,
+            graph,
+            branchState.pc,
+            branchState.pt
+          );
+          if (cableExitStep && cableExitStep.kind === 'pigtail') {
+            branchState.lastConnectorSide = null;
+            branchState.lastConnectorComponent = null;
+            activeKey = exitKey;
+            continue;
+          }
+
+          activeKey = pushNodeEventAtKey(exitKey, branchState);
+          if (!activeKey) return;
+          if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+          continue;
         }
 
-        currentKey = pushNodeEventAtKey(step.exitKey);
-        continue;
-      }
+        if (step.kind === 'pigtail') {
+          var p = step.pigtail;
+          branchState.pt[p.id] = true;
+          traversePigtailFiberSpan(p, branchState);
 
-      if (step.kind === 'pigtail') {
-        var p = step.pigtail;
-        visitedPt[p.id] = true;
-        traversePigtailFiberToSplice(p);
-
-        if (p.fusedPartnerId) {
-          var fuseKey = p.fusionAssemblyId || (p.id + '|' + p.fusedPartnerId);
-          if (!fusedSeen[fuseKey]) {
-            fusedSeen[fuseKey] = true;
-            var spLoss = lookupFusionSpliceLoss(p.fusionAssemblyId, p);
-            spliceLossTotal += spLoss;
-            pushTraceEvent('splice', 'Fusion Splice', spLoss);
-          }
-          var partner = findPigtailInGraph(graph, p.fusedPartnerId);
-          if (partner && !visitedPt[partner.id]) {
-            visitedPt[partner.id] = true;
-            traverseFiberSpan(resolveOtdrFiberLengthM(partner));
-            lastConnectorSide = partner.connector || null;
-            lastConnectorComponent = partner;
-            currentKey = pushNodeEventAtKey(portKeyFromFiberSnap(partner.connector));
-            if (!currentKey) break;
+          if (p.fusedPartnerId) {
+            var fuseKey = p.fusionAssemblyId || (p.id + '|' + p.fusedPartnerId);
+            if (!branchState.fusedSeen[fuseKey]) {
+              branchState.fusedSeen[fuseKey] = true;
+              var spLoss = lookupFusionSpliceLoss(p.fusionAssemblyId, p);
+              spliceLossTotal += spLoss;
+              pushTraceEvent('splice', 'Fusion Splice', spLoss, null, branchState);
+            }
+            var partner = findPigtailInGraph(graph, p.fusedPartnerId);
+            if (partner && !branchState.pt[partner.id]) {
+              branchState.pt[partner.id] = true;
+              traverseFiberSpan(resolveOtdrFiberLengthM(partner), branchState);
+              var partnerPortKey = portKeyFromFiberSnap(partner.connector);
+              branchState.lastConnectorSide = null;
+              branchState.lastConnectorComponent = null;
+              if (isSplitterInputPortKey(partnerPortKey)) {
+                handleSplitterBranching(splitterIdFromPortKey(partnerPortKey), branchState);
+                return;
+              }
+              if (partnerPortKey && partnerPortKey.indexOf('cpl:') === 0) {
+                activeKey = pushNodeEventAtKey(partnerPortKey, branchState);
+                if (!activeKey) return;
+                if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+              } else if (shouldEmitConnectorAtPort(
+                partnerPortKey,
+                graph,
+                branchState.pc,
+                branchState.pt,
+                branchState.fromSplitterBranch
+              )) {
+                branchState.lastConnectorSide = partner.connector || null;
+                branchState.lastConnectorComponent = partner;
+                activeKey = pushNodeEventAtKey(partnerPortKey, branchState);
+                if (!activeKey) return;
+                if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+              } else if (partnerPortKey) {
+                activeKey = partnerPortKey;
+              } else {
+                return;
+              }
+            } else {
+              var tailOptics = resolveConnectorEventOptics(p.connector, p);
+              pushTraceEvent('end', 'End of fiber', tailOptics.loss, {
+                reflectance: tailOptics.reflectance != null ? tailOptics.reflectance : OTDR_FAR_REFLECT_DB,
+              }, branchState);
+              return;
+            }
           } else {
-            var tailOptics = resolveConnectorEventOptics(p.connector, p);
-            var tailReflect = readComponentReflectanceDb(p, null);
-            if (tailReflect == null) tailReflect = OTDR_FAR_REFLECT_DB;
-            pushTraceEvent('end', 'End of fiber', tailOptics.loss, {
-              reflectance: tailReflect,
-            });
-            currentKey = null;
+            var openTailOptics = resolveConnectorEventOptics(p.connector, p);
+            pushTraceEvent('end', 'End of fiber', openTailOptics.loss, {
+              reflectance: openTailOptics.reflectance != null ? openTailOptics.reflectance : OTDR_FAR_REFLECT_DB,
+            }, branchState);
+            return;
           }
-        } else {
-          var openTailOptics = resolveConnectorEventOptics(p.connector, p);
-          var openTailReflect = readComponentReflectanceDb(p, null);
-          if (openTailReflect == null) openTailReflect = OTDR_FAR_REFLECT_DB;
-          pushTraceEvent('end', 'End of fiber', openTailOptics.loss, {
-            reflectance: openTailReflect,
-          });
-          currentKey = null;
         }
       }
     }
 
-    var totalLinkM = applyCumulativeDistancesToEvents(events, linearPos);
-    if (!totalLinkM && cumulativeCableDistance > 0) {
-      totalLinkM = roundTrace3(cumulativeCableDistance);
+    var rootState = makeBranchState();
+    pushTraceEvent('start', 'OTDR Port', 0, { reflectance: OTDR_LAUNCH_REFLECT_DB }, rootState);
+    tracePath(currentKey, rootState);
+
+    finalizeTraceEventOrdering(events);
+
+    var totalLinkM = 0;
+    var evIdx;
+    for (evIdx = 0; evIdx < events.length; evIdx++) {
+      var evDist = typeof events[evIdx].distance === 'number' ? events[evIdx].distance : 0;
+      if (evDist > totalLinkM) totalLinkM = evDist;
+      events[evIdx].linearPos = linearPos(evDist);
     }
-    if (events.length > 1) {
-      events[events.length - 1].distance = totalLinkM;
-      events[events.length - 1].linearPos = linearPos(totalLinkM);
-    }
+    totalLinkM = roundTrace3(totalLinkM);
 
     var cumulativeTotalLoss = applyViaviOtdrEventMetrics(events);
 
@@ -1441,7 +1789,7 @@
       '<table class="trace-event-table">' +
       '<thead><tr>' +
       '<th>Event</th><th>Distance m</th><th>Loss dB</th><th>Reflect. dB</th>' +
-      '<th>Slope dB/km</th><th>Section m</th><th>T. Loss dB</th>' +
+      '<th>Slope dB/km</th><th>Section km</th><th>T. Loss dB</th>' +
       '</tr></thead>' +
       '<tbody class="trace-event-tbody"></tbody>' +
       '</table></div>' +
@@ -1677,9 +2025,27 @@
     return parseFloat(Number(loss)).toFixed(3);
   }
 
+  function formatTraceSectionKm(sectionKm) {
+    if (sectionKm == null || !isFinite(sectionKm)) return '—';
+    return parseFloat(Number(sectionKm)).toFixed(3);
+  }
+
+  function formatTraceSlopeDbKm(sectionAtt) {
+    if (sectionAtt == null || sectionAtt === '--') return '—';
+    if (!isFinite(sectionAtt)) return '—';
+    return parseFloat(Number(sectionAtt)).toFixed(3);
+  }
+
   function formatTraceEventTLoss(tLoss) {
     if (tLoss == null || !isFinite(tLoss)) return '—';
     return parseFloat(Number(tLoss)).toFixed(3);
+  }
+
+  function resolveTraceEventSectionKm(ev) {
+    if (!ev) return null;
+    if (ev.sectionKm != null && isFinite(ev.sectionKm)) return ev.sectionKm;
+    if (ev.sectionM != null && isFinite(ev.sectionM)) return roundTrace3(ev.sectionM / 1000);
+    return null;
   }
 
   function getTraceViewport(deviceId) {
@@ -1733,7 +2099,7 @@
     var strokeW = '1.5';
     var t = type || 'connector';
     if (t === 'reflective') {
-      t = label === 'Splitter' ? 'splitter'
+      t = (label === 'Splitter' || label === 'End Splitter') ? 'splitter'
         : (label === 'End' || label === 'Open Tail' || label === 'End of fiber' ? 'end' : 'connector');
     }
 
@@ -1824,20 +2190,20 @@
       var formattedDist = formatTraceEventDistance(ev.distance);
       var formattedLoss = formatTraceEventLoss(ev.loss);
       var formattedReflect = formatTraceCell(ev.reflect, 2);
-      var formattedSlope = formatTraceCell(ev.sectionAtt, 3);
-      var formattedSection = formatTraceEventDistance(ev.sectionM);
+      var formattedSlope = formatTraceSlopeDbKm(ev.sectionAtt);
+      var formattedSection = formatTraceSectionKm(resolveTraceEventSectionKm(ev));
       var formattedTLoss = formatTraceEventTLoss(ev.tLoss != null ? ev.tLoss : ev.totalLoss);
       var isLossAlarm = false;
       var isReflectAlarm = false;
-      if (currentOtdrTestState.alarmsEnabled) {
-        if (ev.loss != null && isFinite(ev.loss)) {
-          var lossVal = parseFloat(ev.loss);
-          if (ev.type === 'splice' && lossVal > 0.30) {
-            isLossAlarm = true;
-          } else if (ev.type === 'connector' && lossVal > 0.50) {
-            isLossAlarm = true;
-          }
+      if (currentOtdrTestState.alarmsEnabled && ev.loss != null && ev.loss !== '--') {
+        var lossVal = parseFloat(ev.loss);
+        if (ev.type === 'splice') {
+          if (lossVal > 0.30) isLossAlarm = true;
+        } else {
+          if (lossVal > 0.50) isLossAlarm = true;
         }
+      }
+      if (currentOtdrTestState.alarmsEnabled) {
         if (ev.reflect != null && isFinite(ev.reflect)) {
           var reflectVal = parseFloat(ev.reflect);
           if (reflectVal > -35.00) {
