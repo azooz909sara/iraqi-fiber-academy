@@ -1078,11 +1078,339 @@
   background: #e6e6e6;
 }
 
+.lab-otdr-device .running-viewport.smartlink-view {
+  position: relative;
+}
+
 .lab-otdr-device .viewport-top {
   flex: 1.2;
   background: #e6e6e6;
   border-bottom: 1px solid #cccccc;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.lab-otdr-device .smartlink-view.is-link-ready .viewport-top {
+  flex: 1;
+  border-bottom: none;
+}
+
+.lab-otdr-device .smartlink-view.is-link-ready .viewport-bottom {
+  display: none;
+}
+
+.lab-otdr-device .smartlink-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.lab-otdr-device .smartlink-schematic {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 16px 14px;
+  background: #f5f5f5;
+  min-height: 0;
+  cursor: grab;
+  -webkit-overflow-scrolling: touch;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.lab-otdr-device .smartlink-schematic::-webkit-scrollbar {
+  display: none;
+}
+
+.lab-otdr-device .smartlink-schematic.active-drag {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.lab-otdr-device .smartlink-empty-state {
+  width: 100%;
+  text-align: center;
+  font-size: 8px;
+  color: #666666;
+  padding: 12px;
+}
+
+.lab-otdr-device .sl-chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  min-width: min-content;
+  padding: 4px 0;
+}
+
+.lab-otdr-device .sl-fiber-section,
+.lab-otdr-device .sl-fiber {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  padding: 0 4px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.lab-otdr-device .sl-fiber-line {
+  width: 100%;
+  min-width: 44px;
+  height: 3px;
+  background: linear-gradient(180deg, #ffd54f 0%, #f9a825 55%, #f57f17 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  transition: height 0.12s ease, background 0.12s ease;
+}
+
+.lab-otdr-device .sl-fiber-line.active {
+  background: #1b1b3a;
+  height: 4px;
+}
+
+.lab-otdr-device .sl-fiber-dist {
+  margin-bottom: 3px;
+  font-size: 7px;
+  font-weight: 600;
+  color: #333333;
+  white-space: nowrap;
+}
+
+.lab-otdr-device .sl-event-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+  padding-top: 6px;
+}
+
+.lab-otdr-device .sl-event-num {
+  font-size: 8px;
+  font-weight: 700;
+  color: #333333;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+
+.lab-otdr-device .sl-event-box,
+.lab-otdr-device .sl-event {
+  position: relative;
+  width: 54px;
+  min-width: 54px;
+  height: 54px;
+  background: #ffffff;
+  border: 2px solid #2d2966;
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.lab-otdr-device .sl-event-box.active,
+.lab-otdr-device .sl-event.active {
+  background: #1b1b3a;
+  border-color: #1b1b3a;
+  color: #ffffff;
+}
+
+.lab-otdr-device .sl-event-box.active svg,
+.lab-otdr-device .sl-event.active svg {
+  fill: #ffffff;
+}
+
+.lab-otdr-device .sl-event-box.is-failed:not(.active),
+.lab-otdr-device .sl-event.is-failed:not(.active) {
+  border-color: #d32f2f;
+}
+
+.lab-otdr-device .sl-event-wrapper.is-failed .sl-event-num,
+.lab-otdr-device .sl-event-wrapper:has(.is-failed) .sl-event-num {
+  color: #d32f2f;
+}
+
+.lab-otdr-device .sl-event-dist {
+  margin-top: 3px;
+  font-size: 7px;
+  font-weight: 600;
+  color: #333333;
+  line-height: 1;
+}
+
+.lab-otdr-device .sl-chain-unit {
+  align-self: flex-end;
+  font-size: 7px;
+  font-weight: 600;
+  color: #666666;
+  margin-left: 6px;
+  padding-bottom: 2px;
+}
+
+.lab-otdr-device .sl-event-status {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.lab-otdr-device .sl-event-status--pass {
+  background: #4caf50;
+}
+
+.lab-otdr-device .sl-event-status--fail {
+  background: #d32f2f;
+}
+
+.lab-otdr-device .sl-event-icon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 10px 0;
+  width: 100%;
+  min-height: 22px;
+  flex: 1 1 auto;
+}
+
+.lab-otdr-device .sl-event-icon svg,
+.lab-otdr-device .sl-event-icon img {
+  width: 32px;
+  height: 32px;
+  fill: #5c3a92;
+}
+
+.lab-otdr-device .sl-event-icon .sl-event-icon-svg {
+  width: 32px;
+  height: auto;
+  max-height: 32px;
+}
+
+.lab-otdr-device .smartlink-detail {
+  flex: 0 0 auto;
+  min-height: 58px;
+  background: #e0e0e0;
+  border-top: 1px solid #cccccc;
+  display: flex;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.lab-otdr-device .smartlink-detail-status {
+  flex: 1 1 42%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-right: 1px solid #cccccc;
+  min-width: 0;
+}
+
+.lab-otdr-device .sl-detail-status-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #ffffff;
+  flex-shrink: 0;
+}
+
+.lab-otdr-device .sl-detail-status-icon--pass {
+  background: #4caf50;
+}
+
+.lab-otdr-device .sl-detail-status-icon--fail {
+  background: #d32f2f;
+}
+
+.lab-otdr-device .sl-detail-status-icon--info {
+  background: #5c6bc0;
+}
+
+.lab-otdr-device .sl-detail-info {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #5c6bc0;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.lab-otdr-device .sl-detail-title {
+  font-size: 8px;
+  font-weight: 600;
+  color: #000000;
+  line-height: 1.25;
+}
+
+.lab-otdr-device .smartlink-detail-metrics {
+  flex: 1 1 58%;
+  display: flex;
+  align-items: stretch;
+}
+
+.lab-otdr-device .smartlink-metric-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 3px;
+  border-right: 1px solid #cccccc;
+  min-width: 0;
+}
+
+.lab-otdr-device .smartlink-metric-col:last-child {
+  border-right: none;
+}
+
+.lab-otdr-device .smartlink-metric-label {
+  font-size: 6px;
+  font-weight: 700;
+  color: #333333;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.lab-otdr-device .smartlink-metric-val {
+  font-size: 8px;
+  font-weight: 700;
+  color: #000000;
+  margin-top: 3px;
+  text-align: center;
+}
+
+.lab-otdr-device .smartlink-metric-val.is-alarm {
+  color: #d32f2f;
 }
 
 .lab-otdr-device .viewport-bottom {
@@ -1602,6 +1930,112 @@
   height: 12px;
   flex-shrink: 0;
   display: block;
+}
+
+/* ── SmartLink pass/fail status popup ── */
+
+.lab-otdr-device .smartlink-status-popup {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.lab-otdr-device .smartlink-status-popup.hidden {
+  display: none;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-modal {
+  width: 72%;
+  max-width: 280px;
+  background: #f5f5f5;
+  border: 1px solid #888888;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 6px;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.lab-otdr-device .smartlink-status-popup.is-pass .popup-icon {
+  background: #4caf50;
+}
+
+.lab-otdr-device .smartlink-status-popup.is-pass .popup-icon::after {
+  content: '✓';
+}
+
+.lab-otdr-device .smartlink-status-popup.is-fail .popup-icon {
+  background: #d32f2f;
+}
+
+.lab-otdr-device .smartlink-status-popup.is-fail .popup-icon::after {
+  content: '✕';
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.lab-otdr-device .smartlink-status-popup.is-pass .popup-title {
+  color: #2e7d32;
+}
+
+.lab-otdr-device .smartlink-status-popup.is-fail .popup-title {
+  color: #d32f2f;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-body {
+  padding: 2px 12px 8px;
+  color: #000000;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-body p {
+  margin: 0 0 4px;
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-body p:last-child {
+  margin-bottom: 0;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-footer {
+  border-top: 1px solid #dddddd;
+  padding: 5px 8px 6px;
+  text-align: center;
+}
+
+.lab-otdr-device .smartlink-status-popup .popup-footer small {
+  font-size: 7px;
+  color: #888888;
 }
 
 /* ── SMART TEST connection error popup ── */

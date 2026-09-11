@@ -406,7 +406,7 @@
   function isOtdrControlTarget(e) {
     return !!closestEl(
       e.target,
-      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .sidebar-btn-start, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup'
+      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .sidebar-btn-start, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup, .smartlink-status-popup, .smartlink-schematic, .sl-event-wrapper, .sl-fiber-section'
     );
   }
 
@@ -1913,7 +1913,27 @@
       '<span class="info-text">Info</span>' +
       '</div></div>' +
       '<div class="running-viewport smartlink-view" data-running-panel="smartlink">' +
-      '<div class="viewport-top"></div>' +
+      '<div class="viewport-top">' +
+      '<div class="smartlink-container" id="smartlink-container-' + deviceId + '">' +
+      '<div class="smartlink-schematic" id="smartlink-schematic-' + deviceId + '" aria-label="SmartLink schematic">' +
+      '<div class="smartlink-empty-state">Connect fiber and start the test to view the link schematic.</div>' +
+      '</div>' +
+      '<div class="smartlink-detail" id="smartlink-detail-' + deviceId + '">' +
+      '<div class="smartlink-detail-status">' +
+      '<div class="sl-detail-status-icon sl-detail-status-icon--pass" id="sl-detail-status-icon-' + deviceId + '" aria-hidden="true">✓</div>' +
+      '<span class="sl-detail-info" aria-hidden="true">i</span>' +
+      '<div class="sl-detail-title" id="sl-detail-title-' + deviceId + '">Front Connector (Test Port)</div>' +
+      '</div>' +
+      '<div class="smartlink-detail-metrics">' +
+      '<div class="smartlink-metric-col"><span class="smartlink-metric-label">Laser (nm)</span>' +
+      '<span class="smartlink-metric-val" id="sl-metric-laser-' + deviceId + '">1550</span></div>' +
+      '<div class="smartlink-metric-col"><span class="smartlink-metric-label">Distance (m)</span>' +
+      '<span class="smartlink-metric-val" id="sl-metric-distance-' + deviceId + '">0.00</span></div>' +
+      '<div class="smartlink-metric-col"><span class="smartlink-metric-label">Loss (dB)</span>' +
+      '<span class="smartlink-metric-val" id="sl-metric-loss-' + deviceId + '">—</span></div>' +
+      '<div class="smartlink-metric-col"><span class="smartlink-metric-label">Reflectance (dB)</span>' +
+      '<span class="smartlink-metric-val" id="sl-metric-reflect-' + deviceId + '">—</span></div>' +
+      '</div></div></div></div>' +
       '<div class="viewport-bottom">' +
       '<div class="connection-indicator">' +
       '<div class="conn-title">Connection</div>' +
@@ -1932,7 +1952,21 @@
       '<span class="acq-progress-pct">0%</span>' +
       '</div></div>' +
       '<span class="acq-timer acq-timer-right">00:20</span>' +
-      '</div></div></div></div></div>' +
+      '</div></div></div></div>' +
+      '<div class="smartlink-status-popup hidden" id="smartlink-status-popup-' + deviceId + '" role="dialog" aria-labelledby="popup-title-' + deviceId + '">' +
+      '<div class="popup-modal">' +
+      '<div class="popup-header">' +
+      '<div class="popup-icon" id="popup-icon-' + deviceId + '" aria-hidden="true"></div>' +
+      '<h3 class="popup-title" id="popup-title-' + deviceId + '">Pass</h3>' +
+      '</div>' +
+      '<div class="popup-body">' +
+      '<p>Length : <span class="popup-length" id="popup-length-' + deviceId + '">0.00</span> m</p>' +
+      '<p>Loss @1550nm (10ns): <span class="popup-loss" id="popup-loss-' + deviceId + '">0.00</span> dB</p>' +
+      '</div>' +
+      '<div class="popup-footer">' +
+      '<small>Touch the popup window to close it</small>' +
+      '</div></div></div>' +
+      '</div>' +
       '<div class="trace-view-container" hidden data-running-panel="trace">' +
       '<div class="trace-linear-view" aria-label="Event line">' +
       '<div class="trace-linear-track">' +
@@ -2350,10 +2384,13 @@
     };
   }
 
-  function traceEventIconSvg(type, label) {
-    var stroke = '#302060';
-    var fill = '#302060';
-    var strokeW = '1.5';
+  function getEventIconHtml(type, label, opts) {
+    opts = opts || {};
+    var stroke = opts.stroke || '#302060';
+    var fill = opts.fill || stroke;
+    var strokeW = opts.strokeWidth || '1.5';
+    var rectFill = opts.rectFill != null ? opts.rectFill : '#ffffff';
+    var iconClass = opts.iconClass || 'trace-ev-icon';
     var t = type || 'connector';
     if (t === 'reflective') {
       t = (label === 'Splitter' || label === 'End Splitter') ? 'splitter'
@@ -2362,23 +2399,23 @@
 
     if (t === 'splice') {
       return (
-        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
         '<line x1="1" y1="7" x2="11" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
-        '<rect x="11" y="4" width="10" height="6" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<rect x="11" y="4" width="10" height="6" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="21" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '</svg>'
       );
     }
 
-    if (t === 'connector') {
+    if (t === 'connector' || t === 'coupler') {
       return (
-        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
         '<line x1="1" y1="7" x2="6" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
-        '<rect x="5.5" y="3" width="3" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
-        '<rect x="8.5" y="2.5" width="15" height="9" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<rect x="5.5" y="3" width="3" height="8" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<rect x="8.5" y="2.5" width="15" height="9" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<path d="M13.5 4.8 L15.8 7 L13.5 9.2 Z" fill="' + fill + '"/>' +
         '<path d="M18.5 4.8 L16.2 7 L18.5 9.2 Z" fill="' + fill + '"/>' +
-        '<rect x="23.5" y="3" width="3" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<rect x="23.5" y="3" width="3" height="8" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="26.5" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '</svg>'
       );
@@ -2386,9 +2423,9 @@
 
     if (t === 'splitter') {
       return (
-        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
         '<line x1="1" y1="7" x2="7" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
-        '<path d="M27 2.5 L27 11.5 L11 7 Z" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '" stroke-linejoin="round"/>' +
+        '<path d="M27 2.5 L27 11.5 L11 7 Z" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '" stroke-linejoin="round"/>' +
         '<line x1="21.5" y1="3.2" x2="21.5" y2="10.8" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<text x="24.2" y="8.2" font-size="4.2" font-weight="700" font-family="Arial,sans-serif" fill="' + fill + '" text-anchor="middle">2</text>' +
         '</svg>'
@@ -2397,11 +2434,11 @@
 
     if (t === 'end') {
       return (
-        '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+        '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
         '<line x1="1" y1="5" x2="5" y2="5" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="1" y1="7" x2="5" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="1" y1="9" x2="5" y2="9" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
-        '<rect x="5" y="3" width="10" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+        '<rect x="5" y="3" width="10" height="8" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="10" y1="5.5" x2="10" y2="8.5" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<line x1="10" y1="7" x2="13" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
         '<rect x="15" y="5.5" width="2.5" height="3" fill="' + fill + '"/>' +
@@ -2410,9 +2447,9 @@
     }
 
     return (
-      '<svg class="trace-ev-icon" viewBox="0 0 32 14" aria-hidden="true">' +
+      '<svg class="' + iconClass + '" viewBox="0 0 32 14" aria-hidden="true">' +
       '<rect x="5" y="5.5" width="2.5" height="3" fill="' + fill + '"/>' +
-      '<rect x="7.5" y="3" width="10" height="8" fill="#ffffff" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
+      '<rect x="7.5" y="3" width="10" height="8" fill="' + rectFill + '" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
       '<line x1="12.5" y1="5.5" x2="12.5" y2="8.5" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
       '<line x1="12.5" y1="7" x2="9.5" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
       '<line x1="19" y1="5" x2="23" y2="5" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
@@ -2421,6 +2458,201 @@
       '<line x1="23" y1="7" x2="31" y2="7" stroke="' + stroke + '" stroke-width="' + strokeW + '"/>' +
       '</svg>'
     );
+  }
+
+  function traceEventIconSvg(type, label) {
+    return getEventIconHtml(type, label);
+  }
+
+  function getSmartLinkEventIconHtml(type, label, failed, active) {
+    var iconType = type || 'connector';
+    if (label === 'Coupler') iconType = 'connector';
+    var themeColor = active ? '#ffffff' : (failed ? '#d32f2f' : '#5c3a92');
+    return getEventIconHtml(iconType, label, {
+      stroke: themeColor,
+      fill: themeColor,
+      rectFill: active ? '#1b1b3a' : '#ffffff',
+      iconClass: 'trace-ev-icon sl-event-icon-svg',
+    });
+  }
+
+  function updateSmartLinkDetailPanel(deviceNode, events, selection) {
+    if (!deviceNode) return;
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var displayEvents = getSmartLinkDisplayEvents(events);
+    if (!displayEvents.length) return;
+    selection = selection || { kind: 'event', index: 0 };
+    var laserEl = deviceNode.querySelector('#sl-metric-laser-' + deviceId);
+    var distEl = deviceNode.querySelector('#sl-metric-distance-' + deviceId);
+    var lossEl = deviceNode.querySelector('#sl-metric-loss-' + deviceId);
+    var reflectEl = deviceNode.querySelector('#sl-metric-reflect-' + deviceId);
+    var titleEl = deviceNode.querySelector('#sl-detail-title-' + deviceId);
+    var statusIcon = deviceNode.querySelector('#sl-detail-status-icon-' + deviceId);
+    var wl = parseOtdrWavelengthNm() || 1550;
+    if (laserEl) laserEl.textContent = String(wl);
+
+    if (selection.kind === 'fiber') {
+      var fiberIdx = selection.index;
+      var segM = getSmartLinkFiberSegmentM(displayEvents, fiberIdx);
+      var segLoss = getSmartLinkFiberSegmentLossDb(displayEvents, fiberIdx);
+      if (titleEl) titleEl.textContent = 'Fiber Section';
+      if (distEl) distEl.textContent = formatSmartLinkSchematicDistance(segM);
+      if (lossEl) lossEl.textContent = segLoss != null ? segLoss.toFixed(3) : '—';
+      if (reflectEl) {
+        reflectEl.textContent = '—';
+        reflectEl.classList.remove('is-alarm');
+      }
+      if (statusIcon) {
+        statusIcon.textContent = 'i';
+        statusIcon.className = 'sl-detail-status-icon sl-detail-status-icon--info';
+      }
+      return;
+    }
+
+    var evIdx = Math.max(0, Math.min(selection.index || 0, displayEvents.length - 1));
+    var ev = displayEvents[evIdx];
+    var failed = isSmartLinkEventFailed(ev);
+    if (titleEl) titleEl.textContent = smartLinkEventDescription(ev);
+    if (distEl) distEl.textContent = formatSmartLinkSchematicDistance(ev.distance);
+    if (lossEl) {
+      var lossVal = ev.loss;
+      if (lossVal == null || !isFinite(lossVal)) lossVal = ev._insertionLoss;
+      lossEl.textContent = lossVal != null && isFinite(lossVal) ? Number(lossVal).toFixed(3) : '—';
+      lossEl.classList.toggle('is-alarm', failed && lossVal != null && isFinite(lossVal));
+    }
+    if (reflectEl) {
+      var reflectVal = ev.reflect;
+      if (reflectVal == null || reflectVal === '--') reflectVal = ev._reflectance;
+      if (reflectVal != null && isFinite(reflectVal)) {
+        reflectEl.textContent = reflectVal > -35 ? ('> ' + Number(reflectVal).toFixed(2)) : Number(reflectVal).toFixed(2);
+        reflectEl.classList.toggle('is-alarm', reflectVal > -35);
+      } else {
+        reflectEl.textContent = '—';
+        reflectEl.classList.remove('is-alarm');
+      }
+    }
+    if (statusIcon) {
+      statusIcon.textContent = failed ? '✕' : '✓';
+      statusIcon.className = 'sl-detail-status-icon ' + (failed ? 'sl-detail-status-icon--fail' : 'sl-detail-status-icon--pass');
+    }
+  }
+
+  function selectSmartLinkTarget(deviceNode, kind, index) {
+    if (!deviceNode) return;
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = findDevice(deviceId);
+    if (!d) return;
+    d.smartLinkSelection = { kind: kind, index: index };
+    applySmartLinkSelection(deviceNode);
+    updateSmartLinkDetailPanel(deviceNode, d.traceEvents, d.smartLinkSelection);
+  }
+
+  function applySmartLinkSelection(deviceNode) {
+    if (!deviceNode) return;
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = findDevice(deviceId);
+    var events = d && d.traceEvents ? d.traceEvents : [];
+    var displayEvents = getSmartLinkDisplayEvents(events);
+    var selection = d && d.smartLinkSelection ? d.smartLinkSelection : { kind: 'event', index: 0 };
+    deviceNode.querySelectorAll('.sl-event-box').forEach(function (box) {
+      box.classList.remove('active');
+    });
+    deviceNode.querySelectorAll('.sl-fiber-line').forEach(function (line) {
+      line.classList.remove('active');
+    });
+    deviceNode.querySelectorAll('.sl-event-wrapper').forEach(function (wrapper, wi) {
+      var box = wrapper.querySelector('.sl-event-box');
+      var iconHost = wrapper.querySelector('.sl-event-icon');
+      if (!box || !iconHost || wi >= displayEvents.length) return;
+      var ev = displayEvents[wi];
+      var isActive = selection.kind === 'event' && selection.index === wi;
+      if (isActive) box.classList.add('active');
+      iconHost.innerHTML = getSmartLinkEventIconHtml(
+        ev.type,
+        ev.label,
+        isSmartLinkEventFailed(ev),
+        isActive
+      );
+    });
+    if (selection.kind === 'fiber') {
+      var fiberSec = deviceNode.querySelector('.sl-fiber-section[data-sl-fiber-index="' + selection.index + '"]');
+      if (fiberSec) {
+        var line = fiberSec.querySelector('.sl-fiber-line');
+        if (line) line.classList.add('active');
+      }
+    }
+  }
+
+  function bindSmartLinkDragScroll(host) {
+    host.querySelectorAll('.smartlink-schematic').forEach(function (schematic) {
+      if (schematic.dataset.slDragBound === '1') return;
+      schematic.dataset.slDragBound = '1';
+
+      var dragActive = false;
+      var dragMoved = false;
+      var dragStartX = 0;
+      var dragStartScroll = 0;
+      var dragThreshold = 4;
+
+      function endDrag() {
+        if (!dragActive) return;
+        dragActive = false;
+        schematic.classList.remove('active-drag');
+        document.removeEventListener('mousemove', onDragMove);
+        document.removeEventListener('mouseup', endDrag);
+        if (dragMoved) {
+          schematic.dataset.slSuppressClick = '1';
+        }
+      }
+
+      function onDragMove(e) {
+        if (!dragActive) return;
+        var dx = e.pageX - dragStartX;
+        if (Math.abs(dx) > dragThreshold) dragMoved = true;
+        schematic.scrollLeft = dragStartScroll - dx;
+      }
+
+      schematic.addEventListener('mousedown', function (e) {
+        if (e.button !== 0) return;
+        dragActive = true;
+        dragMoved = false;
+        dragStartX = e.pageX;
+        dragStartScroll = schematic.scrollLeft;
+        schematic.classList.add('active-drag');
+        document.addEventListener('mousemove', onDragMove);
+        document.addEventListener('mouseup', endDrag);
+      });
+    });
+  }
+
+  function bindSmartLinkInteractions(host) {
+    bindSmartLinkDragScroll(host);
+    host.querySelectorAll('.smartlink-schematic').forEach(function (schematic) {
+      if (schematic.dataset.slBound === '1') return;
+      schematic.dataset.slBound = '1';
+      schematic.addEventListener('click', function (e) {
+        if (schematic.dataset.slSuppressClick === '1') {
+          schematic.dataset.slSuppressClick = '';
+          e.stopPropagation();
+          return;
+        }
+        var wrapper = e.target.closest('.sl-event-wrapper');
+        var fiberSec = e.target.closest('.sl-fiber-section');
+        if (!wrapper && !fiberSec) return;
+        e.stopPropagation();
+        var deviceNode = schematic.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        if (wrapper) {
+          var eventIdx = parseInt(wrapper.getAttribute('data-sl-event-index'), 10);
+          if (!isFinite(eventIdx)) return;
+          selectSmartLinkTarget(deviceNode, 'event', eventIdx);
+          return;
+        }
+        var fiberIdx = parseInt(fiberSec.getAttribute('data-sl-fiber-index'), 10);
+        if (!isFinite(fiberIdx)) return;
+        selectSmartLinkTarget(deviceNode, 'fiber', fiberIdx);
+      });
+    });
   }
 
   function populateTraceEventTable(deviceNode, eventsData, selectedIndex) {
@@ -2442,7 +2674,7 @@
     for (i = 0; i < eventsData.length; i++) {
       var ev = eventsData[i];
       var num = ev.eventNum != null ? ev.eventNum : (i + 1);
-      var icon = traceEventIconSvg(ev.type, ev.label);
+      var icon = getEventIconHtml(ev.type, ev.label);
       var rowCls = i === sel ? ' class="selected"' : '';
       var formattedDist = formatTraceEventDistance(ev.distance);
       var formattedLoss = formatTraceEventLoss(ev.loss);
@@ -3163,6 +3395,13 @@
         trace.hidden = true;
         trace.classList.remove('is-table-only');
       }
+      var smartDeviceId = deviceNode.getAttribute('data-otdr-node');
+      var smartDevice = smartDeviceId ? findDevice(smartDeviceId) : null;
+      renderSmartLinkView(deviceNode, {
+        events: smartDevice && smartDevice.traceEvents ? smartDevice.traceEvents : null,
+        totalLoss: smartDevice && smartDevice.traceTotalLoss,
+        orl: smartDevice && smartDevice.traceOrl,
+      });
     } else {
       if (smartlink) smartlink.hidden = true;
       if (trace) {
@@ -3224,6 +3463,17 @@
     populateTraceEventTable(deviceNode, events);
     positionTraceLinearIcons(deviceNode, events);
     updateTraceUIFromTestState(deviceNode);
+    renderSmartLinkView(deviceNode, {
+      events: events,
+      totalLoss: traceResult.totalLoss,
+      orl: traceResult.orl,
+      lengthM: traceResult.totalLengthM,
+    });
+    showSmartLinkStatusPopup(deviceNode, {
+      pass: computeSmartLinkPassState(events),
+      lengthM: traceResult.totalLengthM,
+      lossDb: traceResult.totalLoss,
+    });
 
     var tabs = deviceNode.querySelectorAll('.tabs-left .tab[data-running-tab]');
     var ti;
@@ -3300,6 +3550,7 @@
       d.acquisitionActive = false;
       d.connectionError = false;
       d.traceEvents = null;
+      d.smartLinkSelection = null;
       d.runningTab = 'smartlink';
       resetTraceViewport(deviceId);
     }
@@ -3330,6 +3581,8 @@
     resetTraceGraphLayout(deviceNode);
     var tbody = deviceNode.querySelector('.trace-event-tbody');
     if (tbody) tbody.innerHTML = '';
+    renderSmartLinkView(deviceNode, null);
+    hideSmartLinkStatusPopup(deviceNode);
   }
 
   function stopOtdrAcquisition(deviceId, deviceNode) {
@@ -3526,6 +3779,197 @@
     if (popup) popup.hidden = true;
   }
 
+  function getSmartLinkLaserLabel() {
+    var wl = parseOtdrWavelengthNm() || 1550;
+    return String(wl) + ' nm (10ns)';
+  }
+
+  function formatSmartLinkDistanceM(sectionM) {
+    if (sectionM == null || !isFinite(sectionM)) return '—';
+    var m = Math.max(0, Number(sectionM));
+    if (m < 100) return m.toFixed(2) + ' m';
+    return m.toFixed(1) + ' m';
+  }
+
+  function getSmartLinkDisplayEvents(events) {
+    if (!events || !events.length) return [];
+    var displayEvents = events.slice();
+    displayEvents.sort(function (a, b) {
+      var ea = a.eventNum != null ? a.eventNum : (a._traversalSeq || 0);
+      var eb = b.eventNum != null ? b.eventNum : (b._traversalSeq || 0);
+      if (ea !== eb) return ea - eb;
+      var pathCmp = compareBranchPaths(a.branchPath, b.branchPath);
+      if (pathCmp !== 0) return pathCmp;
+      var da = typeof a.distance === 'number' ? a.distance : 0;
+      var db = typeof b.distance === 'number' ? b.distance : 0;
+      if (da !== db) return da - db;
+      return (a._traversalSeq || 0) - (b._traversalSeq || 0);
+    });
+    return displayEvents;
+  }
+
+  function getSmartLinkSchematicEvents(events) {
+    return getSmartLinkDisplayEvents(events);
+  }
+
+  function formatSmartLinkSchematicDistance(distM) {
+    if (distM == null || !isFinite(distM)) return '—';
+    return Number(distM).toFixed(2);
+  }
+
+  function smartLinkEventDescription(ev) {
+    if (!ev) return 'Event';
+    if (ev.type === 'start') return 'Front Connector (Test Port)';
+    if (ev.label === 'Coupler') return 'Coupler';
+    if (ev.type === 'splice') return 'Fusion Splice';
+    if (ev.type === 'splitter') return ev.label || 'Splitter';
+    if (ev.type === 'end' || ev.label === 'End of fiber') return 'End of fiber';
+    if (ev.type === 'connector') return 'Connector (possible mechanical splice)';
+    return ev.label || traceEventLabelFromType(ev.type);
+  }
+
+  function getSmartLinkFiberSegmentM(events, fiberIndex) {
+    if (!events || fiberIndex < 1 || fiberIndex >= events.length) return 0;
+    var ev = events[fiberIndex];
+    if (typeof ev.sectionM === 'number' && isFinite(ev.sectionM)) return ev.sectionM;
+    return Math.max(0, (ev.distance || 0) - (events[fiberIndex - 1].distance || 0));
+  }
+
+  function getSmartLinkFiberSegmentLossDb(events, fiberIndex) {
+    if (!events || fiberIndex < 1 || fiberIndex >= events.length) return null;
+    var ev = events[fiberIndex];
+    var sectionKm = typeof ev.sectionKm === 'number' ? ev.sectionKm : getSmartLinkFiberSegmentM(events, fiberIndex) / 1000;
+    var slope = typeof ev.sectionAtt === 'number' && isFinite(ev.sectionAtt) ? ev.sectionAtt : getViaviFiberSlopeDbKm();
+    return roundTrace3(sectionKm * slope);
+  }
+
+  function isSmartLinkEventFailed(ev) {
+    if (!ev) return false;
+    if (ev._polishMismatch || ev._alarm) return true;
+    if (currentOtdrTestState.alarmsEnabled && ev.loss != null && isFinite(ev.loss)) {
+      if (ev.type === 'splice') return ev.loss > 0.30;
+      if (ev.type !== 'start') return ev.loss > 0.50;
+    }
+    if (currentOtdrTestState.alarmsEnabled && ev.reflect != null && isFinite(ev.reflect)) {
+      return ev.reflect > -35.0;
+    }
+    return false;
+  }
+
+  function computeSmartLinkPassState(events) {
+    var schematicEvents = getSmartLinkSchematicEvents(events);
+    var i;
+    for (i = 0; i < schematicEvents.length; i++) {
+      if (isSmartLinkEventFailed(schematicEvents[i])) return false;
+    }
+    return schematicEvents.length > 0;
+  }
+
+  function smartLinkEventClassName(type, label) {
+    if (type === 'splice') return 'sl-event--splice';
+    if (type === 'splitter') return 'sl-event--splitter';
+    if (type === 'end' || label === 'End of fiber') return 'sl-event--end';
+    if (label === 'Coupler') return 'sl-event--coupler';
+    return 'sl-event--connector';
+  }
+
+  function setSmartLinkViewportMode(deviceNode, mode) {
+    if (!deviceNode) return;
+    var view = deviceNode.querySelector('.smartlink-view');
+    var bottom = deviceNode.querySelector('.viewport-bottom');
+    if (view) view.classList.toggle('is-link-ready', mode === 'results');
+    if (bottom) bottom.hidden = mode === 'results';
+  }
+
+  function renderSmartLinkView(deviceNode, opts) {
+    if (!deviceNode) return;
+    opts = opts || {};
+    var deviceId = deviceNode.getAttribute('data-otdr-node');
+    var d = deviceId ? findDevice(deviceId) : null;
+    var events = opts.events || (d && d.traceEvents) || null;
+    var schematic = deviceNode.querySelector('.smartlink-schematic');
+    if (!schematic) return;
+
+    if (!events || !events.length) {
+      schematic.innerHTML = '<div class="smartlink-empty-state">Connect fiber and start the test to view the link schematic.</div>';
+      if (d) d.smartLinkSelection = null;
+      updateSmartLinkDetailPanel(deviceNode, [], { kind: 'event', index: 0 });
+      setSmartLinkViewportMode(deviceNode, 'connection');
+      return;
+    }
+
+    var schematicEvents = getSmartLinkDisplayEvents(events);
+    if (!schematicEvents.length) {
+      schematic.innerHTML = '<div class="smartlink-empty-state">No link events detected.</div>';
+      setSmartLinkViewportMode(deviceNode, 'results');
+      return;
+    }
+
+    if (d && !d.smartLinkSelection) {
+      d.smartLinkSelection = { kind: 'event', index: 0 };
+    }
+    var selection = opts.selection || (d && d.smartLinkSelection) || { kind: 'event', index: 0 };
+
+    var html = '<div class="sl-chain">';
+    var i;
+    for (i = 0; i < schematicEvents.length; i++) {
+      var ev = schematicEvents[i];
+      if (i > 0) {
+        var segM = getSmartLinkFiberSegmentM(schematicEvents, i);
+        var fiberActive = selection.kind === 'fiber' && selection.index === i;
+        html +=
+          '<div class="sl-fiber-section sl-fiber" data-sl-fiber-index="' + i + '" data-sl-kind="fiber">' +
+          '<span class="sl-fiber-dist">' + formatSmartLinkSchematicDistance(segM) + '</span>' +
+          '<div class="sl-fiber-line' + (fiberActive ? ' active' : '') + '"></div>' +
+          '</div>';
+      }
+      var failed = isSmartLinkEventFailed(ev);
+      var eventNum = ev.eventNum != null ? ev.eventNum : (i + 1);
+      var eventActive = selection.kind === 'event' && selection.index === i;
+      html +=
+        '<div class="sl-event-wrapper" data-sl-event-index="' + i + '" data-sl-kind="event">' +
+        '<div class="sl-event-num">' + eventNum + '</div>' +
+        '<div class="sl-event-box sl-event ' + smartLinkEventClassName(ev.type, ev.label) +
+        (failed ? ' is-failed' : ' is-passed') +
+        (eventActive ? ' active' : '') + '">' +
+        '<div class="sl-event-status ' + (failed ? 'sl-event-status--fail' : 'sl-event-status--pass') + '">' +
+        (failed ? '✕' : '✓') + '</div>' +
+        '<div class="sl-event-icon" aria-hidden="true">' +
+        getSmartLinkEventIconHtml(ev.type, ev.label, failed, eventActive) +
+        '</div></div>' +
+        '<div class="sl-event-dist">' + formatSmartLinkSchematicDistance(ev.distance) + '</div>' +
+        '</div>';
+    }
+    html += '<span class="sl-chain-unit">m</span></div>';
+    schematic.innerHTML = html;
+    setSmartLinkViewportMode(deviceNode, 'results');
+    updateSmartLinkDetailPanel(deviceNode, events, selection);
+  }
+
+  function hideSmartLinkStatusPopup(deviceNode) {
+    var popup = deviceNode && deviceNode.querySelector('.smartlink-status-popup');
+    if (popup) popup.classList.add('hidden');
+  }
+
+  function showSmartLinkStatusPopup(deviceNode, opts) {
+    if (!deviceNode) return;
+    opts = opts || {};
+    var popup = deviceNode.querySelector('.smartlink-status-popup');
+    if (!popup) return;
+    var passed = opts.pass !== false;
+    var lengthM = typeof opts.lengthM === 'number' && isFinite(opts.lengthM) ? opts.lengthM : 0;
+    var lossDb = typeof opts.lossDb === 'number' && isFinite(opts.lossDb) ? opts.lossDb : 0;
+    var titleEl = popup.querySelector('.popup-title');
+    var lengthEl = popup.querySelector('.popup-length');
+    var lossEl = popup.querySelector('.popup-loss');
+    popup.classList.remove('is-pass', 'is-fail');
+    popup.classList.add(passed ? 'is-pass' : 'is-fail');
+    if (titleEl) titleEl.textContent = passed ? 'Pass' : 'Fail';
+    if (lengthEl) lengthEl.textContent = lengthM.toFixed(2);
+    if (lossEl) lossEl.textContent = lossDb.toFixed(3);
+    popup.classList.remove('hidden');
+  }
+
   function applyRunningConnectionState(deviceId, deviceNode) {
     stopConnectionAnimation(deviceId);
     stopConnectionValidationTimer(deviceId);
@@ -3558,6 +4002,12 @@
       var events = d.traceEvents || getDefaultTraceEvents();
       populateTraceEventTable(deviceNode, events);
       positionTraceLinearIcons(deviceNode, events);
+      renderSmartLinkView(deviceNode, {
+        events: events,
+        totalLoss: d.traceTotalLoss,
+        orl: d.traceOrl,
+        lengthM: d.traceLengthM,
+      });
       switchRunningTab(deviceNode, d.runningTab || 'trace');
       applyDefaultTraceSplitLayout(deviceNode);
       renderTraceForDevice(deviceId, deviceNode);
@@ -3959,6 +4409,15 @@
       });
     });
 
+    host.querySelectorAll('.smartlink-status-popup').forEach(function (popup) {
+      if (popup.dataset.otdrScreenBound === '1') return;
+      popup.dataset.otdrScreenBound = '1';
+      popup.addEventListener('click', function (e) {
+        e.stopPropagation();
+        popup.classList.add('hidden');
+      });
+    });
+
     host.querySelectorAll('[data-sts-action="stop-test"]').forEach(function (btn) {
       if (btn.dataset.otdrScreenBound === '1') return;
       btn.dataset.otdrScreenBound = '1';
@@ -3990,6 +4449,7 @@
     bindTraceCanvasInteractions(host);
     bindTraceEventTableRows(host);
     bindTraceResizer(host);
+    bindSmartLinkInteractions(host);
 
     host.querySelectorAll('.running-tabs-header .tab:not([data-running-tab])').forEach(function (tab) {
       if (tab.dataset.otdrScreenBound === '1') return;
