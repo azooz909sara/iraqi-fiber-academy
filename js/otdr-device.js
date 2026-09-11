@@ -2034,6 +2034,8 @@
   var TRACE_ZOOM_MAX = 5;
   var TRACE_GRAPH_COLLAPSE_THRESHOLD = 60;
   var TRACE_DEFAULT_GRAPH_HEIGHT = '65%';
+  var TRACE_PLOT_MARGIN_LEFT = 36;
+  var TRACE_OPTICAL_BASELINE_DB = 5;
 
   var traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
   var isTraceDragging = false;
@@ -2068,7 +2070,7 @@
   }
 
   function toCanvasX(d, w) {
-    return (d - traceCamera.x) * traceCamera.scaleX;
+    return TRACE_PLOT_MARGIN_LEFT + (d - traceCamera.x) * traceCamera.scaleX;
   }
 
   function toCanvasY(db, h) {
@@ -2637,6 +2639,148 @@
     return x - Math.floor(x);
   }
 
+  function parseTraceEventLoss(ev) {
+    if (!ev) return 0;
+    var v = ev.loss;
+    if (v == null || v === '--') v = ev._insertionLoss;
+    var n = parseFloat(v);
+    return isFinite(n) ? n : 0;
+  }
+
+  function parseTraceEventReflect(ev) {
+    if (!ev) return null;
+    var v = ev.reflect;
+    if (v == null || v === '--') v = ev._reflectance;
+    var n = parseFloat(v);
+    return isFinite(n) ? n : null;
+  }
+
+  function getReflectiveSpikeHeightDb(reflectVal) {
+    if (reflectVal == null || !isFinite(reflectVal)) return 5;
+    var severity = Math.max(0, Math.min(1, (reflectVal + 70) / 56));
+    return 3 + severity * 14;
+  }
+
+  function resolveTraceEventSlopeDbKm(ev, defaultSlope) {
+    if (!ev) return defaultSlope;
+    if (typeof ev.slope === 'number' && isFinite(ev.slope)) return ev.slope;
+    if (typeof ev.sectionAtt === 'number' && isFinite(ev.sectionAtt)) return ev.sectionAtt;
+    return defaultSlope;
+  }
+
+  function isTraceEndEvent(ev, index, total) {
+    if (!ev) return false;
+    if (ev.type === 'end') return true;
+    if (ev.label === 'End of fiber') return true;
+    return index === total - 1 && ev.type !== 'start';
+  }
+
+  function getTracePathDrawEvents(events) {
+    if (!events || !events.length) return [];
+    var drawEvents = [];
+    var i;
+    for (i = 0; i < events.length; i++) {
+      var branchPath = events[i].branchPath || '0';
+      if (branchPath === '0') drawEvents.push(events[i]);
+    }
+    if (!drawEvents.length) drawEvents = events.slice();
+    drawEvents.sort(function (a, b) {
+      var ea = a.eventNum != null ? a.eventNum : (a._traversalSeq || 0);
+      var eb = b.eventNum != null ? b.eventNum : (b._traversalSeq || 0);
+      if (ea !== eb) return ea - eb;
+      var da = typeof a.distance === 'number' ? a.distance : 0;
+      var db = typeof b.distance === 'number' ? b.distance : 0;
+      if (da !== db) return da - db;
+      return (a._traversalSeq || 0) - (b._traversalSeq || 0);
+    });
+    return drawEvents;
+  }
+
+  function drawEventDrivenTracePath(ctx, events, w, h) {
+    var drawEvents = getTracePathDrawEvents(events);
+    if (!drawEvents.length) return;
+
+    var currentDb = TRACE_OPTICAL_BASELINE_DB;
+    var defaultSlope = getViaviFiberSlopeDbKm();
+    var lastEventDist = 0;
+    var noiseSeed = 42;
+    var i;
+    var ended = false;
+
+    ctx.beginPath();
+    ctx.moveTo(toCanvasX(0, w), toCanvasY(currentDb, h));
+
+    for (i = 0; i < drawEvents.length && !ended; i++) {
+      var ev = drawEvents[i];
+      var eventDist = typeof ev.distance === 'number' ? ev.distance : 0;
+      var eventX = toCanvasX(eventDist, w);
+      var eventType = ev.type || '';
+      var eventLoss = parseTraceEventLoss(ev);
+      var reflectVal = parseTraceEventReflect(ev);
+      var isStart = eventType === 'start' || i === 0;
+      var isEnd = isTraceEndEvent(ev, i, drawEvents.length);
+
+      if (!isStart) {
+        var sectionKm = resolveTraceEventSectionKm(ev);
+        if (sectionKm == null || !isFinite(sectionKm)) {
+          sectionKm = Math.max(0, (eventDist - lastEventDist) / 1000);
+        }
+        var slopeDbKm = resolveTraceEventSlopeDbKm(ev, defaultSlope);
+        currentDb -= sectionKm * slopeDbKm;
+        ctx.lineTo(eventX, toCanvasY(currentDb, h));
+      }
+
+      if (isStart) {
+        if (reflectVal != null) {
+          var startSpike = getReflectiveSpikeHeightDb(reflectVal);
+          ctx.lineTo(eventX, toCanvasY(currentDb + startSpike, h));
+          ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        }
+      } else if (eventType === 'splice') {
+        if (eventLoss > 0) {
+          currentDb -= eventLoss;
+          ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        }
+      } else if (eventType === 'connector' || eventType === 'reflective' || eventType === 'splitter') {
+        var spikeHeight = getReflectiveSpikeHeightDb(reflectVal);
+        ctx.lineTo(eventX, toCanvasY(currentDb + spikeHeight, h));
+        ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        if (eventLoss > 0) {
+          currentDb -= eventLoss;
+          ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        }
+      } else if (isEnd) {
+        var endSpike = getReflectiveSpikeHeightDb(reflectVal != null ? reflectVal : -45);
+        ctx.lineTo(eventX, toCanvasY(currentDb + endSpike, h));
+        ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        if (eventLoss > 0) {
+          currentDb -= eventLoss;
+          ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        }
+        currentDb = -35;
+        ctx.lineTo(eventX, toCanvasY(currentDb, h));
+        var plotWidth = Math.max(1, w - TRACE_PLOT_MARGIN_LEFT);
+        var noiseEndDist = eventDist + Math.max(80, plotWidth / Math.max(traceCamera.scaleX, 0.01) * 0.12);
+        var nd;
+        for (nd = eventDist + 6; nd <= noiseEndDist; nd += 7) {
+          var jitter = (deterministicNoise(nd, noiseSeed) - 0.5) * 10;
+          ctx.lineTo(toCanvasX(nd, w), toCanvasY(currentDb + jitter, h));
+        }
+        ended = true;
+      }
+
+      lastEventDist = eventDist;
+    }
+
+    if (!ended && lastEventDist >= 0) {
+      var tailDist = lastEventDist + 40;
+      currentDb -= (40 / 1000) * defaultSlope;
+      ctx.lineTo(toCanvasX(tailDist, w), toCanvasY(currentDb, h));
+    }
+
+    ctx.stroke();
+  }
+
   function prepareTraceCanvas(canvas) {
     var dpr = window.devicePixelRatio || 1;
     var rect = canvas.getBoundingClientRect();
@@ -2676,7 +2820,7 @@
     var h = prepared.h;
     var labelSize = Math.max(8, Math.round(Math.min(w, h) * 0.08));
     var distMin = traceCamera.x;
-    var distMax = traceCamera.x + w / traceCamera.scaleX;
+    var distMax = traceCamera.x + (w - TRACE_PLOT_MARGIN_LEFT) / traceCamera.scaleX;
     var dbMin = traceCamera.y - (h / 2) / traceCamera.scaleY;
     var dbMax = traceCamera.y + (h / 2) / traceCamera.scaleY;
     var distStep = getTraceDistanceMeterStep(distMin, distMax);
@@ -2761,24 +2905,18 @@
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    var initialX = toCanvasX(0, w);
-    var initialY = toCanvasY(0, h);
-    ctx.beginPath();
-    ctx.moveTo(initialX, initialY);
-    var traceMaxDist = 2500;
-    if (mockFiberEvents.length) {
-      var mockEnd = mockFiberEvents[mockFiberEvents.length - 1];
-      if (mockEnd && typeof mockEnd.distance === 'number') {
-        traceMaxDist = Math.max(100, Math.min(50000, Math.ceil(mockEnd.distance + 20)));
+    var events = eventsData;
+    if (!events || !events.length) {
+      var traceDeviceNode = canvas.closest('[data-otdr-node]');
+      if (traceDeviceNode) {
+        var traceDevice = findDevice(traceDeviceNode.getAttribute('data-otdr-node'));
+        if (traceDevice && traceDevice.traceEvents && traceDevice.traceEvents.length) {
+          events = traceDevice.traceEvents;
+        }
       }
     }
-    for (dist = 1; dist <= traceMaxDist; dist += 1) {
-      var currentDB = calcTraceDBAtDistance(dist);
-      ctx.lineTo(toCanvasX(dist, w), toCanvasY(currentDB, h));
-    }
-    ctx.stroke();
-
-    var events = eventsData || getDefaultTraceEvents();
+    if (!events || !events.length) events = getDefaultTraceEvents();
+    drawEventDrivenTracePath(ctx, events, w, h);
     events.forEach(function (ev) {
       if (typeof ev.distance !== 'number') return;
       var mx = toCanvasX(ev.distance, w);
