@@ -2038,6 +2038,7 @@
   var TRACE_OPTICAL_BASELINE_DB = 5;
 
   var traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
+  var currentTraceEventIndex = -1;
   var isTraceDragging = false;
   var lastTracePan = { x: 0, y: 0 };
   var mockFiberEvents = getMockFiberEventsSeven();
@@ -2045,7 +2046,90 @@
   var traceRedrawPending = null;
   var traceRedrawTarget = null;
 
+  function resetTraceEventCycleIndex() {
+    currentTraceEventIndex = -1;
+  }
+
+  function getTraceTableEvents(deviceId) {
+    var d = deviceId ? findDevice(deviceId) : null;
+    if (d && d.traceEvents && d.traceEvents.length) return d.traceEvents;
+    return getDefaultTraceEvents();
+  }
+
+  function computeTraceEventCenterDb(ev) {
+    if (!ev) return TRACE_OPTICAL_BASELINE_DB;
+    var tLoss = ev.tLoss != null ? ev.tLoss : ev.totalLoss;
+    if (typeof tLoss === 'number' && isFinite(tLoss)) {
+      return TRACE_OPTICAL_BASELINE_DB - tLoss;
+    }
+    return TRACE_OPTICAL_BASELINE_DB;
+  }
+
+  function focusTraceCameraOnEvent(targetEvent, canvas) {
+    if (!targetEvent || !canvas) return;
+    var prepared = prepareTraceCanvas(canvas);
+    if (!prepared) return;
+    var w = prepared.w;
+    var eventDist = typeof targetEvent.distance === 'number' ? targetEvent.distance : 0;
+
+    if (traceCamera.scaleX < 3.0) {
+      traceCamera.scaleX = 4.0;
+      traceCamera.scaleY = 2.0;
+    }
+    clampTraceZoomInScales(canvas);
+
+    var plotCenterX = w / 2;
+    traceCamera.x = eventDist - (plotCenterX - TRACE_PLOT_MARGIN_LEFT) / traceCamera.scaleX;
+    if (traceCamera.x < 0) traceCamera.x = 0;
+    traceCamera.y = computeTraceEventCenterDb(targetEvent);
+    traceCamera.y = Math.max(-50, Math.min(50, traceCamera.y));
+  }
+
+  function persistTraceCameraState(deviceId) {
+    var d = findDevice(deviceId);
+    if (!d) return;
+    d.traceCamera = {
+      x: traceCamera.x,
+      y: traceCamera.y,
+      scaleX: traceCamera.scaleX,
+      scaleY: traceCamera.scaleY,
+    };
+  }
+
+  function cycleTraceCursorView(deviceId, deviceNode, canvas, cursorButton) {
+    var events = getTraceTableEvents(deviceId);
+    currentTraceEventIndex += 1;
+    if (currentTraceEventIndex >= events.length) {
+      currentTraceEventIndex = -1;
+    }
+
+    var vp = getTraceViewport(deviceId);
+    var wrap = deviceNode && deviceNode.querySelector('.trace-floating-controls');
+    if (wrap) {
+      wrap.querySelectorAll('.cursor-a-btn').forEach(function (b) {
+        b.classList.remove('is-active');
+      });
+    }
+
+    if (currentTraceEventIndex === -1) {
+      resetTraceViewport(deviceId);
+      vp.selectedEventIndex = 0;
+      if (deviceNode) populateTraceEventTable(deviceNode, events, 0);
+    } else {
+      focusTraceCameraOnEvent(events[currentTraceEventIndex], canvas);
+      persistTraceCameraState(deviceId);
+      vp.selectedEventIndex = currentTraceEventIndex;
+      vp.activeCursor = 'A';
+      if (deviceNode) populateTraceEventTable(deviceNode, events, currentTraceEventIndex);
+      if (cursorButton) cursorButton.classList.add('is-active');
+    }
+
+    if (canvas) scheduleTraceRedraw(canvas);
+    else if (deviceNode) renderTraceForDevice(deviceId, deviceNode);
+  }
+
   function resetOtdrTraceAcquisitionState(deviceId, deviceNode) {
+    resetTraceEventCycleIndex();
     mockFiberEvents = [];
     traceEventCounter = 1;
     var d = deviceId ? findDevice(deviceId) : null;
@@ -3099,11 +3183,19 @@
     if (d) d.runningTab = tabName;
   }
 
+  function runOtdrTest(deviceId, deviceNode) {
+    if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
+    if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
+    resetTraceEventCycleIndex();
+    finishAcquisitionAndShowTrace(deviceId, deviceNode);
+  }
+
   function finishAcquisitionAndShowTrace(deviceId, deviceNode) {
     var traceResult = computeLabOtdrTrace(deviceId);
     traceResult.events = ensureTraceEvents(traceResult.events);
     syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
     traceEventCounter = 1;
+    resetTraceEventCycleIndex();
     var d = findDevice(deviceId);
     if (d) {
       d.acquisitionActive = false;
@@ -3756,14 +3848,7 @@
           return;
         }
         if (cursorA) {
-          vp.activeCursor = 'A';
-          var wrap = graphArea.querySelector('.trace-floating-controls');
-          if (wrap) {
-            wrap.querySelectorAll('.cursor-a-btn').forEach(function (b) {
-              b.classList.remove('is-active');
-            });
-          }
-          cursorA.classList.add('is-active');
+          cycleTraceCursorView(deviceId, deviceNode, canvas, cursorA);
         }
       });
     });
@@ -4399,6 +4484,7 @@
     getDefaultTraceEvents: getDefaultTraceEvents,
     startOtdrAcquisition: startOtdrAcquisition,
     stopOtdrAcquisition: stopOtdrAcquisition,
+    runOtdrTest: runOtdrTest,
     getTestState: function () {
       return JSON.parse(JSON.stringify(currentOtdrTestState));
     },
@@ -4411,6 +4497,7 @@
   global.initOTDRMachine = initOTDRMachine;
   global.startOtdrAcquisition = startOtdrAcquisition;
   global.stopOtdrAcquisition = stopOtdrAcquisition;
+  global.runOtdrTest = runOtdrTest;
 
   if (!tryRegister()) {
     document.addEventListener('DOMContentLoaded', function () {
