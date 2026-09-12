@@ -402,7 +402,7 @@
 
   function sleeveSlidePathPoints(p, end) {
     if (!isCable(p)) return fiberSleevePathPoints(p);
-    return cableStripPathPoints(p, cableEndFromToken(end || 'end'));
+    return cableStripPathPoints(p, cableEndFromToken(end || 'end'), true);
   }
 
   function pigtailEndHasSleeve(p, end) {
@@ -568,12 +568,13 @@
     return isCableEndCleaned(p, end) ? ' is-fiber-cleaned' : '';
   }
 
-  function cableStripPathPoints(p, end) {
+  function cableStripPathPoints(p, end, forSleeve) {
     end = cableEndFromToken(end);
     var dense = fiberRenderPathPointsDense(p);
     if (!dense || dense.length < 2) return dense;
     var pts = !isCable(p) || end === 'end' ? dense.slice().reverse() : dense.slice();
     if (!isCable(p)) return pts;
+    if (forSleeve) return pts;
     /* Each end only owns arc-length from its own tip (half span) — prevents cross-end hits. */
     var total = polylineLength(pts);
     var half = total * 0.5;
@@ -1630,7 +1631,7 @@
     return pointAtPathDistance(pts, total);
   }
 
-  function projectOntoFiberPath(pts, wx, wy) {
+  function projectOntoFiberPath(pts, wx, wy, allowFarExtrapolate) {
     if (!pts || pts.length < 2) {
       return { x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: 0 };
     }
@@ -1687,6 +1688,34 @@
           t: total > 0 ? along0 / total : 0,
           perpDist: perp0,
         };
+      }
+    }
+    /* Cable sleeves only: extrapolate past far tip for opposite-end ejection. */
+    if (allowFarExtrapolate) {
+      var last = pts.length - 1;
+      var axL = pts[last - 1].x;
+      var ayL = pts[last - 1].y;
+      var bxL = pts[last].x;
+      var byL = pts[last].y;
+      var segDxL = bxL - axL;
+      var segDyL = byL - ayL;
+      var segLenL = Math.sqrt(segDxL * segDxL + segDyL * segDyL) || 1;
+      var uL = ((wx - axL) * segDxL + (wy - ayL) * segDyL) / (segLenL * segLenL);
+      if (uL > 1) {
+        var pxL = axL + segDxL * uL;
+        var pyL = ayL + segDyL * uL;
+        var perpL = dist2(wx, wy, pxL, pyL);
+        var alongL = total + (uL - 1) * segLenL;
+        if (!best || perpL <= best.perpDist + 6) {
+          best = {
+            x: pxL,
+            y: pyL,
+            rot: fiberPathTangentRotDeg(segDxL, segDyL),
+            dist: alongL,
+            t: total > 0 ? alongL / total : 0,
+            perpDist: perpL,
+          };
+        }
       }
     }
     return best || { x: wx, y: wy, rot: 0, dist: 0, t: 0, perpDist: 0 };
@@ -1815,8 +1844,12 @@
     var sleeveEnd = resolveSleeveEnd(p, end);
     var pts = sleeveSlidePathPoints(p, sleeveEnd);
     var total = polylineLength(pts);
-    var proj = projectOntoFiberPath(pts, wx, wy);
+    var cableSleeve = isCable(p);
+    var proj = projectOntoFiberPath(pts, wx, wy, cableSleeve);
     if (proj.dist < -SLEEVE_EJECT_PULL_PX) {
+      return { eject: true, x: wx, y: wy };
+    }
+    if (cableSleeve && proj.dist > total + SLEEVE_EJECT_PULL_PX) {
       return { eject: true, x: wx, y: wy };
     }
     setSleeveAlongValue(
