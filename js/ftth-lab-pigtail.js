@@ -109,8 +109,12 @@
         cleaved: false,
         coatingRemoved: false,
         strippedLengthPx: 0,
+        hasSleeve: false,
+        sleeveAlong: null,
       };
     }
+    if (typeof prep.hasSleeve !== 'boolean') prep.hasSleeve = false;
+    if (prep.sleeveAlong != null && typeof prep.sleeveAlong !== 'number') prep.sleeveAlong = null;
     if (typeof prep.strippedLengthPx !== 'number' || !isFinite(prep.strippedLengthPx)) {
       prep.strippedLengthPx = 0;
     }
@@ -139,6 +143,12 @@
     p.prepState.cleaved = !!(p.isCleaved || p.cleaved);
     p.prepState.coatingRemoved = (Number(p.stripStage) || 0) >= 2 ||
       isBareStripComplete(ensureFiberStrip(p));
+    p.prepState.hasSleeve = !!p.hasSleeve;
+    if (p.hasSleeve && typeof p.sleeveAlong === 'number') {
+      p.prepState.sleeveAlong = p.sleeveAlong;
+    } else if (!p.hasSleeve) {
+      p.prepState.sleeveAlong = null;
+    }
     return p.prepState;
   }
 
@@ -341,6 +351,18 @@
     p.endPrepState.cleaved = !!(p.isCleaved || p.cleaved);
     p.endPrepState.coatingRemoved = getCableEndStripStage(p, 'end') >= 2 ||
       isBareStripComplete(ensureFiberStrip(p));
+    p.startPrepState.hasSleeve = !!p.startHasSleeve;
+    p.endPrepState.hasSleeve = !!p.hasSleeve;
+    if (p.startHasSleeve && typeof p.startSleeveAlong === 'number') {
+      p.startPrepState.sleeveAlong = p.startSleeveAlong;
+    } else if (!p.startHasSleeve) {
+      p.startPrepState.sleeveAlong = null;
+    }
+    if (p.hasSleeve && typeof p.sleeveAlong === 'number') {
+      p.endPrepState.sleeveAlong = p.sleeveAlong;
+    } else if (!p.hasSleeve) {
+      p.endPrepState.sleeveAlong = null;
+    }
   }
 
   /** After prep-state swap, mirror swapped prep into per-end legacy fields used by rendering. */
@@ -358,6 +380,85 @@
     p.cleaved = !!p.endPrepState.cleaved;
     p.startStripLengthPx = Number(p.startPrepState.strippedLengthPx) || 0;
     p.stripLengthPx = Number(p.endPrepState.strippedLengthPx) || 0;
+    p.startHasSleeve = !!p.startPrepState.hasSleeve;
+    p.hasSleeve = !!p.endPrepState.hasSleeve;
+    p.startSleeveAlong = p.startPrepState.sleeveAlong;
+    p.sleeveAlong = p.endPrepState.sleeveAlong;
+  }
+
+  function pigtailEndHasSleeve(p, end) {
+    if (!p) return false;
+    if (!isCable(p)) return !!p.hasSleeve;
+    end = cableEndFromToken(end);
+    if (end === 'start') return !!(p.startHasSleeve || (p.startPrepState && p.startPrepState.hasSleeve));
+    return !!(p.hasSleeve || (p.endPrepState && p.endPrepState.hasSleeve));
+  }
+
+  function resolveSleeveEnd(p, end) {
+    if (!isCable(p)) return 'end';
+    if (end) return cableEndFromToken(end);
+    if (p.hasSleeve || (p.endPrepState && p.endPrepState.hasSleeve)) return 'end';
+    if (p.startHasSleeve || (p.startPrepState && p.startPrepState.hasSleeve)) return 'start';
+    return 'end';
+  }
+
+  function getSleeveAlongValue(p, end) {
+    var size = getSleeveSizePx();
+    var sleeveEnd = resolveSleeveEnd(p, end);
+    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
+    var total = polylineLength(pts);
+    var fallback = defaultSleeveAlong(total, size.w);
+    if (!isCable(p)) {
+      return typeof p.sleeveAlong === 'number' ? p.sleeveAlong : fallback;
+    }
+    if (sleeveEnd === 'start') {
+      var startAlong = typeof p.startSleeveAlong === 'number'
+        ? p.startSleeveAlong
+        : (p.startPrepState && typeof p.startPrepState.sleeveAlong === 'number'
+          ? p.startPrepState.sleeveAlong
+          : null);
+      return startAlong != null ? startAlong : fallback;
+    }
+    var endAlong = typeof p.sleeveAlong === 'number'
+      ? p.sleeveAlong
+      : (p.endPrepState && typeof p.endPrepState.sleeveAlong === 'number'
+        ? p.endPrepState.sleeveAlong
+        : null);
+    return endAlong != null ? endAlong : fallback;
+  }
+
+  function setSleeveAlongValue(p, end, along) {
+    if (!isCable(p)) {
+      p.sleeveAlong = along;
+      if (p.prepState) p.prepState.sleeveAlong = along;
+      return;
+    }
+    if (cableEndFromToken(end) === 'start') {
+      p.startSleeveAlong = along;
+      if (p.startPrepState) p.startPrepState.sleeveAlong = along;
+    } else {
+      p.sleeveAlong = along;
+      if (p.endPrepState) p.endPrepState.sleeveAlong = along;
+    }
+  }
+
+  function getCableEndFiberTangentRotAtTip(p, end) {
+    end = cableEndFromToken(end);
+    var densePts = fiberRenderPathPointsDense(p);
+    if (!densePts || densePts.length < 2) {
+      var tip = cableEndTipWorld(p, end);
+      var other = end === 'start' ? { x: p.bx, y: p.by } : { x: p.ax, y: p.ay };
+      return fiberPathTangentRotDeg(other.x - tip.x, other.y - tip.y);
+    }
+    var look = Math.max(1, Math.round(densePts.length * 0.08));
+    if (end === 'start') {
+      var tipS = densePts[0];
+      var nearS = densePts[Math.min(densePts.length - 1, look)];
+      return fiberPathTangentRotDeg(nearS.x - tipS.x, nearS.y - tipS.y);
+    }
+    var tipE = densePts[densePts.length - 1];
+    var nearE = densePts[Math.max(0, densePts.length - 1 - look)];
+    return fiberPathTangentRotDeg(tipE.x - nearE.x, tipE.y - nearE.y);
   }
 
   function ensureCableEndStrip(p, end) {
@@ -1247,6 +1348,13 @@
         p.sleeveAlong = 0;
       }
       if (!p.hasSleeve) p.sleeveAlong = null;
+      if (isCable(p)) {
+        p.startHasSleeve = !!p.startHasSleeve;
+        if (p.startHasSleeve && typeof p.startSleeveAlong !== 'number') {
+          p.startSleeveAlong = 0;
+        }
+        if (!p.startHasSleeve) p.startSleeveAlong = null;
+      }
       if (typeof p.stripStage !== 'number') p.stripStage = 0;
       if (typeof p.stripPeel !== 'number') p.stripPeel = 0;
       if (p.stripStage < 0) p.stripStage = 0;
@@ -1555,20 +1663,28 @@
     return fiberPathTangentRotDeg(dx, dy);
   }
 
-  function getShrunkSleeveWeldPose(p) {
+  function getShrunkSleeveWeldPose(p, end) {
     if (!p) return { x: 0, y: 0, rot: 0 };
-    var rot = getPigtailFiberTangentRotAtTip(p);
+    var sleeveEnd = resolveSleeveEnd(p, end);
+    var rot = isCable(p)
+      ? getCableEndFiberTangentRotAtTip(p, sleeveEnd)
+      : getPigtailFiberTangentRotAtTip(p);
     if (getPigtailFusionAssemblyId(p)) {
       var weld = getFusedWeldWorld(getPigtailFusionAssemblyId(p));
       if (weld) return { x: weld.x, y: weld.y, rot: rot };
     }
+    if (isCable(p)) {
+      var tip = cableEndTipWorld(p, sleeveEnd);
+      return { x: tip.x, y: tip.y, rot: rot };
+    }
     return { x: p.bx, y: p.by, rot: rot };
   }
 
-  function sleeveGeometry(p) {
+  function sleeveGeometry(p, end) {
     var size = getSleeveSizePx();
+    var sleeveEnd = resolveSleeveEnd(p, end);
     if (p.isSleeveShrunk) {
-      var weldPose = getShrunkSleeveWeldPose(p);
+      var weldPose = getShrunkSleeveWeldPose(p, sleeveEnd);
       return {
         x: weldPose.x,
         y: weldPose.y,
@@ -1577,11 +1693,9 @@
         h: size.h,
       };
     }
-    var pts = fiberSleevePathPoints(p);
+    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
     var total = polylineLength(pts);
-    var along = typeof p.sleeveAlong === 'number'
-      ? p.sleeveAlong
-      : defaultSleeveAlong(total, size.w);
+    var along = getSleeveAlongValue(p, sleeveEnd);
     var pt = pointAtPathDistance(pts, along * total);
     return {
       x: pt.x,
@@ -1592,8 +1706,8 @@
     };
   }
 
-  function sleeveStyle(p) {
-    var g = sleeveGeometry(p);
+  function sleeveStyle(p, end) {
+    var g = sleeveGeometry(p, end);
     var h = g.h;
     if (p.isSleeveShrunk) {
       h = Math.max(3, g.h * 0.62);
@@ -1617,31 +1731,47 @@
     }, 420);
   }
 
-  function updateSleeveElement(p, el) {
-    if (!el || !p || !p.hasSleeve) return;
-    el.setAttribute('style', sleeveStyle(p));
+  function updateSleeveElement(p, el, end) {
+    if (!el || !p) return;
+    end = resolveSleeveEnd(p, end);
+    if (!pigtailEndHasSleeve(p, end)) return;
+    el.setAttribute('style', sleeveStyle(p, end));
     el.classList.toggle('is-heat-shrunk', !!p.isSleeveShrunk);
     el.classList.toggle('is-heat-shrinking', !!p.isSleeveShrunk);
   }
 
   function repaintPigtailSleeveDom(p) {
-    if (!layer || !p || !p.hasSleeve) return;
+    if (!layer || !p) return;
+    if (isCable(p)) {
+      ['start', 'end'].forEach(function (end) {
+        if (!pigtailEndHasSleeve(p, end)) return;
+        var el = layer.querySelector(
+          '.lab-pigtail-sleeve[data-pt-sleeve="' + fiberTargetId(p, end) + '"]'
+        );
+        if (el) updateSleeveElement(p, el, end);
+      });
+      return;
+    }
+    if (!p.hasSleeve) return;
     var el = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
-    if (el) updateSleeveElement(p, el);
+    if (el) updateSleeveElement(p, el, 'end');
   }
 
-  function dragSleeveAlongPath(p, wx, wy) {
+  function dragSleeveAlongPath(p, wx, wy, end) {
     if (p && p.isSleeveShrunk) return { eject: false, locked: true };
-    var pts = fiberSleevePathPoints(p);
+    var sleeveEnd = resolveSleeveEnd(p, end);
+    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
     var total = polylineLength(pts);
-    var size = getSleeveSizePx();
     var proj = projectOntoFiberPath(pts, wx, wy);
     if (proj.dist < -SLEEVE_EJECT_PULL_PX) {
       return { eject: true, x: wx, y: wy };
     }
-    p.sleeveAlong = total > 0
-      ? Math.max(0, Math.min(1, proj.dist / total))
-      : 0;
+    setSleeveAlongValue(
+      p,
+      sleeveEnd,
+      total > 0 ? Math.max(0, Math.min(1, proj.dist / total)) : 0
+    );
+    if (isCable(p)) syncCablePrepState(p);
     return { eject: false, proj: proj };
   }
 
@@ -3645,9 +3775,15 @@
     return !!(asm && asm.sleeveShrunk);
   }
 
+  function pigtailHasAnySleeve(p) {
+    if (!p) return false;
+    if (!isCable(p)) return !!p.hasSleeve;
+    return pigtailEndHasSleeve(p, 'start') || pigtailEndHasSleeve(p, 'end');
+  }
+
   function fusedAssemblyHasShrinkSleeve(machineId) {
     var pair = getFusedAssemblyPigtails(machineId);
-    return !!((pair.left && pair.left.hasSleeve) || (pair.right && pair.right.hasSleeve));
+    return !!(pigtailHasAnySleeve(pair.left) || pigtailHasAnySleeve(pair.right));
   }
 
   function ovenDragBlockedMessage(p) {
@@ -3916,14 +4052,28 @@
     return seatFusedAssemblyInOven(machineId, slot);
   }
 
+  function forEachMountedSleeve(pg, fn) {
+    if (!pg || typeof fn !== 'function') return;
+    if (!isCable(pg)) {
+      if (pg.hasSleeve) fn(pg, 'end', pg.id);
+      return;
+    }
+    ['start', 'end'].forEach(function (end) {
+      if (!pigtailEndHasSleeve(pg, end)) return;
+      fn(pg, end, fiberTargetId(pg, end));
+    });
+  }
+
   function clearOvenSleeveShrinkVisual(machineId) {
     var pair = getFusedAssemblyPigtails(machineId);
     if (!layer) return;
     [pair.left, pair.right].forEach(function (pg) {
       if (!pg) return;
-      layer.querySelectorAll('.lab-pigtail-sleeve[data-pt-sleeve="' + pg.id + '"]').forEach(function (el) {
-        el.classList.remove('is-heat-shrinking', 'is-heat-shrunk');
-        el.style.removeProperty('height');
+      forEachMountedSleeve(pg, function (item, end, sleeveId) {
+        layer.querySelectorAll('.lab-pigtail-sleeve[data-pt-sleeve="' + sleeveId + '"]').forEach(function (el) {
+          el.classList.remove('is-heat-shrinking', 'is-heat-shrunk');
+          el.style.removeProperty('height');
+        });
       });
       if (pg.isSleeveShrunk && !isPigtailFusionPermanent(pg)) {
         pg.isSleeveShrunk = false;
@@ -3938,18 +4088,20 @@
     var t = Math.max(0, Math.min(1, (progress || 0) / 100));
     var shrinkY = 1 - t * 0.38;
     [pair.left, pair.right].forEach(function (pg) {
-      if (!pg || !pg.hasSleeve) return;
-      layer.querySelectorAll('.lab-pigtail-sleeve[data-pt-sleeve="' + pg.id + '"]').forEach(function (el) {
-        var g = sleeveGeometry(pg);
-        var h = Math.max(3, g.h * shrinkY);
-        el.classList.add('is-heat-shrinking');
-        el.classList.toggle('is-heat-shrunk', t >= 1);
-        el.style.left = Math.round(g.x - g.w / 2) + 'px';
-        el.style.top = Math.round(g.y - h / 2) + 'px';
-        el.style.width = g.w + 'px';
-        el.style.height = h + 'px';
-        el.style.transform = 'rotate(' + g.rot.toFixed(2) + 'deg)';
-        el.style.transformOrigin = '50% 50%';
+      if (!pg) return;
+      forEachMountedSleeve(pg, function (item, end, sleeveId) {
+        layer.querySelectorAll('.lab-pigtail-sleeve[data-pt-sleeve="' + sleeveId + '"]').forEach(function (el) {
+          var g = sleeveGeometry(item, end);
+          var h = Math.max(3, g.h * shrinkY);
+          el.classList.add('is-heat-shrinking');
+          el.classList.toggle('is-heat-shrunk', t >= 1);
+          el.style.left = Math.round(g.x - g.w / 2) + 'px';
+          el.style.top = Math.round(g.y - h / 2) + 'px';
+          el.style.width = g.w + 'px';
+          el.style.height = h + 'px';
+          el.style.transform = 'rotate(' + g.rot.toFixed(2) + 'deg)';
+          el.style.transformOrigin = '50% 50%';
+        });
       });
     });
   }
@@ -6133,8 +6285,7 @@
       for (ei = 0; ei < ends.length; ei++) {
         var end = ends[ei];
         if (!p) continue;
-        if (end === 'end' && p.hasSleeve) continue;
-        if (end === 'start' && p.startHasSleeve) continue;
+        if (pigtailEndHasSleeve(p, end)) continue;
         var tip = cableEndTipWorld(p, end);
         var d = dist2(world.x, world.y, tip.x, tip.y);
         if (d <= thr && d < bestD) {
@@ -6153,13 +6304,8 @@
     var p = target.p;
     var end = target.end || 'end';
     if (!p) return false;
-    if (end === 'start' && p.startHasSleeve && !opts.force) {
-      setStatus('Sleeve already on start end');
-      selectCable(p.id);
-      return false;
-    }
-    if (end === 'end' && p.hasSleeve && !opts.force) {
-      setStatus('Sleeve already on this pigtail');
+    if (pigtailEndHasSleeve(p, end) && !opts.force) {
+      setStatus(isCable(p) ? 'Sleeve already on this cable end' : 'Sleeve already on this pigtail');
       if (isCable(p)) selectCable(p.id);
       else selectPigtail(p.id);
       return false;
@@ -6167,11 +6313,30 @@
     var pts = cableStripPathPoints(p, end);
     var total = polylineLength(pts);
     var size = getSleeveSizePx();
-    if (end === 'start') p.startHasSleeve = true;
-    else p.hasSleeve = true;
-    p.sleeveAlong = typeof opts.sleeveAlong === 'number'
+    var along = typeof opts.sleeveAlong === 'number'
       ? Math.max(0, Math.min(1, opts.sleeveAlong))
       : defaultSleeveAlong(total, size.w);
+    if (end === 'start') {
+      p.startHasSleeve = true;
+      p.startSleeveAlong = along;
+      if (p.startPrepState) {
+        p.startPrepState.hasSleeve = true;
+        p.startPrepState.sleeveAlong = along;
+      }
+    } else {
+      p.hasSleeve = true;
+      p.sleeveAlong = along;
+      if (p.endPrepState) {
+        p.endPrepState.hasSleeve = true;
+        p.endPrepState.sleeveAlong = along;
+      }
+      if (!isCable(p)) {
+        ensurePigtailPrepState(p);
+        p.prepState.hasSleeve = true;
+        p.prepState.sleeveAlong = along;
+      }
+    }
+    if (isCable(p)) syncCablePrepState(p);
     if (opts.consumeFreeSleeveId && global.FtthLab &&
         typeof FtthLab.consumeFreeSleeve === 'function') {
       FtthLab.consumeFreeSleeve(opts.consumeFreeSleeveId);
@@ -6191,14 +6356,34 @@
   }
 
   function ejectSleeve(id, wx, wy) {
-    var p = findPigtail(id);
-    if (!p || !p.hasSleeve) return null;
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || !pigtailEndHasSleeve(p, end)) return null;
     if (p.isSleeveShrunk) return null;
-    var g = sleeveGeometry(p);
+    var g = sleeveGeometry(p, end);
     var spawnX = typeof wx === 'number' ? wx : g.x;
     var spawnY = typeof wy === 'number' ? wy : g.y;
-    p.hasSleeve = false;
-    p.sleeveAlong = null;
+    if (end === 'start') {
+      p.startHasSleeve = false;
+      p.startSleeveAlong = null;
+      if (p.startPrepState) {
+        p.startPrepState.hasSleeve = false;
+        p.startPrepState.sleeveAlong = null;
+      }
+    } else {
+      p.hasSleeve = false;
+      p.sleeveAlong = null;
+      if (p.endPrepState) {
+        p.endPrepState.hasSleeve = false;
+        p.endPrepState.sleeveAlong = null;
+      }
+      if (!isCable(p) && p.prepState) {
+        p.prepState.hasSleeve = false;
+        p.prepState.sleeveAlong = null;
+      }
+    }
+    if (isCable(p)) syncCablePrepState(p);
     rebuildLayer();
     pushHistory();
     if (global.FtthLab && typeof FtthLab.placeFreeSleeve === 'function') {
@@ -6398,9 +6583,11 @@
       by: tipY,
       startPrepState: {
         stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+        hasSleeve: false, sleeveAlong: null,
       },
       endPrepState: {
         stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+        hasSleeve: false, sleeveAlong: null,
       },
       connector: { attached: null, mismatch: false, lockedRot: null, liveRot: horizRot },
       tail: { attached: null },
@@ -6411,7 +6598,9 @@
       lengthUnit: 'm',
       fixedLength: SPAWN_LEN_PX,
       hasSleeve: false,
+      sleeveAlong: null,
       startHasSleeve: false,
+      startSleeveAlong: null,
       isStripped: false,
       startIsStripped: false,
       isCleaned: false,
@@ -7669,6 +7858,15 @@
     );
   }
 
+  function buildCableSleeveHtml(p, end) {
+    if (!pigtailEndHasSleeve(p, end)) return '';
+    return (
+      '<div class="lab-pigtail-sleeve lab-sleeve-tube" data-pt-sleeve="' + fiberTargetId(p, end) +
+      '" style="' + sleeveStyle(p, end) +
+      '" title="Sleeve 60mm · drag along fiber" aria-label="Splice protection sleeve"></div>'
+    );
+  }
+
   function buildCableTailButtonHtml(p, end) {
     end = cableEndFromToken(end);
     syncCablePrepState(p);
@@ -7787,6 +7985,8 @@
           '<div class="lab-pigtail lab-cable' + selected + '" data-pt-node="' + p.id + '" data-cable-node="' + p.id + '">' +
           buildCableTailButtonHtml(p, 'start') +
           buildCableTailButtonHtml(p, 'end') +
+          buildCableSleeveHtml(p, 'start') +
+          buildCableSleeveHtml(p, 'end') +
           '</div>';
         return;
       }
@@ -7850,7 +8050,7 @@
         '</button>' +
         (p.hasSleeve
           ? '<div class="lab-pigtail-sleeve lab-sleeve-tube" data-pt-sleeve="' + p.id + '" style="' +
-            sleeveStyle(p) + '" title="Sleeve 60mm · drag along fiber" aria-label="Splice protection sleeve"></div>'
+            sleeveStyle(p, 'end') + '" title="Sleeve 60mm · drag along fiber" aria-label="Splice protection sleeve"></div>'
           : '') +
         '</div>';
     });
@@ -7905,6 +8105,27 @@
         bBtn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
         bBtn.classList.toggle('is-splicer-docked', !!p.isSnappedToSplicer);
       }
+      ['start', 'end'].forEach(function (cableEnd) {
+        var sleeveId = fiberTargetId(p, cableEnd);
+        var sleeveEl = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + sleeveId + '"]');
+        if (pigtailEndHasSleeve(p, cableEnd)) {
+          if (sleeveEl) {
+            updateSleeveElement(p, sleeveEl, cableEnd);
+          } else {
+            var hostNode = layer.querySelector('[data-pt-node="' + p.id + '"]');
+            if (hostNode) {
+              var wrapEl = document.createElement('div');
+              wrapEl.className = 'lab-pigtail-sleeve lab-sleeve-tube';
+              wrapEl.setAttribute('data-pt-sleeve', sleeveId);
+              wrapEl.setAttribute('style', sleeveStyle(p, cableEnd));
+              wrapEl.setAttribute('title', 'Sleeve 60mm');
+              hostNode.appendChild(wrapEl);
+            }
+          }
+        } else if (sleeveEl && sleeveEl.parentNode) {
+          sleeveEl.parentNode.removeChild(sleeveEl);
+        }
+      });
       return;
     }
     if (aBtn) aBtn.setAttribute('style', connectorStyle(p));
@@ -7922,14 +8143,14 @@
     var sleeve = layer.querySelector('.lab-pigtail-sleeve[data-pt-sleeve="' + p.id + '"]');
     if (p.hasSleeve) {
       if (sleeve) {
-        sleeve.setAttribute('style', sleeveStyle(p));
+        updateSleeveElement(p, sleeve, 'end');
       } else {
         var hostNode = layer.querySelector('[data-pt-node="' + p.id + '"]');
         if (hostNode) {
           var wrapEl = document.createElement('div');
           wrapEl.className = 'lab-pigtail-sleeve lab-sleeve-tube';
           wrapEl.setAttribute('data-pt-sleeve', p.id);
-          wrapEl.setAttribute('style', sleeveStyle(p));
+          wrapEl.setAttribute('style', sleeveStyle(p, 'end'));
           wrapEl.setAttribute('title', 'Sleeve 60mm');
           hostNode.appendChild(wrapEl);
         }
@@ -8090,11 +8311,15 @@
         e.preventDefault();
         e.stopPropagation();
         var id = btn.getAttribute('data-pt-sleeve');
-        var p = findPigtail(id);
-        if (!p || !p.hasSleeve) return;
+        var target = parseFiberTargetId(id);
+        if (!target) return;
+        var p = target.p;
+        var sleeveEnd = target.end;
+        if (!pigtailEndHasSleeve(p, sleeveEnd)) return;
         if (p.isSleeveShrunk) return;
         if (isPigtailOvenDragLocked(p)) return;
-        selectPigtail(id, { skipRebuild: true });
+        if (isCable(p)) selectCable(p.id, { skipRebuild: true });
+        else selectPigtail(p.id, { skipRebuild: true });
         btn.classList.add('is-dragging');
         document.body.classList.add('lab-sleeve-dragging');
         try { btn.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
@@ -8114,20 +8339,20 @@
         function onMove(ev) {
           moved = true;
           var world = clientToWorld(ev.clientX, ev.clientY);
-          var result = dragSleeveAlongPath(p, world.x, world.y);
+          var result = dragSleeveAlongPath(p, world.x, world.y, sleeveEnd);
           if (result.eject) {
             ejected = true;
             finishDrag(ev);
             ejectSleeve(id, world.x, world.y);
             return;
           }
-          updateSleeveElement(p, btn);
+          updateSleeveElement(p, btn, sleeveEnd);
         }
 
         function onUp(ev) {
           if (ejected) return;
           var world = clientToWorld(ev.clientX, ev.clientY);
-          var result = dragSleeveAlongPath(p, world.x, world.y);
+          var result = dragSleeveAlongPath(p, world.x, world.y, sleeveEnd);
           finishDrag(ev);
           if (result.eject) {
             ejectSleeve(id, world.x, world.y);
