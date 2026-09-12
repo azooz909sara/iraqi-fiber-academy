@@ -101,20 +101,246 @@
     return cableEndFromToken(end) === 'start' ? p.id + ':start' : p.id;
   }
 
+  function ensureEndPrepStateFields(prep) {
+    if (!prep || typeof prep !== 'object') {
+      return {
+        stripped: false,
+        cleaned: false,
+        cleaved: false,
+        coatingRemoved: false,
+        strippedLengthPx: 0,
+      };
+    }
+    if (typeof prep.strippedLengthPx !== 'number' || !isFinite(prep.strippedLengthPx)) {
+      prep.strippedLengthPx = 0;
+    }
+    if (prep.strippedLengthPx < 0) prep.strippedLengthPx = 0;
+    if (typeof prep.coatingRemoved !== 'boolean') prep.coatingRemoved = false;
+    return prep;
+  }
+
+  function ensurePigtailPrepState(p) {
+    if (!p || isCable(p)) return null;
+    if (!p.prepState || typeof p.prepState !== 'object') {
+      p.prepState = {
+        stripped: false,
+        cleaned: false,
+        cleaved: false,
+        coatingRemoved: false,
+        strippedLengthPx: 0,
+      };
+    }
+    ensureEndPrepStateFields(p.prepState);
+    if (!p.prepState.strippedLengthPx && Number(p.stripLengthPx) > 0) {
+      p.prepState.strippedLengthPx = Number(p.stripLengthPx) || 0;
+    }
+    p.prepState.stripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1);
+    p.prepState.cleaned = !!p.isCleaned;
+    p.prepState.cleaved = !!(p.isCleaved || p.cleaved);
+    p.prepState.coatingRemoved = (Number(p.stripStage) || 0) >= 2 ||
+      isBareStripComplete(ensureFiberStrip(p));
+    return p.prepState;
+  }
+
+  function getEndPrepState(p, end) {
+    if (!p) return null;
+    if (isCable(p)) {
+      syncCablePrepState(p);
+      end = cableEndFromToken(end);
+      return end === 'start' ? p.startPrepState : p.endPrepState;
+    }
+    return ensurePigtailPrepState(p);
+  }
+
+  function getEndStrippedLengthPx(p, end) {
+    var prep = getEndPrepState(p, end);
+    return prep ? Math.max(0, Number(prep.strippedLengthPx) || 0) : 0;
+  }
+
+  function stripDepthFromToolWorld(p, end, wx, wy) {
+    end = resolveCableEnd(p, end);
+    var pts = cableStripPathPoints(p, end);
+    var depth = 0;
+    if (pts && pts.length >= 2) {
+      var proj = projectOntoFiberStrict(pts, wx, wy);
+      if (proj) depth = Math.max(0, proj.dist || 0);
+    }
+    if (depth < STRIP_TIP_EPS) {
+      depth = cableEndTipDist(p, end, wx, wy);
+    }
+    return depth;
+  }
+
+  function resetEndCleanCleaveFlags(p, end) {
+    end = resolveCableEnd(p, end);
+    if (isCable(p)) {
+      if (end === 'start') {
+        p.startIsCleaned = false;
+        p.startIsCleaved = false;
+        p.startCleaved = false;
+        p.startCleavedStripLock = null;
+      } else {
+        p.isCleaned = false;
+        p.isCleaved = false;
+        p.cleaved = false;
+        p.cleavedStripLock = null;
+      }
+      return;
+    }
+    p.isCleaned = false;
+    p.isCleaved = false;
+    p.cleaved = false;
+    p.cleavedStripLock = null;
+    p.stripFrontierLock = null;
+  }
+
+  /**
+   * Jacket strip extended past prior frontier — restore buffer coating on the new span,
+   * invalidate clean/cleave, and drop back to jacket-only stage.
+   */
+  function resetPrepOnStripExtension(p, end, prevLen) {
+    var prep = getEndPrepState(p, end);
+    if (!prep) return;
+    var fs = ensureCableEndStrip(p, end);
+    var stage = isCable(p) ? getCableEndStripStage(p, end) : (Number(p.stripStage) || 0);
+    var coatingWasRemoved = stage >= 2 || isBareStripComplete(fs) || !!prep.coatingRemoved;
+
+    prep.cleaned = false;
+    prep.cleaved = false;
+    prep.coatingRemoved = false;
+    resetEndCleanCleaveFlags(p, end);
+
+    if (coatingWasRemoved) {
+      fs.bareTo = Math.max(0, prevLen);
+    } else if ((fs.bareTo || 0) > STRIP_TIP_EPS) {
+      fs.bareTo = Math.min(fs.bareTo || 0, prevLen);
+    } else {
+      fs.bareTo = 0;
+    }
+
+    if (isCable(p)) {
+      setCableEndStripStage(p, end, (fs.jacketTo || 0) > STRIP_TIP_EPS || prevLen > STRIP_TIP_EPS ? 1 : 0);
+    } else {
+      p.stripStage = (fs.jacketTo || 0) > STRIP_TIP_EPS || prevLen > STRIP_TIP_EPS ? 1 : 0;
+      p.stripFrontierLock = null;
+    }
+  }
+
+  function syncFiberStripFromStrippedLength(p, end) {
+    if (!p) return;
+    end = resolveCableEnd(p, end);
+    var len = getEndStrippedLengthPx(p, end);
+    var fs = ensureCableEndStrip(p, end);
+    var stage = isCable(p) ? getCableEndStripStage(p, end) : (Number(p.stripStage) || 0);
+    if (len <= STRIP_TIP_EPS) return;
+    if (stage >= 2 && isBareStripComplete(fs)) {
+      fs.jacketTo = len;
+      fs.bareTo = len;
+    } else if (stage >= 1) {
+      fs.jacketTo = Math.max(fs.jacketTo || 0, len);
+      if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    } else {
+      fs.jacketTo = Math.max(fs.jacketTo || 0, len);
+      if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    }
+    if (isCable(p)) {
+      if (end === 'start') p.startStripLengthPx = len;
+      else p.stripLengthPx = len;
+    } else {
+      p.stripLengthPx = len;
+    }
+  }
+
+  function applyStrippedLengthPx(p, end, distPx, opts) {
+    opts = opts || {};
+    if (!p) return 0;
+    end = resolveCableEnd(p, end);
+    var prep = getEndPrepState(p, end);
+    if (!prep) return 0;
+    var maxLen = maxCableEndStripLenPx(p, end);
+    var n = Number(distPx);
+    if (!isFinite(n) || n < 0) n = 0;
+    var prevLen = prep.strippedLengthPx || 0;
+    var isBufferPeel = !!(opts.bufferPeel || opts.layer === 'buffer');
+    if (n > prevLen + STRIP_TIP_EPS && !isBufferPeel) {
+      resetPrepOnStripExtension(p, end, prevLen);
+    }
+    n = Math.min(maxLen, Math.max(prevLen, n));
+    prep.strippedLengthPx = n;
+    prep.stripped = n > STRIP_TIP_EPS;
+    if (isCable(p)) {
+      if (end === 'start') {
+        p.startIsStripped = prep.stripped;
+        p.startStripLengthPx = n;
+      } else {
+        p.isStripped = prep.stripped;
+        p.stripLengthPx = n;
+      }
+    } else {
+      p.isStripped = prep.stripped;
+      p.stripLengthPx = n;
+    }
+    syncFiberStripFromStrippedLength(p, end);
+    if (isBufferPeel && (isCable(p) ? getCableEndStripStage(p, end) >= 2 : (Number(p.stripStage) || 0) >= 2)) {
+      prep.coatingRemoved = true;
+    }
+    return n;
+  }
+
+  function recordStripToolAtWorld(id, wx, wy, opts) {
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    if (!p) return 0;
+    var end = target.end || 'end';
+    opts = opts || {};
+    return applyStrippedLengthPx(
+      p,
+      end,
+      stripDepthFromToolWorld(p, end, wx, wy),
+      opts
+    );
+  }
+
   function syncCablePrepState(p) {
     if (!isCable(p)) return;
     if (!p.startPrepState || typeof p.startPrepState !== 'object') {
-      p.startPrepState = { stripped: false, cleaned: false, cleaved: false };
+      p.startPrepState = {
+        stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+      };
     }
     if (!p.endPrepState || typeof p.endPrepState !== 'object') {
-      p.endPrepState = { stripped: false, cleaned: false, cleaved: false };
+      p.endPrepState = {
+        stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+      };
     }
-    p.startPrepState.stripped = !!(p.startIsStripped || (Number(p.startStripStage) || 0) >= 1);
+    ensureEndPrepStateFields(p.startPrepState);
+    ensureEndPrepStateFields(p.endPrepState);
+    if (!p.startPrepState.strippedLengthPx && Number(p.startStripLengthPx) > 0) {
+      p.startPrepState.strippedLengthPx = Number(p.startStripLengthPx) || 0;
+    }
+    if (!p.endPrepState.strippedLengthPx && Number(p.stripLengthPx) > 0) {
+      p.endPrepState.strippedLengthPx = Number(p.stripLengthPx) || 0;
+    }
+    var fsStart = p.startFiberStrip;
+    if (fsStart && (fsStart.jacketTo || 0) > p.startPrepState.strippedLengthPx) {
+      p.startPrepState.strippedLengthPx = fsStart.jacketTo;
+    }
+    var fsEnd = p.fiberStrip;
+    if (fsEnd && (fsEnd.jacketTo || 0) > p.endPrepState.strippedLengthPx) {
+      p.endPrepState.strippedLengthPx = fsEnd.jacketTo;
+    }
+    p.startPrepState.stripped = !!(p.startIsStripped || (Number(p.startStripStage) || 0) >= 1 ||
+      p.startPrepState.strippedLengthPx > STRIP_TIP_EPS);
     p.startPrepState.cleaned = !!p.startIsCleaned;
     p.startPrepState.cleaved = !!(p.startIsCleaved || p.startCleaved);
-    p.endPrepState.stripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1);
+    p.startPrepState.coatingRemoved = getCableEndStripStage(p, 'start') >= 2 ||
+      isBareStripComplete(ensureCableEndStrip(p, 'start'));
+    p.endPrepState.stripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1 ||
+      p.endPrepState.strippedLengthPx > STRIP_TIP_EPS);
     p.endPrepState.cleaned = !!p.isCleaned;
     p.endPrepState.cleaved = !!(p.isCleaved || p.cleaved);
+    p.endPrepState.coatingRemoved = getCableEndStripStage(p, 'end') >= 2 ||
+      isBareStripComplete(ensureFiberStrip(p));
   }
 
   function ensureCableEndStrip(p, end) {
@@ -189,7 +415,42 @@
 
   function maxCableEndStripLenPx(p, end) {
     var pts = cableStripPathPoints(p, end);
-    return Math.max(0, polylineLength(pts));
+    var pathMax = Math.max(0, polylineLength(pts));
+    return Math.max(pathMax, getBareGlassLengthAfterCutPx());
+  }
+
+  /** Render-path distance from tip — uses stored strippedLengthPx (world px, not % of span). */
+  function cableEndRenderDistPx(p, end, kind) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return 0;
+    var prep = cableEndPrepState(p, end);
+    var len = Math.max(0, prep.strippedLengthPx || 0);
+    if (isCableEndCleaved(p, end)) return getBareGlassLengthAfterCutPx();
+    if (len <= STRIP_TIP_EPS) return 0;
+    var fs = ensureCableEndStrip(p, end);
+    var stage = getCableEndStripStage(p, end);
+    if (kind === 'bare') {
+      if (stage >= 2 || isBareStripComplete(fs) || prep.cleaved) return len;
+      if ((fs.bareTo || 0) > STRIP_TIP_EPS) return Math.min(len, fs.bareTo || 0);
+      return 0;
+    }
+    return len;
+  }
+
+  function endRenderStripDistPx(p, end, kind) {
+    if (isCable(p)) return cableEndRenderDistPx(p, end, kind);
+    var prep = ensurePigtailPrepState(p);
+    var len = Math.max(0, prep.strippedLengthPx || 0);
+    if (p.isCleaved || p.cleaved) return getBareGlassLengthAfterCutPx();
+    if (len <= STRIP_TIP_EPS) return 0;
+    var fs = ensureFiberStrip(p);
+    var stage = Number(p.stripStage) || 0;
+    if (kind === 'bare') {
+      if (stage >= 2 || isBareStripComplete(fs)) return len;
+      if ((fs.bareTo || 0) > STRIP_TIP_EPS) return Math.min(len, fs.bareTo || 0);
+      return 0;
+    }
+    return len;
   }
 
   function cableEndTipWorld(p, end) {
@@ -253,14 +514,12 @@
   function getBareGlassDrawLengthPxForEnd(p, end) {
     if (!p) return 0;
     end = resolveCableEnd(p, end);
+    if (isCable(p)) return cableEndRenderDistPx(p, end, 'bare');
     var fs = ensureCableEndStrip(p, end);
     var jacketTo = Math.max(0, fs.jacketTo || 0);
     var bareTo = Math.max(0, fs.bareTo || 0);
     if (isCableEndFullyStripped(p, end) || isBareStripComplete(fs)) bareTo = jacketTo;
     if (bareTo <= STRIP_TIP_EPS) return 0;
-    if (isCable(p) && end === 'start') {
-      return Math.min(jacketTo, bareTo);
-    }
     return stripArcOnRenderPath(p, bareTo);
   }
 
@@ -979,6 +1238,8 @@
       p.isStripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1 || p.stripFrontierLock);
       p.isCleaned = !!p.isCleaned;
       ensureFiberStrip(p);
+      if (isCable(p)) syncCablePrepState(p);
+      else ensurePigtailPrepState(p);
       p.cleaved = !!p.cleaved;
       p.isCleaved = !!(p.isCleaved || p.cleaved);
       p.cleaved = p.isCleaved;
@@ -1662,9 +1923,12 @@
         var fs = ensureCableEndStrip(p, cableEnd);
         var maxLen = maxCableEndStripLenPx(p, cableEnd);
         if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
+        var prep = cableEndPrepState(p, cableEnd);
+        if (prep.strippedLengthPx > maxLen) prep.strippedLengthPx = maxLen;
         if (fs.jacketTo > maxLen) fs.jacketTo = maxLen;
         if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
         if (fs.bareTo > maxLen) fs.bareTo = maxLen;
+        syncFiberStripFromStrippedLength(p, cableEnd);
       }
       syncCablePrepState(p);
       return;
@@ -1677,9 +1941,12 @@
     var fs = p.fiberStrip;
     var maxLen = maxStripLenPx(p);
     if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
+    ensurePigtailPrepState(p);
+    if (p.prepState.strippedLengthPx > maxLen) p.prepState.strippedLengthPx = maxLen;
     if (fs.jacketTo > maxLen) fs.jacketTo = maxLen;
     if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
     if (fs.bareTo > maxLen) fs.bareTo = maxLen;
+    syncFiberStripFromStrippedLength(p, 'end');
     syncStripStageFromFiberStrip(p);
   }
 
@@ -1726,6 +1993,11 @@
     if ((Number(p.stripStage) || 0) >= 1) p.isStripped = true;
     p.stripLengthPx = j;
     p.stripPeel = fs.peel || 0;
+    ensurePigtailPrepState(p);
+    if (j > (p.prepState.strippedLengthPx || 0)) {
+      p.prepState.strippedLengthPx = j;
+      p.prepState.stripped = j > STRIP_TIP_EPS;
+    }
   }
 
   /** Committed jacket strip length from tip (ignores ephemeral peel animation). */
@@ -1920,18 +2192,10 @@
    */
   function getBareGlassDrawLengthPx(p) {
     if (!p) return 0;
-    ensureFiberStrip(p);
-    enforceFullStripBareFrontier(p);
-    var fs = p.fiberStrip;
-    var jacketTo = Math.max(0, fs.jacketTo || 0);
-    var bareTo = Math.max(0, fs.bareTo || 0);
-    var fullyStripped = isFullyStrippedPigtail(p);
-    var bareComplete = fullyStripped || isBareStripComplete(fs);
-    if (bareComplete) {
-      bareTo = jacketTo;
+    if (isCable(p)) {
+      return cableEndRenderDistPx(p, p.activeCableEnd || 'end', 'bare');
     }
-    if (bareTo <= STRIP_TIP_EPS) return 0;
-    return stripArcOnRenderPath(p, bareTo);
+    return endRenderStripDistPx(p, 'end', 'bare');
   }
 
   function cleanedBareClass(p) {
@@ -2013,15 +2277,8 @@
       return svgPathFromPoints(segPts);
     }
 
-    var jacketRender = stripArcOnRenderPath(p, jacketTo);
-    var bareRender = stripArcOnRenderPath(p, bareTo);
-    if (end === 'start') {
-      jacketRender = total > STRIP_TIP_EPS ? Math.min(total, jacketTo) : 0;
-      bareRender = total > STRIP_TIP_EPS ? Math.min(total, bareTo) : 0;
-    } else {
-      jacketRender = stripArcOnRenderPath(p, jacketTo);
-      bareRender = stripArcOnRenderPath(p, bareTo);
-    }
+    var jacketRender = cableEndRenderDistPx(p, end, 'jacket');
+    var bareRender = cableEndRenderDistPx(p, end, 'bare');
 
     if (end === 'start') {
       var dJacketEnd = Math.min(total, jacketRender);
@@ -2054,7 +2311,7 @@
             segPath(0, dJacketEnd) + '" fill="none"' + peelStyle('buffer') + ' />';
         }
       } else if (!fullyStripped && !bareComplete && jacketTo <= STRIP_TIP_EPS) {
-        var tipCap = Math.min(22, Math.max(12, total * 0.1));
+        var tipCap = Math.min(22, total);
         html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' + sel +
           '" data-pt-fiber="' + p.id + '" data-pt-fiber-end="start" data-pt-fiber-seg="buffer" d="' +
           segPath(0, tipCap) + '" fill="none" />';
@@ -2219,8 +2476,8 @@
         barePathD + '" fill="none"' + peelStyle('bare') + ' />' +
         buildPigtailResiduePathSvg(p, barePathD);
     } else {
-    var jacketRender = stripArcOnRenderPath(p, jacketTo);
-    var bareRender = stripArcOnRenderPath(p, bareTo);
+    var jacketRender = endRenderStripDistPx(p, 'end', 'jacket');
+    var bareRender = endRenderStripDistPx(p, 'end', 'bare');
     if (jacketRender > STRIP_TIP_EPS && total > jacketRender + STRIP_TIP_EPS) {
       var dJacketEnd = Math.max(0, total - jacketRender);
       var dBareEnd = Math.max(dJacketEnd, total - bareRender);
@@ -4959,6 +5216,10 @@
     }
     fs.peel = 0;
     fs.peelLayer = null;
+    var committedLen = layerKind === 'buffer'
+      ? Math.max(fs.bareTo || 0, fs.jacketTo || 0)
+      : Math.max(fs.jacketTo || 0, 0);
+    applyStrippedLengthPx(p, end, committedLen, { layer: layerKind, bufferPeel: layerKind === 'buffer' });
     if (isCable(p)) syncCablePrepState(p);
     else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
@@ -5026,6 +5287,10 @@
       return null;
     }
 
+    var liveLen = layerKind === 'buffer'
+      ? Math.max(fs.bareTo || 0, fs.jacketTo || 0)
+      : Math.max(fs.jacketTo || 0, 0);
+    applyStrippedLengthPx(p, end, liveLen, { layer: layerKind, bufferPeel: layerKind === 'buffer' });
     if (isCable(p)) {
       var stage = (fs.bareTo || 0) >= (fs.jacketTo || 0) - STRIP_TIP_EPS ? 2 :
         ((fs.jacketTo || 0) > STRIP_TIP_EPS ? 1 : 0);
@@ -5381,13 +5646,8 @@
     var p = target.p;
     var end = target.end || 'end';
     if (!p || isCableEndCleaved(p, end)) return;
-    var fs = ensureCableEndStrip(p, end);
-    clampStripFrontiersToPath(p);
-    var n = Number(px);
-    if (!isFinite(n) || n < 0) n = 0;
-    n = Math.min(n, maxCableEndStripLenPx(p, end));
-    fs.jacketTo = Math.max(fs.jacketTo || 0, n);
-    if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    clampStripFrontiersToPath(p, end);
+    applyStrippedLengthPx(p, end, px);
     if (isCable(p)) syncCablePrepState(p);
     else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
@@ -5418,6 +5678,7 @@
       var stageVal = (fs.bareTo || 0) >= (fs.jacketTo || 0) - STRIP_TIP_EPS ? 2 :
         ((fs.jacketTo || 0) > STRIP_TIP_EPS ? 1 : 0);
       setCableEndStripStage(p, end, stageVal);
+      applyStrippedLengthPx(p, end, Math.max(fs.jacketTo || 0, fs.bareTo || 0));
       syncCablePrepState(p);
     } else {
       syncStripStageFromFiberStrip(p);
@@ -5820,6 +6081,9 @@
       stripStage: 0,
       stripPeel: 0,
       stripLengthPx: 0,
+      prepState: {
+        stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+      },
       fiberStrip: { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null },
       drawLockRot: horizRot,
       isSnappedToCleaver: false,
@@ -5869,8 +6133,12 @@
       ay: pos.y,
       bx: tipX,
       by: tipY,
-      startPrepState: { stripped: false, cleaned: false, cleaved: false },
-      endPrepState: { stripped: false, cleaned: false, cleaved: false },
+      startPrepState: {
+        stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+      },
+      endPrepState: {
+        stripped: false, cleaned: false, cleaved: false, coatingRemoved: false, strippedLengthPx: 0,
+      },
       connector: { attached: null, mismatch: false, lockedRot: null, liveRot: horizRot },
       tail: { attached: null },
       route: [],
@@ -8923,6 +9191,7 @@
       FtthLab.hitTestPigtailBareEnd = hitTestPigtailBareEnd;
       FtthLab.findPigtailStripTarget = findStripTarget;
       FtthLab.findPigtailStripTargetAtWorld = findStripTargetAtWorld;
+      FtthLab.recordStripToolAtWorld = recordStripToolAtWorld;
       FtthLab.setPigtailStripPeel = setStripPeel;
       FtthLab.setPigtailStripLengthPx = setStripLengthPx;
       FtthLab.clearPigtailStripPeel = clearStripPeel;

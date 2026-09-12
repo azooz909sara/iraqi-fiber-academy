@@ -751,6 +751,9 @@
 
         var target = findStripTarget(e.clientX, e.clientY, s);
         if (target) {
+          if (global.FtthLab && typeof FtthLab.recordStripToolAtWorld === 'function') {
+            FtthLab.recordStripToolAtWorld(target.id, target.x, target.y, { layer: target.layer });
+          }
           startPeelSession(e, s, target, node);
           return;
         }
