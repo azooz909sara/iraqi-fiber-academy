@@ -118,6 +118,8 @@
   var liveTrafficAcknowledged = {};
   var liveTrafficChoiceCallbacks = {};
   var smartlinkLiveWarningDismissed = {};
+  var activeLaser = '1550';
+  var activeOtdrPort = 'APC';
 
   var currentOtdrTestState = {
     configFile: '',
@@ -160,11 +162,41 @@
   }
 
   function resetTestStateToDefaults() {
+    activeLaser = '1550';
     currentOtdrTestState.laser = '1550 nm';
     currentOtdrTestState.distanceUnit = 'meter';
     currentOtdrTestState.launchCable = 'No';
     currentOtdrTestState.alarms = 'Yes';
     currentOtdrTestState.alarmsEnabled = true;
+  }
+
+  function syncActiveLaserToDevice(deviceId) {
+    var d = findDevice(deviceId);
+    if (d) d.activeLaser = activeLaser;
+  }
+
+  function getActiveLaserValue(deviceId) {
+    var d = findDevice(deviceId);
+    if (d && d.activeLaser) return String(d.activeLaser);
+    return laserDataValueFromState();
+  }
+
+  function isLiveLaserSelected(deviceId) {
+    var laserVal = getActiveLaserValue(deviceId);
+    var laserLabel = currentOtdrTestState.laser || '';
+    return laserVal === '1625' ||
+      laserVal.indexOf('1625') >= 0 ||
+      laserLabel.indexOf('1625') >= 0;
+  }
+
+  function getActiveOtdrPortForDevice(deviceId) {
+    var d = findDevice(deviceId);
+    if (d && d.activeOtdrPort) return d.activeOtdrPort;
+    return resolveActiveOtdrPortForDevice(deviceId);
+  }
+
+  function isSafeLiveTest(deviceId) {
+    return isLiveLaserSelected(deviceId) && getActiveOtdrPortForDevice(deviceId) === 'APC LIVE';
   }
 
   function setSetupRowValue(deviceNode, rowKey, dataValue) {
@@ -181,7 +213,10 @@
     if (!row || !opt) return;
     var rowKey = row.getAttribute('data-sts-row');
     var val = opt.getAttribute('data-value');
-    if (rowKey === 'laser') currentOtdrTestState.laser = val + ' nm';
+    if (rowKey === 'laser') {
+      activeLaser = val;
+      currentOtdrTestState.laser = val === '1625' ? '1625 nm (LIVE)' : val + ' nm';
+    }
     else if (rowKey === 'distance') currentOtdrTestState.distanceUnit = val || 'meter';
     else if (rowKey === 'launch-cable') {
       currentOtdrTestState.launchCable = val === 'yes' ? 'Yes' : 'No';
@@ -194,7 +229,13 @@
   function readSetupSelectionsFromDevice(deviceNode) {
     if (!deviceNode) return;
     var laserOpt = deviceNode.querySelector('[data-sts-row="laser"] .sts-opt.is-active');
-    if (laserOpt) currentOtdrTestState.laser = laserOpt.getAttribute('data-value') + ' nm';
+    if (laserOpt) {
+      var laserVal = laserOpt.getAttribute('data-value');
+      activeLaser = laserVal;
+      currentOtdrTestState.laser = laserVal === '1625' ? '1625 nm (LIVE)' : laserVal + ' nm';
+      var laserDeviceId = deviceNode.getAttribute('data-otdr-node');
+      if (laserDeviceId) syncActiveLaserToDevice(laserDeviceId);
+    }
     var distOpt = deviceNode.querySelector('[data-sts-row="distance"] .sts-opt.is-active');
     if (distOpt) currentOtdrTestState.distanceUnit = distOpt.getAttribute('data-value') || 'meter';
     var lcOpt = deviceNode.querySelector('[data-sts-row="launch-cable"] .sts-opt.is-active');
@@ -1300,7 +1341,7 @@
   }
 
   function buildDynamicOtdrEvents(deviceId, graph) {
-    var currentKey = 'ols:' + deviceId + '-port-apc';
+    var currentKey = getOtdrPortProbeKey(deviceId);
     var fiberLossTotal = 0;
     var connectorLossTotal = 0;
     var spliceLossTotal = 0;
@@ -1757,18 +1798,39 @@
     return false;
   }
 
-  function isApcPortConnected(deviceId) {
-    var portId = deviceId + '-port-apc';
+  function isOtdrPortConnected(deviceId, portSuffix) {
+    var portId = deviceId + portSuffix;
     if (isPortOccupied(portId)) return true;
     if (!layer) return false;
     var node = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
     if (!node) return false;
-    refreshPortOccupancy(node);
     var port = node.querySelector('[data-ols-port="' + portId + '"], [data-otdr-port="' + portId + '"]');
     if (port && port.classList.contains('is-occupied')) return true;
     var wrap = node.querySelector('[data-port-id="' + portId + '"]');
     if (wrap && wrap.classList.contains('is-occupied')) return true;
     return false;
+  }
+
+  function isApcPortConnected(deviceId) {
+    return isOtdrPortConnected(deviceId, '-port-apc');
+  }
+
+  function isApcLivePortConnected(deviceId) {
+    return isOtdrPortConnected(deviceId, '-port-apc-live');
+  }
+
+  function resolveActiveOtdrPortForDevice(deviceId) {
+    if (isApcLivePortConnected(deviceId)) return 'APC LIVE';
+    if (isApcPortConnected(deviceId)) return 'APC';
+    return activeOtdrPort || 'APC';
+  }
+
+  function syncActiveOtdrPortForDevice(deviceId) {
+    if (!deviceId) return;
+    var port = resolveActiveOtdrPortForDevice(deviceId);
+    activeOtdrPort = port;
+    var d = findDevice(deviceId);
+    if (d) d.activeOtdrPort = port;
   }
 
   function isPigtailConnectedToPort(deviceId) {
@@ -1777,10 +1839,13 @@
       var node = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
       if (node) refreshPortOccupancy(node);
     }
-    return isApcPortConnected(deviceId);
+    return isApcPortConnected(deviceId) || isApcLivePortConnected(deviceId);
   }
 
   function getOtdrPortProbeKey(deviceId) {
+    if (isApcLivePortConnected(deviceId)) {
+      return 'ols:' + deviceId + '-port-apc-live';
+    }
     return 'ols:' + deviceId + '-port-apc';
   }
 
@@ -1793,8 +1858,13 @@
     return reading.dBm != null && isFinite(reading.dBm) && reading.dBm > noise + 0.01;
   }
 
+  function hasLiveTraffic(deviceId) {
+    if (isSafeLiveTest(deviceId)) return false;
+    return detectLiveTrafficOnFiber(deviceId);
+  }
+
   function shouldApplyLiveTrafficEffects(deviceId) {
-    return detectLiveTrafficOnFiber(deviceId) && !!liveTrafficAcknowledged[deviceId];
+    return hasLiveTraffic(deviceId) && !!liveTrafficAcknowledged[deviceId];
   }
 
   function clearLiveTrafficState(deviceId) {
@@ -1809,7 +1879,7 @@
   }
 
   function shouldShowSmartlinkLiveWarning(deviceId) {
-    if (!detectLiveTrafficOnFiber(deviceId)) return false;
+    if (!hasLiveTraffic(deviceId)) return false;
     if (liveTrafficAcknowledged[deviceId]) return true;
     var d = findDevice(deviceId);
     if (!d) return false;
@@ -1890,7 +1960,16 @@
   }
 
   function promptLiveTrafficContinue(deviceId, deviceNode, onProceed) {
-    if (!detectLiveTrafficOnFiber(deviceId)) {
+    if (isSafeLiveTest(deviceId)) {
+      clearLiveTrafficState(deviceId);
+      if (deviceNode) {
+        hideTrafficDetectedPopup(deviceId, deviceNode);
+        hideSmartlinkLiveWarningPopup(deviceId, deviceNode);
+      }
+      if (onProceed) onProceed();
+      return;
+    }
+    if (!hasLiveTraffic(deviceId)) {
       if (onProceed) onProceed();
       return;
     }
@@ -2090,6 +2169,8 @@
       var wrap = port.closest('.protruding-port');
       if (wrap) wrap.classList.toggle('is-occupied', occupied);
     });
+    var deviceId = root.getAttribute && root.getAttribute('data-otdr-node');
+    if (deviceId) syncActiveOtdrPortForDevice(deviceId);
   }
 
   function updateInspector() {
@@ -2255,7 +2336,7 @@
       '<div class="sts-options setup-options">' +
       '<button type="button" class="sts-opt opt-btn" data-value="1310">1310 nm</button>' +
       '<button type="button" class="sts-opt opt-btn is-active selected" data-value="1550">1550 nm</button>' +
-      '<span class="sts-live-note setup-live-note">1625 nm (LIVE)</span>' +
+      '<button type="button" class="sts-opt opt-btn sts-opt--live" data-value="1625">1625 nm (LIVE)</button>' +
       '</div></div>' +
       '<div class="sts-row setup-row" data-sts-row="distance">' +
       '<div class="sts-label setup-label">Distance Unit</div>' +
@@ -4879,7 +4960,7 @@
       showConnectionErrorState(deviceId, deviceNode);
       return;
     }
-    if (detectLiveTrafficOnFiber(deviceId)) {
+    if (hasLiveTraffic(deviceId)) {
       if (!liveTrafficAcknowledged[deviceId]) {
         applyLiveTrafficConnectionFailure(deviceId, deviceNode);
         return;
@@ -5219,7 +5300,7 @@
     if (!boxes.length) return;
 
     resetConnectionBoxes(boxesContainer);
-    if (detectLiveTrafficOnFiber(deviceId)) {
+    if (hasLiveTraffic(deviceId)) {
       showConnectionLiveTrafficBadState(root);
       scheduleConnectionValidation(deviceId, root);
       return;
@@ -5751,7 +5832,12 @@
         syncSetupRowToTestState(row, opt);
         var deviceNode = opt.closest('[data-otdr-node]');
         if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        syncActiveLaserToDevice(deviceId);
         var rowKey = row.getAttribute('data-sts-row');
+        if (rowKey === 'laser') {
+          updateTraceUIFromTestState(deviceNode);
+        }
         if (rowKey === 'distance' || rowKey === 'alarms') {
           var deviceId = deviceNode.getAttribute('data-otdr-node');
           var d = findDevice(deviceId);
@@ -5880,6 +5966,8 @@
       y: Math.round(y - DEVICE_NAT_H / 2),
       screen: 'home',
       poweredOn: true,
+      activeLaser: activeLaser,
+      activeOtdrPort: activeOtdrPort,
     };
     devices.push(device);
     selectOtdr(device.id);
@@ -6033,6 +6121,8 @@
     if (!layer) return;
     layer.querySelectorAll('[data-otdr-node]').forEach(function (node) {
       refreshPortOccupancy(node);
+      var otdrId = node.getAttribute('data-otdr-node');
+      if (otdrId) syncActiveOtdrPortForDevice(otdrId);
     });
     if (isRealTimeActive && realTimeDeviceId) {
       var rtNode = layer.querySelector('[data-otdr-node="' + realTimeDeviceId + '"]');

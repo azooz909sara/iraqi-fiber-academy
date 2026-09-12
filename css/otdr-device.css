@@ -831,6 +831,17 @@
   flex: 0 1 auto;
 }
 
+.lab-otdr-device .sts-opt--live {
+  color: #007a32;
+  font-weight: 600;
+}
+
+.lab-otdr-device .sts-opt--live.is-active,
+.lab-otdr-device .sts-opt--live.selected {
+  background: #00a040;
+  color: #ffffff;
+}
+
 .lab-otdr-device .sts-opt--default,
 .lab-otdr-device .setup-default-btn {
   position: relative;
