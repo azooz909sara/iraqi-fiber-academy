@@ -114,6 +114,10 @@
   var traceLiveNoisePhase = 0;
   var REAL_TIME_SCAN_MS = 300;
   var fiberDisconnectWarnedFor = null;
+  var isDevicePoweredOn = true;
+  var liveTrafficAcknowledged = {};
+  var liveTrafficChoiceCallbacks = {};
+  var smartlinkLiveWarningDismissed = {};
 
   var currentOtdrTestState = {
     configFile: '',
@@ -416,7 +420,7 @@
   function isOtdrControlTarget(e) {
     return !!closestEl(
       e.target,
-      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .sidebar-btn-start, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup, .smartlink-status-popup, .smartlink-schematic, .sl-event-wrapper, .sl-fiber-section'
+      '.otdr-btn, .otdr-dpad__btn, .otdr-dpad__center, .otdr-power-btn, .app-btn, .otdr-screen, .otdr-os-home, .otdr-smart-test-app, .otdr-smart-test-setup, .otdr-smart-test-running, .st-list-item, .st-btn, .sts-opt, .sts-action-btn, .sidebar-btn, .sidebar-btn-start, .running-tabs-header .tab, .zoom-in-btn, .zoom-out-btn, .cursor-a-btn, .otdr-trace-canvas, .trace-graph-area, .trace-resizer, .trace-summary-bar, .otdr-error-popup, .traffic-detected-popup, .traffic-detected-popup__btn, .smartlink-live-warning-popup, .smartlink-status-popup, .smartlink-schematic, .sl-event-wrapper, .sl-fiber-section'
     );
   }
 
@@ -1776,6 +1780,173 @@
     return isApcPortConnected(deviceId);
   }
 
+  function getOtdrPortProbeKey(deviceId) {
+    return 'ols:' + deviceId + '-port-apc';
+  }
+
+  function detectLiveTrafficOnFiber(deviceId) {
+    if (!deviceId || !isPigtailConnectedToPort(deviceId)) return false;
+    if (!global.FtthLab || typeof FtthLab.measureOpticalAtKey !== 'function') return false;
+    var reading = FtthLab.measureOpticalAtKey(getOtdrPortProbeKey(deviceId));
+    if (!reading || !reading.source) return false;
+    var noise = FtthLab.OPM_NOISE_DBM != null ? FtthLab.OPM_NOISE_DBM : -70;
+    return reading.dBm != null && isFinite(reading.dBm) && reading.dBm > noise + 0.01;
+  }
+
+  function shouldApplyLiveTrafficEffects(deviceId) {
+    return detectLiveTrafficOnFiber(deviceId) && !!liveTrafficAcknowledged[deviceId];
+  }
+
+  function clearLiveTrafficState(deviceId) {
+    delete liveTrafficAcknowledged[deviceId];
+    delete liveTrafficChoiceCallbacks[deviceId];
+    delete smartlinkLiveWarningDismissed[deviceId];
+    var d = findDevice(deviceId);
+    if (d) {
+      d.liveTrafficDetected = false;
+      d.liveTrafficCorrupted = false;
+    }
+  }
+
+  function shouldShowSmartlinkLiveWarning(deviceId) {
+    if (!detectLiveTrafficOnFiber(deviceId)) return false;
+    if (liveTrafficAcknowledged[deviceId]) return true;
+    var d = findDevice(deviceId);
+    if (!d) return false;
+    return !!(d.liveTrafficDetected || d.liveTrafficCorrupted);
+  }
+
+  function getSmartlinkLiveWarningPopupEl(deviceNode, deviceId) {
+    if (!deviceNode) return null;
+    return deviceNode.querySelector('#smartlink-live-warning-popup-' + deviceId) ||
+      deviceNode.querySelector('.smartlink-live-warning-popup');
+  }
+
+  function hideSmartlinkLiveWarningPopup(deviceId, deviceNode) {
+    if (!deviceNode) return;
+    var popup = getSmartlinkLiveWarningPopupEl(deviceNode, deviceId);
+    if (popup) popup.classList.add('hidden');
+  }
+
+  function showSmartlinkLiveWarningPopup(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    if (!shouldShowSmartlinkLiveWarning(deviceId)) return;
+    if (smartlinkLiveWarningDismissed[deviceId]) return;
+    var d = findDevice(deviceId);
+    if (!d || d.runningTab !== 'smartlink') return;
+    var smartlink = deviceNode.querySelector('[data-running-panel="smartlink"]');
+    if (!smartlink || smartlink.hidden) return;
+    var popup = getSmartlinkLiveWarningPopupEl(deviceNode, deviceId);
+    if (popup) popup.classList.remove('hidden');
+    setStatus('FO-1202 · Signal detected on fiber under test');
+  }
+
+  function dismissSmartlinkLiveWarningPopup(deviceId, deviceNode) {
+    smartlinkLiveWarningDismissed[deviceId] = true;
+    hideSmartlinkLiveWarningPopup(deviceId, deviceNode);
+  }
+
+  function updateSmartlinkLiveWarningVisibility(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    var d = findDevice(deviceId);
+    if (!d || d.runningTab !== 'smartlink') {
+      hideSmartlinkLiveWarningPopup(deviceId, deviceNode);
+      return;
+    }
+    if (shouldShowSmartlinkLiveWarning(deviceId) && !smartlinkLiveWarningDismissed[deviceId]) {
+      showSmartlinkLiveWarningPopup(deviceId, deviceNode);
+    } else {
+      hideSmartlinkLiveWarningPopup(deviceId, deviceNode);
+    }
+  }
+
+  function getTrafficDetectedPopupEl(deviceNode, deviceId) {
+    if (!deviceNode) return null;
+    return deviceNode.querySelector('#traffic-detected-popup-' + deviceId) ||
+      deviceNode.querySelector('.traffic-detected-popup');
+  }
+
+  function showTrafficDetectedPopup(deviceId, deviceNode, onChoice) {
+    if (!deviceId || !deviceNode) return;
+    liveTrafficChoiceCallbacks[deviceId] = onChoice;
+    var popup = getTrafficDetectedPopupEl(deviceNode, deviceId);
+    if (popup) popup.classList.remove('hidden');
+  }
+
+  function hideTrafficDetectedPopup(deviceId, deviceNode) {
+    if (!deviceNode) return;
+    var popup = getTrafficDetectedPopupEl(deviceNode, deviceId);
+    if (popup) popup.classList.add('hidden');
+    delete liveTrafficChoiceCallbacks[deviceId];
+  }
+
+  function handleTrafficDetectedChoice(deviceId, deviceNode, choice) {
+    var cb = liveTrafficChoiceCallbacks[deviceId];
+    hideTrafficDetectedPopup(deviceId, deviceNode);
+    if (cb) {
+      delete liveTrafficChoiceCallbacks[deviceId];
+      cb(choice === 'yes');
+    }
+  }
+
+  function promptLiveTrafficContinue(deviceId, deviceNode, onProceed) {
+    if (!detectLiveTrafficOnFiber(deviceId)) {
+      if (onProceed) onProceed();
+      return;
+    }
+    showTrafficDetectedPopup(deviceId, deviceNode, function (yes) {
+      if (!yes) {
+        setStatus('FD-1200 · Live traffic on fiber · measurement cancelled');
+        return;
+      }
+      liveTrafficAcknowledged[deviceId] = true;
+      delete smartlinkLiveWarningDismissed[deviceId];
+      var d = findDevice(deviceId);
+      if (d) d.liveTrafficDetected = true;
+      if (onProceed) onProceed();
+    });
+  }
+
+  function corruptTraceResultForLiveTraffic(deviceId, traceResult) {
+    if (!traceResult) return traceResult;
+    var baseLen = traceResult.totalLengthM || 4.5;
+    var chaosEvents = [
+      { type: 'start', distance: 0, loss: null, reflect: -12.0, _reflectance: -12.0 },
+      { type: 'connector', distance: roundTrace3(0.12 + Math.random() * 0.4), loss: roundTrace3(4.2 + Math.random() * 3), reflect: -8.0, _insertionLoss: roundTrace3(4.2 + Math.random() * 3), _reflectance: -8.0 },
+      { type: 'splice', distance: roundTrace3(baseLen * 0.35 + Math.random() * 2), loss: roundTrace3(1.8 + Math.random() * 2.5), reflect: null, _insertionLoss: roundTrace3(1.8 + Math.random() * 2.5) },
+      { type: 'connector', distance: roundTrace3(baseLen * 0.72 + Math.random() * 1.5), loss: roundTrace3(6.1 + Math.random() * 4), reflect: -5.0, _insertionLoss: roundTrace3(6.1 + Math.random() * 4), _reflectance: -5.0 },
+      { type: 'end', distance: roundTrace3(baseLen * (0.9 + Math.random() * 0.4)), loss: roundTrace3(2.0 + Math.random() * 3), reflect: -3.0, _insertionLoss: roundTrace3(2.0 + Math.random() * 3), _reflectance: -3.0 },
+    ];
+    chaosEvents.forEach(function (ev, idx) {
+      ev.eventNum = idx + 1;
+      ev.event = String(idx + 1);
+      ev.label = traceEventLabelFromType(ev.type);
+      ev.linearPos = Math.min(0.98, Math.max(0.02, ev.distance / Math.max(baseLen, 5)));
+    });
+    applyViaviOtdrEventMetrics(chaosEvents);
+    traceResult.events = chaosEvents;
+    traceResult.totalLengthM = chaosEvents[chaosEvents.length - 1].distance;
+    traceResult.totalLoss = roundTrace2(12 + Math.random() * 18);
+    traceResult.orl = roundTrace2(8 + Math.random() * 11);
+    traceResult.liveTrafficCorrupted = true;
+    var corruptDevice = findDevice(deviceId);
+    if (corruptDevice) corruptDevice.liveTrafficCorrupted = true;
+    return traceResult;
+  }
+
+  function showLiveSignalDetectedPopup(deviceId, deviceNode) {
+    if (!deviceNode) return;
+    var d = findDevice(deviceId);
+    if (d) d.liveTrafficDetected = true;
+    updateSmartlinkLiveWarningVisibility(deviceId, deviceNode);
+  }
+
+  function restoreOtdrErrorDescVisibility(deviceNode) {
+    if (!deviceNode) return;
+    var descEl = deviceNode.querySelector('.otdr-error-desc');
+    if (descEl) descEl.style.display = '';
+  }
+
   function setOtdrErrorPopupContent(deviceNode, code, title, desc) {
     if (!deviceNode) return;
     var popup = deviceNode.querySelector('.otdr-error-popup');
@@ -1789,6 +1960,7 @@
   }
 
   function restoreOtdrErrorPopupDefaults(deviceNode) {
+    restoreOtdrErrorDescVisibility(deviceNode);
     setOtdrErrorPopupContent(
       deviceNode,
       'FO-1128',
@@ -1813,6 +1985,7 @@
 
   function clearFiberDisconnectedNotice(deviceId, deviceNode) {
     if (fiberDisconnectWarnedFor === deviceId) fiberDisconnectWarnedFor = null;
+    clearLiveTrafficState(deviceId);
     var d = findDevice(deviceId);
     if (d) d.fiberDisconnected = false;
     if (!deviceNode) return;
@@ -2126,6 +2299,41 @@
     );
   }
 
+  function buildSmartlinkLiveWarningPopupMarkup(deviceId) {
+    return (
+      '<div class="smartlink-live-warning-popup hidden" id="smartlink-live-warning-popup-' + deviceId + '"' +
+      ' role="alertdialog" aria-labelledby="smartlink-live-warning-title-' + deviceId + '">' +
+      '<div class="smartlink-live-warning-popup__code">FO-1202</div>' +
+      '<div class="smartlink-live-warning-popup__row">' +
+      '<span class="smartlink-live-warning-popup__warn" aria-hidden="true">⚠️</span>' +
+      '<strong class="smartlink-live-warning-popup__title" id="smartlink-live-warning-title-' + deviceId + '">' +
+      'Signal detected on fiber under test</strong>' +
+      '</div>' +
+      '<div class="smartlink-live-warning-popup__footer">Touch the popup window to close it</div>' +
+      '</div>'
+    );
+  }
+
+  function buildTrafficDetectedPopupMarkup(deviceId) {
+    return (
+      '<div class="traffic-detected-popup hidden" id="traffic-detected-popup-' + deviceId + '"' +
+      ' role="alertdialog" aria-labelledby="traffic-detected-title-' + deviceId + '">' +
+      '<div class="traffic-detected-popup__row">' +
+      '<span class="traffic-detected-popup__warn" aria-hidden="true">⚠️</span>' +
+      '<div class="traffic-detected-popup__text">' +
+      '<span class="traffic-detected-popup__code">FD-1200</span>' +
+      '<strong class="traffic-detected-popup__message" id="traffic-detected-title-' + deviceId + '">' +
+      'Traffic Detected on Fiber !<br>Do you want to continue?</strong>' +
+      '</div></div>' +
+      '<div class="traffic-detected-popup__actions">' +
+      '<button type="button" class="traffic-detected-popup__btn" id="btn-traffic-yes-' + deviceId + '"' +
+      ' data-traffic-choice="yes">Yes</button>' +
+      '<button type="button" class="traffic-detected-popup__btn" id="btn-traffic-no-' + deviceId + '"' +
+      ' data-traffic-choice="no">No</button>' +
+      '</div></div>'
+    );
+  }
+
   function buildConnBoxesMarkup() {
     var html = '';
     var i;
@@ -2199,6 +2407,7 @@
       '</div></div>' +
       '<span class="acq-timer acq-timer-right">00:20</span>' +
       '</div></div></div></div>' +
+      buildSmartlinkLiveWarningPopupMarkup(deviceId) +
       '<div class="smartlink-status-popup hidden" id="smartlink-status-popup-' + deviceId + '" role="dialog" aria-labelledby="popup-title-' + deviceId + '">' +
       '<div class="popup-modal">' +
       '<div class="popup-header">' +
@@ -2258,7 +2467,8 @@
       '<div class="sidebar-btn sidebar-btn-start" role="button" tabindex="0" data-sidebar-mode="start" aria-label="Start test">' +
       '<span class="btn-text">START</span>' +
       '<span class="btn-icon btn-icon-play" aria-hidden="true"><span class="play-triangle"></span></span></div>' +
-      '<div class="sidebar-btn" role="button" tabindex="0">' +
+      '<div class="sidebar-btn sidebar-btn-realtime" role="button" tabindex="0"' +
+      ' data-sidebar-action="real-time" aria-pressed="false" aria-label="Tiempo Real">' +
       '<span class="btn-text">Tiempo<br>Real</span>' +
       '<span class="btn-icon" aria-hidden="true">⏱️</span></div>' +
       '<div class="sidebar-btn" role="button" tabindex="0">' +
@@ -2301,6 +2511,30 @@
     resetConnectionBoxes(boxesContainer);
     var boxes = boxesContainer.querySelectorAll('.conn-box');
     if (boxes[0]) boxes[0].classList.add('bg-orange');
+  }
+
+  function showConnectionLiveTrafficBadState(deviceNode) {
+    var boxesContainer = deviceNode && deviceNode.querySelector('.conn-boxes');
+    if (!boxesContainer) return;
+    resetConnectionBoxes(boxesContainer);
+    var boxes = boxesContainer.querySelectorAll('.conn-box');
+    if (boxes[0]) boxes[0].classList.add('bg-red');
+  }
+
+  function applyLiveTrafficConnectionFailure(deviceId, deviceNode) {
+    var d = findDevice(deviceId);
+    if (d) {
+      d.connectionError = true;
+      d.acquisitionActive = false;
+      d.liveTrafficDetected = true;
+    }
+    stopConnectionAnimation(deviceId);
+    stopConnectionValidationTimer(deviceId);
+    stopAcquisitionProgress(deviceId);
+    resetRunningViewportUI(deviceNode);
+    showConnectionLiveTrafficBadState(deviceNode);
+    showLiveSignalDetectedPopup(deviceId, deviceNode);
+    updateSidebarStartStopButton(deviceNode, false);
   }
 
   function formatAcqTimer(seconds, maxSeconds) {
@@ -3586,6 +3820,10 @@
       return;
     }
     var d = findDevice(deviceId);
+    if (shouldApplyLiveTrafficEffects(deviceId)) {
+      traceLiveNoiseActive = true;
+      traceLiveNoiseAmplitude = Math.max(traceLiveNoiseAmplitude || 0, 8);
+    }
     var events = opts.previewEvents ||
       (d && d.traceEvents && d.traceEvents.length ? d.traceEvents : getDefaultTraceEvents());
     drawOTDRTrace(canvas, events);
@@ -3736,7 +3974,9 @@
         totalLoss: smartDevice && smartDevice.traceTotalLoss,
         orl: smartDevice && smartDevice.traceOrl,
       });
+      updateSmartlinkLiveWarningVisibility(switchDeviceId, deviceNode);
     } else {
+      hideSmartlinkLiveWarningPopup(switchDeviceId, deviceNode);
       if (smartlink) smartlink.hidden = true;
       if (trace) {
         trace.hidden = false;
@@ -3951,11 +4191,15 @@
 
   function updateRealTimeButtonState(deviceNode, active) {
     if (!deviceNode) return;
-    var btn = deviceNode.querySelector('[data-sts-action="real-time"]');
-    if (!btn) return;
-    btn.classList.toggle('is-active', !!active);
-    btn.classList.toggle('active', !!active);
-    btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    var buttons = deviceNode.querySelectorAll(
+      '[data-sts-action="real-time"], [data-sidebar-action="real-time"]'
+    );
+    var bi;
+    for (bi = 0; bi < buttons.length; bi++) {
+      buttons[bi].classList.toggle('is-active', !!active);
+      buttons[bi].classList.toggle('active', !!active);
+      buttons[bi].setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
     updateSidebarStartStopButton(deviceNode, false);
   }
 
@@ -3984,6 +4228,7 @@
     if (stopId && layer) {
       var node = layer.querySelector('[data-otdr-node="' + stopId + '"]');
       if (node) {
+        hideTrafficDetectedPopup(stopId, node);
         updateRealTimeButtonState(node, false);
         hideRealtimeHud(node);
         renderTraceForDevice(stopId, node);
@@ -3993,11 +4238,17 @@
 
   function commitRealTimeMeasurement(deviceId, deviceNode) {
     if (!deviceId || !deviceNode) return;
+    stopRealTimeMode(deviceId);
     if (!isPigtailConnectedToPort(deviceId)) {
       applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
+      setStatus('FO-1129 · Cannot measure · Fiber disconnected');
       return;
     }
-    stopRealTimeMode(deviceId);
+    if (shouldApplyLiveTrafficEffects(deviceId)) {
+      traceLiveNoiseActive = true;
+      traceLiveNoiseAmplitude = 8;
+      traceLiveNoisePhase = realTimeNoisePhase;
+    }
     runOtdrTest(deviceId, deviceNode);
     switchRunningTab(deviceNode, 'trace');
     setStatus('SMART TEST · Real Time measurement committed');
@@ -4007,6 +4258,10 @@
     if (!deviceId || !deviceNode || !isRealTimeActive || realTimeDeviceId !== deviceId) return;
     var d = findDevice(deviceId);
     if (!d || d.screen !== 'smart-test-running') return;
+    if (!devicePoweredOn(deviceId)) {
+      stopRealTimeMode(deviceId);
+      return;
+    }
 
     if (!isPigtailConnectedToPort(deviceId)) {
       applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
@@ -4015,11 +4270,17 @@
     clearFiberDisconnectedNotice(deviceId, deviceNode);
 
     var worstAngle = getWorstNetworkBendAngle(deviceId);
-    realTimeQualityScore = computeRealTimeQualityScore(worstAngle);
+    if (shouldApplyLiveTrafficEffects(deviceId)) {
+      worstAngle = 45;
+      realTimeQualityScore = 12;
+      traceLiveNoiseAmplitude = 6.5 + Math.random() * 2.5;
+    } else {
+      realTimeQualityScore = computeRealTimeQualityScore(worstAngle);
+      traceLiveNoiseAmplitude = 2.4 + (100 - realTimeQualityScore) * 0.18;
+    }
     realTimeNoisePhase += 1;
     traceLiveNoiseActive = true;
     traceLiveNoisePhase = realTimeNoisePhase;
-    traceLiveNoiseAmplitude = 2.4 + (100 - realTimeQualityScore) * 0.18;
 
     updateRealtimeHudFromAngle(deviceNode, worstAngle);
 
@@ -4041,6 +4302,11 @@
     clearFiberDisconnectedNotice(deviceId, deviceNode);
 
     var traceResult = computeLabOtdrTrace(deviceId);
+    if (shouldApplyLiveTrafficEffects(deviceId)) {
+      traceLiveNoiseActive = true;
+      traceLiveNoiseAmplitude = 9;
+      traceResult = corruptTraceResultForLiveTraffic(deviceId, traceResult);
+    }
     traceResult.events = ensureTraceEvents(traceResult.events);
     syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
 
@@ -4084,9 +4350,12 @@
     }
   }
 
-  function startRealTimeMode(deviceId, deviceNode) {
+  function beginRealTimeMode(deviceId, deviceNode) {
     if (!deviceId || !deviceNode) return;
     stopRealTimeMode(realTimeDeviceId);
+    stopAcquisitionProgress(deviceId);
+    stopConnectionValidationTimer(deviceId);
+    stopConnectionAnimation(deviceId);
     isRealTimeActive = true;
     realTimeDeviceId = deviceId;
     updateRealTimeButtonState(deviceNode, true);
@@ -4097,6 +4366,10 @@
       setDeviceScreen(deviceId, 'smart-test-running');
       deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
       d = findDevice(deviceId);
+    }
+    if (d) {
+      d.acquisitionActive = false;
+      d.acquisitionComplete = !!d.traceEvents;
     }
 
     switchRunningTab(deviceNode, 'trace');
@@ -4124,14 +4397,134 @@
     setStatus('SMART TEST · Real Time active · adjust bend and press MEASURE to commit');
   }
 
+  function startRealTimeMode(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    if (!devicePoweredOn(deviceId)) return;
+    if (!isPigtailConnectedToPort(deviceId)) {
+      applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
+      return;
+    }
+    promptLiveTrafficContinue(deviceId, deviceNode, function () {
+      beginRealTimeMode(deviceId, deviceNode);
+    });
+  }
+
   function toggleRealTimeMode(deviceId, deviceNode) {
     if (!deviceId || !deviceNode) return;
     if (isRealTimeActive && realTimeDeviceId === deviceId) {
-      stopRealTimeMode(deviceId);
-      setStatus('SMART TEST · Real Time stopped');
+      commitRealTimeMeasurement(deviceId, deviceNode);
       return;
     }
     startRealTimeMode(deviceId, deviceNode);
+  }
+
+  function devicePoweredOn(deviceId) {
+    var d = findDevice(deviceId);
+    if (d) return d.poweredOn !== false;
+    return isDevicePoweredOn;
+  }
+
+  function restoreTraceEventTableVisibility(deviceNode, deviceId) {
+    if (!deviceNode) return;
+    deviceNode.classList.remove('is-realtime-active');
+    var traceContainer = deviceNode.querySelector('.trace-view-container');
+    if (traceContainer) {
+      traceContainer.classList.remove('is-realtime-mode');
+      traceContainer.hidden = false;
+      traceContainer.classList.remove('is-table-only');
+    }
+    var tableWrap = getOtdrTableContainer(deviceNode, deviceId);
+    if (tableWrap) {
+      tableWrap.hidden = false;
+      tableWrap.style.display = 'block';
+    }
+    var resizer = deviceNode.querySelector('.trace-resizer');
+    if (resizer) resizer.hidden = false;
+    var summary = deviceNode.querySelector('.trace-summary-bar');
+    if (summary) summary.hidden = false;
+    var graphArea = deviceNode.querySelector('.trace-graph-area');
+    if (graphArea) graphArea.classList.remove('is-realtime-expanded');
+    applyDefaultTraceSplitLayout(deviceNode);
+  }
+
+  function applyDevicePowerUI(deviceNode, poweredOn) {
+    if (!deviceNode) return;
+    isDevicePoweredOn = !!poweredOn;
+    deviceNode.classList.toggle('is-powered-off', !poweredOn);
+    var screen = deviceNode.querySelector('.otdr-screen');
+    if (screen) {
+      screen.classList.toggle('is-powered-off', !poweredOn);
+      screen.setAttribute('aria-hidden', poweredOn ? 'false' : 'true');
+    }
+    var powerOverlay = deviceNode.querySelector('.otdr-screen-power-off');
+    if (powerOverlay) {
+      powerOverlay.hidden = !!poweredOn;
+      powerOverlay.setAttribute('aria-hidden', poweredOn ? 'true' : 'false');
+    }
+    var powerLeds = deviceNode.querySelectorAll('.otdr-led-group .otdr-led');
+    var onLed = powerLeds.length > 1 ? powerLeds[1] : deviceNode.querySelector('.otdr-led.is-on');
+    if (onLed) onLed.classList.toggle('is-on', !!poweredOn);
+    var powerBtn = deviceNode.querySelector('[data-otdr-btn="power"]');
+    if (powerBtn) {
+      powerBtn.classList.toggle('is-pressed', !poweredOn);
+      powerBtn.setAttribute('aria-pressed', poweredOn ? 'false' : 'true');
+    }
+  }
+
+  function setDevicePoweredOn(deviceId, deviceNode, poweredOn) {
+    var d = findDevice(deviceId);
+    if (!d) return;
+    d.poweredOn = !!poweredOn;
+    isDevicePoweredOn = !!poweredOn;
+    if (!poweredOn) {
+      stopRealTimeMode(deviceId);
+      stopOtdrAcquisition(deviceId, deviceNode);
+      stopConnectionAnimation(deviceId);
+      stopConnectionValidationTimer(deviceId);
+      stopAcquisitionProgress(deviceId);
+      updateRealTimeButtonState(deviceNode, false);
+    }
+    applyDevicePowerUI(deviceNode, poweredOn);
+  }
+
+  function toggleDevicePower(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    var d = findDevice(deviceId);
+    if (!d) return;
+    var nextPoweredOn = d.poweredOn === false;
+    setDevicePoweredOn(deviceId, deviceNode, nextPoweredOn);
+    setStatus(nextPoweredOn ? 'SmartOTDR powered on' : 'SmartOTDR powered off');
+  }
+
+  function handlePhysicalStartStop(deviceId, deviceNode) {
+    if (!deviceId || !deviceNode) return;
+    if (!devicePoweredOn(deviceId)) return;
+
+    if (isRealTimeActive && realTimeDeviceId === deviceId) {
+      stopRealTimeMode(deviceId);
+      updateRealTimeButtonState(deviceNode, false);
+      hideRealtimeHud(deviceNode);
+    }
+
+    if (isOtdrTestInProgress(deviceId)) {
+      stopOtdrAcquisition(deviceId, deviceNode);
+      return;
+    }
+
+    var d = findDevice(deviceId);
+    if (!d || d.screen !== 'smart-test-running') {
+      setDeviceScreen(deviceId, 'smart-test-running');
+      deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
+    }
+
+    stopRealTimeMode(deviceId);
+    updateRealTimeButtonState(deviceNode, false);
+    hideRealtimeHud(deviceNode);
+    switchRunningTab(deviceNode, 'trace');
+    restoreTraceEventTableVisibility(deviceNode, deviceId);
+    promptLiveTrafficContinue(deviceId, deviceNode, function () {
+      runOtdrTest(deviceId, deviceNode);
+    });
   }
 
   function runOtdrTest(deviceId, deviceNode, opts) {
@@ -4142,6 +4535,7 @@
       refreshOtdrLiveScan(deviceId, deviceNode);
       return;
     }
+    if (!devicePoweredOn(deviceId)) return;
     if (!isPigtailConnectedToPort(deviceId)) {
       abortOtdrTestFiberDisconnected(deviceId, deviceNode);
       return;
@@ -4156,6 +4550,11 @@
       return;
     }
     var traceResult = computeLabOtdrTrace(deviceId);
+    if (shouldApplyLiveTrafficEffects(deviceId)) {
+      traceLiveNoiseActive = true;
+      traceLiveNoiseAmplitude = 9;
+      traceResult = corruptTraceResultForLiveTraffic(deviceId, traceResult);
+    }
     traceResult.events = ensureTraceEvents(traceResult.events);
     syncMockFiberEventsFromTrace(traceResult.events, traceResult.totalLengthM);
     traceEventCounter = 1;
@@ -4227,6 +4626,8 @@
       });
     });
 
+    hideRealtimeHud(deviceNode);
+    restoreTraceEventTableVisibility(deviceNode, deviceId);
     setStatus('SMART TEST · trace acquired');
     updateSidebarStartStopButton(deviceNode, false);
   }
@@ -4327,6 +4728,7 @@
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
     stopRealTimeMode(deviceId);
+    hideTrafficDetectedPopup(deviceId, deviceNode);
     var d = findDevice(deviceId);
     stopConnectionAnimation(deviceId);
     stopAcquisitionProgress(deviceId);
@@ -4334,7 +4736,9 @@
       d.acquisitionActive = false;
       d.acquisitionComplete = false;
       d.connectionError = false;
+      d.liveTrafficDetected = false;
     }
+    clearLiveTrafficState(deviceId);
     var boxesContainer = deviceNode.querySelector('.conn-boxes');
     if (boxesContainer) resetConnectionBoxes(boxesContainer);
     resetRunningViewportUI(deviceNode);
@@ -4343,7 +4747,7 @@
     setStatus('SMART TEST · stopped');
   }
 
-  function startOtdrAcquisition(deviceId, deviceNode) {
+  function beginStartOtdrAcquisition(deviceId, deviceNode) {
     if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
@@ -4372,6 +4776,24 @@
     updateAcquisitionTimerUI(deviceNode);
     updateSidebarStartStopButton(deviceNode, true);
     setStatus('SMART TEST running · SmartLink · ' + (currentOtdrTestState.configFile || 'test'));
+  }
+
+  function startOtdrAcquisition(deviceId, deviceNode) {
+    if (!deviceNode && deviceId) deviceNode = document.getElementById(deviceId);
+    if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
+    if (!deviceId || !deviceNode) return;
+    if (!devicePoweredOn(deviceId)) return;
+    if (!isPigtailConnectedToPort(deviceId)) {
+      if (findDevice(deviceId) && findDevice(deviceId).screen !== 'smart-test-running') {
+        setDeviceScreen(deviceId, 'smart-test-running');
+        deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
+      }
+      abortOtdrTestFiberDisconnected(deviceId, deviceNode);
+      return;
+    }
+    promptLiveTrafficContinue(deviceId, deviceNode, function () {
+      beginStartOtdrAcquisition(deviceId, deviceNode);
+    });
   }
 
   function resetTraceViewUI(deviceNode) {
@@ -4453,11 +4875,21 @@
   function finishConnectionValidation(deviceId, deviceNode) {
     if (!deviceNode) return;
     refreshPortOccupancy(deviceNode);
-    if (isPigtailConnectedToPort(deviceId)) {
-      showAcquisitionPhase(deviceId, deviceNode);
-    } else {
+    if (!isPigtailConnectedToPort(deviceId)) {
       showConnectionErrorState(deviceId, deviceNode);
+      return;
     }
+    if (detectLiveTrafficOnFiber(deviceId)) {
+      if (!liveTrafficAcknowledged[deviceId]) {
+        applyLiveTrafficConnectionFailure(deviceId, deviceNode);
+        return;
+      }
+      showConnectionLiveTrafficBadState(deviceNode);
+      showSmartlinkLiveWarningPopup(deviceId, deviceNode);
+      showAcquisitionPhase(deviceId, deviceNode);
+      return;
+    }
+    showAcquisitionPhase(deviceId, deviceNode);
   }
 
   function stopConnectionValidationTimer(deviceId) {
@@ -4787,6 +5219,11 @@
     if (!boxes.length) return;
 
     resetConnectionBoxes(boxesContainer);
+    if (detectLiveTrafficOnFiber(deviceId)) {
+      showConnectionLiveTrafficBadState(root);
+      scheduleConnectionValidation(deviceId, root);
+      return;
+    }
     var index = 0;
     scheduleConnectionValidation(deviceId, root);
 
@@ -4832,6 +5269,10 @@
     if (!d) return;
     if ((screenName || 'home') !== 'smart-test-running') {
       stopRealTimeMode(deviceId);
+      if (layer) {
+        var prevNode = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
+        if (prevNode) hideTrafficDetectedPopup(deviceId, prevNode);
+      }
     }
     d.screen = screenName || 'home';
     if (opts.selectedConfig) {
@@ -4924,6 +5365,8 @@
       buildSmartTestAppMarkup() +
       buildSmartTestSetupMarkup(configName) +
       buildSmartTestRunningMarkup(deviceId) +
+      buildTrafficDetectedPopupMarkup(deviceId) +
+      '<div class="otdr-screen-power-off" hidden aria-hidden="true"></div>' +
       '</div>' +
       '<div class="otdr-controls" aria-label="Physical controls">' +
       '<div class="otdr-controls__row">' +
@@ -5068,8 +5511,32 @@
         e.stopPropagation();
         var deviceNode = btn.closest('[data-otdr-node]');
         if (!deviceNode) return;
-        setDeviceScreen(deviceNode.getAttribute('data-otdr-node'), 'home');
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        if (!devicePoweredOn(deviceId)) return;
+        setDeviceScreen(deviceId, 'home');
         setStatus('SmartOTDR home');
+      });
+    });
+
+    host.querySelectorAll('[data-otdr-btn="start-stop"]').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        handlePhysicalStartStop(deviceNode.getAttribute('data-otdr-node'), deviceNode);
+      });
+    });
+
+    host.querySelectorAll('[data-otdr-btn="power"]').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        toggleDevicePower(deviceNode.getAttribute('data-otdr-node'), deviceNode);
       });
     });
 
@@ -5143,6 +5610,23 @@
       });
     });
 
+    host.querySelectorAll('[data-sidebar-action="real-time"]').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        var d = findDevice(deviceId);
+        if (!d || d.screen !== 'smart-test-running') {
+          setDeviceScreen(deviceId, 'smart-test-running');
+          deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
+        }
+        toggleRealTimeMode(deviceId, deviceNode);
+      });
+    });
+
     host.querySelectorAll('.sidebar-btn-start').forEach(function (btn) {
       if (btn.dataset.otdrScreenBound === '1') return;
       btn.dataset.otdrScreenBound = '1';
@@ -5164,12 +5648,36 @@
       });
     });
 
+    host.querySelectorAll('.traffic-detected-popup__btn').forEach(function (btn) {
+      if (btn.dataset.otdrScreenBound === '1') return;
+      btn.dataset.otdrScreenBound = '1';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = btn.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        var deviceId = deviceNode.getAttribute('data-otdr-node');
+        handleTrafficDetectedChoice(deviceId, deviceNode, btn.getAttribute('data-traffic-choice'));
+      });
+    });
+
     host.querySelectorAll('.otdr-error-popup').forEach(function (popup) {
       if (popup.dataset.otdrScreenBound === '1') return;
       popup.dataset.otdrScreenBound = '1';
       popup.addEventListener('click', function (e) {
         e.stopPropagation();
         popup.hidden = true;
+        restoreOtdrErrorDescVisibility(popup.closest('[data-otdr-node]'));
+      });
+    });
+
+    host.querySelectorAll('.smartlink-live-warning-popup').forEach(function (popup) {
+      if (popup.dataset.otdrScreenBound === '1') return;
+      popup.dataset.otdrScreenBound = '1';
+      popup.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var deviceNode = popup.closest('[data-otdr-node]');
+        if (!deviceNode) return;
+        dismissSmartlinkLiveWarningPopup(deviceNode.getAttribute('data-otdr-node'), deviceNode);
       });
     });
 
@@ -5359,6 +5867,7 @@
         if (d.selectedConfig) syncConfigToTestState(d.selectedConfig);
         applyTestStateToSetupUI(el);
       }
+      applyDevicePowerUI(el, d.poweredOn !== false);
     });
     bindLayerEvents(layer);
   }
@@ -5370,6 +5879,7 @@
       x: Math.round(x - DEVICE_NAT_W / 2),
       y: Math.round(y - DEVICE_NAT_H / 2),
       screen: 'home',
+      poweredOn: true,
     };
     devices.push(device);
     selectOtdr(device.id);
