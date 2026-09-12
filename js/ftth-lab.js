@@ -403,6 +403,7 @@
     'smart-splitter': 'SPLITTERS',
     'patch-cord': 'FIBER JUMPERS',
     'sc-pigtail': 'FIBER JUMPERS',
+    'cable': 'FIBER JUMPERS',
     'splice-sleeve': 'FUSION SPLICING',
     'cfs-stripper': 'FUSION SPLICING',
     'cleaning-wipe': 'FUSION SPLICING',
@@ -1520,7 +1521,12 @@
   }
 
   function registerFusionWeldEdges(adj, pigtails, fusedSeen) {
-    function addFusedWeldEdge(idA, idB, dedupeKey, lossDb) {
+    function endpointKeyForFusedId(id, sideKey) {
+      if (sideKey) return sideKey;
+      return 'pigtail:' + id + ':tail';
+    }
+
+    function addFusedWeldEdge(idA, idB, dedupeKey, lossDb, keyA, keyB) {
       if (!idA || !idB || idA === idB) return;
       var seenKey = dedupeKey || [idA, idB].sort().join('|');
       if (fusedSeen[seenKey]) return;
@@ -1529,8 +1535,8 @@
       var weldParts = { splice: weldLoss };
       addUndirectedEdge(
         adj,
-        'pigtail:' + idA + ':tail',
-        'pigtail:' + idB + ':tail',
+        endpointKeyForFusedId(idA, keyA),
+        endpointKeyForFusedId(idB, keyB),
         weldLoss,
         weldParts
       );
@@ -1542,7 +1548,14 @@
         if (!pair || !pair.leftId || !pair.rightId) return;
         var key = pair.assemblyId || pair.fusionAssemblyId ||
           [pair.leftId, pair.rightId].sort().join('|');
-        addFusedWeldEdge(pair.leftId, pair.rightId, key, pair.spliceLossDb);
+        addFusedWeldEdge(
+          pair.leftId,
+          pair.rightId,
+          key,
+          pair.spliceLossDb,
+          pair.leftKey,
+          pair.rightKey
+        );
       });
     }
 
@@ -1591,6 +1604,17 @@
 
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
+      if (p.type === 'cable') {
+        var startKey = 'cable:' + p.id + ':start';
+        var endKey = 'cable:' + p.id + ':end';
+        var cableFiberM = typeof p.fiberLengthM === 'number' ? p.fiberLengthM :
+          (typeof p.lengthMeters === 'number' ? p.lengthMeters : 0);
+        var cableParts = { fiber: fiberSpanLossDb(cableFiberM, wavelengthNm) };
+        addUndirectedEdge(adj, startKey, endKey, totalLossParts(cableParts), cableParts);
+        adj[startKey] = adj[startKey] || [];
+        adj[endKey] = adj[endKey] || [];
+        continue;
+      }
       var kc = portKeyFromAtt(p.connector);
       var tailKey = 'pigtail:' + p.id + ':tail';
       var ptLoss = PIGTAIL_CONN_LOSS_DB;
@@ -1912,6 +1936,7 @@
     'vfl',
     'otdr-machine',
     'sc-pigtail',
+    'cable',
     'patch-cord',
   ];
 

@@ -86,8 +86,20 @@
     }
     var host = FusionSplicerMachine.ensureFiberLayer(machineId);
     if (!host) return null;
+    var raw = String(pigtailId);
+    var escaped = raw.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    var path = host.querySelector(
+      '[data-pt-fiber-stripped="' + escaped + '"][data-pt-fiber-seg="bare"]'
+    );
+    if (path) return path;
+    if (raw.indexOf(':') >= 0) {
+      var end = raw.split(':')[1];
+      return host.querySelector(
+        '[data-pt-fiber-stripped="' + escaped + '"][data-pt-fiber-end="' + end + '"][data-pt-fiber-seg="bare"]'
+      );
+    }
     return host.querySelector(
-      '[data-pt-fiber-stripped="' + pigtailId + '"][data-pt-fiber-seg="bare"]'
+      '[data-pt-fiber-stripped="' + escaped + '"][data-pt-fiber-seg="bare"]'
     );
   }
 

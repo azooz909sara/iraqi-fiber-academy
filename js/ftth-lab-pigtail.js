@@ -76,6 +76,266 @@
   /** 250µm buffer/coating (fiber #1 blue) — sync with .lab-pigtail-fiber--buffer in ftth-lab.css */
   var PIGTAIL_BUFFER_STROKE_COLOR = '#7FB5F5';
 
+  function isCable(p) {
+    return !!(p && p.type === 'cable');
+  }
+
+  function cableEndFromToken(token) {
+    if (token === 'start' || token === 'A') return 'start';
+    return 'end';
+  }
+
+  function parseFiberTargetId(targetId) {
+    var raw = String(targetId || '');
+    var parts = raw.split(':');
+    var id = parts[0];
+    var end = parts.length > 1 ? cableEndFromToken(parts[1]) : 'end';
+    var p = findPigtail(id);
+    if (!p) return null;
+    if (!isCable(p)) end = 'end';
+    return { p: p, id: p.id, end: end, targetId: end === 'end' ? p.id : p.id + ':start' };
+  }
+
+  function fiberTargetId(p, end) {
+    if (!isCable(p)) return p.id;
+    return cableEndFromToken(end) === 'start' ? p.id + ':start' : p.id;
+  }
+
+  function syncCablePrepState(p) {
+    if (!isCable(p)) return;
+    if (!p.startPrepState || typeof p.startPrepState !== 'object') {
+      p.startPrepState = { stripped: false, cleaned: false, cleaved: false };
+    }
+    if (!p.endPrepState || typeof p.endPrepState !== 'object') {
+      p.endPrepState = { stripped: false, cleaned: false, cleaved: false };
+    }
+    p.startPrepState.stripped = !!(p.startIsStripped || (Number(p.startStripStage) || 0) >= 1);
+    p.startPrepState.cleaned = !!p.startIsCleaned;
+    p.startPrepState.cleaved = !!(p.startIsCleaved || p.startCleaved);
+    p.endPrepState.stripped = !!(p.isStripped || (Number(p.stripStage) || 0) >= 1);
+    p.endPrepState.cleaned = !!p.isCleaned;
+    p.endPrepState.cleaved = !!(p.isCleaved || p.cleaved);
+  }
+
+  function ensureCableEndStrip(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return ensureFiberStrip(p);
+    if (end === 'start') {
+      if (!p.startFiberStrip || typeof p.startFiberStrip !== 'object') {
+        p.startFiberStrip = { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null };
+      }
+      return p.startFiberStrip;
+    }
+    return ensureFiberStrip(p);
+  }
+
+  function getCableEndStripStage(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return Number(p.stripStage) || 0;
+    return end === 'start' ? (Number(p.startStripStage) || 0) : (Number(p.stripStage) || 0);
+  }
+
+  function setCableEndStripStage(p, end, stage) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) {
+      p.stripStage = stage;
+      return;
+    }
+    if (end === 'start') p.startStripStage = stage;
+    else p.stripStage = stage;
+    syncCablePrepState(p);
+  }
+
+  function isCableEndFullyStripped(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return isFullyStrippedPigtail(p);
+    if (end === 'start') {
+      return !!(p.startIsCleaved || p.startCleaved || (Number(p.startStripStage) || 0) >= 2);
+    }
+    return isFullyStrippedPigtail(p);
+  }
+
+  function isCableEndCleaved(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return !!(p.isCleaved || p.cleaved);
+    return end === 'start' ? !!(p.startIsCleaved || p.startCleaved) : !!(p.isCleaved || p.cleaved);
+  }
+
+  function isCableEndCleaned(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return !!p.isCleaned;
+    return end === 'start' ? !!p.startIsCleaned : !!p.isCleaned;
+  }
+
+  function cleanedBareClassForEnd(p, end) {
+    return isCableEndCleaned(p, end) ? ' is-fiber-cleaned' : '';
+  }
+
+  function cableStripPathPoints(p, end) {
+    end = cableEndFromToken(end);
+    var dense = fiberRenderPathPointsDense(p);
+    if (!dense || dense.length < 2) return dense;
+    var pts = !isCable(p) || end === 'end' ? dense.slice().reverse() : dense.slice();
+    if (!isCable(p)) return pts;
+    /* Each end only owns arc-length from its own tip (half span) — prevents cross-end hits. */
+    var total = polylineLength(pts);
+    var half = total * 0.5;
+    var cap = Math.min(total, half + CLEAVE_TIP_ZONE_PX);
+    if (cap < total - STRIP_TIP_EPS) {
+      pts = slicePolylineByDistance(pts, 0, cap);
+    }
+    return pts;
+  }
+
+  function maxCableEndStripLenPx(p, end) {
+    var pts = cableStripPathPoints(p, end);
+    return Math.max(0, polylineLength(pts));
+  }
+
+  function cableEndTipWorld(p, end) {
+    end = cableEndFromToken(end);
+    if (end === 'start') return { x: p.ax, y: p.ay };
+    return { x: p.bx, y: p.by };
+  }
+
+  /** World distance from a point to a cable end tip (start = ax/ay, end = bx/by). */
+  function cableEndTipDist(p, end, wx, wy) {
+    var tip = cableEndTipWorld(p, end);
+    return Math.hypot(wx - tip.x, wy - tip.y);
+  }
+
+  /** Which cable end is closer to the tool — drives strip/cleave/clean hit tests. */
+  function nearestCableEndAtWorld(p, wx, wy) {
+    var dStart = cableEndTipDist(p, 'start', wx, wy);
+    var dEnd = cableEndTipDist(p, 'end', wx, wy);
+    return dStart <= dEnd ? 'start' : 'end';
+  }
+
+  /** True when (wx, wy) is unambiguously on this cable end's side of the span. */
+  function cableEndOwnsToolPoint(p, end, wx, wy) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return end === 'end';
+    return nearestCableEndAtWorld(p, wx, wy) === end;
+  }
+
+  function cableEndSnappedToSplicer(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return !!p.isSnappedToSplicer;
+    return end === 'start' ? !!p.startIsSnappedToSplicer : !!p.isSnappedToSplicer;
+  }
+
+  function opticalEndpointKey(p, end) {
+    if (!isCable(p)) return 'pigtail:' + p.id + ':tail';
+    return 'cable:' + p.id + ':' + cableEndFromToken(end);
+  }
+
+  function resolveCableEnd(p, end) {
+    if (!isCable(p)) return 'end';
+    return cableEndFromToken(end || p.activeCableEnd || 'end');
+  }
+
+  function cableEndPrepState(p, end) {
+    syncCablePrepState(p);
+    end = cableEndFromToken(end);
+    return end === 'start' ? p.startPrepState : p.endPrepState;
+  }
+
+  function cableEndIsSnappedToCleaver(p, end) {
+    end = cableEndFromToken(end);
+    if (!isCable(p)) return !!p.isSnappedToCleaver;
+    return end === 'start' ? !!p.startIsSnappedToCleaver : !!p.isSnappedToCleaver;
+  }
+
+  function cableEndIsSnappedToSplicer(p, end) {
+    return cableEndSnappedToSplicer(p, end);
+  }
+
+  function getBareGlassDrawLengthPxForEnd(p, end) {
+    if (!p) return 0;
+    end = resolveCableEnd(p, end);
+    var fs = ensureCableEndStrip(p, end);
+    var jacketTo = Math.max(0, fs.jacketTo || 0);
+    var bareTo = Math.max(0, fs.bareTo || 0);
+    if (isCableEndFullyStripped(p, end) || isBareStripComplete(fs)) bareTo = jacketTo;
+    if (bareTo <= STRIP_TIP_EPS) return 0;
+    if (isCable(p) && end === 'start') {
+      return Math.min(jacketTo, bareTo);
+    }
+    return stripArcOnRenderPath(p, bareTo);
+  }
+
+  function getSplicerExposedBareLengthPxForEnd(p, end) {
+    end = resolveCableEnd(p, end);
+    if (isCableEndCleaved(p, end)) return getBareGlassLengthAfterCutPx();
+    return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassDrawLengthPxForEnd(p, end));
+  }
+
+  function setCableEndSplicerSnap(p, end, slot) {
+    end = resolveCableEnd(p, end);
+    p.activeCableEnd = end;
+    if (end === 'start') {
+      p.startIsSnappedToSplicer = true;
+      p.startSnappedSplicerId = slot.machineId;
+      p.startSnappedSplicerSide = slot.side;
+      p.startSplicerGrooveY = slot.grooveY;
+      p.startSplicerTipX = p.ax;
+      p.startSplicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
+      p.startSplicerPreviewSlot = null;
+      p.startSplicerBareGlassPx = getSplicerExposedBareLengthPxForEnd(p, 'start');
+      p.startSplicerInnerEdgeX = slot.innerEdgeX;
+    } else {
+      p.isSnappedToSplicer = true;
+      p.snappedSplicerId = slot.machineId;
+      p.snappedSplicerSide = slot.side;
+      p.splicerGrooveY = slot.grooveY;
+      p.splicerTipX = p.bx;
+      p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
+      p.splicerPreviewSlot = null;
+      p.splicerBareGlassPx = getSplicerExposedBareLengthPxForEnd(p, 'end');
+      p.splicerInnerEdgeX = slot.innerEdgeX;
+    }
+  }
+
+  function clearCableEndSplicerSnap(p, end, opts) {
+    opts = opts || {};
+    end = resolveCableEnd(p, end);
+    var snapped = cableEndIsSnappedToSplicer(p, end);
+    if (!snapped) return;
+    var machineId = end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId;
+    var side = end === 'start' ? p.startSnappedSplicerSide : p.snappedSplicerSide;
+    if (end === 'start') {
+      p.startIsSnappedToSplicer = false;
+      p.startSnappedSplicerId = null;
+      p.startSnappedSplicerSide = null;
+      p.startSplicerGrooveY = null;
+      p.startSplicerTipX = null;
+      p.startSplicerPreviewSlot = null;
+      p.startSplicerGrooveAnchor = null;
+      if (!opts.preserveWeld) {
+        p.startSplicerBareGlassPx = null;
+        p.startSplicerInnerEdgeX = null;
+      }
+    } else {
+      p.isSnappedToSplicer = false;
+      p.snappedSplicerId = null;
+      p.snappedSplicerSide = null;
+      p.splicerGrooveY = null;
+      p.splicerTipX = null;
+      p.splicerPreviewSlot = null;
+      p.splicerGrooveAnchor = null;
+      if (!opts.preserveWeld) {
+        p.splicerBareGlassPx = null;
+        p.splicerInnerEdgeX = null;
+      }
+    }
+    if (machineId && side && global.FusionSplicerMachine && FusionSplicerMachine.getUI) {
+      var api = FusionSplicerMachine.getUI(machineId);
+      if (api && typeof api.setFiberPlaced === 'function') {
+        api.setFiberPlaced(side, false);
+      }
+    }
+  }
+
   function getPigtailFiberRenderStrokeWidths() {
     return {
       jacket: PIGTAIL_FIBER_STROKE_JACKET_PX,
@@ -1278,18 +1538,20 @@
     p.fiberStrip.bareTo = p.fiberStrip.jacketTo;
   }
 
-  function captureCleaveStripAnchor(p, cleaverId) {
-    ensureFiberStrip(p);
-    var boundary = getJacketBoundaryWorld(p);
-    var rulerStopX = p.cleaverSlotAnchorX;
+  function captureCleaveStripAnchor(p, cleaverId, end) {
+    end = isCable(p) ? resolveCableEnd(p, end) : 'end';
+    var fs = ensureCableEndStrip(p, end);
+    var boundary = getJacketBoundaryWorld(p, end);
+    var rulerStopX = end === 'start' ? p.startCleaverSlotAnchorX : p.cleaverSlotAnchorX;
     if (rulerStopX == null && cleaverId) {
       var slot = getCleaverSlotGeometry(cleaverId);
       if (slot && slot.rulerStopX != null) rulerStopX = slot.rulerStopX;
     }
     if (rulerStopX == null && boundary) rulerStopX = boundary.x;
     return {
-      preJacketTo: p.fiberStrip.jacketTo || 0,
-      preBareTo: p.fiberStrip.bareTo || 0,
+      end: end,
+      preJacketTo: fs.jacketTo || 0,
+      preBareTo: fs.bareTo || 0,
       jacketBoundaryX: boundary ? boundary.x : null,
       rulerStopX: rulerStopX,
     };
@@ -1322,10 +1584,11 @@
   function lockCleavedStripGeometry(p, bareLenPx, opts) {
     opts = opts || {};
     if (!p) return;
-    ensureFiberStrip(p);
+    var end = isCable(p) ? resolveCableEnd(p, opts.end) : 'end';
+    var fs = ensureCableEndStrip(p, end);
     var bareLen = typeof bareLenPx === 'number' ? bareLenPx : getBareGlassLengthAfterCutPx();
     bareLen = Math.max(CLEAVE_MIN_CUT_PX, bareLen);
-    var maxLen = maxStripLenPx(p);
+    var maxLen = isCable(p) ? maxCableEndStripLenPx(p, end) : maxStripLenPx(p);
     if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
 
     var jacketTo;
@@ -1333,13 +1596,13 @@
       var removed = typeof opts.removedFromTip === 'number' ? opts.removedFromTip : 0;
       jacketTo = Math.max(bareLen, opts.preJacketTo - removed);
     } else {
-      jacketTo = p.fiberStrip.jacketTo || 0;
+      jacketTo = fs.jacketTo || 0;
     }
     jacketTo = Math.min(jacketTo, maxLen);
-    p.fiberStrip.jacketTo = jacketTo;
-    p.fiberStrip.bareTo = jacketTo;
-    p.fiberStrip.peel = 0;
-    p.fiberStrip.peelLayer = null;
+    fs.jacketTo = jacketTo;
+    fs.bareTo = jacketTo;
+    fs.peel = 0;
+    fs.peelLayer = null;
 
     var lock = {
       jacketTo: jacketTo,
@@ -1347,19 +1610,17 @@
     };
     if (opts.jacketBoundaryX != null) lock.jacketBoundaryX = opts.jacketBoundaryX;
     if (opts.rulerStopX != null) lock.rulerStopX = opts.rulerStopX;
-    p.cleavedStripLock = lock;
+    if (end === 'start') p.startCleavedStripLock = lock;
+    else p.cleavedStripLock = lock;
 
-    var pinX = lock.jacketBoundaryX != null ? lock.jacketBoundaryX : lock.rulerStopX;
-    if (pinX != null) {
-      pinJacketBoundaryToWorldX(p, pinX);
-      lock.jacketTo = p.fiberStrip.jacketTo;
-      lock.bareTo = p.fiberStrip.jacketTo;
-      enforceRulerWall(p, pinX);
+    if (isCable(p)) {
+      syncCablePrepState(p);
+      setCableEndStripStage(p, end, 2);
+    } else {
+      enforceFullStripBareFrontier(p);
+      syncStripStageFromFiberStrip(p);
+      lockPermanentStripFrontier(p);
     }
-
-    enforceFullStripBareFrontier(p);
-    syncStripStageFromFiberStrip(p);
-    lockPermanentStripFrontier(p);
   }
 
   var STRIP_TIP_EPS = 0.05;
@@ -1390,8 +1651,24 @@
    * Keep strip frontiers valid against the live fiber polyline (tip-anchored arc-length).
    * Call whenever geometry changes — extend, route, or cleave.
    */
-  function clampStripFrontiersToPath(p) {
+  function clampStripFrontiersToPath(p, end) {
     if (!p) return;
+    if (isCable(p)) {
+      var ends = end ? [resolveCableEnd(p, end)] : ['start', 'end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var cableEnd = ends[ei];
+        if (isCableEndCleaved(p, cableEnd)) continue;
+        var fs = ensureCableEndStrip(p, cableEnd);
+        var maxLen = maxCableEndStripLenPx(p, cableEnd);
+        if (!isFinite(maxLen) || maxLen < 0) maxLen = 0;
+        if (fs.jacketTo > maxLen) fs.jacketTo = maxLen;
+        if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+        if (fs.bareTo > maxLen) fs.bareTo = maxLen;
+      }
+      syncCablePrepState(p);
+      return;
+    }
     ensureFiberStrip(p);
     if (p.isCleaved || p.cleaved || (Number(p.stripStage) || 0) >= 2 || p.stripFrontierLock) {
       restorePermanentStripFrontier(p);
@@ -1482,11 +1759,13 @@
     return null;
   }
 
-  function stripHitFromProj(p, pts, proj, stage, layer, thr) {
-    var fs = ensureFiberStrip(p);
+  function stripHitFromProj(p, pts, proj, stage, layer, thr, end) {
+    end = end ? cableEndFromToken(end) : 'end';
+    var fs = ensureCableEndStrip(p, end);
     var dirs = peelDirsFromPath(pts);
     return {
-      id: p.id,
+      id: fiberTargetId(p, end),
+      end: end,
       stage: stage,
       layer: layer,
       x: proj.x,
@@ -1584,6 +1863,22 @@
    * Snake mode returns corner vertices; SVG fillets are applied at draw time.
    */
   function fiberRenderPathPoints(p) {
+    if (isCable(p)) {
+      var tipA = { x: p.ax, y: p.ay };
+      var tipB = { x: p.bx, y: p.by };
+      ensurePathHistory(p);
+      if (usesOrthoRoute(p)) {
+        return orthoPolyline(p);
+      }
+      var cablePts = [{ x: tipA.x, y: tipA.y }];
+      var cL = resolvePigtailRenderLength(p, tipA, tipB);
+      var cMid = samplePigtailCatenary(tipA, tipB, cL, PIGTAIL_CATENARY_SAMPLES);
+      var cj;
+      for (cj = 1; cj < cMid.length; cj++) {
+        pushSleevePathPt(cablePts, cMid[cj]);
+      }
+      return cablePts;
+    }
     var tipA = bootAnchor(p);
     var p0 = strainReliefStart(p);
     var tipB = { x: p.bx, y: p.by };
@@ -1656,6 +1951,18 @@
     return isFullyStrippedPigtail(p) || !!(p.isCleaved || p.cleaved);
   }
 
+  function shouldShowCableEndResidue(p, end) {
+    if (!isCable(p)) return shouldShowPigtailResidue(p);
+    end = cableEndFromToken(end);
+    syncCablePrepState(p);
+    var prep = cableEndPrepState(p, end);
+    if (!prep.stripped || prep.cleaned) return false;
+    var fs = ensureCableEndStrip(p, end);
+    if (prep.cleaved || isCableEndCleaved(p, end)) return true;
+    if (getCableEndStripStage(p, end) >= 2 || isBareStripComplete(fs)) return true;
+    return (fs.bareTo || 0) > STRIP_TIP_EPS;
+  }
+
   function buildPigtailResiduePathSvg(p, pathD) {
     if (!shouldShowPigtailResidue(p) || !pathD) return '';
     return (
@@ -1664,8 +1971,160 @@
     );
   }
 
+  function buildCableEndResiduePathSvg(p, end, pathD) {
+    if (!shouldShowCableEndResidue(p, end) || !pathD) return '';
+    var targetId = fiberTargetId(p, end);
+    return (
+      '<path class="lab-pigtail-residue" data-pt-residue="' + targetId + '" data-pt-fiber="' + p.id +
+      '" data-pt-fiber-end="' + cableEndFromToken(end) + '" d="' + pathD +
+      '" fill="none" stroke="' + getPigtailBufferStrokeColor(p) + '" />'
+    );
+  }
+
+  function buildCableEndStripSvg(p, end, densePts, total, sel) {
+    end = cableEndFromToken(end);
+    syncCablePrepState(p);
+    var prep = cableEndPrepState(p, end);
+    var fs = ensureCableEndStrip(p, end);
+    var jacketTo = Math.max(0, fs.jacketTo || 0);
+    var bareTo = Math.max(0, fs.bareTo || 0);
+    var fullyStripped = prep.stripped && (getCableEndStripStage(p, end) >= 2 || prep.cleaved);
+    var bareComplete = fullyStripped || isBareStripComplete(fs);
+    if (bareComplete) bareTo = jacketTo;
+    var peel = fs.peel || 0;
+    var peelLayer = fs.peelLayer;
+    var strippedId = fiberTargetId(p, end);
+    var cleaved = prep.cleaved || isCableEndCleaved(p, end);
+    var splicerCls = cableEndSnappedToSplicer(p, end) ? ' is-splicer-terminated' : '';
+    var html = '';
+
+    function peelStyle(layerName) {
+      if (peel <= 0.02 || peelLayer !== layerName) return '';
+      return ' style="--strip-peel:' + peel.toFixed(3) + ';"';
+    }
+    function peelClass(layerName) {
+      return peel > 0.02 && peelLayer === layerName ? ' is-strip-peeling' : '';
+    }
+    function segPath(d0, d1) {
+      var segPts = slicePolylineByDistance(densePts, d0, d1);
+      if (usesOrthoRoute(p) && segPts.length >= 2) {
+        return filletOrthoSvg(collapseOrthoPts(segPts), ORTHO_FILLET_R);
+      }
+      return svgPathFromPoints(segPts);
+    }
+
+    var jacketRender = stripArcOnRenderPath(p, jacketTo);
+    var bareRender = stripArcOnRenderPath(p, bareTo);
+    if (end === 'start') {
+      jacketRender = total > STRIP_TIP_EPS ? Math.min(total, jacketTo) : 0;
+      bareRender = total > STRIP_TIP_EPS ? Math.min(total, bareTo) : 0;
+    } else {
+      jacketRender = stripArcOnRenderPath(p, jacketTo);
+      bareRender = stripArcOnRenderPath(p, bareTo);
+    }
+
+    if (end === 'start') {
+      var dJacketEnd = Math.min(total, jacketRender);
+      var dBareEnd = Math.min(total, bareRender);
+      if (dJacketEnd > STRIP_TIP_EPS || dBareEnd > STRIP_TIP_EPS) {
+        var tipBareStart = fullyStripped || bareComplete ||
+          (bareTo >= jacketTo - STRIP_BUFFER_COMPLETE_PX && jacketTo > STRIP_TIP_EPS);
+        if (tipBareStart) {
+          var startBareFullD = segPath(0, Math.max(dBareEnd, dJacketEnd));
+          html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+            (cleaved ? ' lab-pigtail-fiber--cleaved' : '') + peelClass('bare') + splicerCls +
+            cleanedBareClassForEnd(p, 'start') +
+            '" data-pt-fiber-stripped="' + strippedId + '" data-pt-fiber-end="start" data-pt-fiber-seg="bare" d="' +
+            startBareFullD + '" fill="none"' + peelStyle('bare') + ' />' +
+            buildCableEndResiduePathSvg(p, 'start', startBareFullD);
+        } else if (dBareEnd > STRIP_TIP_EPS) {
+          var startBarePartialD = segPath(0, dBareEnd);
+          html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+            (cleaved ? ' lab-pigtail-fiber--cleaved' : '') + peelClass('bare') + splicerCls +
+            cleanedBareClassForEnd(p, 'start') +
+            '" data-pt-fiber-stripped="' + strippedId + '" data-pt-fiber-end="start" data-pt-fiber-seg="bare" d="' +
+            startBarePartialD + '" fill="none"' + peelStyle('bare') + ' />' +
+            buildCableEndResiduePathSvg(p, 'start', startBarePartialD);
+          html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' + peelClass('buffer') +
+            '" data-pt-fiber="' + p.id + '" data-pt-fiber-end="start" data-pt-fiber-seg="buffer" d="' +
+            segPath(dBareEnd, dJacketEnd) + '" fill="none"' + peelStyle('buffer') + ' />';
+        } else if (dJacketEnd > STRIP_TIP_EPS) {
+          html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' + peelClass('buffer') +
+            '" data-pt-fiber="' + p.id + '" data-pt-fiber-end="start" data-pt-fiber-seg="buffer" d="' +
+            segPath(0, dJacketEnd) + '" fill="none"' + peelStyle('buffer') + ' />';
+        }
+      } else if (!fullyStripped && !bareComplete && jacketTo <= STRIP_TIP_EPS) {
+        var tipCap = Math.min(22, Math.max(12, total * 0.1));
+        html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' + sel +
+          '" data-pt-fiber="' + p.id + '" data-pt-fiber-end="start" data-pt-fiber-seg="buffer" d="' +
+          segPath(0, tipCap) + '" fill="none" />';
+      }
+      return { html: html, jacketEnd: dJacketEnd };
+    }
+
+    if (jacketRender > STRIP_TIP_EPS && total > jacketRender + STRIP_TIP_EPS) {
+      var dJacketEndB = Math.max(0, total - jacketRender);
+      var dBareEndB = Math.max(dJacketEndB, total - bareRender);
+      var tipBareB = fullyStripped || bareComplete ||
+        (bareRender >= jacketRender - STRIP_BUFFER_COMPLETE_PX && jacketRender > STRIP_TIP_EPS);
+      var tipPathDB = segPath(dJacketEndB, total);
+      if (tipBareB) {
+        html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+          (cleaved ? ' lab-pigtail-fiber--cleaved' : '') + peelClass('bare') + splicerCls +
+          cleanedBareClassForEnd(p, 'end') +
+          '" data-pt-fiber-stripped="' + strippedId + '" data-pt-fiber-end="end" data-pt-fiber-seg="bare" d="' +
+          tipPathDB + '" fill="none"' + peelStyle('bare') + ' />' +
+          buildCableEndResiduePathSvg(p, 'end', tipPathDB);
+      } else {
+        html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--buffer' + peelClass('buffer') +
+          '" data-pt-fiber="' + p.id + '" data-pt-fiber-end="end" data-pt-fiber-seg="buffer" d="' +
+          segPath(dJacketEndB, dBareEndB) + '" fill="none"' + peelStyle('buffer') + ' />';
+        html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
+          (cleaved ? ' lab-pigtail-fiber--cleaved' : '') + peelClass('bare') + splicerCls +
+          cleanedBareClassForEnd(p, 'end') +
+          '" data-pt-fiber-stripped="' + strippedId + '" data-pt-fiber-end="end" data-pt-fiber-seg="bare" d="' +
+          tipPathDB + '" fill="none"' + peelStyle('bare') + ' />' +
+          buildCableEndResiduePathSvg(p, 'end', tipPathDB);
+      }
+      return { html: html, jacketStart: dJacketEndB };
+    }
+    return { html: html, jacketStart: total };
+  }
+
+  function buildCableFiberSvg(p, opts) {
+    opts = opts || {};
+    var densePts = fiberRenderPathPointsDense(p);
+    var fullPts = fiberRenderPathPoints(p);
+    var fullPath = fiberSvgPathFromRenderPoints(p, fullPts) || fiberPath(p);
+    var total = polylineLength(densePts);
+    var sel = selection.id === p.id ? ' is-selected' : '';
+    var startSeg = buildCableEndStripSvg(p, 'start', densePts, total, sel);
+    var endSeg = buildCableEndStripSvg(p, 'end', densePts, total, sel);
+    var midStart = Math.max(startSeg.jacketEnd || 0, 0);
+    var midEnd = Math.min(endSeg.jacketStart != null ? endSeg.jacketStart : total, total);
+    var html =
+      '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
+      '" fill="none" stroke="transparent" />';
+    html += startSeg.html;
+    if (midEnd > midStart + STRIP_TIP_EPS) {
+      var midPts = slicePolylineByDistance(densePts, midStart, midEnd);
+      var midD = fiberSvgPathFromRenderPoints(p, midPts);
+      html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + midD + '" fill="none" />';
+    } else if (midStart <= STRIP_TIP_EPS && midEnd >= total - STRIP_TIP_EPS) {
+      html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath + '" fill="none" />';
+    }
+    html += endSeg.html;
+    html += '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + fullPath + '" fill="none" />';
+    html += '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + ':start" d="' +
+      svgPathFromPoints(slicePolylineByDistance(densePts, 0, Math.min(24, total))) + '" fill="none" />';
+    return html;
+  }
+
   function buildPigtailFiberSvg(p, opts) {
     opts = opts || {};
+    if (isCable(p)) return buildCableFiberSvg(p, opts);
     var fullPts = fiberRenderPathPoints(p);
     var densePts = fiberRenderPathPointsDense(p);
     var fullPath = fiberSvgPathFromRenderPoints(p, fullPts) || fiberPath(p);
@@ -1945,19 +2404,42 @@
   }
 
   /** World point where yellow jacket meets bare glass (tip-anchored arc-length jacketTo). */
-  function getJacketBoundaryWorld(p) {
+  function getJacketBoundaryWorld(p, end) {
     if (!p) return null;
-    ensureFiberStrip(p);
-    var jacketTo = Number(p.fiberStrip.jacketTo) || 0;
-    var pts = fiberSleevePathPoints(p);
+    end = isCable(p) ? resolveCableEnd(p, end) : 'end';
+    var fs = ensureCableEndStrip(p, end);
+    var jacketTo = Number(fs.jacketTo) || 0;
+    var pts = isCable(p) ? cableStripPathPoints(p, end) : fiberSleevePathPoints(p);
+    var tip = cableEndTipWorld(p, end);
     if (!pts || pts.length < 2) {
-      return { x: p.bx, y: p.by };
+      return { x: tip.x, y: tip.y };
     }
     if (jacketTo < STRIP_TIP_EPS) {
       return { x: pts[0].x, y: pts[0].y };
     }
     var pt = pointAtPathDistance(pts, jacketTo);
     return { x: pt.x, y: pt.y };
+  }
+
+  function translateStartGeometry(p, dx, dy) {
+    if (!p || (!dx && !dy)) return;
+    p.ax += dx;
+    p.ay += dy;
+    if (usesOrthoRoute(p)) {
+      var hist = ensurePathHistory(p);
+      var i;
+      for (i = 0; i < hist.length; i++) {
+        hist[i].x += dx;
+        hist[i].y += dy;
+      }
+      syncPathAlias(p);
+    }
+  }
+
+  function translateCableEndGeometry(p, end, dx, dy) {
+    end = resolveCableEnd(p, end);
+    if (end === 'start') translateStartGeometry(p, dx, dy);
+    else translateTailGeometry(p, dx, dy);
   }
 
   function translateTailGeometry(p, dx, dy) {
@@ -2099,24 +2581,35 @@
     updateFiberPath(p);
   }
 
-  function updateCleaverSnapVisual(p) {
+  function updateCleaverSnapVisual(p, end) {
     if (!layer || !p) return;
-    var btn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
-    if (btn) btn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
+    end = isCable(p) ? resolveCableEnd(p, end) : 'end';
+    var label = end === 'start' ? 'A' : 'B';
+    var btn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="' + label + '"]');
+    if (!btn) return;
+    var docked = end === 'start' ? !!p.startIsSnappedToCleaver : !!p.isSnappedToCleaver;
+    btn.classList.toggle('is-cleaver-docked', docked);
   }
 
   function clearCleaverSnap(p, opts) {
     opts = opts || {};
     if (!p) return;
-    var cleaverId = p.snappedCleaverId;
-    p.isSnappedToCleaver = false;
-    p.snappedCleaverId = null;
-    p.cleaverSlotAnchorX = null;
+    var end = isCable(p) ? resolveCableEnd(p, opts.end) : 'end';
+    var cleaverId = end === 'start' ? p.startSnappedCleaverId : p.snappedCleaverId;
+    if (end === 'start') {
+      p.startIsSnappedToCleaver = false;
+      p.startSnappedCleaverId = null;
+      p.startCleaverSlotAnchorX = null;
+    } else {
+      p.isSnappedToCleaver = false;
+      p.snappedCleaverId = null;
+      p.cleaverSlotAnchorX = null;
+    }
     if (cleaverId && global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
       FtthLab.setCleaverDockedPigtail(cleaverId, null);
     }
-    updateCleaverSnapVisual(p);
-    restorePermanentStripFrontier(p);
+    updateCleaverSnapVisual(p, end);
+    if (!isCable(p)) restorePermanentStripFrontier(p);
     if (!opts.skipGuide) clearCleaverGuideLine();
     clearCleaverDropzoneHighlight();
   }
@@ -2165,18 +2658,64 @@
     }
   }
 
-  function cleaverEligibleForDropzone(p) {
-    if (!p || p.cleaved || p.isCleaved) return false;
-    if ((Number(p.stripStage) || 0) < 2) return false;
-    if (p.tail && p.tail.attached) return false;
+  function cleaverEligibleForDropzone(p, end) {
+    end = resolveCableEnd(p, end);
+    if (!p || isCableEndCleaved(p, end)) return false;
+    if (getCableEndStripStage(p, end) < 2) return false;
+    if (!isCable(p) && p.tail && p.tail.attached) return false;
     return true;
   }
 
   /**
    * Snap on release only: lock Y to groove, shift tail so jacketTo meets ruler stop (art X=305).
    */
-  function seatFiberOnCleaverDrop(p, cleaverId) {
-    if (!cleaverEligibleForDropzone(p)) return false;
+  function flattenOrthoForCleaverSlotEnd(p, tipX, grooveY, end) {
+    end = resolveCableEnd(p, end);
+    if (!usesOrthoRoute(p)) return;
+    ensurePathHistory(p);
+    var hist = p.pathHistory;
+    var inland = Math.max(ORTHO_MIN_SEG, 16);
+    if (end === 'start') {
+      var tipFromWest = tipX <= (p.bx || tipX);
+      var inlandX = tipFromWest ? tipX + inland : tipX - inland;
+      if (!hist.length) {
+        hist.push({ x: inlandX, y: grooveY });
+      } else {
+        var first = hist[0];
+        if (Math.abs(first.y - grooveY) > 0.5) {
+          hist.unshift({ x: first.x, y: grooveY });
+        }
+        first = hist[0];
+        if (Math.abs(first.x - tipX) < ORTHO_MIN_SEG) {
+          hist[0] = { x: inlandX, y: grooveY };
+        }
+      }
+    } else {
+      flattenOrthoForCleaverSlot(p, tipX, grooveY);
+      return;
+    }
+    p.pathHistory = hist;
+    syncPathAlias(p);
+    if (p.snake) {
+      p.snake.axis = 'h';
+      p.snake.ghost = null;
+    }
+  }
+
+  function enforceRulerWallForEnd(p, rulerStopX, end) {
+    if (!p || rulerStopX == null) return;
+    end = resolveCableEnd(p, end);
+    var i;
+    for (i = 0; i < 12; i++) {
+      var boundary = getJacketBoundaryWorld(p, end);
+      if (!boundary || boundary.x <= rulerStopX + RULER_WALL_EPS) return;
+      translateCableEndGeometry(p, end, rulerStopX - boundary.x, 0);
+    }
+  }
+
+  function seatFiberOnCleaverDrop(p, cleaverId, end) {
+    end = resolveCableEnd(p, end);
+    if (!cleaverEligibleForDropzone(p, end)) return false;
     var slot = getCleaverSlotGeometry(cleaverId);
     if (!slot || !slot.open || slot.grooveY == null || slot.rulerStopX == null) return false;
 
@@ -2186,27 +2725,54 @@
     var span = bareTipSpanX(bladeX, rulerStopX);
     if (span.maxX - span.minX < ORTHO_MIN_SEG) return false;
 
+    var tipX;
+    if (end === 'start') {
+      p.ay = Math.round(grooveY);
+      flattenOrthoForCleaverSlotEnd(p, p.ax, grooveY, 'start');
+      var boundaryStart = getJacketBoundaryWorld(p, 'start');
+      if (boundaryStart) translateCableEndGeometry(p, 'start', rulerStopX - boundaryStart.x, 0);
+      enforceRulerWallForEnd(p, rulerStopX, 'start');
+      tipX = Math.max(span.minX, Math.min(span.maxX, p.ax));
+      p.ax = tipX;
+      flattenOrthoForCleaverSlotEnd(p, tipX, grooveY, 'start');
+      boundaryStart = getJacketBoundaryWorld(p, 'start');
+      if (boundaryStart) translateCableEndGeometry(p, 'start', rulerStopX - boundaryStart.x, 0);
+      enforceRulerWallForEnd(p, rulerStopX, 'start');
+      var iterS;
+      for (iterS = 0; iterS < 16; iterS++) {
+        boundaryStart = getJacketBoundaryWorld(p, 'start');
+        if (!boundaryStart || Math.abs(boundaryStart.x - rulerStopX) < RULER_WALL_EPS) break;
+        translateCableEndGeometry(p, 'start', rulerStopX - boundaryStart.x, 0);
+      }
+      p.ax = Math.round(Math.max(span.minX, Math.min(span.maxX, p.ax)));
+      p.ay = Math.round(grooveY);
+      p.startIsSnappedToCleaver = true;
+      p.startSnappedCleaverId = cleaverId;
+      p.startCleaverSlotAnchorX = rulerStopX;
+      return true;
+    }
+
     p.by = Math.round(grooveY);
     flattenOrthoForCleaverSlot(p, p.bx, grooveY);
 
-    var boundary = getJacketBoundaryWorld(p);
+    var boundary = getJacketBoundaryWorld(p, 'end');
     if (boundary) {
       translateTailGeometry(p, rulerStopX - boundary.x, 0);
     }
-    enforceRulerWall(p, rulerStopX);
+    enforceRulerWallForEnd(p, rulerStopX, 'end');
 
-    var tipX = Math.max(span.minX, Math.min(span.maxX, p.bx));
+    tipX = Math.max(span.minX, Math.min(span.maxX, p.bx));
     p.bx = tipX;
     flattenOrthoForCleaverSlot(p, tipX, grooveY);
-    boundary = getJacketBoundaryWorld(p);
+    boundary = getJacketBoundaryWorld(p, 'end');
     if (boundary) {
       translateTailGeometry(p, rulerStopX - boundary.x, 0);
     }
-    enforceRulerWall(p, rulerStopX);
+    enforceRulerWallForEnd(p, rulerStopX, 'end');
 
     var iter;
     for (iter = 0; iter < 16; iter++) {
-      boundary = getJacketBoundaryWorld(p);
+      boundary = getJacketBoundaryWorld(p, 'end');
       if (!boundary || Math.abs(boundary.x - rulerStopX) < RULER_WALL_EPS) break;
       translateTailGeometry(p, rulerStopX - boundary.x, 0);
     }
@@ -2216,12 +2782,12 @@
     p.isSnappedToCleaver = true;
     p.snappedCleaverId = cleaverId;
     p.cleaverSlotAnchorX = rulerStopX;
-    lockPermanentStripFrontier(p);
+    if (!isCable(p)) lockPermanentStripFrontier(p);
     return true;
   }
 
-  function finishCleaverDropSeat(p, cleaverId) {
-    if (!seatFiberOnCleaverDrop(p, cleaverId)) return false;
+  function finishCleaverDropSeat(p, cleaverId, end) {
+    if (!seatFiberOnCleaverDrop(p, cleaverId, end)) return false;
     if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
       FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
     }
@@ -2229,9 +2795,10 @@
     var guide = cleaverSlotGuideFromInfo(slot);
     if (guide) setCleaverGuideLine(guide, true);
     if (slot) setCleaverRulerWallGuide(slot, true);
-    updateCleaverSnapVisual(p);
+    updateCleaverSnapVisual(p, end);
     updateFiberPath(p);
-    setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
+    setStatus((isCable(p) ? 'Cable' : 'SC Pigtail') + ' · ' + end +
+      ' end · jacket seated against cleaver ruler · bare glass in groove');
     return true;
   }
 
@@ -2243,13 +2810,19 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (!p || p.cleaved || p.isCleaved) continue;
-      if ((Number(p.stripStage) || 0) < 2) continue;
-      if (p.tail && p.tail.attached) continue;
-      var d = dist2(wx, wy, p.bx, p.by);
-      if (d <= thr && d < bestD) {
-        bestD = d;
-        best = { id: p.id, x: p.bx, y: p.by, dist: d };
+      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var end = ends[ei];
+        if (!p || isCableEndCleaved(p, end)) continue;
+        if (getCableEndStripStage(p, end) < 2) continue;
+        if (!isCable(p) && p.tail && p.tail.attached) continue;
+        var tip = cableEndTipWorld(p, end);
+        var d = dist2(wx, wy, tip.x, tip.y);
+        if (d <= thr && d < bestD) {
+          bestD = d;
+          best = { id: fiberTargetId(p, end), end: end, x: tip.x, y: tip.y, dist: d };
+        }
       }
     }
     return best;
@@ -2260,6 +2833,10 @@
     pigtails.forEach(function (p) {
       if (p.isSnappedToCleaver && p.snappedCleaverId === cleaverId) {
         clearCleaverSnap(p, { skipGuide: true });
+        changed = true;
+      }
+      if (isCable(p) && p.startIsSnappedToCleaver && p.startSnappedCleaverId === cleaverId) {
+        clearCleaverSnap(p, { skipGuide: true, end: 'start' });
         changed = true;
       }
     });
@@ -2280,8 +2857,16 @@
 
   /* ─── Fusion splicer clamp V-groove snap (cleaved pigtails) ─── */
 
-  function splicerEligibleForSnap(p) {
+  function splicerEligibleForSnap(p, end) {
     if (!p) return false;
+    end = end ? cableEndFromToken(end) : (isCable(p) ? 'end' : 'end');
+    if (isCable(p)) {
+      var prep = cableEndPrepState(p, end);
+      if (!prep.stripped || !prep.cleaned || !prep.cleaved) return false;
+      if (end === 'start' && p.startIsSnappedToCleaver) return false;
+      if (end === 'end' && p.isSnappedToCleaver) return false;
+      return true;
+    }
     if (!(p.isCleaved || p.cleaved) && !isFullyStrippedPigtail(p)) return false;
     if (p.tail && p.tail.attached) return false;
     if (p.isSnappedToCleaver) return false;
@@ -2300,11 +2885,30 @@
     return null;
   }
 
-  function findSnappedPigtailOnSide(machineId, side, exceptId) {
+  function findSnappedPigtailOnSide(machineId, side, exceptId, exceptEnd) {
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var cand = pigtails[i];
       if (exceptId && cand.id === exceptId) continue;
+      if (isCable(cand)) {
+        if (
+          !(exceptId === cand.id && exceptEnd === 'start') &&
+          cand.startIsSnappedToSplicer &&
+          cand.startSnappedSplicerId === machineId &&
+          cand.startSnappedSplicerSide === side
+        ) {
+          return cableSplicerDockAdapter(cand, 'start');
+        }
+        if (
+          !(exceptId === cand.id && exceptEnd === 'end') &&
+          cand.isSnappedToSplicer &&
+          cand.snappedSplicerId === machineId &&
+          cand.snappedSplicerSide === side
+        ) {
+          return cableSplicerDockAdapter(cand, 'end');
+        }
+        continue;
+      }
       if (
         cand.isSnappedToSplicer &&
         cand.snappedSplicerId === machineId &&
@@ -2316,12 +2920,44 @@
     return null;
   }
 
+  function cableSplicerDockAdapter(p, end) {
+    end = cableEndFromToken(end);
+    return {
+      id: p.id,
+      type: 'cable',
+      cableEnd: end,
+      targetId: fiberTargetId(p, end),
+      bx: end === 'start' ? p.ax : p.bx,
+      by: end === 'start' ? p.ay : p.by,
+      isSnappedToSplicer: cableEndSnappedToSplicer(p, end),
+      snappedSplicerId: end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId,
+      snappedSplicerSide: end === 'start' ? p.startSnappedSplicerSide : p.snappedSplicerSide,
+      isCleaved: isCableEndCleaved(p, end),
+      cleaved: isCableEndCleaved(p, end),
+      stripStage: getCableEndStripStage(p, end),
+      fiberStrip: ensureCableEndStrip(p, end),
+      connector: { attached: null, mismatch: false },
+      tail: { attached: null },
+    };
+  }
+
   function getSplicerDockedPair(machineId) {
     var left = null;
     var right = null;
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
+      if (isCable(p)) {
+        if (p.startIsSnappedToSplicer && p.startSnappedSplicerId === machineId) {
+          if (p.startSnappedSplicerSide === 'L') left = cableSplicerDockAdapter(p, 'start');
+          if (p.startSnappedSplicerSide === 'R') right = cableSplicerDockAdapter(p, 'start');
+        }
+        if (p.isSnappedToSplicer && p.snappedSplicerId === machineId) {
+          if (p.snappedSplicerSide === 'L') left = cableSplicerDockAdapter(p, 'end');
+          if (p.snappedSplicerSide === 'R') right = cableSplicerDockAdapter(p, 'end');
+        }
+        continue;
+      }
       if (!p.isSnappedToSplicer || p.snappedSplicerId !== machineId) continue;
       if (p.snappedSplicerSide === 'L') left = p;
       if (p.snappedSplicerSide === 'R') right = p;
@@ -2406,6 +3042,14 @@
       machineId: machineId,
       leftId: pair.left.id,
       rightId: pair.right.id,
+      leftKey: (function () {
+        var lp = findPigtail(pair.left.id);
+        return lp ? opticalEndpointKey(lp, pair.left.cableEnd || 'end') : null;
+      })(),
+      rightKey: (function () {
+        var rp = findPigtail(pair.right.id);
+        return rp ? opticalEndpointKey(rp, pair.right.cableEnd || 'end') : null;
+      })(),
       bridgeX1: slotL ? slotL.innerEdgeX : pair.left.bx,
       bridgeX2: slotR ? slotR.innerEdgeX : pair.right.bx,
       bridgeY: grooveY,
@@ -3572,59 +4216,85 @@
    * Docked tip alignment — per-side only. Never mutates strip arc-lengths (clamp truncation
    * is geometric in buildPigtailFiberSvg). Cleaved fibers use exact cleavedGlassLength.
    */
-  function alignSplicerJacketToInnerEdge(p, slot) {
+  function alignSplicerJacketToInnerEdge(p, slot, end) {
     if (!p || !slot) return false;
+    end = resolveCableEnd(p, end);
     var dir = slot.side === 'L' ? 1 : -1;
     var welded = isPigtailFused(p);
-    if (welded && p.isSnappedToSplicer) {
+    if (welded && cableEndIsSnappedToSplicer(p, end)) {
       syncSplicerWeldedTips(slot.machineId);
       return true;
     }
     if (welded) return true;
-    var exposed = getSplicerExposedBareLengthPx(p);
-    p.bx = Math.round(slot.innerEdgeX + dir * exposed);
-    p.by = Math.round(slot.grooveY);
-    p.splicerBareGlassPx = exposed;
-    p.splicerInnerEdgeX = slot.innerEdgeX;
+    var exposed = getSplicerExposedBareLengthPxForEnd(p, end);
+    if (end === 'start') {
+      p.ax = Math.round(slot.innerEdgeX + dir * exposed);
+      p.ay = Math.round(slot.grooveY);
+      p.startSplicerBareGlassPx = exposed;
+      p.startSplicerInnerEdgeX = slot.innerEdgeX;
+    } else {
+      p.bx = Math.round(slot.innerEdgeX + dir * exposed);
+      p.by = Math.round(slot.grooveY);
+      p.splicerBareGlassPx = exposed;
+      p.splicerInnerEdgeX = slot.innerEdgeX;
+    }
     return true;
   }
 
   /** Shift whole pigtail vertically so tip Y aligns with groove — no stretch, no diagonal bridge. */
-  function applySplicerRigidSnapShift(p, slot) {
+  function applySplicerRigidSnapShift(p, slot, end) {
     if (!p || !slot) return false;
-    var deltaY = slot.grooveY - p.by;
+    end = resolveCableEnd(p, end);
+    var tip = cableEndTipWorld(p, end);
+    var deltaY = slot.grooveY - tip.y;
     if (Math.abs(deltaY) > 0.01) {
       translatePigtailRigidY(p, deltaY);
     }
-    p.by = Math.round(slot.grooveY);
-    p.ay = Math.round(p.ay);
+    if (end === 'start') p.ay = Math.round(slot.grooveY);
+    else p.by = Math.round(slot.grooveY);
     return true;
   }
 
   var splicerDockTrackRafId = null;
 
-  function syncSnappedPigtailToLiveGroove(p) {
-    if (!p || !p.isSnappedToSplicer) return false;
-    var slot = getSplicerGrooveSlot(p.snappedSplicerId, p.snappedSplicerSide, { forTracking: true });
+  function syncSnappedPigtailToLiveGroove(p, end) {
+    end = resolveCableEnd(p, end);
+    if (!p || !cableEndIsSnappedToSplicer(p, end)) return false;
+    var machineId = end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId;
+    var side = end === 'start' ? p.startSnappedSplicerSide : p.snappedSplicerSide;
+    var slot = getSplicerGrooveSlot(machineId, side, { forTracking: true });
     if (!slot) return false;
+    var anchor = end === 'start' ? p.startSplicerGrooveAnchor : p.splicerGrooveAnchor;
     var changed = false;
-    if (!p.splicerGrooveAnchor) {
-      p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
-      p.splicerGrooveY = slot.grooveY;
+    if (!anchor) {
+      anchor = { x: slot.centerX, y: slot.grooveY };
+      if (end === 'start') {
+        p.startSplicerGrooveAnchor = anchor;
+        p.startSplicerGrooveY = slot.grooveY;
+      } else {
+        p.splicerGrooveAnchor = anchor;
+        p.splicerGrooveY = slot.grooveY;
+      }
     } else {
-      var deltaX = slot.centerX - p.splicerGrooveAnchor.x;
-      var deltaY = slot.grooveY - p.splicerGrooveAnchor.y;
+      var deltaX = slot.centerX - anchor.x;
+      var deltaY = slot.grooveY - anchor.y;
       if (Math.abs(deltaX) >= 0.01 || Math.abs(deltaY) >= 0.01) {
         translatePigtailRigid(p, deltaX, deltaY);
-        p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
-        p.splicerGrooveY = slot.grooveY;
+        anchor = { x: slot.centerX, y: slot.grooveY };
+        if (end === 'start') {
+          p.startSplicerGrooveAnchor = anchor;
+          p.startSplicerGrooveY = slot.grooveY;
+        } else {
+          p.splicerGrooveAnchor = anchor;
+          p.splicerGrooveY = slot.grooveY;
+        }
         changed = true;
       }
     }
-    var innerDrift = p.splicerInnerEdgeX == null ||
-      Math.abs(p.splicerInnerEdgeX - slot.innerEdgeX) > 0.5;
+    var innerEdgeX = end === 'start' ? p.startSplicerInnerEdgeX : p.splicerInnerEdgeX;
+    var innerDrift = innerEdgeX == null || Math.abs(innerEdgeX - slot.innerEdgeX) > 0.5;
     if (changed || innerDrift) {
-      alignSplicerJacketToInnerEdge(p, slot);
+      alignSplicerJacketToInnerEdge(p, slot, end);
       changed = true;
     }
     return changed;
@@ -3635,12 +4305,18 @@
     var changed = false;
     var machineIds = {};
     pigtails.forEach(function (p) {
-      if (!p.isSnappedToSplicer) return;
-      anySnapped = true;
-      if (p.snappedSplicerId) machineIds[p.snappedSplicerId] = true;
-      if (syncSnappedPigtailToLiveGroove(p)) {
-        changed = true;
-        updateFiberPath(p);
+      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var end = ends[ei];
+        if (!cableEndIsSnappedToSplicer(p, end)) continue;
+        anySnapped = true;
+        var mid = end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId;
+        if (mid) machineIds[mid] = true;
+        if (syncSnappedPigtailToLiveGroove(p, end)) {
+          changed = true;
+          updateFiberPath(p);
+        }
       }
     });
     if (changed) {
@@ -3671,21 +4347,16 @@
   function seatFiberInSplicerGroove(p, slot, opts) {
     opts = opts || {};
     if (!p || !slot || !slot.open) return false;
-    if (!splicerEligibleForSnap(p) && !opts.force) return false;
-    var occupant = findSnappedPigtailOnSide(slot.machineId, slot.side, p.id);
+    var end = resolveCableEnd(p, opts.end);
+    p.activeCableEnd = end;
+    if (!splicerEligibleForSnap(p, end) && !opts.force) return false;
+    var occupant = findSnappedPigtailOnSide(slot.machineId, slot.side, p.id, end);
     if (occupant) return false;
 
     captureSplicerDockSnapshot(p);
-    applySplicerRigidSnapShift(p, slot);
-    alignSplicerJacketToInnerEdge(p, slot);
-
-    p.isSnappedToSplicer = true;
-    p.snappedSplicerId = slot.machineId;
-    p.snappedSplicerSide = slot.side;
-    p.splicerGrooveY = slot.grooveY;
-    p.splicerTipX = p.bx;
-    p.splicerGrooveAnchor = { x: slot.centerX, y: slot.grooveY };
-    p.splicerPreviewSlot = null;
+    applySplicerRigidSnapShift(p, slot, end);
+    alignSplicerJacketToInnerEdge(p, slot, end);
+    setCableEndSplicerSnap(p, end, slot);
 
     if (global.FusionSplicerMachine && global.FusionSplicerMachine.getUI) {
       var api = FusionSplicerMachine.getUI(slot.machineId);
@@ -3695,7 +4366,8 @@
     }
 
     if (!opts.quiet) {
-      setStatus('SC Pigtail · seated in ' + slot.side + '-clamp V-groove');
+      setStatus((isCable(p) ? 'Cable' : 'SC Pigtail') + ' · ' + end +
+        ' end seated in ' + slot.side + '-clamp V-groove');
     }
     ensureSplicerDockTracking();
     return true;
@@ -3703,30 +4375,15 @@
 
   function clearSplicerSnap(p, opts) {
     opts = opts || {};
-    if (!p || !p.isSnappedToSplicer) return;
-    var machineId = p.snappedSplicerId;
-    var side = p.snappedSplicerSide;
+    if (!p) return;
+    var end = resolveCableEnd(p, opts.end);
+    if (!cableEndIsSnappedToSplicer(p, end)) return;
+    var machineId = end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId;
     var preserveWeld = !!opts.preserveWeld || isPigtailFused(p);
-    p.isSnappedToSplicer = false;
-    p.snappedSplicerId = null;
-    p.snappedSplicerSide = null;
-    p.splicerGrooveY = null;
-    p.splicerTipX = null;
-    p.splicerPreviewSlot = null;
-    p.splicerGrooveAnchor = null;
-    if (!preserveWeld) {
-      p.splicerBareGlassPx = null;
-      p.splicerInnerEdgeX = null;
-    }
+    clearCableEndSplicerSnap(p, end, { preserveWeld: preserveWeld });
     restoreSplicerDockStripState(p);
     if (machineId && !preserveWeld) {
       clearSplicerWeldForMachine(machineId);
-    }
-    if (machineId && side && global.FusionSplicerMachine && FusionSplicerMachine.getUI) {
-      var api = FusionSplicerMachine.getUI(machineId);
-      if (api && typeof api.setFiberPlaced === 'function') {
-        api.setFiberPlaced(side, false);
-      }
     }
     if (machineId) {
       renderSplicerFiberOverlays(machineId);
@@ -3737,13 +4394,15 @@
   }
 
   /** Instant unsnap — detach machine slot, keep current geometry (shifted pathHistory + curves). */
-  function forceUnsnapPigtailFromSplicer(p) {
-    if (!p || !p.isSnappedToSplicer) return false;
+  function forceUnsnapPigtailFromSplicer(p, end) {
+    end = resolveCableEnd(p, end);
+    if (!p || !cableEndIsSnappedToSplicer(p, end)) return false;
     if (isPigtailFused(p)) {
       return liftFusedAssemblyFromSplicer(getPigtailFusionAssemblyId(p));
     }
-    clearSplicerSnap(p, { skipRebuild: true });
-    p.splicerDragDetached = true;
+    clearSplicerSnap(p, { skipRebuild: true, end: end });
+    if (end === 'start') p.startSplicerDragDetached = true;
+    else p.splicerDragDetached = true;
     updateFiberPath(p);
     return true;
   }
@@ -3801,29 +4460,37 @@
   }
 
   /** Magnet glow only while dragging — rigid snap executes on pointerup drop. */
-  function applySplicerMagnetDuringDrag(p, clientX, clientY) {
-    if (p.splicerDragDetached) return;
-    if (!splicerEligibleForSnap(p)) {
-      p.splicerPreviewSlot = null;
+  function applySplicerMagnetDuringDrag(p, clientX, clientY, end) {
+    end = resolveCableEnd(p, end);
+    p.activeCableEnd = end;
+    var detached = end === 'start' ? p.startSplicerDragDetached : p.splicerDragDetached;
+    if (detached) return;
+    if (!splicerEligibleForSnap(p, end)) {
+      if (end === 'start') p.startSplicerPreviewSlot = null;
+      else p.splicerPreviewSlot = null;
       clearSplicerMagnetHighlight();
       return;
     }
     var splicerHit = hitTestSplicerGroove(clientX, clientY);
     if (splicerHit && splicerHit.slot) {
-      p.splicerPreviewSlot = splicerHit.slot;
+      if (end === 'start') p.startSplicerPreviewSlot = splicerHit.slot;
+      else p.splicerPreviewSlot = splicerHit.slot;
       highlightSplicerGrooveHit(splicerHit);
       return;
     }
-    p.splicerPreviewSlot = null;
+    if (end === 'start') p.startSplicerPreviewSlot = null;
+    else p.splicerPreviewSlot = null;
     clearSplicerMagnetHighlight();
   }
 
   /** Lock pigtail into groove on pointer release. */
-  function finishSplicerMagnetOnDrop(p, clientX, clientY) {
-    if (!splicerEligibleForSnap(p)) return false;
+  function finishSplicerMagnetOnDrop(p, clientX, clientY, end) {
+    end = resolveCableEnd(p, end);
+    p.activeCableEnd = end;
+    if (!splicerEligibleForSnap(p, end)) return false;
     var dropHit = hitTestSplicerGroove(clientX, clientY);
     if (dropHit && dropHit.slot) {
-      return finishSplicerDropSeat(p, dropHit);
+      return finishSplicerDropSeat(p, dropHit, end);
     }
     return false;
   }
@@ -3908,9 +4575,10 @@
     return null;
   }
 
-  function finishSplicerDropSeat(p, hit) {
+  function finishSplicerDropSeat(p, hit, end) {
     if (!hit || !hit.slot) return false;
-    var ok = seatFiberInSplicerGroove(p, hit.slot);
+    end = resolveCableEnd(p, end);
+    var ok = seatFiberInSplicerGroove(p, hit.slot, { end: end });
     if (!ok) return false;
     updateFiberPath(p);
     renderSplicerFiberOverlays(hit.slot.machineId);
@@ -3923,14 +4591,34 @@
     if (!slot) return { ok: false, reason: 'no-slot' };
     if (!slot.open && !opts.forceOpen) return { ok: false, reason: 'clamp-closed' };
 
-    var pig = opts.pigtailId ? findPigtail(opts.pigtailId) : null;
+    var target = opts.pigtailId ? parseFiberTargetId(opts.pigtailId) : null;
+    var pig = target ? target.p : (opts.pigtailId ? findPigtail(opts.pigtailId) : null);
+    var cableEnd = target ? target.end : (opts.cableEnd || null);
     var i;
     if (!pig) {
       pig = findSnappedPigtailOnSide(machineId, side);
+      if (pig && pig.cableEnd) cableEnd = pig.cableEnd;
     }
     if (!pig) {
       for (i = 0; i < pigtails.length; i++) {
         var cand = pigtails[i];
+        if (isCable(cand)) {
+          var ends = ['start', 'end'];
+          var ei;
+          for (ei = 0; ei < ends.length; ei++) {
+            var endTry = ends[ei];
+            if (!splicerEligibleForSnap(cand, endTry)) continue;
+            if (cableEndIsSnappedToSplicer(cand, endTry) &&
+                (endTry === 'start' ? cand.startSnappedSplicerId : cand.snappedSplicerId) === machineId) {
+              continue;
+            }
+            pig = cand;
+            cableEnd = endTry;
+            break;
+          }
+          if (pig) break;
+          continue;
+        }
         if (!splicerEligibleForSnap(cand)) continue;
         if (cand.isSnappedToSplicer && cand.snappedSplicerId === machineId) continue;
         pig = cand;
@@ -3939,7 +4627,11 @@
     }
     if (!pig) return { ok: false, reason: 'no-pigtail' };
 
-    var ok = seatFiberInSplicerGroove(pig, slot, { force: !!opts.force, quiet: !!opts.quiet });
+    var ok = seatFiberInSplicerGroove(pig, slot, {
+      force: !!opts.force,
+      quiet: !!opts.quiet,
+      end: cableEnd,
+    });
     if (!ok) return { ok: false, reason: 'seat-failed' };
 
     updateFiberPath(pig);
@@ -4018,8 +4710,12 @@
     var ids = {};
     var i;
     for (i = 0; i < pigtails.length; i++) {
-      if (pigtails[i].isSnappedToSplicer && pigtails[i].snappedSplicerId) {
-        ids[pigtails[i].snappedSplicerId] = true;
+      var pg = pigtails[i];
+      if (pg.isSnappedToSplicer && pg.snappedSplicerId) {
+        ids[pg.snappedSplicerId] = true;
+      }
+      if (isCable(pg) && pg.startIsSnappedToSplicer && pg.startSnappedSplicerId) {
+        ids[pg.startSnappedSplicerId] = true;
       }
     }
     if (machineId) ids[machineId] = true;
@@ -4040,7 +4736,9 @@
         html += '<g class="lab-splicer-fused-assembly" data-fused-assembly="' + overlayAssemblyId + '">';
       }
       pigtails.forEach(function (p) {
-        if (!p.isSnappedToSplicer || p.snappedSplicerId !== mid) return;
+        var onMachine = (p.isSnappedToSplicer && p.snappedSplicerId === mid) ||
+          (isCable(p) && p.startIsSnappedToSplicer && p.startSnappedSplicerId === mid);
+        if (!onMachine) return;
         html +=
           '<g data-pt-fiber-wrap="' + p.id + '">' +
           buildPigtailFiberSvg(p, { splicerPort: true }) +
@@ -4150,15 +4848,17 @@
    * - Jacket: anywhere inland on the yellow jacket
    * - Buffer: on exposed coating between bareTo and jacketTo
    */
-  function notchIntersectsUnstrippedFiber(p, wx, wy, thresholdPx) {
+  function notchIntersectsUnstrippedFiber(p, wx, wy, thresholdPx, end) {
     var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
     thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
-    if (!p || p.isCleaved || p.cleaved) return null;
-    ensureFiberStrip(p);
-    clampStripFrontiersToPath(p);
-    var fs = p.fiberStrip;
+    end = end ? cableEndFromToken(end) : 'end';
+    if (!p || isCableEndCleaved(p, end)) return null;
+    if (isCable(p) && !cableEndOwnsToolPoint(p, end, wx, wy)) return null;
+    if (getCableEndStripStage(p, end) >= 2 && end === 'end' && !isCable(p)) return null;
+    var fs = ensureCableEndStrip(p, end);
+    clampStripFrontiersToPath(p, end);
 
-    var pts = fiberSleevePathPoints(p);
+    var pts = cableStripPathPoints(p, end);
     if (!pts || pts.length < 2) return null;
     var total = polylineLength(pts);
     var jacketTo = fs.jacketTo || 0;
@@ -4174,20 +4874,21 @@
     if (proj.dist < -0.01) return null;
 
     if (hasJacketRemain && proj.dist >= jacketTo - STRIP_TIP_EPS && proj.dist <= maxStrip + STRIP_TIP_EPS) {
-      return stripHitFromProj(p, pts, proj, 0, 'jacket', thr);
+      return stripHitFromProj(p, pts, proj, 0, 'jacket', thr, end);
     }
 
     if (hasBufferRemain && proj.dist >= bareTo - STRIP_TIP_EPS && proj.dist < jacketTo - STRIP_BUFFER_COMPLETE_PX) {
-      return stripHitFromProj(p, pts, proj, 1, 'buffer', thr);
+      return stripHitFromProj(p, pts, proj, 1, 'buffer', thr, end);
     }
 
     return null;
   }
 
   function projectPigtailStripNotch(id, wx, wy) {
-    var p = findPigtail(id);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
     if (!p) return null;
-    var pts = fiberSleevePathPoints(p);
+    var pts = cableStripPathPoints(p, target.end || 'end');
     if (!pts || pts.length < 2) return null;
     var proj = projectOntoFiberStrict(pts, wx, wy);
     if (!proj) return null;
@@ -4234,13 +4935,19 @@
    * Commit the full clamped segment when the peel session ends or the tool passes the tip.
    */
   function commitStripPeelSession(id, layerKind, session) {
-    var p = findPigtail(id);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
     if (!p || !session) return;
-    ensureFiberStrip(p);
-    p.isCleaned = false;
-    p.isStripped = true;
-    var fs = p.fiberStrip;
-    var maxLen = maxStripLenPx(p);
+    var end = target.end || 'end';
+    var fs = ensureCableEndStrip(p, end);
+    if (end === 'start') {
+      p.startIsCleaned = false;
+      p.startIsStripped = true;
+    } else {
+      p.isCleaned = false;
+      p.isStripped = true;
+    }
+    var maxLen = maxCableEndStripLenPx(p, end);
     var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
     if (layerKind === 'jacket') {
       fs.jacketTo = Math.min(maxLen, Math.max(fs.jacketTo || 0, clampAlong));
@@ -4252,7 +4959,8 @@
     }
     fs.peel = 0;
     fs.peelLayer = null;
-    syncStripStageFromFiberStrip(p);
+    if (isCable(p)) syncCablePrepState(p);
+    else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
@@ -4261,14 +4969,15 @@
    * Frontier = session.startAlong − notchAlong (arc-length from tip); completes at clamp point.
    */
   function applyStripDragFromNotch(id, wx, wy, layerKind, session) {
-    var p = findPigtail(id);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
     if (!p || !session) return null;
-    ensureFiberStrip(p);
-    clampStripFrontiersToPath(p);
-    var fs = p.fiberStrip;
+    var end = target.end || 'end';
+    var fs = ensureCableEndStrip(p, end);
+    clampStripFrontiersToPath(p, end);
     if (layerKind === 'buffer' && (fs.jacketTo || 0) < STRIP_TIP_EPS) return null;
 
-    var pts = fiberSleevePathPoints(p);
+    var pts = cableStripPathPoints(p, end);
     if (!pts || pts.length < 2) return null;
 
     var along = peelAlongDistForSession(pts, wx, wy, session);
@@ -4291,7 +5000,7 @@
       return null;
     }
 
-    var maxLen = maxStripLenPx(p);
+    var maxLen = maxCableEndStripLenPx(p, end);
     var clampAlong = Math.min(maxLen, Math.max(0, session.startAlong || 0));
     var targetFrontier = Math.max(0, clampAlong - along);
     var peeled = clampAlong - targetFrontier;
@@ -4317,7 +5026,14 @@
       return null;
     }
 
-    syncStripStageFromFiberStrip(p);
+    if (isCable(p)) {
+      var stage = (fs.bareTo || 0) >= (fs.jacketTo || 0) - STRIP_TIP_EPS ? 2 :
+        ((fs.jacketTo || 0) > STRIP_TIP_EPS ? 1 : 0);
+      setCableEndStripStage(p, end, stage);
+      syncCablePrepState(p);
+    } else {
+      syncStripStageFromFiberStrip(p);
+    }
     updateStripVisuals(p);
     return {
       ok: true,
@@ -4343,14 +5059,27 @@
     var thr = typeof thresholdPx === 'number' ? thresholdPx : STRIP_NOTCH_HIT_PX;
     thr = Math.min(thr, STRIP_NOTCH_HIT_PX);
     var best = null;
-    var bestD = thr + 1;
+    var bestScore = thr + 1;
     var i;
     for (i = 0; i < pigtails.length; i++) {
-      var hit = notchIntersectsUnstrippedFiber(pigtails[i], wx, wy, thr);
-      if (!hit) continue;
-      if (hit.perpDist < bestD) {
-        bestD = hit.perpDist;
-        best = hit;
+      var p = pigtails[i];
+      if (isCable(p)) {
+        var nearEnd = nearestCableEndAtWorld(p, wx, wy);
+        var hit = notchIntersectsUnstrippedFiber(p, wx, wy, thr, nearEnd);
+        if (!hit) continue;
+        var tipDist = cableEndTipDist(p, nearEnd, wx, wy);
+        var score = hit.perpDist + tipDist * 0.02;
+        if (score < bestScore) {
+          bestScore = score;
+          best = hit;
+        }
+        continue;
+      }
+      var hitP = notchIntersectsUnstrippedFiber(p, wx, wy, thr, 'end');
+      if (!hitP) continue;
+      if (hitP.perpDist < bestScore) {
+        bestScore = hitP.perpDist;
+        best = hitP;
       }
     }
     return best;
@@ -4461,23 +5190,31 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (!p || p.cleaved || p.isCleaved) continue;
-      if ((Number(p.stripStage) || 0) !== 2) continue;
-      if (p.tail && p.tail.attached) continue;
-      var pts = fiberSleevePathPoints(p);
-      if (!pts || pts.length < 2) continue;
-      var proj = projectOntoFiberStrict(pts, bladeX, bladeY);
-      if (!proj || proj.perpDist > thr) continue;
-      if (proj.perpDist < bestD) {
-        bestD = proj.perpDist;
-        best = {
-          id: p.id,
-          x: proj.x,
-          y: proj.y,
-          rot: proj.rot,
-          perpDist: proj.perpDist,
-          along: proj.dist,
-        };
+      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var end = ends[ei];
+        if (!p || isCableEndCleaved(p, end)) continue;
+        if (isCable(p) && !cableEndOwnsToolPoint(p, end, bladeX, bladeY)) continue;
+        if (getCableEndStripStage(p, end) !== 2) continue;
+        if (!isCable(p) && p.tail && p.tail.attached) continue;
+        var pts = cableStripPathPoints(p, end);
+        if (!pts || pts.length < 2) continue;
+        var proj = projectOntoFiberStrict(pts, bladeX, bladeY);
+        if (!proj || proj.perpDist > thr) continue;
+        var score = proj.perpDist + cableEndTipDist(p, end, bladeX, bladeY) * 0.02;
+        if (score < bestD) {
+          bestD = score;
+          best = {
+            id: fiberTargetId(p, end),
+            end: end,
+            x: proj.x,
+            y: proj.y,
+            rot: proj.rot,
+            perpDist: proj.perpDist,
+            along: proj.dist,
+          };
+        }
       }
     }
     return best;
@@ -4491,43 +5228,13 @@
     var radius = typeof opts.hitRadius === 'number' ? opts.hitRadius : BLADE_HIT_RADIUS_PX;
     var hit = findPigtailBladeHit(bladeX, bladeY, radius);
     if (!hit) return false;
-    var p = findPigtail(hit.id);
-    if (!p) return false;
-    var pts = fiberSleevePathPoints(p);
-    if (!pts || pts.length < 2) return false;
-    if (hit.along < CLEAVE_MIN_CUT_PX) return false;
-    if (polylineLength(pts) < hit.along + 6) return false;
-
-    var anchor = captureCleaveStripAnchor(p, opts.cleaverId);
-    var lenBefore = polylineLength(pts);
-
-    truncateFiberAtBladeX(p, bladeX, bladeY);
-
-    var lenAfter = polylineLength(fiberSleevePathPoints(p));
-    var removed = Math.max(0, lenBefore - lenAfter);
-
-    p.isCleaved = true;
-    p.cleaved = true;
-    lockCleavedStripGeometry(p, getBareGlassLengthAfterCutPx(), {
-      preJacketTo: anchor.preJacketTo,
-      removedFromTip: removed,
-      jacketBoundaryX: anchor.jacketBoundaryX,
-      rulerStopX: anchor.rulerStopX,
+    return commitCleave(hit.id, {
+      cutX: bladeX,
+      cutY: bladeY,
+      cleaverId: opts.cleaverId,
+      cleaveAngle: opts.cleaveAngle,
+      cleaveFaceRot: opts.cleaveFaceRot,
     });
-    p.cleaveAngle = 90;
-    p.cleaveFaceRot = 90;
-    clearCleaverSnap(p, { skipGuide: true });
-    clearCleaverGuideLine();
-    updateFiberPath(p);
-    rebuildLayer();
-    pushHistory();
-    updateInspector();
-    refreshBudget();
-    setStatus('SC Pigtail · fiber cleaved · perpendicular end face');
-    if (global.FtthLab && typeof FtthLab.showToast === 'function') {
-      FtthLab.showToast('تم القص 90°');
-    }
-    return true;
   }
 
   /**
@@ -4541,26 +5248,34 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (!p || p.cleaved || p.isCleaved) continue;
-      if ((Number(p.stripStage) || 0) < 2) continue;
-      if (p.tail && p.tail.attached) continue;
-      var pts = fiberSleevePathPoints(p);
-      if (!pts || pts.length < 2) continue;
-      var proj = projectOntoFiberStrict(pts, wx, wy);
-      if (!proj || !proj.onSegment) continue;
-      if (proj.dist > CLEAVE_TIP_ZONE_PX) continue;
-      if (proj.perpDist > thr) continue;
-      if (proj.perpDist < bestD) {
-        bestD = proj.perpDist;
-        best = {
-          id: p.id,
-          x: proj.x,
-          y: proj.y,
-          rot: proj.rot,
-          perpDist: proj.perpDist,
-          along: proj.dist,
-          wastePx: getBareGlassLengthAfterCutPx(),
-        };
+      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var end = ends[ei];
+        if (!p || isCableEndCleaved(p, end)) continue;
+        if (isCable(p) && !cableEndOwnsToolPoint(p, end, wx, wy)) continue;
+        if (getCableEndStripStage(p, end) < 2) continue;
+        if (!isCable(p) && p.tail && p.tail.attached) continue;
+        var pts = cableStripPathPoints(p, end);
+        if (!pts || pts.length < 2) continue;
+        var proj = projectOntoFiberStrict(pts, wx, wy);
+        if (!proj || !proj.onSegment) continue;
+        if (proj.dist > CLEAVE_TIP_ZONE_PX) continue;
+        if (proj.perpDist > thr) continue;
+        var score = proj.perpDist + cableEndTipDist(p, end, wx, wy) * 0.02;
+        if (score < bestD) {
+          bestD = score;
+          best = {
+            id: fiberTargetId(p, end),
+            end: end,
+            x: proj.x,
+            y: proj.y,
+            rot: proj.rot,
+            perpDist: proj.perpDist,
+            along: proj.dist,
+            wastePx: getBareGlassLengthAfterCutPx(),
+          };
+        }
       }
     }
     return best;
@@ -4588,10 +5303,12 @@
   /** Commit a precision cleave — slice at blade point, flat 90° end face. */
   function commitCleave(id, opts) {
     opts = opts || {};
-    var p = findPigtail(id);
-    if (!p || p.cleaved || p.isCleaved) return false;
-    if ((Number(p.stripStage) || 0) < 2) return false;
-    var pts = fiberSleevePathPoints(p);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || isCableEndCleaved(p, end)) return false;
+    if (getCableEndStripStage(p, end) < 2) return false;
+    var pts = cableStripPathPoints(p, end);
     if (!pts || pts.length < 2) return false;
     var total = polylineLength(pts);
     var cutDist;
@@ -4607,13 +5324,23 @@
     if (cutDist < CLEAVE_MIN_CUT_PX) return false;
     if (total < cutDist + 6) return false;
 
-    var anchor = captureCleaveStripAnchor(p, opts.cleaverId);
+    var anchor = captureCleaveStripAnchor(p, opts.cleaverId, end);
     var newTip = pointAtPathDistance(pts, cutDist);
-    p.bx = newTip.x;
-    p.by = newTip.y;
-    p.isCleaved = true;
-    p.cleaved = true;
+    if (end === 'start') {
+      p.ax = newTip.x;
+      p.ay = newTip.y;
+      p.startIsCleaved = true;
+      p.startCleaved = true;
+    } else {
+      p.bx = newTip.x;
+      p.by = newTip.y;
+      p.isCleaved = true;
+      p.cleaved = true;
+    }
+    syncCablePrepState(p);
+    clearCleaverSnap(p, { skipGuide: true, end: end });
     lockCleavedStripGeometry(p, getBareGlassLengthAfterCutPx(), {
+      end: end,
       preJacketTo: anchor.preJacketTo,
       removedFromTip: cutDist,
       jacketBoundaryX: anchor.jacketBoundaryX,
@@ -4634,84 +5361,104 @@
   }
 
   function setStripPeel(id, peel) {
-    var p = findPigtail(id);
-    if (!p || p.isCleaved || p.cleaved) return;
-    ensureFiberStrip(p);
-    if ((Number(p.stripStage) || 0) >= 2 && (p.fiberStrip.peelLayer || '') !== 'jacket') return;
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || isCableEndCleaved(p, end)) return;
+    var fs = ensureCableEndStrip(p, end);
+    if (getCableEndStripStage(p, end) >= 2 && (fs.peelLayer || '') !== 'jacket') return;
     var n = Number(peel);
     if (!isFinite(n)) n = 0;
-    p.fiberStrip.peel = Math.max(0, Math.min(1, n));
-    syncStripStageFromFiberStrip(p);
+    fs.peel = Math.max(0, Math.min(1, n));
+    if (isCable(p)) syncCablePrepState(p);
+    else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
   /** Legacy hook — sets jacket frontier length from tip. */
   function setStripLengthPx(id, px) {
-    var p = findPigtail(id);
-    if (!p || p.isCleaved || p.cleaved) return;
-    ensureFiberStrip(p);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || isCableEndCleaved(p, end)) return;
+    var fs = ensureCableEndStrip(p, end);
     clampStripFrontiersToPath(p);
     var n = Number(px);
     if (!isFinite(n) || n < 0) n = 0;
-    n = Math.min(n, maxStripLenPx(p));
-    p.fiberStrip.jacketTo = Math.max(p.fiberStrip.jacketTo || 0, n);
-    if (p.fiberStrip.bareTo > p.fiberStrip.jacketTo) {
-      p.fiberStrip.bareTo = p.fiberStrip.jacketTo;
-    }
-    syncStripStageFromFiberStrip(p);
+    n = Math.min(n, maxCableEndStripLenPx(p, end));
+    fs.jacketTo = Math.max(fs.jacketTo || 0, n);
+    if (fs.bareTo > fs.jacketTo) fs.bareTo = fs.jacketTo;
+    if (isCable(p)) syncCablePrepState(p);
+    else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
   function clearStripPeel(id) {
-    var p = findPigtail(id);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
     if (!p) return;
-    ensureFiberStrip(p);
-    p.fiberStrip.peel = 0;
-    p.fiberStrip.peelLayer = null;
-    syncStripStageFromFiberStrip(p);
+    var fs = ensureCableEndStrip(p, target.end || 'end');
+    fs.peel = 0;
+    fs.peelLayer = null;
+    if (isCable(p)) syncCablePrepState(p);
+    else syncStripStageFromFiberStrip(p);
     updateStripVisuals(p);
   }
 
   /** Stage is derived from fiberStrip frontiers — no fixed-length snap. */
   function commitStripStage(id) {
-    var p = findPigtail(id);
-    if (!p || p.isCleaved || p.cleaved) return false;
-    ensureFiberStrip(p);
-    p.isCleaned = false;
-    syncStripStageFromFiberStrip(p);
-    p.fiberStrip.peel = 0;
-    p.fiberStrip.peelLayer = null;
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || isCableEndCleaved(p, end)) return false;
+    var fs = ensureCableEndStrip(p, end);
+    if (end === 'start') p.startIsCleaned = false;
+    else p.isCleaned = false;
+    if (isCable(p)) {
+      var stageVal = (fs.bareTo || 0) >= (fs.jacketTo || 0) - STRIP_TIP_EPS ? 2 :
+        ((fs.jacketTo || 0) > STRIP_TIP_EPS ? 1 : 0);
+      setCableEndStripStage(p, end, stageVal);
+      syncCablePrepState(p);
+    } else {
+      syncStripStageFromFiberStrip(p);
+    }
+    fs.peel = 0;
+    fs.peelLayer = null;
     rebuildLayer();
     pushHistory();
     updateInspector();
-    var stage = p.stripStage || 0;
+    var stage = getCableEndStripStage(p, end);
+    var label = isCable(p) ? 'Cable' : 'SC Pigtail';
     setStatus(
       stage >= 2
-        ? 'SC Pigtail · buffer stripped · bare glass exposed'
+        ? label + ' · buffer stripped · bare glass exposed'
         : stage >= 1
-          ? 'SC Pigtail · jacket stripped · clamp buffer to peel coating'
-          : 'SC Pigtail · jacket peel in progress'
+          ? label + ' · jacket stripped · clamp buffer to peel coating'
+          : label + ' · jacket peel in progress'
     );
     return true;
   }
 
-  function syncTailStripDom(p, tail) {
+  function syncTailStripDom(p, tail, end) {
     if (!p || !tail) return;
-    ensureFiberStrip(p);
-    enforceFullStripBareFrontier(p);
-    var fs = p.fiberStrip;
+    end = end ? cableEndFromToken(end) : 'end';
+    var fs = ensureCableEndStrip(p, end);
+    if (!isCable(p)) enforceFullStripBareFrontier(p);
     var peel = fs.peel || 0;
     var peelLayer = fs.peelLayer;
     var j = fs.jacketTo || 0;
-    var fullyStripped = isFullyStrippedPigtail(p);
+    var fullyStripped = isCable(p)
+      ? isCableEndFullyStripped(p, end)
+      : isFullyStrippedPigtail(p);
     var bareComplete = fullyStripped || isBareStripComplete(fs);
     var jacketStripped = j > STRIP_TIP_EPS;
-    var stage = p.stripStage || 0;
+    var cleaved = isCableEndCleaved(p, end);
 
     tail.classList.toggle('is-strip-peeling', peel > 0.02);
     tail.style.setProperty('--strip-peel', peel.toFixed(3));
     tail.classList.toggle('is-strip-stage1', jacketStripped);
     tail.classList.toggle('is-strip-stage2', bareComplete);
+    tail.classList.toggle('is-cleaved', cleaved);
 
     var jacketEl = tail.querySelector('.lab-pigtail__jacket');
     var bufferEl = tail.querySelector('.lab-pigtail__buffer');
@@ -4729,16 +5476,24 @@
     if (cleaveEl) {
       cleaveEl.classList.toggle('is-strip-bare', bareComplete);
       cleaveEl.classList.toggle('is-strip-buffered', !fullyStripped && jacketStripped && !bareComplete);
-      cleaveEl.classList.toggle('is-cleaved', !!(p.isCleaved || p.cleaved));
+      cleaveEl.classList.toggle('is-cleaved', cleaved);
     }
   }
 
   function updateStripVisuals(p) {
     if (!layer || !p) return;
-    ensureFiberStrip(p);
+    if (isCable(p)) syncCablePrepState(p);
+    else ensureFiberStrip(p);
     replacePigtailFiberSvg(p);
+    if (isCable(p)) {
+      var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
+      var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
+      syncTailStripDom(p, aBtn, 'start');
+      syncTailStripDom(p, bBtn, 'end');
+      return;
+    }
     var tail = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
-    syncTailStripDom(p, tail);
+    syncTailStripDom(p, tail, 'end');
   }
 
   function replacePigtailFiberSvg(p, opts) {
@@ -4746,15 +5501,20 @@
     if (!layer || !p) return;
     var svg = layer.querySelector('.lab-pigtail-svg');
     if (!svg) return;
+    function fiberAttrMatches(attrVal) {
+      if (!attrVal) return false;
+      if (attrVal === p.id) return true;
+      return isCable(p) && attrVal.indexOf(p.id + ':') === 0;
+    }
     function isFiberNode(n) {
       if (!n || n.nodeType !== 1) return false;
       return (
         n.getAttribute('data-pt-drag') === p.id ||
-        n.getAttribute('data-pt-fiber') === p.id ||
-        n.getAttribute('data-pt-fiber-stripped') === p.id ||
-        n.getAttribute('data-pt-residue') === p.id ||
+        fiberAttrMatches(n.getAttribute('data-pt-fiber')) ||
+        fiberAttrMatches(n.getAttribute('data-pt-fiber-stripped')) ||
+        fiberAttrMatches(n.getAttribute('data-pt-residue')) ||
         n.getAttribute('data-pt-ghost') === p.id ||
-        n.getAttribute('data-pt-laser') === p.id
+        fiberAttrMatches(n.getAttribute('data-pt-laser'))
       );
     }
     var child = svg.firstChild;
@@ -4809,22 +5569,30 @@
       id = near ? near.id : null;
     }
     if (!id) return null;
-    var p = findPigtail(id);
-    if (!p || !p.isStripped || !isFullyStrippedPigtail(p)) return null;
-    return p;
+    var target = parseFiberTargetId(id);
+    var p = target ? target.p : findPigtail(id);
+    var end = target ? target.end : 'end';
+    if (!p || !isCableEndFullyStripped(p, end)) return null;
+    if (isCableEndCleaned(p, end)) return null;
+    return { id: fiberTargetId(p, end), end: end, isCleaned: false, type: isCable(p) ? 'cable' : 'pigtail' };
   }
 
   /** Mark a fully stripped pigtail bare fiber as cleaned. */
   function markPigtailCleaned(id) {
-    var p = findPigtail(id);
-    if (!p || !p.isStripped || !isFullyStrippedPigtail(p)) return false;
-    if (p.isCleaned) return false;
-    p.isCleaned = true;
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
+    if (!p || !isCableEndFullyStripped(p, end)) return false;
+    if (isCableEndCleaned(p, end)) return false;
+    if (end === 'start') p.startIsCleaned = true;
+    else p.isCleaned = true;
+    syncCablePrepState(p);
     updateStripVisuals(p);
     rebuildLayer();
     pushHistory();
     updateInspector();
-    selectPigtail(id);
+    if (isCable(p)) selectCable(p.id);
+    else selectPigtail(p.id);
     return true;
   }
 
@@ -4836,30 +5604,47 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      if (!p || p.hasSleeve) continue;
-      var d = dist2(world.x, world.y, p.bx, p.by);
-      if (d <= thr && d < bestD) {
-        bestD = d;
-        best = p;
+      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ei;
+      for (ei = 0; ei < ends.length; ei++) {
+        var end = ends[ei];
+        if (!p) continue;
+        if (end === 'end' && p.hasSleeve) continue;
+        if (end === 'start' && p.startHasSleeve) continue;
+        var tip = cableEndTipWorld(p, end);
+        var d = dist2(world.x, world.y, tip.x, tip.y);
+        if (d <= thr && d < bestD) {
+          bestD = d;
+          best = { p: p, end: end };
+        }
       }
     }
-    return best ? { id: best.id, dist: bestD } : null;
+    return best ? { id: fiberTargetId(best.p, best.end), dist: bestD } : null;
   }
 
   /** Slide a 60mm protection sleeve onto a pigtail bare tip. Returns true if applied. */
   function mountSleeve(id, opts) {
     opts = opts || {};
-    var p = findPigtail(id);
+    var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
+    var p = target.p;
+    var end = target.end || 'end';
     if (!p) return false;
-    if (p.hasSleeve && !opts.force) {
-      setStatus('Sleeve already on this pigtail');
-      selectPigtail(id);
+    if (end === 'start' && p.startHasSleeve && !opts.force) {
+      setStatus('Sleeve already on start end');
+      selectCable(p.id);
       return false;
     }
-    var pts = fiberSleevePathPoints(p);
+    if (end === 'end' && p.hasSleeve && !opts.force) {
+      setStatus('Sleeve already on this pigtail');
+      if (isCable(p)) selectCable(p.id);
+      else selectPigtail(p.id);
+      return false;
+    }
+    var pts = cableStripPathPoints(p, end);
     var total = polylineLength(pts);
     var size = getSleeveSizePx();
-    p.hasSleeve = true;
+    if (end === 'start') p.startHasSleeve = true;
+    else p.hasSleeve = true;
     p.sleeveAlong = typeof opts.sleeveAlong === 'number'
       ? Math.max(0, Math.min(1, opts.sleeveAlong))
       : defaultSleeveAlong(total, size.w);
@@ -4867,9 +5652,10 @@
         typeof FtthLab.consumeFreeSleeve === 'function') {
       FtthLab.consumeFreeSleeve(opts.consumeFreeSleeveId);
     }
-    selectPigtail(id);
+    if (isCable(p)) selectCable(p.id);
+    else selectPigtail(p.id);
     rebuildLayer();
-    if (opts.slideIn !== false) triggerSleeveSlideIn(id);
+    if (opts.slideIn !== false) triggerSleeveSlideIn(fiberTargetId(p, end));
     pushHistory();
     updateInspector();
     setStatus('Sleeve 60mm · slid onto bare fiber');
@@ -4908,10 +5694,13 @@
     for (i = 0; i < list.length; i++) {
       el = list[i];
       if (!el || !el.closest) continue;
-      node = el.closest('[data-pt-id][data-pt-end="B"], .lab-pigtail__tail');
+      node = el.closest('[data-pt-id][data-pt-end], .lab-pigtail__tail, .lab-cable__end');
       if (!node) continue;
       var id = node.getAttribute('data-pt-id');
-      if (id && findPigtail(id)) return id;
+      var cableEnd = node.getAttribute('data-cable-end');
+      if (id && findPigtail(id)) {
+        return cableEnd ? fiberTargetId(findPigtail(id), cableEnd) : id;
+      }
     }
     /* Near-tip tolerance: also accept fiber hit near bare end */
     for (i = 0; i < list.length; i++) {
@@ -4925,7 +5714,12 @@
       var p = fid && findPigtail(fid);
       if (!p) continue;
       var world = clientToWorld(clientX, clientY);
-      if (dist2(world.x, world.y, p.bx, p.by) <= 36) return fid;
+      if (isCable(p)) {
+        if (dist2(world.x, world.y, p.ax, p.ay) <= 36) return fiberTargetId(p, 'start');
+        if (dist2(world.x, world.y, p.bx, p.by) <= 36) return fiberTargetId(p, 'end');
+      } else if (dist2(world.x, world.y, p.bx, p.by) <= 36) {
+        return fid;
+      }
     }
     return null;
   }
@@ -5060,6 +5854,115 @@
     return item;
   }
 
+  function placeCable(x, y) {
+    seq += 1;
+    var pos = (typeof x === 'number' && typeof y === 'number')
+      ? { x: x, y: y }
+      : defaultPos();
+    var tipX = pos.x + SPAWN_LEN_PX;
+    var tipY = pos.y;
+    var horizRot = endRotationDeg(pos.x, pos.y, tipX, tipY);
+    var item = {
+      id: 'cb-' + seq,
+      type: 'cable',
+      ax: pos.x,
+      ay: pos.y,
+      bx: tipX,
+      by: tipY,
+      startPrepState: { stripped: false, cleaned: false, cleaved: false },
+      endPrepState: { stripped: false, cleaned: false, cleaved: false },
+      connector: { attached: null, mismatch: false, lockedRot: null, liveRot: horizRot },
+      tail: { attached: null },
+      route: [],
+      pathHistory: [],
+      routeMode: 'snake',
+      lengthMeters: null,
+      lengthUnit: 'm',
+      fixedLength: SPAWN_LEN_PX,
+      hasSleeve: false,
+      startHasSleeve: false,
+      isStripped: false,
+      startIsStripped: false,
+      isCleaned: false,
+      startIsCleaned: false,
+      isCleaved: false,
+      startIsCleaved: false,
+      cleaved: false,
+      startCleaved: false,
+      stripStage: 0,
+      startStripStage: 0,
+      stripPeel: 0,
+      startStripPeel: 0,
+      stripLengthPx: 0,
+      startStripLengthPx: 0,
+      fiberStrip: { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null },
+      startFiberStrip: { jacketTo: 0, bareTo: 0, peel: 0, peelLayer: null },
+      drawLockRot: horizRot,
+      isSnappedToCleaver: false,
+      startIsSnappedToCleaver: false,
+      snappedCleaverId: null,
+      startSnappedCleaverId: null,
+      cleaverSlotAnchorX: null,
+      startCleaverSlotAnchorX: null,
+      isSnappedToSplicer: false,
+      startIsSnappedToSplicer: false,
+      snappedSplicerId: null,
+      startSnappedSplicerId: null,
+      snappedSplicerSide: null,
+      startSnappedSplicerSide: null,
+      splicerGrooveY: null,
+      startSplicerGrooveY: null,
+      splicerTipX: null,
+      startSplicerTipX: null,
+      splicerPreviewSlot: null,
+      startSplicerPreviewSlot: null,
+      splicerDragDetached: false,
+      startSplicerDragDetached: false,
+      splicerGrooveAnchor: null,
+      startSplicerGrooveAnchor: null,
+      splicerBareGlassPx: null,
+      startSplicerBareGlassPx: null,
+      splicerInnerEdgeX: null,
+      startSplicerInnerEdgeX: null,
+      splicerDockSnapshot: null,
+      startSplicerDockSnapshot: null,
+      splicerWeldMachineId: null,
+      startSplicerWeldMachineId: null,
+      fusionAssemblyId: null,
+      startFusionAssemblyId: null,
+      fusedPartnerId: null,
+      startFusedPartnerId: null,
+      fusionPermanent: false,
+      startFusionPermanent: false,
+      splicerFusedSide: null,
+      startSplicerFusedSide: null,
+      fusedJacketEndDist: null,
+      startFusedJacketEndDist: null,
+      cleavedStripLock: null,
+      startCleavedStripLock: null,
+      stripFrontierLock: null,
+      startStripFrontierLock: null,
+      activeCableEnd: 'end',
+    };
+    syncCablePrepState(item);
+    pigtails.push(item);
+    selectCable(item.id);
+    rebuildLayer();
+    pushHistory();
+    refreshBudget();
+    setStatus('Cable placed · bare fiber both ends · drag either tip to route');
+    return item;
+  }
+
+  function selectCable(id, opts) {
+    selection = { kind: 'cable', id: id };
+    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
+      FtthLab.setSelectionOwner('cable');
+    }
+    updateInspector();
+    if (!(opts && opts.skipRebuild)) rebuildLayer();
+  }
+
   function removePigtail(id) {
     var p = findPigtail(id);
     if (p && isPigtailFused(p)) {
@@ -5160,6 +6063,7 @@
 
   /** Exact rear tip of the ribbed boot — fiber path must start here. */
   function bootAnchor(p) {
+    if (isCable(p)) return { x: p.ax, y: p.ay };
     return localToWorld(p.ax, p.ay, 0, BOOT_EXIT_OFFSET, getConnRot(p));
   }
 
@@ -5729,11 +6633,19 @@
   }
 
   function orthoPolyline(p) {
-    var start = strainReliefStart(p);
     var tipB = { x: p.bx, y: p.by };
     var hist = ensurePathHistory(p);
     var ghost = p.snake && p.snake.ghost ? { x: p.snake.ghost.x, y: p.snake.ghost.y } : null;
     var dragA = !!(p.snake && p.snake.dragEnd === 'A');
+    var start;
+    if (isCable(p)) {
+      start = { x: p.ax, y: p.ay };
+      if (!hist.length && !ghost) {
+        return collapseOrthoPts([start, tipB]);
+      }
+    } else {
+      start = strainReliefStart(p);
+    }
     var pts = [{ x: start.x, y: start.y }];
     var i;
     /* Ghost bend sits between the free tip and committed history (never in pathHistory). */
@@ -6114,6 +7026,13 @@
    * Active snake.ghost is included as an L-preview bend (not stored until commit).
    */
   function fiberPath(p) {
+    if (isCable(p)) {
+      var cablePts = fiberRenderPathPoints(p);
+      if (!cablePts || cablePts.length < 2) {
+        return 'M ' + p.ax + ' ' + p.ay + ' L ' + p.bx + ' ' + p.by;
+      }
+      return fiberSvgPathFromRenderPoints(p, cablePts) || svgPathFromPoints(cablePts);
+    }
     var tipA = bootAnchor(p);
     var p0 = strainReliefStart(p);
     var tipB = { x: p.bx, y: p.by };
@@ -6185,6 +7104,87 @@
     );
   }
 
+  function cableEndStyle(p, end) {
+    end = cableEndFromToken(end);
+    var rot;
+    var tip = cableEndTipWorld(p, end);
+    var other = cableEndFromToken(end) === 'start' ? { x: p.bx, y: p.by } : { x: p.ax, y: p.ay };
+    if ((end === 'start' && p.startIsSnappedToCleaver) || (end === 'end' && p.isSnappedToCleaver)) {
+      rot = 0;
+    } else if (usesOrthoRoute(p)) {
+      var pts = orthoPolyline(p);
+      if (pts.length >= 2) {
+        var a;
+        var b;
+        if (end === 'start') {
+          a = pts[0];
+          b = pts[1];
+        } else {
+          a = pts[pts.length - 2];
+          b = pts[pts.length - 1];
+        }
+        rot = headingRotFromMotion(b.x - a.x, b.y - a.y);
+      } else {
+        rot = headingRotFromMotion(other.x - tip.x, other.y - tip.y);
+      }
+    } else {
+      rot = end === 'start'
+        ? headingRotFromMotion(other.x - tip.x, other.y - tip.y) + 180
+        : headingRotFromMotion(other.x - tip.x, other.y - tip.y) + 180;
+    }
+    return (
+      'left:' + Math.round(tip.x - TAIL_W / 2) + 'px;' +
+      'top:' + Math.round(tip.y - TAIL_H / 2) + 'px;' +
+      'transform-origin:50% 50%;' +
+      'transform:rotate(' + rot.toFixed(2) + 'deg)'
+    );
+  }
+
+  function buildCableTailButtonHtml(p, end) {
+    end = cableEndFromToken(end);
+    syncCablePrepState(p);
+    var prep = cableEndPrepState(p, end);
+    var selected = selection.id === p.id ? ' is-selected' : '';
+    var fs = ensureCableEndStrip(p, end);
+    var j = fs.jacketTo || 0;
+    var fullyStripped = prep.stripped && (getCableEndStripStage(p, end) >= 2 || prep.cleaved);
+    var bareComplete = fullyStripped || isBareStripComplete(fs);
+    var jacketStripped = prep.stripped || j > STRIP_TIP_EPS;
+    var stripStage = getCableEndStripStage(p, end);
+    var peel = fs.peel || 0;
+    var peelLayer = fs.peelLayer;
+    var cleaved = prep.cleaved || isCableEndCleaved(p, end);
+    var snappedCleaver = end === 'start' ? p.startIsSnappedToCleaver : p.isSnappedToCleaver;
+    var snappedSplicer = cableEndSnappedToSplicer(p, end);
+    var label = end === 'start' ? 'A' : 'B';
+    return (
+      '<button type="button" class="lab-pigtail__tail lab-cable__end' +
+      (snappedCleaver ? ' is-cleaver-docked' : '') +
+      (snappedSplicer ? ' is-splicer-docked' : '') +
+      (cleaved ? ' is-cleaved' : '') +
+      (jacketStripped ? ' is-strip-stage1' : '') +
+      (bareComplete ? ' is-strip-stage2' : '') +
+      (peel > 0.02 ? ' is-strip-peeling' : '') +
+      '" data-pt-id="' + p.id + '" data-pt-end="' + label + '" data-cable-end="' + end +
+      '" style="' + cableEndStyle(p, end) + ';--strip-peel:' + peel.toFixed(3) + ';" ' +
+      'title="Bare fiber · ' + stripStageLabel(stripStage) + '" aria-label="Bare fiber ' + label + '">' +
+      '<span class="lab-pigtail__jacket' + (jacketStripped ? ' is-strip-removed' : '') +
+      (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') + '" aria-hidden="true"></span>' +
+      '<span class="lab-pigtail__buffer' +
+      (fullyStripped ? ' is-strip-removed' : (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed')) +
+      (bareComplete ? ' is-strip-removed' : '') +
+      (peel > 0.02 && peelLayer === 'buffer' ? ' is-strip-peeling' : '') +
+      '" aria-hidden="true"></span>' +
+      '<span class="lab-pigtail__cleave' +
+      (bareComplete ? ' is-strip-bare' : '') +
+      (jacketStripped && !bareComplete ? ' is-strip-buffered' : '') +
+      (cleaved ? ' is-cleaved' : '') + '" aria-hidden="true"></span>' +
+      '<span class="lab-vfl-exit-flare lab-vfl-exit-flare--tail" aria-hidden="true">' +
+      '<i class="lab-vfl-exit-flare__aura"></i><i class="lab-vfl-exit-flare__hot"></i></span>' +
+      '</button>'
+    );
+  }
+
   function tailStyle(p) {
     var rot;
     if (p.isSnappedToCleaver) {
@@ -6252,6 +7252,15 @@
 
     pigtails.forEach(function (p) {
       var selected = selection.id === p.id ? ' is-selected' : '';
+      if (isCable(p)) {
+        syncCablePrepState(p);
+        html +=
+          '<div class="lab-pigtail lab-cable' + selected + '" data-pt-node="' + p.id + '" data-cable-node="' + p.id + '">' +
+          buildCableTailButtonHtml(p, 'start') +
+          buildCableTailButtonHtml(p, 'end') +
+          '</div>';
+        return;
+      }
       ensureFiberStrip(p);
       var fs = p.fiberStrip;
       var j = fs.jacketTo || 0;
@@ -6332,13 +7341,35 @@
 
   function updateFiberPath(p) {
     if (!layer) return;
-    if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+    if (!isCable(p) && (isFullyStrippedPigtail(p) || p.stripFrontierLock)) {
       restorePermanentStripFrontier(p);
     }
     syncPigtailFiberLength(p);
     replacePigtailFiberSvg(p);
     var aBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="A"]');
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
+    if (isCable(p)) {
+      syncCablePrepState(p);
+      if (aBtn) {
+        var startFs = ensureCableEndStrip(p, 'start');
+        var startStage = getCableEndStripStage(p, 'start');
+        aBtn.setAttribute('style', cableEndStyle(p, 'start') + ';--strip-peel:' + (startFs.peel || 0).toFixed(3) + ';');
+        aBtn.classList.toggle('is-strip-stage1', startStage >= 1);
+        aBtn.classList.toggle('is-strip-stage2', startStage >= 2);
+        aBtn.classList.toggle('is-cleaver-docked', !!p.startIsSnappedToCleaver);
+        aBtn.classList.toggle('is-splicer-docked', !!p.startIsSnappedToSplicer);
+      }
+      if (bBtn) {
+        var endFs = ensureCableEndStrip(p, 'end');
+        var endStage = getCableEndStripStage(p, 'end');
+        bBtn.setAttribute('style', cableEndStyle(p, 'end') + ';--strip-peel:' + (endFs.peel || 0).toFixed(3) + ';');
+        bBtn.classList.toggle('is-strip-stage1', endStage >= 1);
+        bBtn.classList.toggle('is-strip-stage2', endStage >= 2);
+        bBtn.classList.toggle('is-cleaver-docked', !!p.isSnappedToCleaver);
+        bBtn.classList.toggle('is-splicer-docked', !!p.isSnappedToSplicer);
+      }
+      return;
+    }
     if (aBtn) aBtn.setAttribute('style', connectorStyle(p));
     if (bBtn) {
       var stripStage = p.stripStage || 0;
@@ -6587,6 +7618,78 @@
         var id = btn.getAttribute('data-pt-id');
         var p = findPigtail(id);
         if (!p) return;
+        if (isCable(p)) {
+          e.preventDefault();
+          e.stopPropagation();
+          var cableEnd = btn.getAttribute('data-cable-end') || 'start';
+          p.activeCableEnd = cableEnd;
+          selectCable(id);
+          var snakeCable = getRouteMode(p) === 'snake';
+          var movedCable = false;
+          if (cableEndIsSnappedToCleaver(p, cableEnd)) {
+            clearCleaverSnap(p, { skipGuide: true, end: cableEnd });
+          } else if (cableEndIsSnappedToSplicer(p, cableEnd)) {
+            forceUnsnapPigtailFromSplicer(p, cableEnd);
+          }
+          if (snakeCable) beginOrthoSnake(p, 'A');
+          else p.snake = { dragEnd: 'A' };
+          btn.classList.add('is-dragging');
+          document.body.classList.add('lab-pigtail-dragging');
+          setPigtailDragPassthrough(p, true);
+          function onCableMove(ev) {
+            movedCable = true;
+            var w = clientToWorld(ev.clientX, ev.clientY);
+            applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY, cableEnd);
+            if (snakeCable) updateOrthoSnake(p, w.x, w.y);
+            else moveTipGravity(p, 'A', w.x, w.y);
+            if (cleaverEligibleForDropzone(p, cableEnd) &&
+                global.FtthLab && typeof FtthLab.findCleaverGrooveNear === 'function') {
+              var tip = cableEndTipWorld(p, cableEnd);
+              var grooveHit = FtthLab.findCleaverGrooveNear(tip.x, tip.y, CLEAVER_SNAP_PX);
+              if (grooveHit && grooveHit.dist <= CLEAVER_SNAP_PX) {
+                setCleaverDropzoneHighlight(grooveHit.cleaverId);
+              } else {
+                clearCleaverDropzoneHighlight();
+              }
+            } else {
+              clearCleaverDropzoneHighlight();
+            }
+            updateFiberPath(p);
+          }
+          function onCableUp(ev) {
+            window.removeEventListener('pointermove', onCableMove);
+            window.removeEventListener('pointerup', onCableUp);
+            window.removeEventListener('pointercancel', onCableUp);
+            btn.classList.remove('is-dragging');
+            document.body.classList.remove('lab-pigtail-dragging');
+            setPigtailDragPassthrough(p, false);
+            if (snakeCable) endOrthoSnake(p);
+            else p.snake = null;
+            var seated = false;
+            var activeCleaver = document.querySelector('.lab-cleaver.cleaver-dropzone-active');
+            if (activeCleaver) {
+              var dropCleaverId = activeCleaver.getAttribute('data-cleaver-node');
+              seated = finishCleaverDropSeat(p, dropCleaverId, cableEnd);
+            }
+            clearCleaverDropzoneHighlight();
+            if (!seated) seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY, cableEnd);
+            if (!seated) {
+              if (cableEnd === 'start') p.startSplicerPreviewSlot = null;
+              else p.splicerPreviewSlot = null;
+            }
+            if (cableEnd === 'start') p.startSplicerDragDetached = false;
+            else p.splicerDragDetached = false;
+            clearSplicerMagnetHighlight();
+            clearSplicerDropzoneHighlight();
+            if (!seated) clearCleaverGuideLine();
+            rebuildLayer();
+            if (movedCable || seated) pushHistory();
+          }
+          window.addEventListener('pointermove', onCableMove);
+          window.addEventListener('pointerup', onCableUp);
+          window.addEventListener('pointercancel', onCableUp);
+          return;
+        }
         var blockedMsg = ovenDragBlockedMessage(p);
         if (blockedMsg) {
           setStatus(blockedMsg);
@@ -6812,7 +7915,11 @@
           setStatus(blockedMsg);
           return;
         }
-        selectPigtail(id);
+        if (isCable(p)) selectCable(id);
+        else selectPigtail(id);
+
+        var cableEnd = isCable(p) ? (btn.getAttribute('data-cable-end') || 'end') : 'end';
+        if (isCable(p)) p.activeCableEnd = cableEnd;
 
         var fusedCtx = beginFusedEndDrag(p);
         var fusedMachineId = fusedCtx.machineId;
@@ -6823,7 +7930,13 @@
         var snakeMode = getRouteMode(p) === 'snake';
 
         if (!fusedMachineId) {
-          if (p.isSnappedToCleaver) {
+          if (isCable(p)) {
+            if (cableEndIsSnappedToCleaver(p, cableEnd)) {
+              clearCleaverSnap(p, { skipGuide: true, end: cableEnd });
+            } else if (cableEndIsSnappedToSplicer(p, cableEnd)) {
+              forceUnsnapPigtailFromSplicer(p, cableEnd);
+            }
+          } else if (p.isSnappedToCleaver) {
             clearCleaverSnap(p, { skipGuide: true });
           } else if (p.isSnappedToSplicer) {
             forceUnsnapPigtailFromSplicer(p);
@@ -6870,7 +7983,7 @@
           }
 
           if (!fusedMachineId) {
-            applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY);
+            applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY, cableEnd);
           }
 
           if (snakeMode) {
@@ -6879,16 +7992,17 @@
             moveTipGravity(p, 'B', world.x, world.y);
           }
 
-          if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
+          if (!isCable(p) && (isFullyStrippedPigtail(p) || p.stripFrontierLock)) {
             restorePermanentStripFrontier(p);
             if (p.isSnappedToCleaver && (p.isCleaved || p.cleaved)) {
               enforceCleavedJacketWall(p);
             }
           }
 
-          if (!fusedMachineId && cleaverEligibleForDropzone(p) &&
+          if (!fusedMachineId && cleaverEligibleForDropzone(p, cableEnd) &&
               global.FtthLab && typeof FtthLab.findCleaverGrooveNear === 'function') {
-            var grooveHit = FtthLab.findCleaverGrooveNear(p.bx, p.by, CLEAVER_SNAP_PX);
+            var cableTip = isCable(p) ? cableEndTipWorld(p, cableEnd) : { x: p.bx, y: p.by };
+            var grooveHit = FtthLab.findCleaverGrooveNear(cableTip.x, cableTip.y, CLEAVER_SNAP_PX);
             if (grooveHit && grooveHit.dist <= CLEAVER_SNAP_PX) {
               setCleaverDropzoneHighlight(grooveHit.cleaverId);
             } else {
@@ -6933,15 +8047,19 @@
             var activeCleaver = document.querySelector('.lab-cleaver.cleaver-dropzone-active');
             if (activeCleaver) {
               var dropCleaverId = activeCleaver.getAttribute('data-cleaver-node');
-              seated = finishCleaverDropSeat(p, dropCleaverId);
+              seated = finishCleaverDropSeat(p, dropCleaverId, cableEnd);
             }
             clearCleaverDropzoneHighlight();
 
             if (!seated) {
-              seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY);
+              seated = finishSplicerMagnetOnDrop(p, ev.clientX, ev.clientY, cableEnd);
             }
-            if (!seated) p.splicerPreviewSlot = null;
-            p.splicerDragDetached = false;
+            if (!seated) {
+              if (cableEnd === 'start') p.startSplicerPreviewSlot = null;
+              else p.splicerPreviewSlot = null;
+            }
+            if (cableEnd === 'start') p.startSplicerDragDetached = false;
+            else p.splicerDragDetached = false;
             clearSplicerMagnetHighlight();
             clearSplicerDropzoneHighlight();
 
@@ -6949,7 +8067,7 @@
               clearCleaverGuideLine();
             }
 
-            if (!p.tail.attached && !p.isSnappedToCleaver && !p.isSnappedToSplicer) {
+            if (!isCable(p) && !p.tail.attached && !p.isSnappedToCleaver && !p.isSnappedToSplicer) {
               var hit = hitTestTailTarget(ev.clientX, ev.clientY);
               if (hit) {
                 attachTail(p, hit);
@@ -7182,7 +8300,7 @@
 
   function getFusedAssemblyOpticalPairs() {
     var map = {};
-    function addPair(leftId, rightId, assemblyId, machineId, permanent, spliceLossDb) {
+    function addPair(leftId, rightId, assemblyId, machineId, permanent, spliceLossDb, leftKey, rightKey) {
       if (!leftId || !rightId || leftId === rightId) return;
       var key = assemblyId || makeFusionAssemblyId(leftId, rightId);
       if (!key) return;
@@ -7193,6 +8311,8 @@
         machineId: machineId || (existing && existing.machineId) || null,
         leftId: leftId,
         rightId: rightId,
+        leftKey: leftKey || (existing && existing.leftKey) || null,
+        rightKey: rightKey || (existing && existing.rightKey) || null,
         permanent: !!(permanent || (existing && existing.permanent)),
         spliceLossDb: typeof spliceLossDb === 'number' && isFinite(spliceLossDb)
           ? spliceLossDb
@@ -7213,7 +8333,9 @@
         assemblyId,
         asm && asm.machineId,
         asm && isFusionAssemblyPermanent(asm),
-        asm && asm.spliceLossDb
+        asm && asm.spliceLossDb,
+        asm && asm.leftKey,
+        asm && asm.rightKey
       );
     });
     pigtails.forEach(function (p) {
@@ -7233,12 +8355,28 @@
 
   function getLaserGraphNodes() {
     return pigtails.map(function (p) {
+      if (isCable(p)) {
+        syncCablePrepState(p);
+        return {
+          id: p.id,
+          type: 'cable',
+          startKey: opticalEndpointKey(p, 'start'),
+          endKey: opticalEndpointKey(p, 'end'),
+          cableLength: pigtailLengthDisplayValue(p),
+          lengthUnit: pigtailLengthUnit(p),
+          lengthMeters: pigtailFiberLengthM(p),
+          fiberLengthM: pigtailFiberLengthM(p),
+          freeStart: true,
+          freeEnd: true,
+        };
+      }
       var partner = getFusedPartner(p);
       var fused = isPigtailFused(p);
       var asmId = getPigtailFusionAssemblyId(p);
       var shrunk = !!(fused && partner && asmId && isFusedAssemblySleeveShrunk(asmId));
       return {
         id: p.id,
+        type: 'pigtail',
         sleeveShrunk: shrunk,
         isSleeveShrunk: shrunk,
         fusionPermanent: isPigtailFusionPermanent(p),
@@ -7347,8 +8485,9 @@
         if (mid) {
           on = !!fusedGlow[mid];
         } else if (id) {
-          var pg = findPigtail(id);
-          on = !!map[id] && !isPigtailFused(pg);
+          var baseId = String(id).split(':')[0];
+          var pg = findPigtail(baseId);
+          on = !!(map[id] || map[baseId]) && (!pg || !isPigtailFused(pg));
         }
         setGlow(el, on);
       });
@@ -7370,13 +8509,99 @@
     if (glow) applyLaserGlow(glow.pigtails, glow.mode, { pigtailExits: glow.pigtailExits });
   }
 
+  function wireInspectorCommonHandlers(detail, p) {
+    if (!detail || !p) return;
+    detail.querySelectorAll('[data-pt-otdr-len-unit]').forEach(function (sel) {
+      sel.addEventListener('change', function () {
+        setPigtailLengthUnit(p.id, sel.value);
+        var lenInput = detail.querySelector('[data-pt-otdr-len="' + p.id + '"]');
+        if (lenInput) setPigtailCableLength(p.id, lenInput.value, sel.value);
+      });
+    });
+    var ptLenInput = detail.querySelector('[data-pt-otdr-len]');
+    if (ptLenInput) {
+      ptLenInput.addEventListener('input', function () {
+        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
+        applyPigtailCableLengthModel(p, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
+      });
+      ptLenInput.addEventListener('change', function () {
+        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
+        setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
+      });
+      ptLenInput.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
+          setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
+        }
+      });
+    }
+    detail.querySelectorAll('[data-pt-route-mode]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var parts = btn.getAttribute('data-pt-route-mode').split(':');
+        setRouteMode(parts[0], parts[1]);
+      });
+    });
+    var rm = detail.querySelector('[data-remove-pt]');
+    if (rm) {
+      rm.addEventListener('click', function () {
+        removePigtail(p.id);
+        if (global.FtthLab && typeof FtthLab.resetInspectorIdle === 'function') {
+          FtthLab.resetInspectorIdle();
+        }
+      });
+    }
+  }
+
   function updateInspector() {
     var card = document.getElementById('lab-inspector-card');
     var detail = document.getElementById('lab-inspector-detail');
     if (!card) return;
-    if (selection.kind !== 'pigtail' || !selection.id) return;
+    if ((selection.kind !== 'pigtail' && selection.kind !== 'cable') || !selection.id) return;
     var p = findPigtail(selection.id);
     if (!p) return;
+
+    if (isCable(p)) {
+      syncCablePrepState(p);
+      card.innerHTML =
+        '<h2>Cable</h2>' +
+        '<p>Bare fiber cable on both ends for splicing.</p>';
+      if (!detail) return;
+      detail.hidden = false;
+      detail.innerHTML =
+        '<div class="lab-pigtail-config">' +
+        '<p class="lab-inspector__label">Cable route mode</p>' +
+        '<div class="lab-route-mode-toggle" role="group" aria-label="Cable route mode">' +
+        '<button type="button" class="lab-route-mode-btn' +
+        (getRouteMode(p) === 'snake' ? ' is-active' : '') +
+        '" data-pt-route-mode="' + p.id + ':snake">Snake Route Mode</button>' +
+        '<button type="button" class="lab-route-mode-btn' +
+        (getRouteMode(p) === 'gravity' ? ' is-active' : '') +
+        '" data-pt-route-mode="' + p.id + ':gravity">Gravity Physics Mode</button>' +
+        '</div>' +
+        '<div class="property-group lab-pigtail-otdr-len-group">' +
+        '<label class="lab-inspector__label" for="pigtailCordLengthInput-' + p.id + '">Cable Length</label>' +
+        '<div class="lab-cable-len-row">' +
+        '<input type="number" id="pigtailCordLengthInput-' + p.id +
+        '" class="lab-pcord-otdr-len-input" data-pt-otdr-len="' + p.id +
+        '" value="' + pigtailLengthDisplayValue(p).toFixed(1) + '" min="0" step="0.1">' +
+        '<select id="pigtailCordUnitSelect-' + p.id +
+        '" class="lab-cable-len-unit" data-pt-otdr-len-unit="' + p.id +
+        '" aria-label="Cable length unit">' +
+        '<option value="m"' + (pigtailLengthUnit(p) === 'm' ? ' selected' : '') + '>m</option>' +
+        '<option value="km"' + (pigtailLengthUnit(p) === 'km' ? ' selected' : '') + '>km</option>' +
+        '</select></div></div>' +
+        '<div class="lab-spl-sheet">' +
+        '<div><span>Ends</span><strong>Bare · Bare</strong></div>' +
+        '<div><span>Start strip</span><strong>' + stripStageLabel(getCableEndStripStage(p, 'start')) + '</strong></div>' +
+        '<div><span>End strip</span><strong>' + stripStageLabel(getCableEndStripStage(p, 'end')) + '</strong></div>' +
+        '<div><span>Length</span><strong>' + pigtailFiberLengthM(p).toFixed(2) + ' m</strong></div>' +
+        '</div>' +
+        '<button type="button" class="lab-eject-btn" data-remove-pt="' + p.id + '">Remove Cable</button>' +
+        '</div>';
+      wireInspectorCommonHandlers(detail, p);
+      return;
+    }
 
     var isApc = normalizePolish(p.polish) === 'APC';
     var loss = pigtailLossDb(p);
@@ -7453,55 +8678,13 @@
       '">Remove Pigtail</button>' +
       '</div>';
 
-    detail.querySelectorAll('[data-pt-otdr-len-unit]').forEach(function (sel) {
-      sel.addEventListener('change', function () {
-        setPigtailLengthUnit(p.id, sel.value);
-        var lenInput = detail.querySelector('[data-pt-otdr-len="' + p.id + '"]');
-        if (lenInput) {
-          setPigtailCableLength(p.id, lenInput.value, sel.value);
-        }
-      });
-    });
-    var ptLenInput = detail.querySelector('[data-pt-otdr-len]');
-    if (ptLenInput) {
-      ptLenInput.addEventListener('input', function () {
-        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
-        var unit = unitSel ? unitSel.value : pigtailLengthUnit(p);
-        applyPigtailCableLengthModel(p, ptLenInput.value, unit);
-      });
-      ptLenInput.addEventListener('change', function () {
-        var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
-        setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
-      });
-      ptLenInput.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Enter') {
-          ev.preventDefault();
-          var unitSel = detail.querySelector('[data-pt-otdr-len-unit="' + p.id + '"]');
-          setPigtailCableLength(p.id, ptLenInput.value, unitSel ? unitSel.value : pigtailLengthUnit(p));
-        }
-      });
-    }
-    detail.querySelectorAll('[data-pt-route-mode]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        var parts = btn.getAttribute('data-pt-route-mode').split(':');
-        setRouteMode(parts[0], parts[1]);
-      });
-    });
+    wireInspectorCommonHandlers(detail, p);
     detail.querySelectorAll('[data-pt-polish]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pt-polish').split(':');
         setConnectorPolish(parts[0], parts[1]);
       });
     });
-    var rm = detail.querySelector('[data-remove-pt]');
-    if (rm) {
-      rm.addEventListener('click', function () {
-        removePigtail(p.id);
-        if (global.FtthLab && typeof FtthLab.resetInspectorIdle === 'function') {
-          FtthLab.resetInspectorIdle();
-        }
-      });
-    }
   }
 
   function onLayoutChange(payload) {
@@ -7624,7 +8807,7 @@
   }
 
   function deleteSelected() {
-    if (selection.kind === 'pigtail' && selection.id) {
+    if ((selection.kind === 'pigtail' || selection.kind === 'cable') && selection.id) {
       removePigtail(selection.id);
       return true;
     }
@@ -7643,7 +8826,7 @@
   function onToolboxClaim(payload) {
     var id = payload && payload.toolId;
     if (id === 'sc-pigtail') return;
-    if (selectedTool) {
+    if (selectedTool === 'pigtail') {
       selectedTool = null;
       renderToolbox();
     }
@@ -7808,6 +8991,7 @@
       FtthLab.findSplicerGrooveNear = function (clientX, clientY) {
         return hitTestSplicerGroove(clientX, clientY);
       };
+      FtthLab.placeCable = placeCable;
 
       document.addEventListener('fusion-splicer:clampLid', function () {
         renderSplicerFiberOverlays();
