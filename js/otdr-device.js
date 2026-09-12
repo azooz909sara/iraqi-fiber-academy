@@ -195,8 +195,39 @@
     return resolveActiveOtdrPortForDevice(deviceId);
   }
 
+  function getRequiredOtdrPortName(deviceId) {
+    return isLiveLaserSelected(deviceId) ? 'APC LIVE' : 'APC';
+  }
+
+  function getRequiredOtdrPortSuffix(deviceId) {
+    return isLiveLaserSelected(deviceId) ? '-port-apc-live' : '-port-apc';
+  }
+
+  function isPigtailConnectedToRequiredPort(deviceId) {
+    if (!deviceId) return false;
+    return isOtdrPortConnected(deviceId, getRequiredOtdrPortSuffix(deviceId));
+  }
+
+  function validateConnection(deviceId) {
+    if (!deviceId) return false;
+    var laser = getActiveLaserValue(deviceId);
+    var requiredPort = getRequiredOtdrPortName(deviceId);
+
+    if ((laser === '1310' || laser === '1550') && requiredPort !== 'APC') {
+      return false;
+    }
+    if (isLiveLaserSelected(deviceId) && requiredPort !== 'APC LIVE') {
+      return false;
+    }
+
+    if (requiredPort === 'APC LIVE') {
+      return isApcLivePortConnected(deviceId);
+    }
+    return isApcPortConnected(deviceId);
+  }
+
   function isSafeLiveTest(deviceId) {
-    return isLiveLaserSelected(deviceId) && getActiveOtdrPortForDevice(deviceId) === 'APC LIVE';
+    return isLiveLaserSelected(deviceId) && isApcLivePortConnected(deviceId) && validateConnection(deviceId);
   }
 
   function setSetupRowValue(deviceNode, rowKey, dataValue) {
@@ -1839,14 +1870,11 @@
       var node = layer.querySelector('[data-otdr-node="' + deviceId + '"]');
       if (node) refreshPortOccupancy(node);
     }
-    return isApcPortConnected(deviceId) || isApcLivePortConnected(deviceId);
+    return validateConnection(deviceId);
   }
 
   function getOtdrPortProbeKey(deviceId) {
-    if (isApcLivePortConnected(deviceId)) {
-      return 'ols:' + deviceId + '-port-apc-live';
-    }
-    return 'ols:' + deviceId + '-port-apc';
+    return 'ols:' + deviceId + getRequiredOtdrPortSuffix(deviceId);
   }
 
   function detectLiveTrafficOnFiber(deviceId) {
@@ -4481,7 +4509,9 @@
   function startRealTimeMode(deviceId, deviceNode) {
     if (!deviceId || !deviceNode) return;
     if (!devicePoweredOn(deviceId)) return;
-    if (!isPigtailConnectedToPort(deviceId)) {
+    readSetupSelectionsFromDevice(deviceNode);
+    syncActiveLaserToDevice(deviceId);
+    if (!validateConnection(deviceId)) {
       applyFiberDisconnectedRealtimeState(deviceId, deviceNode);
       return;
     }
@@ -4580,6 +4610,8 @@
   function handlePhysicalStartStop(deviceId, deviceNode) {
     if (!deviceId || !deviceNode) return;
     if (!devicePoweredOn(deviceId)) return;
+    readSetupSelectionsFromDevice(deviceNode);
+    syncActiveLaserToDevice(deviceId);
 
     if (isRealTimeActive && realTimeDeviceId === deviceId) {
       stopRealTimeMode(deviceId);
@@ -4603,6 +4635,10 @@
     hideRealtimeHud(deviceNode);
     switchRunningTab(deviceNode, 'trace');
     restoreTraceEventTableVisibility(deviceNode, deviceId);
+    if (!validateConnection(deviceId)) {
+      abortOtdrTestFiberDisconnected(deviceId, deviceNode);
+      return;
+    }
     promptLiveTrafficContinue(deviceId, deviceNode, function () {
       runOtdrTest(deviceId, deviceNode);
     });
@@ -4864,7 +4900,9 @@
     if (!deviceId && deviceNode) deviceId = deviceNode.getAttribute('data-otdr-node');
     if (!deviceId || !deviceNode) return;
     if (!devicePoweredOn(deviceId)) return;
-    if (!isPigtailConnectedToPort(deviceId)) {
+    readSetupSelectionsFromDevice(deviceNode);
+    syncActiveLaserToDevice(deviceId);
+    if (!validateConnection(deviceId)) {
       if (findDevice(deviceId) && findDevice(deviceId).screen !== 'smart-test-running') {
         setDeviceScreen(deviceId, 'smart-test-running');
         deviceNode = layer ? layer.querySelector('[data-otdr-node="' + deviceId + '"]') : deviceNode;
