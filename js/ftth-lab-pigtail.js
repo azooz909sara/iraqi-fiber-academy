@@ -386,26 +386,79 @@
     p.sleeveAlong = p.endPrepState.sleeveAlong;
   }
 
+  /** Pigtail: bare tip only (connector blocks A). Cable: both open bare ends. */
+  function sleeveMountableEnds(p) {
+    if (!p) return [];
+    if (!isCable(p)) return ['end'];
+    return ['start', 'end'];
+  }
+
+  function canMountSleeveOnEnd(p, end) {
+    if (!p) return false;
+    end = cableEndFromToken(end || 'end');
+    if (!isCable(p)) return end === 'end';
+    return end === 'start' || end === 'end';
+  }
+
+  function sleeveSlidePathPoints(p, end) {
+    if (!isCable(p)) return fiberSleevePathPoints(p);
+    return cableStripPathPoints(p, cableEndFromToken(end || 'end'));
+  }
+
   function pigtailEndHasSleeve(p, end) {
     if (!p) return false;
-    if (!isCable(p)) return !!p.hasSleeve;
-    end = cableEndFromToken(end);
+    end = cableEndFromToken(end || 'end');
+    if (!isCable(p)) return end === 'end' && !!p.hasSleeve;
     if (end === 'start') return !!(p.startHasSleeve || (p.startPrepState && p.startPrepState.hasSleeve));
     return !!(p.hasSleeve || (p.endPrepState && p.endPrepState.hasSleeve));
   }
 
   function resolveSleeveEnd(p, end) {
     if (!isCable(p)) return 'end';
-    if (end) return cableEndFromToken(end);
+    if (end != null && end !== '') return cableEndFromToken(end);
     if (p.hasSleeve || (p.endPrepState && p.endPrepState.hasSleeve)) return 'end';
     if (p.startHasSleeve || (p.startPrepState && p.startPrepState.hasSleeve)) return 'start';
     return 'end';
   }
 
+  function sleeveMountProximityForEnd(p, end, wx, wy, thr) {
+    var tip = cableEndTipWorld(p, end);
+    var tipD = dist2(wx, wy, tip.x, tip.y);
+    if (tipD <= thr) return tipD;
+    var pts = sleeveSlidePathPoints(p, end);
+    if (!pts || pts.length < 2) return tipD;
+    var proj = projectOntoFiberPath(pts, wx, wy);
+    var size = getSleeveSizePx();
+    var tipZone = Math.max(thr + 4, size.w * 0.85 + 16);
+    if (proj.dist >= -8 && proj.dist <= tipZone && proj.perpDist <= thr) {
+      return proj.perpDist;
+    }
+    return thr + 1;
+  }
+
+  function setCableEndSleeveState(p, end, mounted, along) {
+    end = cableEndFromToken(end);
+    if (end === 'start') {
+      p.startHasSleeve = !!mounted;
+      p.startSleeveAlong = mounted ? along : null;
+      if (p.startPrepState) {
+        p.startPrepState.hasSleeve = !!mounted;
+        p.startPrepState.sleeveAlong = mounted ? along : null;
+      }
+      return;
+    }
+    p.hasSleeve = !!mounted;
+    p.sleeveAlong = mounted ? along : null;
+    if (p.endPrepState) {
+      p.endPrepState.hasSleeve = !!mounted;
+      p.endPrepState.sleeveAlong = mounted ? along : null;
+    }
+  }
+
   function getSleeveAlongValue(p, end) {
     var size = getSleeveSizePx();
     var sleeveEnd = resolveSleeveEnd(p, end);
-    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
+    var pts = sleeveSlidePathPoints(p, sleeveEnd);
     var total = polylineLength(pts);
     var fallback = defaultSleeveAlong(total, size.w);
     if (!isCable(p)) {
@@ -1693,7 +1746,7 @@
         h: size.h,
       };
     }
-    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
+    var pts = sleeveSlidePathPoints(p, sleeveEnd);
     var total = polylineLength(pts);
     var along = getSleeveAlongValue(p, sleeveEnd);
     var pt = pointAtPathDistance(pts, along * total);
@@ -1760,7 +1813,7 @@
   function dragSleeveAlongPath(p, wx, wy, end) {
     if (p && p.isSleeveShrunk) return { eject: false, locked: true };
     var sleeveEnd = resolveSleeveEnd(p, end);
-    var pts = isCable(p) ? cableStripPathPoints(p, sleeveEnd) : fiberSleevePathPoints(p);
+    var pts = sleeveSlidePathPoints(p, sleeveEnd);
     var total = polylineLength(pts);
     var proj = projectOntoFiberPath(pts, wx, wy);
     if (proj.dist < -SLEEVE_EJECT_PULL_PX) {
@@ -6280,14 +6333,16 @@
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ends = sleeveMountableEnds(p);
       var ei;
       for (ei = 0; ei < ends.length; ei++) {
         var end = ends[ei];
         if (!p) continue;
+        if (!canMountSleeveOnEnd(p, end)) continue;
         if (pigtailEndHasSleeve(p, end)) continue;
-        var tip = cableEndTipWorld(p, end);
-        var d = dist2(world.x, world.y, tip.x, tip.y);
+        var d = isCable(p)
+          ? sleeveMountProximityForEnd(p, end, world.x, world.y, thr)
+          : dist2(world.x, world.y, cableEndTipWorld(p, end).x, cableEndTipWorld(p, end).y);
         if (d <= thr && d < bestD) {
           bestD = d;
           best = { p: p, end: end };
@@ -6302,41 +6357,35 @@
     opts = opts || {};
     var target = parseFiberTargetId(id) || { p: findPigtail(id), end: 'end' };
     var p = target.p;
-    var end = target.end || 'end';
+    var end = opts.end ? cableEndFromToken(opts.end) : (target.end || 'end');
     if (!p) return false;
+    if (!canMountSleeveOnEnd(p, end)) {
+      setStatus('Sleeve slides on from the bare fiber tip only');
+      selectPigtail(p.id);
+      return false;
+    }
     if (pigtailEndHasSleeve(p, end) && !opts.force) {
       setStatus(isCable(p) ? 'Sleeve already on this cable end' : 'Sleeve already on this pigtail');
       if (isCable(p)) selectCable(p.id);
       else selectPigtail(p.id);
       return false;
     }
-    var pts = cableStripPathPoints(p, end);
+    var pts = sleeveSlidePathPoints(p, end);
     var total = polylineLength(pts);
     var size = getSleeveSizePx();
     var along = typeof opts.sleeveAlong === 'number'
       ? Math.max(0, Math.min(1, opts.sleeveAlong))
       : defaultSleeveAlong(total, size.w);
-    if (end === 'start') {
-      p.startHasSleeve = true;
-      p.startSleeveAlong = along;
-      if (p.startPrepState) {
-        p.startPrepState.hasSleeve = true;
-        p.startPrepState.sleeveAlong = along;
-      }
+    if (isCable(p)) {
+      setCableEndSleeveState(p, end, true, along);
+      syncCablePrepState(p);
     } else {
       p.hasSleeve = true;
       p.sleeveAlong = along;
-      if (p.endPrepState) {
-        p.endPrepState.hasSleeve = true;
-        p.endPrepState.sleeveAlong = along;
-      }
-      if (!isCable(p)) {
-        ensurePigtailPrepState(p);
-        p.prepState.hasSleeve = true;
-        p.prepState.sleeveAlong = along;
-      }
+      ensurePigtailPrepState(p);
+      p.prepState.hasSleeve = true;
+      p.prepState.sleeveAlong = along;
     }
-    if (isCable(p)) syncCablePrepState(p);
     if (opts.consumeFreeSleeveId && global.FtthLab &&
         typeof FtthLab.consumeFreeSleeve === 'function') {
       FtthLab.consumeFreeSleeve(opts.consumeFreeSleeveId);
@@ -6364,26 +6413,17 @@
     var g = sleeveGeometry(p, end);
     var spawnX = typeof wx === 'number' ? wx : g.x;
     var spawnY = typeof wy === 'number' ? wy : g.y;
-    if (end === 'start') {
-      p.startHasSleeve = false;
-      p.startSleeveAlong = null;
-      if (p.startPrepState) {
-        p.startPrepState.hasSleeve = false;
-        p.startPrepState.sleeveAlong = null;
-      }
+    if (isCable(p)) {
+      setCableEndSleeveState(p, end, false, null);
+      syncCablePrepState(p);
     } else {
       p.hasSleeve = false;
       p.sleeveAlong = null;
-      if (p.endPrepState) {
-        p.endPrepState.hasSleeve = false;
-        p.endPrepState.sleeveAlong = null;
-      }
-      if (!isCable(p) && p.prepState) {
+      if (p.prepState) {
         p.prepState.hasSleeve = false;
         p.prepState.sleeveAlong = null;
       }
     }
-    if (isCable(p)) syncCablePrepState(p);
     rebuildLayer();
     pushHistory();
     if (global.FtthLab && typeof FtthLab.placeFreeSleeve === 'function') {
