@@ -273,14 +273,21 @@
    * Arm stays clamped whether or not a fiber is hit.
    */
   function tryPerformCleave(c) {
-    if (!c || !global.FtthLab || typeof FtthLab.commitPigtailCleaveAtBlade !== 'function') {
-      return false;
-    }
+    if (!c || !global.FtthLab) return false;
     var blade = bladeDropPoint(c);
-    var ok = FtthLab.commitPigtailCleaveAtBlade(blade.x, blade.y, {
-      hitRadius: BLADE_HIT_RADIUS_PX,
-      cleaverId: c.id,
-    });
+    var ok = false;
+    if (typeof FtthLab.commitPigtailCleaveAtBlade === 'function') {
+      ok = FtthLab.commitPigtailCleaveAtBlade(blade.x, blade.y, {
+        hitRadius: BLADE_HIT_RADIUS_PX,
+        cleaverId: c.id,
+      });
+    }
+    if (!ok && c.dockedPigtailId && typeof FtthLab.commitPigtailCleave === 'function') {
+      ok = !!FtthLab.commitPigtailCleave(c.dockedPigtailId, {
+        cleaverId: c.id,
+        fromCleaverDock: true,
+      });
+    }
     if (ok) {
       clearCleaverDockState(c);
       setStatus('Fiber Cleaver · cleaved 90°');
