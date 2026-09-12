@@ -1719,6 +1719,162 @@
     return Math.max(CLEAVE_MIN_CUT_PX, getBareGlassDrawLengthPx(p));
   }
 
+  function restoreCableEndCleavedStripLock(p, end) {
+    end = resolveCableEnd(p, end);
+    if (!isCable(p)) {
+      restoreCleavedStripLock(p);
+      return;
+    }
+    if (!isCableEndCleaved(p, end)) return;
+    var fs = ensureCableEndStrip(p, end);
+    var lock = end === 'start' ? p.startCleavedStripLock : p.cleavedStripLock;
+    if (!lock) {
+      var boundary = getJacketBoundaryWorld(p, end);
+      var rulerStopX = end === 'start' ? p.startCleaverSlotAnchorX : p.cleaverSlotAnchorX;
+      lock = {
+        jacketTo: fs.jacketTo || 0,
+        bareTo: fs.bareTo || 0,
+        jacketBoundaryX: boundary ? boundary.x : null,
+        rulerStopX: rulerStopX,
+      };
+      if (end === 'start') p.startCleavedStripLock = lock;
+      else p.cleavedStripLock = lock;
+    }
+    var maxLen = maxCableEndStripLenPx(p, end);
+    var j = lock.jacketTo;
+    if (!isFinite(j) || j < STRIP_TIP_EPS) j = STRIP_TIP_EPS;
+    if (isFinite(maxLen) && maxLen >= 0 && j > maxLen) j = maxLen;
+    fs.jacketTo = j;
+    fs.bareTo = j;
+    fs.peel = 0;
+    fs.peelLayer = null;
+    lock.jacketTo = j;
+    lock.bareTo = j;
+    setCableEndStripStage(p, end, 2);
+    syncCablePrepState(p);
+  }
+
+  function lockCableEndStripFrontier(p, end) {
+    if (!p) return;
+    end = resolveCableEnd(p, end);
+    if (!isCable(p)) {
+      lockPermanentStripFrontier(p);
+      return;
+    }
+    if (getCableEndStripStage(p, end) < 2) return;
+    var fs = ensureCableEndStrip(p, end);
+    var lock = {
+      jacketTo: fs.jacketTo || 0,
+      bareTo: fs.bareTo || 0,
+      stripStage: 2,
+    };
+    if (end === 'start') p.startStripFrontierLock = lock;
+    else p.stripFrontierLock = lock;
+  }
+
+  function restoreCableEndStripFrontier(p, end) {
+    if (!p) return false;
+    end = resolveCableEnd(p, end);
+    if (!isCable(p)) return restorePermanentStripFrontier(p);
+    if (isCableEndCleaved(p, end)) {
+      restoreCableEndCleavedStripLock(p, end);
+      lockCableEndStripFrontier(p, end);
+      return true;
+    }
+    var lock = end === 'start' ? p.startStripFrontierLock : p.stripFrontierLock;
+    if (getCableEndStripStage(p, end) >= 2 && !lock) lockCableEndStripFrontier(p, end);
+    lock = end === 'start' ? p.startStripFrontierLock : p.stripFrontierLock;
+    if (!lock) return false;
+    var fs = ensureCableEndStrip(p, end);
+    var maxLen = maxCableEndStripLenPx(p, end);
+    var j = lock.jacketTo;
+    if (!isFinite(j) || j < STRIP_TIP_EPS) j = STRIP_TIP_EPS;
+    if (isFinite(maxLen) && maxLen >= 0 && j > maxLen) j = maxLen;
+    fs.jacketTo = j;
+    fs.bareTo = j;
+    fs.peel = 0;
+    fs.peelLayer = null;
+    setCableEndStripStage(p, end, 2);
+    lock.jacketTo = j;
+    lock.bareTo = j;
+    syncCablePrepState(p);
+    return true;
+  }
+
+  function pinJacketBoundaryToWorldXForEnd(p, end, targetX) {
+    if (!p || targetX == null || !isFinite(targetX)) return;
+    end = resolveCableEnd(p, end);
+    var fs = ensureCableEndStrip(p, end);
+    var maxLen = isCable(p) ? maxCableEndStripLenPx(p, end) : maxStripLenPx(p);
+    if (!isFinite(maxLen) || maxLen <= 0) return;
+    var lo = STRIP_TIP_EPS;
+    var hi = maxLen;
+    var iter;
+    for (iter = 0; iter < 28; iter++) {
+      var mid = (lo + hi) * 0.5;
+      fs.jacketTo = mid;
+      fs.bareTo = mid;
+      var boundary = getJacketBoundaryWorld(p, end);
+      if (!boundary || !isFinite(boundary.x)) break;
+      if (Math.abs(boundary.x - targetX) <= RULER_WALL_EPS) {
+        fs.bareTo = mid;
+        return;
+      }
+      if (boundary.x > targetX) lo = mid;
+      else hi = mid;
+    }
+    fs.bareTo = fs.jacketTo;
+  }
+
+  function enforceRulerWallForEnd(p, rulerStopX, end) {
+    if (!p || rulerStopX == null) return;
+    end = resolveCableEnd(p, end);
+    var i;
+    for (i = 0; i < 12; i++) {
+      var boundary = getJacketBoundaryWorld(p, end);
+      if (!boundary || boundary.x <= rulerStopX + RULER_WALL_EPS) return;
+      translateCableEndGeometry(p, end, rulerStopX - boundary.x, 0);
+    }
+  }
+
+  function enforceCleavedJacketWallForEnd(p, end) {
+    end = resolveCableEnd(p, end);
+    if (!isCable(p)) {
+      enforceCleavedJacketWall(p);
+      return;
+    }
+    if (!isCableEndCleaved(p, end)) return;
+    var lock = end === 'start' ? p.startCleavedStripLock : p.cleavedStripLock;
+    if (!lock) return;
+    if (!cableEndIsSnappedToCleaver(p, end)) return;
+    var fs = ensureCableEndStrip(p, end);
+    var wallX = lock.rulerStopX != null ? lock.rulerStopX : lock.jacketBoundaryX;
+    if (wallX == null) return;
+    if (lock.jacketBoundaryX != null) {
+      pinJacketBoundaryToWorldXForEnd(p, end, lock.jacketBoundaryX);
+    } else {
+      fs.jacketTo = lock.jacketTo;
+      fs.bareTo = lock.bareTo;
+    }
+    enforceRulerWallForEnd(p, wallX, end);
+    lock.jacketTo = fs.jacketTo;
+    lock.bareTo = fs.jacketTo;
+    var boundary = getJacketBoundaryWorld(p, end);
+    if (boundary) lock.jacketBoundaryX = boundary.x;
+    syncCablePrepState(p);
+  }
+
+  function cleaverCableEndsForProbe(p, cleaverId, wx, wy) {
+    if (!isCable(p)) return ['end'];
+    if (cleaverId) {
+      var docked = [];
+      if (p.startIsSnappedToCleaver && p.startSnappedCleaverId === cleaverId) docked.push('start');
+      if (p.isSnappedToCleaver && p.snappedCleaverId === cleaverId) docked.push('end');
+      if (docked.length) return docked;
+    }
+    return [nearestCableEndAtWorld(p, wx, wy)];
+  }
+
   function restoreCleavedStripLock(p) {
     if (!p || !(p.isCleaved || p.cleaved)) return;
     ensureFiberStrip(p);
@@ -2835,20 +2991,30 @@
   }
 
   /** Seat fiber in ruler slot — jacket locked at wall, bare tip toward blade. */
-  function seatFiberInCleaverSlot(p, cleaverId) {
-    return seatFiberOnCleaverDrop(p, cleaverId);
+  function seatFiberInCleaverSlot(p, cleaverId, end) {
+    return seatFiberOnCleaverDrop(p, cleaverId, end);
   }
 
   function refreshPigtailCleaverSlot(pigtailId, cleaverId) {
     var p = findPigtail(pigtailId);
-    if (!p || !p.isSnappedToCleaver || p.snappedCleaverId !== cleaverId) return;
+    if (!p) return;
     var slot = getCleaverSlotGeometry(cleaverId);
+    var startDocked = isCable(p) && p.startIsSnappedToCleaver && p.startSnappedCleaverId === cleaverId;
+    var endDocked = p.isSnappedToCleaver && p.snappedCleaverId === cleaverId;
+    if (!startDocked && !endDocked) return;
     if (!slot || !slot.open) {
-      clearCleaverSnap(p);
+      if (startDocked) clearCleaverSnap(p, { end: 'start' });
+      if (endDocked) clearCleaverSnap(p, { end: 'end' });
       return;
     }
-    pinJacketToRulerWall(p, slot, p.bx);
-    p.cleaverSlotAnchorX = slot.rulerStopX;
+    if (startDocked) {
+      seatFiberOnCleaverDrop(p, cleaverId, 'start');
+      p.startCleaverSlotAnchorX = slot.rulerStopX;
+    }
+    if (endDocked) {
+      seatFiberOnCleaverDrop(p, cleaverId, 'end');
+      p.cleaverSlotAnchorX = slot.rulerStopX;
+    }
     var guide = cleaverSlotGuideFromInfo(slot);
     if (guide) setCleaverGuideLine(guide, true);
     setCleaverRulerWallGuide(slot, true);
@@ -2883,7 +3049,8 @@
       FtthLab.setCleaverDockedPigtail(cleaverId, null);
     }
     updateCleaverSnapVisual(p, end);
-    if (!isCable(p)) restorePermanentStripFrontier(p);
+    if (isCable(p)) restoreCableEndStripFrontier(p, end);
+    else restorePermanentStripFrontier(p);
     if (!opts.skipGuide) clearCleaverGuideLine();
     clearCleaverDropzoneHighlight();
   }
@@ -2894,10 +3061,11 @@
 
   function snapPigtailToCleaverGroove(p, cleaverId, snapX, grooveY, opts) {
     opts = opts || {};
-    if (!p || p.cleaved || p.isCleaved) return false;
-    if ((Number(p.stripStage) || 0) < 2) return false;
-    if (p.tail && p.tail.attached) return false;
-    if (!seatFiberOnCleaverDrop(p, cleaverId)) return false;
+    var end = isCable(p) ? resolveCableEnd(p, opts.end) : 'end';
+    if (!p || isCableEndCleaved(p, end)) return false;
+    if (getCableEndStripStage(p, end) < 2) return false;
+    if (!isCable(p) && p.tail && p.tail.attached) return false;
+    if (!seatFiberOnCleaverDrop(p, cleaverId, end)) return false;
     if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
       FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
     }
@@ -2905,18 +3073,20 @@
     var guide = cleaverSlotGuideFromInfo(slot);
     if (guide) setCleaverGuideLine(guide, true);
     if (slot) setCleaverRulerWallGuide(slot, true);
-    updateCleaverSnapVisual(p);
+    updateCleaverSnapVisual(p, end);
     if (!opts.quiet) {
-      setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
+      setStatus((isCable(p) ? 'Cable' : 'SC Pigtail') + ' · ' + end +
+        ' end · jacket seated against cleaver ruler · bare glass in groove');
     }
     return true;
   }
 
-  function findCleaverGrooveSnapForTip(p, tipX, tipY) {
+  function findCleaverGrooveSnapForTip(p, tipX, tipY, end) {
     if (!global.FtthLab || typeof FtthLab.findCleaverGrooveNear !== 'function') return null;
-    if (!p || p.cleaved || p.isCleaved) return null;
-    if ((Number(p.stripStage) || 0) < 2) return null;
-    if (p.tail && p.tail.attached) return null;
+    end = isCable(p) ? resolveCableEnd(p, end) : 'end';
+    if (!p || isCableEndCleaved(p, end)) return null;
+    if (getCableEndStripStage(p, end) < 2) return null;
+    if (!isCable(p) && p.tail && p.tail.attached) return null;
     return FtthLab.findCleaverGrooveNear(tipX, tipY, CLEAVER_SNAP_PX);
   }
 
@@ -3023,6 +3193,8 @@
       p.startIsSnappedToCleaver = true;
       p.startSnappedCleaverId = cleaverId;
       p.startCleaverSlotAnchorX = rulerStopX;
+      p.activeCableEnd = 'start';
+      lockCableEndStripFrontier(p, 'start');
       return true;
     }
 
@@ -3056,11 +3228,18 @@
     p.isSnappedToCleaver = true;
     p.snappedCleaverId = cleaverId;
     p.cleaverSlotAnchorX = rulerStopX;
-    if (!isCable(p)) lockPermanentStripFrontier(p);
+    if (isCable(p)) {
+      p.activeCableEnd = 'end';
+      lockCableEndStripFrontier(p, 'end');
+    } else {
+      lockPermanentStripFrontier(p);
+    }
     return true;
   }
 
   function finishCleaverDropSeat(p, cleaverId, end) {
+    end = resolveCableEnd(p, end);
+    if (isCable(p)) p.activeCableEnd = end;
     if (!seatFiberOnCleaverDrop(p, cleaverId, end)) return false;
     if (global.FtthLab && typeof FtthLab.setCleaverDockedPigtail === 'function') {
       FtthLab.setCleaverDockedPigtail(cleaverId, p.id);
@@ -3120,13 +3299,21 @@
 
   function finalizePigtailCleaverDock(pigtailId) {
     var p = findPigtail(pigtailId);
-    if (!p || !p.isSnappedToCleaver || !p.snappedCleaverId) {
+    if (!p) {
       clearCleaverGuideLine();
       return;
     }
-    refreshPigtailCleaverSlot(pigtailId, p.snappedCleaverId);
+    var cleaverId = null;
+    if (isCable(p) && p.startIsSnappedToCleaver) cleaverId = p.startSnappedCleaverId;
+    else if (p.isSnappedToCleaver) cleaverId = p.snappedCleaverId;
+    if (!cleaverId) {
+      clearCleaverGuideLine();
+      return;
+    }
+    refreshPigtailCleaverSlot(pigtailId, cleaverId);
     pushHistory();
-    setStatus('SC Pigtail · jacket seated against cleaver ruler · bare glass in groove');
+    setStatus((isCable(p) ? 'Cable' : 'SC Pigtail') +
+      ' · jacket seated against cleaver ruler · bare glass in groove');
   }
 
   /* ─── Fusion splicer clamp V-groove snap (cleaved pigtails) ─── */
@@ -5465,19 +5652,18 @@
    * Point-to-line hit test: perpendicular distance from blade drop to pigtail polyline.
    * Requires fully stripped bare glass (stripStage === 2).
    */
-  function findPigtailBladeHit(bladeX, bladeY, hitRadiusPx) {
+  function findPigtailBladeHit(bladeX, bladeY, hitRadiusPx, cleaverId) {
     var thr = typeof hitRadiusPx === 'number' ? hitRadiusPx : BLADE_HIT_RADIUS_PX;
     var best = null;
     var bestD = thr + 1;
     var i;
     for (i = 0; i < pigtails.length; i++) {
       var p = pigtails[i];
-      var ends = isCable(p) ? ['start', 'end'] : ['end'];
+      var ends = isCable(p) ? cleaverCableEndsForProbe(p, cleaverId, bladeX, bladeY) : ['end'];
       var ei;
       for (ei = 0; ei < ends.length; ei++) {
         var end = ends[ei];
         if (!p || isCableEndCleaved(p, end)) continue;
-        if (isCable(p) && !cableEndOwnsToolPoint(p, end, bladeX, bladeY)) continue;
         if (getCableEndStripStage(p, end) !== 2) continue;
         if (!isCable(p) && p.tail && p.tail.attached) continue;
         var pts = cableStripPathPoints(p, end);
@@ -5508,7 +5694,7 @@
   function commitCleaveAtBlade(bladeX, bladeY, opts) {
     opts = opts || {};
     var radius = typeof opts.hitRadius === 'number' ? opts.hitRadius : BLADE_HIT_RADIUS_PX;
-    var hit = findPigtailBladeHit(bladeX, bladeY, radius);
+    var hit = findPigtailBladeHit(bladeX, bladeY, radius, opts.cleaverId);
     if (!hit) return false;
     return commitCleave(hit.id, {
       cutX: bladeX,
@@ -5619,6 +5805,11 @@
       p.isCleaved = true;
       p.cleaved = true;
     }
+    if (isCable(p)) {
+      p.activeCableEnd = end;
+      if (end === 'start') p.startPrepState.cleaved = true;
+      else p.endPrepState.cleaved = true;
+    }
     syncCablePrepState(p);
     clearCleaverSnap(p, { skipGuide: true, end: end });
     lockCleavedStripGeometry(p, getBareGlassLengthAfterCutPx(), {
@@ -5635,7 +5826,10 @@
     pushHistory();
     updateInspector();
     refreshBudget();
-    setStatus('SC Pigtail · fiber cleaved · perpendicular end face');
+    if (isCable(p)) selectCable(p.id);
+    else selectPigtail(p.id);
+    setStatus((isCable(p) ? 'Cable · ' + end + ' end' : 'SC Pigtail') +
+      ' · fiber cleaved · perpendicular end face');
     if (global.FtthLab && typeof FtthLab.showToast === 'function') {
       FtthLab.showToast('تم القص 90°');
     }
@@ -7633,6 +7827,14 @@
     var bBtn = layer.querySelector('[data-pt-id="' + p.id + '"][data-pt-end="B"]');
     if (isCable(p)) {
       syncCablePrepState(p);
+      restoreCableEndStripFrontier(p, 'start');
+      restoreCableEndStripFrontier(p, 'end');
+      if (cableEndIsSnappedToCleaver(p, 'start') && isCableEndCleaved(p, 'start')) {
+        enforceCleavedJacketWallForEnd(p, 'start');
+      }
+      if (cableEndIsSnappedToCleaver(p, 'end') && isCableEndCleaved(p, 'end')) {
+        enforceCleavedJacketWallForEnd(p, 'end');
+      }
       if (aBtn) {
         var startFs = ensureCableEndStrip(p, 'start');
         var startStage = getCableEndStripStage(p, 'start');
@@ -7927,6 +8129,10 @@
             applySplicerMagnetDuringDrag(p, ev.clientX, ev.clientY, cableEnd);
             if (snakeCable) updateOrthoSnake(p, w.x, w.y);
             else moveTipGravity(p, 'A', w.x, w.y);
+            restoreCableEndStripFrontier(p, cableEnd);
+            if (cableEndIsSnappedToCleaver(p, cableEnd) && isCableEndCleaved(p, cableEnd)) {
+              enforceCleavedJacketWallForEnd(p, cableEnd);
+            }
             if (cleaverEligibleForDropzone(p, cableEnd) &&
                 global.FtthLab && typeof FtthLab.findCleaverGrooveNear === 'function') {
               var tip = cableEndTipWorld(p, cableEnd);
@@ -8277,7 +8483,12 @@
             moveTipGravity(p, 'B', world.x, world.y);
           }
 
-          if (!isCable(p) && (isFullyStrippedPigtail(p) || p.stripFrontierLock)) {
+          if (isCable(p)) {
+            restoreCableEndStripFrontier(p, cableEnd);
+            if (cableEndIsSnappedToCleaver(p, cableEnd) && isCableEndCleaved(p, cableEnd)) {
+              enforceCleavedJacketWallForEnd(p, cableEnd);
+            }
+          } else if (isFullyStrippedPigtail(p) || p.stripFrontierLock) {
             restorePermanentStripFrontier(p);
             if (p.isSnappedToCleaver && (p.isCleaved || p.cleaved)) {
               enforceCleavedJacketWall(p);
