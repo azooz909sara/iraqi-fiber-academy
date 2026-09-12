@@ -469,7 +469,18 @@
   }
 
   function flipSelected() {
-    if (selectionOwner && state.tools[selectionOwner] &&
+    var pigTool = state.tools['sc-pigtail'];
+    if (pigTool && typeof pigTool.flipSelected === 'function') {
+      try {
+        if (pigTool.flipSelected()) {
+          return true;
+        }
+      } catch (errPig) {
+        console.warn('[FtthLab] flipSelected failed: sc-pigtail', errPig);
+      }
+    }
+    if (selectionOwner && selectionOwner !== 'sc-pigtail' &&
+        state.tools[selectionOwner] &&
         typeof state.tools[selectionOwner].flipSelected === 'function') {
       try {
         if (state.tools[selectionOwner].flipSelected()) {
@@ -482,17 +493,16 @@
     var ids = Object.keys(state.tools);
     for (var i = ids.length - 1; i >= 0; i--) {
       var tool = state.tools[ids[i]];
-      if (tool && typeof tool.flipSelected === 'function') {
-        try {
-          if (tool.flipSelected()) {
-            return true;
-          }
-        } catch (err2) {
-          console.warn('[FtthLab] flipSelected failed:', ids[i], err2);
+      if (!tool || tool.id === 'sc-pigtail' || typeof tool.flipSelected !== 'function') continue;
+      try {
+        if (tool.flipSelected()) {
+          return true;
         }
+      } catch (err2) {
+        console.warn('[FtthLab] flipSelected failed:', ids[i], err2);
       }
     }
-    setStatus('Select a pigtail to flip');
+    setStatus('Select a pigtail or cable to flip');
     return false;
   }
 

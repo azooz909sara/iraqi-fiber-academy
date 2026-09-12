@@ -343,6 +343,23 @@
       isBareStripComplete(ensureFiberStrip(p));
   }
 
+  /** After prep-state swap, mirror swapped prep into per-end legacy fields used by rendering. */
+  function applyCableLegacyFromPrepStates(p) {
+    if (!isCable(p)) return;
+    ensureEndPrepStateFields(p.startPrepState);
+    ensureEndPrepStateFields(p.endPrepState);
+    p.startIsStripped = !!p.startPrepState.stripped;
+    p.isStripped = !!p.endPrepState.stripped;
+    p.startIsCleaned = !!p.startPrepState.cleaned;
+    p.isCleaned = !!p.endPrepState.cleaned;
+    p.startIsCleaved = !!p.startPrepState.cleaved;
+    p.startCleaved = !!p.startPrepState.cleaved;
+    p.isCleaved = !!p.endPrepState.cleaved;
+    p.cleaved = !!p.endPrepState.cleaved;
+    p.startStripLengthPx = Number(p.startPrepState.strippedLengthPx) || 0;
+    p.stripLengthPx = Number(p.endPrepState.strippedLengthPx) || 0;
+  }
+
   function ensureCableEndStrip(p, end) {
     end = cableEndFromToken(end);
     if (!isCable(p)) return ensureFiberStrip(p);
@@ -6224,9 +6241,7 @@
 
   function selectCable(id, opts) {
     selection = { kind: 'cable', id: id };
-    if (global.FtthLab && typeof FtthLab.setSelectionOwner === 'function') {
-      FtthLab.setSelectionOwner('cable');
-    }
+    claimSelection();
     updateInspector();
     if (!(opts && opts.skipRebuild)) rebuildLayer();
   }
@@ -7809,7 +7824,9 @@
         if (e.target.closest('[data-pt-end]') || e.target.closest('[data-pt-drag]')) return;
         if (e.target.closest('[data-pt-sleeve]')) return;
         e.stopPropagation();
-        selectPigtail(node.getAttribute('data-pt-node'));
+        var nodeId = node.getAttribute('data-pt-node');
+        if (node.getAttribute('data-cable-node')) selectCable(nodeId);
+        else selectPigtail(nodeId);
       });
     });
 
@@ -9029,7 +9046,83 @@
     }
   }
 
+  function swapCableEndFields(p, startKey, endKey) {
+    var tmp = p[startKey];
+    p[startKey] = p[endKey];
+    p[endKey] = tmp;
+  }
+
+  function flipSelectedCable(p) {
+    if (
+      p.startIsSnappedToCleaver || p.isSnappedToCleaver ||
+      p.startIsSnappedToSplicer || p.isSnappedToSplicer
+    ) {
+      setStatus('Unsnap cable before flipping');
+      return false;
+    }
+    var tmpX = p.ax;
+    var tmpY = p.ay;
+    p.ax = p.bx;
+    p.ay = p.by;
+    p.bx = tmpX;
+    p.by = tmpY;
+    ensurePathHistory(p);
+    if (p.pathHistory && p.pathHistory.length > 1) {
+      p.pathHistory = p.pathHistory.slice().reverse();
+      p.route = p.pathHistory.slice();
+    }
+    var tmpPrep = p.startPrepState;
+    p.startPrepState = p.endPrepState;
+    p.endPrepState = tmpPrep;
+    swapCableEndFields(p, 'startFiberStrip', 'fiberStrip');
+    swapCableEndFields(p, 'startHasSleeve', 'hasSleeve');
+    swapCableEndFields(p, 'startSleeveAlong', 'sleeveAlong');
+    swapCableEndFields(p, 'startStripStage', 'stripStage');
+    swapCableEndFields(p, 'startStripPeel', 'stripPeel');
+    swapCableEndFields(p, 'startIsSnappedToCleaver', 'isSnappedToCleaver');
+    swapCableEndFields(p, 'startSnappedCleaverId', 'snappedCleaverId');
+    swapCableEndFields(p, 'startCleaverSlotAnchorX', 'cleaverSlotAnchorX');
+    swapCableEndFields(p, 'startIsSnappedToSplicer', 'isSnappedToSplicer');
+    swapCableEndFields(p, 'startSnappedSplicerId', 'snappedSplicerId');
+    swapCableEndFields(p, 'startSnappedSplicerSide', 'snappedSplicerSide');
+    swapCableEndFields(p, 'startSplicerGrooveY', 'splicerGrooveY');
+    swapCableEndFields(p, 'startSplicerTipX', 'splicerTipX');
+    swapCableEndFields(p, 'startSplicerPreviewSlot', 'splicerPreviewSlot');
+    swapCableEndFields(p, 'startSplicerDragDetached', 'splicerDragDetached');
+    swapCableEndFields(p, 'startSplicerGrooveAnchor', 'splicerGrooveAnchor');
+    swapCableEndFields(p, 'startSplicerBareGlassPx', 'splicerBareGlassPx');
+    swapCableEndFields(p, 'startSplicerInnerEdgeX', 'splicerInnerEdgeX');
+    swapCableEndFields(p, 'startSplicerDockSnapshot', 'splicerDockSnapshot');
+    swapCableEndFields(p, 'startSplicerWeldMachineId', 'splicerWeldMachineId');
+    swapCableEndFields(p, 'startFusionAssemblyId', 'fusionAssemblyId');
+    swapCableEndFields(p, 'startFusedPartnerId', 'fusedPartnerId');
+    swapCableEndFields(p, 'startFusionPermanent', 'fusionPermanent');
+    swapCableEndFields(p, 'startSplicerFusedSide', 'splicerFusedSide');
+    swapCableEndFields(p, 'startFusedJacketEndDist', 'fusedJacketEndDist');
+    swapCableEndFields(p, 'startCleavedStripLock', 'cleavedStripLock');
+    swapCableEndFields(p, 'startStripFrontierLock', 'stripFrontierLock');
+    applyCableLegacyFromPrepStates(p);
+    p.activeCableEnd = p.activeCableEnd === 'start' ? 'end' : 'start';
+    p.drawLockRot = endRotationDeg(p.ax, p.ay, p.bx, p.by);
+    if (p.connector) p.connector.liveRot = p.drawLockRot;
+    syncCablePrepState(p);
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    refreshBudget();
+    if (global.FtthLab && typeof FtthLab.refreshVflLaser === 'function') {
+      FtthLab.refreshVflLaser();
+    }
+    setStatus('Cable flipped');
+    return true;
+  }
+
   function flipSelectedPigtail() {
+    if (selection.kind === 'cable' && selection.id) {
+      var cable = findPigtail(selection.id);
+      if (!cable || !isCable(cable)) return false;
+      return flipSelectedCable(cable);
+    }
     if (selection.kind !== 'pigtail' || !selection.id) return false;
     var p = findPigtail(selection.id);
     if (!p) return false;
