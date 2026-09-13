@@ -41,6 +41,8 @@
   var PIGTAIL_CATENARY_SAMPLES = 48;
   var PIGTAIL_CATENARY_SLACK = 1.12;
   var SLEEVE_MOUNT_PROX_PX = 25;
+  /** Short jacket stub (world px) at a fused cable tip — mirrors buildCableEndStripSvg splice zone. */
+  var CABLE_FUSION_JACKET_STUB_PX = 25;
   var SLEEVE_EJECT_PULL_PX = 14;
   var STRIP_CLAMP_PROX_PX = 6;
   /** Hard max distance from cutting notch to fiber centerline for clamp/strip. */
@@ -808,6 +810,9 @@
 
   function getPigtailFusionAssemblyId(p) {
     if (!p) return null;
+    if (isCable(p) && p.startFusionAssemblyId && fusedAssemblies[p.startFusionAssemblyId]) {
+      return p.startFusionAssemblyId;
+    }
     if (p.fusionAssemblyId && fusedAssemblies[p.fusionAssemblyId]) {
       return p.fusionAssemblyId;
     }
@@ -824,6 +829,102 @@
       }
     }
     return null;
+  }
+
+  /** Resolve fused-assembly record for any member (cables may only appear in leftId/rightId). */
+  function findFusionAssemblyRecordForMember(p) {
+    if (!p) return null;
+    var asmId = getPigtailFusionAssemblyId(p);
+    if (asmId && fusedAssemblies[asmId]) return fusedAssemblies[asmId];
+    if (isCable(p)) {
+      if (p.fusionAssemblyId && fusedAssemblies[p.fusionAssemblyId]) {
+        return fusedAssemblies[p.fusionAssemblyId];
+      }
+      if (p.startFusionAssemblyId && fusedAssemblies[p.startFusionAssemblyId]) {
+        return fusedAssemblies[p.startFusionAssemblyId];
+      }
+    }
+    var found = null;
+    Object.keys(fusedAssemblies).forEach(function (aid) {
+      var asm = fusedAssemblies[aid];
+      if (asm && (asm.leftId === p.id || asm.rightId === p.id)) found = asm;
+    });
+    return found;
+  }
+
+  /** Which cable end ('start' | 'end') is welded in a fusion assembly, or null. */
+  function getCableFusedEnd(p, asm) {
+    if (!p || !isCable(p)) return null;
+    asm = asm || findFusionAssemblyRecordForMember(p);
+    if (!asm) return null;
+    if (asm.leftId !== p.id && asm.rightId !== p.id) return null;
+    var key = asm.leftId === p.id ? asm.leftKey : asm.rightKey;
+    var prefix = 'cable:' + p.id + ':';
+    if (key && key.indexOf(prefix) === 0) {
+      return cableEndFromToken(key.slice(prefix.length));
+    }
+    if (p.startFusionAssemblyId || p.startSplicerWeldMachineId || p.startIsSnappedToSplicer) {
+      return 'start';
+    }
+    if (p.fusionAssemblyId || p.splicerWeldMachineId || p.isSnappedToSplicer) {
+      return 'end';
+    }
+    return resolveCableEnd(p, p.activeCableEnd);
+  }
+
+  /** Real pigtail/cable from a dock adapter or live object reference. */
+  function resolveDockedMember(dockRef) {
+    if (!dockRef || !dockRef.id) return null;
+    return findPigtail(dockRef.id);
+  }
+
+  function dockedMemberCableEnd(dockRef) {
+    if (!dockRef) return 'end';
+    if (dockRef.cableEnd) return cableEndFromToken(dockRef.cableEnd);
+    var p = resolveDockedMember(dockRef);
+    if (!p || !isCable(p)) return 'end';
+    return resolveCableEnd(p, p.activeCableEnd);
+  }
+
+  /** Fusion assembly id for a splicer machine — registry, then real docked members. */
+  function resolveFusionAssemblyIdForMachine(machineId) {
+    if (!machineId) return null;
+    var byMachine = findFusionAssemblyByMachineId(machineId);
+    if (byMachine && isFusedAssembly(byMachine)) return byMachine;
+    var docked = getSplicerDockedPair(machineId);
+    if (!docked.left || !docked.right) return null;
+    var leftReal = resolveDockedMember(docked.left);
+    var rightReal = resolveDockedMember(docked.right);
+    var asmId = (leftReal && getPigtailFusionAssemblyId(leftReal)) ||
+      (rightReal && getPigtailFusionAssemblyId(rightReal));
+    if (asmId && isFusedAssembly(asmId)) return asmId;
+    var fusionId = makeFusionAssemblyId(docked.left.id, docked.right.id);
+    return fusionId && isFusedAssembly(fusionId) ? fusionId : null;
+  }
+
+  function applyFusionStateToMember(dockRef, fusionId, machineId, side, partnerId) {
+    var p = resolveDockedMember(dockRef);
+    if (!p || !fusionId) return;
+    var cableEnd = dockedMemberCableEnd(dockRef);
+    if (isCable(p) && cableEnd === 'start') {
+      p.startFusionAssemblyId = fusionId;
+      p.startFusedPartnerId = partnerId;
+      p.startSplicerWeldMachineId = machineId;
+      p.startSplicerFusedSide = side;
+      return;
+    }
+    p.fusionAssemblyId = fusionId;
+    p.fusedPartnerId = partnerId;
+    p.splicerWeldMachineId = machineId;
+    p.splicerFusedSide = side;
+  }
+
+  function getFusedMemberWeldWorld(p, asm) {
+    if (!p) return null;
+    if (isCable(p) && getCableFusedEnd(p, asm) === 'start') {
+      return { x: p.ax, y: p.ay };
+    }
+    return { x: p.bx, y: p.by };
   }
 
   function getFusionAssemblyMachineId(assemblyId) {
@@ -2770,24 +2871,62 @@
     var fullPath = fiberSvgPathFromRenderPoints(p, fullPts) || fiberPath(p);
     var total = polylineLength(densePts);
     var sel = selection.id === p.id ? ' is-selected' : '';
+    var fusedEnd = getCableFusedEnd(p);
     var startSeg = buildCableEndStripSvg(p, 'start', densePts, total, sel);
     var endSeg = buildCableEndStripSvg(p, 'end', densePts, total, sel);
     var midStart = Math.max(startSeg.jacketEnd || 0, 0);
     var midEnd = Math.min(endSeg.jacketStart != null ? endSeg.jacketStart : total, total);
+    var fusedBareStart = 0;
+    var fusedBareEnd = 0;
+    if (fusedEnd === 'start') {
+      fusedBareStart = Math.max(
+        cableEndRenderDistPx(p, 'start', 'bare'),
+        getSplicerExposedBareLengthPxForEnd(p, 'start')
+      );
+      midStart = Math.max(0, Math.min(total, fusedBareStart + CABLE_FUSION_JACKET_STUB_PX));
+    }
+    if (fusedEnd === 'end') {
+      fusedBareEnd = Math.max(
+        cableEndRenderDistPx(p, 'end', 'bare'),
+        getSplicerExposedBareLengthPxForEnd(p, 'end')
+      );
+      midEnd = Math.max(0, Math.min(total, total - fusedBareEnd - CABLE_FUSION_JACKET_STUB_PX));
+    }
     var html =
       '<path class="lab-pigtail-fiber-hit" data-pt-drag="' + p.id + '" d="' + fullPath +
       '" fill="none" stroke="transparent" />';
-    html += startSeg.html;
+    if (fusedEnd !== 'start') {
+      html += startSeg.html;
+    }
+    function appendCableMidJacketPath(pathD) {
+      if (!pathD) return;
+      html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
+        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="cable-mid-jacket" d="' + pathD +
+        '" fill="none" />';
+    }
+    if (midEnd <= midStart) {
+      midEnd = Math.min(total, midStart + 0.1);
+    }
     if (midEnd > midStart + STRIP_TIP_EPS) {
       var midPts = slicePolylineByDistance(densePts, midStart, midEnd);
-      var midD = fiberSvgPathFromRenderPoints(p, midPts);
-      html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
-        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + midD + '" fill="none" />';
+      appendCableMidJacketPath(fiberSvgPathFromRenderPoints(p, midPts));
     } else if (midStart <= STRIP_TIP_EPS && midEnd >= total - STRIP_TIP_EPS) {
-      html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
-        '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath + '" fill="none" />';
+      appendCableMidJacketPath(fullPath);
+    } else if (fusedEnd) {
+      var bodyStart = fusedEnd === 'start'
+        ? Math.max(0, Math.min(total, fusedBareStart + CABLE_FUSION_JACKET_STUB_PX))
+        : midStart;
+      var bodyEnd = fusedEnd === 'end'
+        ? Math.max(0, Math.min(total, total - fusedBareEnd - CABLE_FUSION_JACKET_STUB_PX))
+        : midEnd;
+      if (bodyEnd > bodyStart + STRIP_TIP_EPS) {
+        var bodyPts = slicePolylineByDistance(densePts, bodyStart, bodyEnd);
+        appendCableMidJacketPath(fiberSvgPathFromRenderPoints(p, bodyPts));
+      }
     }
-    html += endSeg.html;
+    if (fusedEnd !== 'end') {
+      html += endSeg.html;
+    }
     html += '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + '" d="' + fullPath + '" fill="none" />';
     html += '<path class="lab-pigtail-laser-core" data-pt-laser="' + p.id + ':start" d="' +
       svgPathFromPoints(slicePolylineByDistance(densePts, 0, Math.min(24, total))) + '" fill="none" />';
@@ -3749,11 +3888,11 @@
       rightId: pair.right.id,
       leftKey: (function () {
         var lp = findPigtail(pair.left.id);
-        return lp ? opticalEndpointKey(lp, pair.left.cableEnd || 'end') : null;
+        return lp ? opticalEndpointKey(lp, dockedMemberCableEnd(pair.left)) : null;
       })(),
       rightKey: (function () {
         var rp = findPigtail(pair.right.id);
-        return rp ? opticalEndpointKey(rp, pair.right.cableEnd || 'end') : null;
+        return rp ? opticalEndpointKey(rp, dockedMemberCableEnd(pair.right)) : null;
       })(),
       bridgeX1: slotL ? slotL.innerEdgeX : pair.left.bx,
       bridgeX2: slotR ? slotR.innerEdgeX : pair.right.bx,
@@ -3771,16 +3910,12 @@
       ovenGrooveAnchor: null,
       ovenDockSnapshot: null,
     };
-    pair.left.fusionAssemblyId = fusionId;
-    pair.right.fusionAssemblyId = fusionId;
-    pair.left.fusedPartnerId = pair.right.id;
-    pair.right.fusedPartnerId = pair.left.id;
-    pair.left.splicerWeldMachineId = machineId;
-    pair.right.splicerWeldMachineId = machineId;
-    pair.left.splicerFusedSide = 'L';
-    pair.right.splicerFusedSide = 'R';
-    captureFusedJacketEndDist(pair.left, machineId, 'L');
-    captureFusedJacketEndDist(pair.right, machineId, 'R');
+    applyFusionStateToMember(pair.left, fusionId, machineId, 'L', pair.right.id);
+    applyFusionStateToMember(pair.right, fusionId, machineId, 'R', pair.left.id);
+    var leftReal = resolveDockedMember(pair.left);
+    var rightReal = resolveDockedMember(pair.right);
+    if (leftReal) captureFusedJacketEndDist(leftReal, machineId, 'L', dockedMemberCableEnd(pair.left));
+    if (rightReal) captureFusedJacketEndDist(rightReal, machineId, 'R', dockedMemberCableEnd(pair.right));
     setFiberFusedState(machineId, true);
     syncGlobalFiberFusedFlag();
     return true;
@@ -4246,16 +4381,33 @@
     );
   }
 
+  function memberSnappedToSplicer(p) {
+    if (!p) return false;
+    if (isCable(p)) return !!(p.isSnappedToSplicer || p.startIsSnappedToSplicer);
+    return !!p.isSnappedToSplicer;
+  }
+
   function shouldRenderFusedBridgeInMainLayer(machineId) {
     if (!isFusedAssembly(machineId)) return false;
     var pair = getFusedAssemblyPigtails(machineId);
     if (!pair.left || !pair.right) return false;
-    return !pair.left.isSnappedToSplicer && !pair.right.isSnappedToSplicer;
+    return !memberSnappedToSplicer(pair.left) && !memberSnappedToSplicer(pair.right);
   }
 
   function resolveFusedJacketEndDist(p, densePts, total, splicerSlot) {
     if (!p || !densePts || total < 0.01) return 0;
-    if (isPigtailFused(p) && !p.isSnappedToSplicer) {
+    if (isCable(p) && getCableFusedEnd(p) === 'start') {
+      if (p.startFusedJacketEndDist != null && isFinite(p.startFusedJacketEndDist)) {
+        return Math.max(0, Math.min(total,
+          p.startFusedJacketEndDist + getSplicerExposedBareLengthPxForEnd(p, 'start')));
+      }
+      if (isPigtailFused(p) && !memberSnappedToSplicer(p)) {
+        var weldProjStart = projectOntoFiberStrict(densePts, p.ax, p.ay);
+        var bareLenStart = getSplicerExposedBareLengthPxForEnd(p, 'start');
+        return Math.max(0, Math.min(total, (weldProjStart.dist || 0) + bareLenStart));
+      }
+    }
+    if (isPigtailFused(p) && !memberSnappedToSplicer(p)) {
       var weldProj = projectOntoFiberStrict(densePts, p.bx, p.by);
       var bareLen = getSplicerExposedBareLengthPx(p);
       return Math.max(0, Math.min(total, (weldProj.dist || total) - bareLen));
@@ -4304,20 +4456,76 @@
     return { x: slice.end.x, y: slice.end.y };
   }
 
-  function captureFusedJacketEndDist(p, machineId, side) {
+  function captureFusedJacketEndDist(p, machineId, side, cableEnd) {
     if (!p) return;
+    cableEnd = cableEnd ? cableEndFromToken(cableEnd) : (isCable(p) ? resolveCableEnd(p, p.activeCableEnd) : 'end');
     var densePts = fiberRenderPathPointsDense(p);
     var total = polylineLength(densePts);
     var slot = getSplicerGrooveSlot(machineId, side, { forTracking: true });
+    var dist = null;
     if (slot) {
       var innerProj = projectOntoFiberStrict(densePts, slot.innerEdgeX, slot.grooveY);
-      p.fusedJacketEndDist = Math.max(0, Math.min(total, innerProj.dist || 0));
-      return;
+      dist = Math.max(0, Math.min(total, innerProj.dist || 0));
+    } else if (isCable(p) && cableEnd === 'start' && p.startSplicerInnerEdgeX != null) {
+      var startProj = projectOntoFiberStrict(densePts, p.startSplicerInnerEdgeX, p.ay);
+      dist = Math.max(0, Math.min(total, startProj.dist || 0));
+    } else if (p.splicerInnerEdgeX != null) {
+      var grooveY = isCable(p) && cableEnd === 'start' ? p.ay : p.by;
+      var fallback = projectOntoFiberStrict(densePts, p.splicerInnerEdgeX, grooveY);
+      dist = Math.max(0, Math.min(total, fallback.dist || 0));
     }
-    if (p.splicerInnerEdgeX != null) {
-      var fallback = projectOntoFiberStrict(densePts, p.splicerInnerEdgeX, p.by);
-      p.fusedJacketEndDist = Math.max(0, Math.min(total, fallback.dist || 0));
+    if (dist == null) return;
+    if (isCable(p) && cableEnd === 'start') {
+      p.startFusedJacketEndDist = dist;
+    } else {
+      p.fusedJacketEndDist = dist;
     }
+  }
+
+  /**
+   * Bidirectional cable fusion slice — tip-anchored like buildCableEndStripSvg.
+   * barePts always run jacket-boundary → cleaved tip (last point at weld) for glass merge.
+   */
+  function sliceCableFusedMemberAssemblyParts(p, fusedEnd, densePts, total) {
+    fusedEnd = cableEndFromToken(fusedEnd || getCableFusedEnd(p));
+    if (!p || !isCable(p) || !densePts || total < 0.01 || !fusedEnd) {
+      return { jacketPts: [], barePts: [], dJacket: 0, fusedEnd: fusedEnd };
+    }
+    var bareRender = Math.max(
+      cableEndRenderDistPx(p, fusedEnd, 'bare'),
+      getSplicerExposedBareLengthPxForEnd(p, fusedEnd)
+    );
+    bareRender = Math.min(total, Math.max(bareRender, STRIP_TIP_EPS));
+    var dJacketStub = Math.min(total, bareRender + CABLE_FUSION_JACKET_STUB_PX);
+    var barePts;
+    var jacketPts;
+    var dJacket;
+    if (fusedEnd === 'start') {
+      barePts = slicePolylineByDistance(densePts, 0, bareRender);
+      if (barePts.length >= 2) barePts = barePts.slice().reverse();
+      jacketPts = slicePolylineByDistance(densePts, bareRender, dJacketStub);
+      dJacket = bareRender;
+    } else {
+      var dBareStart = Math.max(0, total - bareRender);
+      var dJacketStart = Math.max(0, total - dJacketStub);
+      barePts = slicePolylineByDistance(densePts, dBareStart, total);
+      jacketPts = slicePolylineByDistance(densePts, dJacketStart, dBareStart);
+      dJacket = dBareStart;
+    }
+    return { jacketPts: jacketPts, barePts: barePts, dJacket: dJacket, fusedEnd: fusedEnd };
+  }
+
+  /** Unidirectional pigtail fusion slice — connector @ 0, weld tip @ total. */
+  function sliceFusedMemberAssemblyParts(p, densePts, total) {
+    if (!p || !densePts || total < 0.01) {
+      return { jacketPts: [], barePts: [], dJacket: 0 };
+    }
+    var dJacket = resolveFusedJacketEndDist(p, densePts, total, null);
+    return {
+      jacketPts: slicePolylineByDistance(densePts, 0, dJacket),
+      barePts: slicePolylineByDistance(densePts, dJacket, total),
+      dJacket: dJacket,
+    };
   }
 
   function purgeStaleFusedBareSegments(machineId) {
@@ -4358,17 +4566,52 @@
     if (!leftDense || leftDense.length < 2 || !rightDense || rightDense.length < 2) return null;
     var totalL = polylineLength(leftDense);
     var totalR = polylineLength(rightDense);
-    var dJacketL = resolveFusedJacketEndDist(left, leftDense, totalL, null);
-    var dJacketR = resolveFusedJacketEndDist(right, rightDense, totalR, null);
-    var jacketL = slicePolylineByDistance(leftDense, 0, dJacketL);
-    var bareL = slicePolylineByDistance(leftDense, dJacketL, totalL);
-    var jacketR = slicePolylineByDistance(rightDense, 0, dJacketR);
-    var bareR = slicePolylineByDistance(rightDense, dJacketR, totalR);
+    var asm = fusedAssemblies[machineId];
+    var fusedEndL = isCable(left) ? getCableFusedEnd(left, asm) : null;
+    var fusedEndR = isCable(right) ? getCableFusedEnd(right, asm) : null;
+    var sliceL = isCable(left)
+      ? sliceCableFusedMemberAssemblyParts(left, fusedEndL, leftDense, totalL)
+      : sliceFusedMemberAssemblyParts(left, leftDense, totalL);
+    var sliceR = isCable(right)
+      ? sliceCableFusedMemberAssemblyParts(right, fusedEndR, rightDense, totalR)
+      : sliceFusedMemberAssemblyParts(right, rightDense, totalR);
+    var jacketL = sliceL.jacketPts;
+    var bareL = sliceL.barePts;
+    var jacketR = sliceR.jacketPts;
+    var bareR = sliceR.barePts;
     if (jacketL.length < 2) {
-      jacketL = slicePolylineByDistance(leftDense, 0, Math.max(dJacketL, 2));
+      if (isCable(left)) {
+        if (fusedEndL === 'start') {
+          jacketL = slicePolylineByDistance(leftDense, sliceL.dJacket, Math.min(totalL, sliceL.dJacket + 2));
+        } else {
+          jacketL = slicePolylineByDistance(leftDense, Math.max(0, totalL - CABLE_FUSION_JACKET_STUB_PX), sliceL.dJacket);
+        }
+      } else {
+        jacketL = slicePolylineByDistance(leftDense, 0, Math.max(sliceL.dJacket, 2));
+      }
     }
     if (jacketR.length < 2) {
-      jacketR = slicePolylineByDistance(rightDense, 0, Math.max(dJacketR, 2));
+      if (isCable(right)) {
+        if (fusedEndR === 'start') {
+          jacketR = slicePolylineByDistance(rightDense, sliceR.dJacket, Math.min(totalR, sliceR.dJacket + 2));
+        } else {
+          jacketR = slicePolylineByDistance(rightDense, Math.max(0, totalR - CABLE_FUSION_JACKET_STUB_PX), sliceR.dJacket);
+        }
+      } else {
+        jacketR = slicePolylineByDistance(rightDense, 0, Math.max(sliceR.dJacket, 2));
+      }
+    }
+    var weld = null;
+    if (asm && asm.meetX != null && asm.bridgeY != null) {
+      weld = { x: asm.meetX, y: asm.bridgeY };
+    } else {
+      var weldL = getFusedMemberWeldWorld(left, asm);
+      var weldR = getFusedMemberWeldWorld(right, asm);
+      if (weldL && weldR) {
+        weld = { x: (weldL.x + weldR.x) / 2, y: (weldL.y + weldR.y) / 2 };
+      } else {
+        weld = weldL || weldR || { x: left.bx, y: left.by };
+      }
     }
     return {
       left: left,
@@ -4377,7 +4620,7 @@
       bareL: bareL,
       jacketR: jacketR,
       bareR: bareR,
-      weld: { x: left.bx, y: left.by },
+      weld: weld,
     };
   }
 
@@ -4426,7 +4669,24 @@
         glassPts = [{ x: endL.x, y: endL.y }, { x: endR.x, y: endR.y }];
       }
     }
-    if (glassPts.length < 2) return '';
+    if (glassPts.length < 2) {
+      var weldFb = data.weld;
+      if (weldFb && isFinite(weldFb.x) && isFinite(weldFb.y)) {
+        glassPts = [
+          { x: weldFb.x - 2.5, y: weldFb.y },
+          { x: weldFb.x + 2.5, y: weldFb.y },
+        ];
+      } else if (data.bareL && data.bareL.length) {
+        var tipL = data.bareL[data.bareL.length - 1];
+        var tipR = data.bareR && data.bareR.length ? data.bareR[0] : tipL;
+        glassPts = [{ x: tipL.x, y: tipL.y }, { x: tipR.x, y: tipR.y }];
+      }
+    }
+    if (glassPts.length < 2) {
+      var wx = data.weld && isFinite(data.weld.x) ? data.weld.x : 0;
+      var wy = data.weld && isFinite(data.weld.y) ? data.weld.y : 0;
+      glassPts = [{ x: wx - 2.5, y: wy }, { x: wx + 2.5, y: wy }];
+    }
     var glassPath = svgPathFromPoints(glassPts);
     var dragPts = data.jacketL.concat(glassPts.length > 1 ? glassPts.slice(1) : []);
     var revJacketR = data.jacketR.slice().reverse();
@@ -4731,16 +4991,37 @@
     if (ctx.partner) setPigtailDragPassthrough(ctx.partner, active);
   }
 
+  function isDraggingFusedWeldedEnd(p, draggedEnd) {
+    if (!p || !isPigtailFused(p)) return false;
+    draggedEnd = cableEndFromToken(draggedEnd || 'end');
+    if (!isCable(p)) return draggedEnd === 'end';
+    var fusedEnd = getCableFusedEnd(p);
+    return !!(fusedEnd && fusedEnd === draggedEnd);
+  }
+
+  function setFusedMemberWeldTipWorld(p, weldX, weldY, asm) {
+    if (!p || weldX == null || weldY == null) return;
+    if (isCable(p) && getCableFusedEnd(p, asm) === 'start') {
+      p.ax = weldX;
+      p.ay = weldY;
+      return;
+    }
+    p.bx = weldX;
+    p.by = weldY;
+  }
+
   function syncFusedPartnerWeldTip(primary, partner) {
     if (!primary || !partner) return;
-    partner.bx = primary.bx;
-    partner.by = primary.by;
+    var asm = findFusionAssemblyRecordForMember(primary);
+    var weld = getFusedMemberWeldWorld(primary, asm);
+    if (!weld) return;
+    setFusedMemberWeldTipWorld(partner, weld.x, weld.y, asm);
   }
 
   /** Keep weld junction aligned after snake/gravity end drags on a fused pair. */
-  function afterFusedEndDragFrame(primary, partner, machineId) {
+  function afterFusedEndDragFrame(primary, partner, machineId, draggedEnd) {
     if (!machineId || !primary) return;
-    if (partner) {
+    if (partner && isDraggingFusedWeldedEnd(primary, draggedEnd)) {
       syncFusedPartnerWeldTip(primary, partner);
       if (isFullyStrippedPigtail(partner) || partner.stripFrontierLock) {
         restorePermanentStripFrontier(partner);
@@ -4831,12 +5112,28 @@
     });
   }
 
+  function setMemberWeldTipAtMeet(p, dockRef, meetX, grooveY) {
+    if (!p) return;
+    var cableEnd = dockedMemberCableEnd(dockRef);
+    if (isCable(p) && cableEnd === 'start') {
+      p.ax = Math.round(meetX);
+      p.ay = Math.round(grooveY);
+      return;
+    }
+    p.bx = Math.round(meetX);
+    p.by = Math.round(grooveY);
+  }
+
   function syncSplicerWeldedTips(machineId) {
     var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
-    var assemblyId = getPigtailFusionAssemblyId(pair.left) ||
+    var leftReal = resolveDockedMember(pair.left);
+    var rightReal = resolveDockedMember(pair.right);
+    var assemblyId = resolveFusionAssemblyIdForMachine(machineId) ||
+      (leftReal && getPigtailFusionAssemblyId(leftReal)) ||
       makeFusionAssemblyId(pair.left.id, pair.right.id);
-    var docked = pair.left.isSnappedToSplicer || pair.right.isSnappedToSplicer;
+    var docked = (leftReal && memberSnappedToSplicer(leftReal)) ||
+      (rightReal && memberSnappedToSplicer(rightReal));
     if (!docked) return true;
     var slotL = getSplicerGrooveSlot(machineId, 'L', { forTracking: true });
     var slotR = getSplicerGrooveSlot(machineId, 'R', { forTracking: true });
@@ -4844,15 +5141,25 @@
       if (isFusedAssembly(assemblyId)) {
         updateFusedAssemblyBridgeFromSlots(assemblyId, slotL, slotR);
       }
-      pair.left.splicerInnerEdgeX = slotL.innerEdgeX;
-      pair.right.splicerInnerEdgeX = slotR.innerEdgeX;
+      if (leftReal) {
+        if (dockedMemberCableEnd(pair.left) === 'start') {
+          leftReal.startSplicerInnerEdgeX = slotL.innerEdgeX;
+        } else {
+          leftReal.splicerInnerEdgeX = slotL.innerEdgeX;
+        }
+      }
+      if (rightReal) {
+        if (dockedMemberCableEnd(pair.right) === 'start') {
+          rightReal.startSplicerInnerEdgeX = slotR.innerEdgeX;
+        } else {
+          rightReal.splicerInnerEdgeX = slotR.innerEdgeX;
+        }
+      }
       var asm = fusedAssemblies[assemblyId];
       var meetX = asm ? asm.meetX : (slotL.innerEdgeX + slotR.innerEdgeX) / 2;
       var grooveY = asm ? asm.bridgeY : (slotL.grooveY + slotR.grooveY) / 2;
-      pair.left.bx = Math.round(meetX);
-      pair.left.by = Math.round(grooveY);
-      pair.right.bx = Math.round(meetX);
-      pair.right.by = Math.round(grooveY);
+      setMemberWeldTipAtMeet(leftReal, pair.left, meetX, grooveY);
+      setMemberWeldTipAtMeet(rightReal, pair.right, meetX, grooveY);
     }
     return true;
   }
@@ -4860,16 +5167,15 @@
   function applySplicerArcWeld(machineId) {
     var pair = getSplicerDockedPair(machineId);
     if (!pair.left || !pair.right) return false;
-    if (isPigtailFusionPermanent(pair.left) || isPigtailFusionPermanent(pair.right)) {
+    var leftReal = resolveDockedMember(pair.left);
+    var rightReal = resolveDockedMember(pair.right);
+    if ((leftReal && isPigtailFusionPermanent(leftReal)) ||
+        (rightReal && isPigtailFusionPermanent(rightReal))) {
       return false;
     }
     var fusionId = makeFusionAssemblyId(pair.left.id, pair.right.id);
-    pair.left.splicerWeldMachineId = machineId;
-    pair.right.splicerWeldMachineId = machineId;
-    pair.left.fusionAssemblyId = fusionId;
-    pair.right.fusionAssemblyId = fusionId;
-    pair.left.fusedPartnerId = pair.right.id;
-    pair.right.fusedPartnerId = pair.left.id;
+    applyFusionStateToMember(pair.left, fusionId, machineId, 'L', pair.right.id);
+    applyFusionStateToMember(pair.right, fusionId, machineId, 'R', pair.left.id);
     syncSplicerWeldedTips(machineId);
     return true;
   }
@@ -5238,9 +5544,19 @@
   /* ─── Fusion splicer heat-oven magnet (fused assembly only) ─── */
 
   function getFusedWeldWorld(machineId) {
+    var asm = fusedAssemblies[machineId] || findFusionAssemblyByMachineId(machineId);
+    if (asm && asm.meetX != null && asm.bridgeY != null) {
+      return { x: asm.meetX, y: asm.bridgeY };
+    }
     var pair = getFusedAssemblyPigtails(machineId);
     if (!pair.left) return null;
-    return { x: pair.left.bx, y: pair.left.by };
+    var asmWeld = fusedAssemblies[machineId] || asm;
+    var weldL = getFusedMemberWeldWorld(pair.left, asmWeld);
+    var weldR = pair.right ? getFusedMemberWeldWorld(pair.right, asmWeld) : null;
+    if (weldL && weldR) {
+      return { x: (weldL.x + weldR.x) / 2, y: (weldL.y + weldR.y) / 2 };
+    }
+    return weldL || weldR;
   }
 
   function ovenEligibleForSnap(assemblyId, splicerMachineId) {
@@ -5454,9 +5770,7 @@
       if (!svg) return;
       var html = '';
       var dockedPair = getSplicerDockedPair(mid);
-      var overlayAssemblyId = (dockedPair.left && isPigtailFused(dockedPair.left))
-        ? getPigtailFusionAssemblyId(dockedPair.left)
-        : null;
+      var overlayAssemblyId = resolveFusionAssemblyIdForMachine(mid);
       var fused = overlayAssemblyId && isFusedAssembly(overlayAssemblyId);
       var overlayUnified = fused && !shouldRenderFusedBridgeInMainLayer(overlayAssemblyId);
       if (overlayUnified) {
@@ -8680,7 +8994,7 @@
             }
           }
           if (fusedMachineId) {
-            afterFusedEndDragFrame(p, fusedPartner, fusedMachineId);
+            afterFusedEndDragFrame(p, fusedPartner, fusedMachineId, 'start');
             refreshFusedAssemblyAfterPathEdits(p, fusedPartner, fusedMachineId);
           } else {
             updateFiberPath(p);
@@ -8861,7 +9175,7 @@
           var hit = hitTestTailTarget(ev.clientX, ev.clientY);
           highlightPort(hit && hit.el);
           if (fusedMachineId) {
-            afterFusedEndDragFrame(p, fusedPartner, fusedMachineId);
+            afterFusedEndDragFrame(p, fusedPartner, fusedMachineId, cableEnd);
             refreshFusedAssemblyAfterPathEdits(p, fusedPartner, fusedMachineId);
           } else {
             updateFiberPath(p);
