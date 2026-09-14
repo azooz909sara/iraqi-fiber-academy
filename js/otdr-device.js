@@ -1213,7 +1213,7 @@
     if (exitKey.indexOf('cpl:') === 0) return true;
     if (isSplitterInputPortKey(exitKey) || exitKey.indexOf('spl:') === 0) return false;
     var nextStep = findFiberStepFromPort(exitKey, graph, visitedPc || {}, visitedPt || {});
-    if (nextStep && nextStep.kind === 'pigtail') return false;
+    if (nextStep && (nextStep.kind === 'pigtail' || nextStep.kind === 'cable')) return false;
     if (fromSplitterBranch) return false;
     return true;
   }
@@ -1301,6 +1301,44 @@
     return roundTrace3(max);
   }
 
+  function isCableGraphNode(member) {
+    return !!(member && member.type === 'cable');
+  }
+
+  function oppositeCableMemberEnd(end) {
+    return end === 'start' ? 'end' : 'start';
+  }
+
+  function parseCableEndpointKey(key) {
+    var m = /^cable:([^:]+):(start|end)$/.exec(key || '');
+    if (!m) return null;
+    return { id: m[1], end: m[2] };
+  }
+
+  function cablePartnerAtMemberEnd(cable, end) {
+    if (!cable || !isCableGraphNode(cable)) return null;
+    if (end === 'start') return cable.startFusedPartnerId || null;
+    return cable.endFusedPartnerId || cable.fusedPartnerId || null;
+  }
+
+  function cableFusionAssemblyAtMemberEnd(cable, end) {
+    if (!cable || !isCableGraphNode(cable)) return null;
+    if (end === 'start') return cable.startFusionAssemblyId || null;
+    return cable.endFusionAssemblyId || cable.fusionAssemblyId || null;
+  }
+
+  function resolveFusionPartnerEntryEnd(partner, fromMemberId) {
+    if (!partner || !fromMemberId) return null;
+    if (isCableGraphNode(partner)) {
+      if (partner.startFusedPartnerId === fromMemberId) return 'start';
+      if (partner.endFusedPartnerId === fromMemberId) return 'end';
+      if (partner.fusedPartnerId === fromMemberId) return 'end';
+      return null;
+    }
+    if (partner.fusedPartnerId === fromMemberId) return 'tail';
+    return 'tail';
+  }
+
   function findFiberStepFromPort(currentKey, graph, visitedPc, visitedPt) {
     if (!currentKey) return null;
     var pcords = graph.pcords || [];
@@ -1349,6 +1387,20 @@
         lengthM: resolveOtdrFiberLengthM(p),
         pigtail: p,
       };
+    }
+
+    var cableMatch = parseCableEndpointKey(currentKey);
+    if (cableMatch) {
+      var cableNode = findPigtailInGraph(graph, cableMatch.id);
+      if (cableNode && isCableGraphNode(cableNode) && !visitedPt[cableNode.id]) {
+        return {
+          kind: 'cable',
+          linkId: cableNode.id,
+          cable: cableNode,
+          entryEnd: cableMatch.end,
+          lengthM: resolveOtdrFiberLengthM(cableNode),
+        };
+      }
     }
     return null;
   }
@@ -1500,6 +1552,103 @@
       if (bendLoss <= 0) return;
       bendLossTotal += bendLoss;
       pushTraceEvent('bend', 'Bend', bendLoss, { icon: 'bend' }, branchState);
+    }
+
+    function emitFusionSpliceIfNew(assemblyId, leftId, rightId, memberForLoss, branchState) {
+      var fuseKey = assemblyId || [leftId, rightId].sort().join('|');
+      if (branchState.fusedSeen[fuseKey]) return;
+      branchState.fusedSeen[fuseKey] = true;
+      var spLoss = lookupFusionSpliceLoss(assemblyId, memberForLoss);
+      spliceLossTotal += spLoss;
+      pushTraceEvent('splice', 'Fusion Splice', spLoss, null, branchState);
+    }
+
+    function pushOpenFiberEnd(branchState, connectorSide, component) {
+      var endOptics = resolveConnectorEventOptics(connectorSide, component);
+      connectorLossTotal += endOptics.loss;
+      pushTraceEvent('end', 'End of fiber', endOptics.loss, {
+        reflectance: endOptics.reflectance != null ? endOptics.reflectance : OTDR_FAR_REFLECT_DB,
+      }, branchState);
+    }
+
+    function continueFromPigtailConnector(partner, branchState) {
+      var partnerPortKey = portKeyFromFiberSnap(partner.connector);
+      branchState.lastConnectorSide = partner.connector || null;
+      branchState.lastConnectorComponent = partner;
+
+      if (isSplitterInputPortKey(partnerPortKey)) {
+        handleSplitterBranching(splitterIdFromPortKey(partnerPortKey), branchState);
+        return null;
+      }
+      if (!partnerPortKey) {
+        pushOpenFiberEnd(branchState, partner.connector, partner);
+        return null;
+      }
+      if (partnerPortKey.indexOf('cpl:') === 0) {
+        return pushNodeEventAtKey(partnerPortKey, branchState);
+      }
+      if (shouldEmitConnectorAtPort(
+        partnerPortKey,
+        graph,
+        branchState.pc,
+        branchState.pt,
+        branchState.fromSplitterBranch
+      )) {
+        return pushNodeEventAtKey(partnerPortKey, branchState);
+      }
+      return partnerPortKey;
+    }
+
+    function traverseCableFromEntry(cable, entryEnd, branchState) {
+      if (branchState.pt[cable.id]) {
+        pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
+        return null;
+      }
+      branchState.pt[cable.id] = true;
+      traverseFiberSpan(resolveOtdrFiberLengthM(cable), branchState);
+
+      var exitEnd = oppositeCableMemberEnd(entryEnd);
+      var nextPartnerId = cablePartnerAtMemberEnd(cable, exitEnd);
+      if (nextPartnerId) {
+        emitFusionSpliceIfNew(
+          cableFusionAssemblyAtMemberEnd(cable, exitEnd),
+          cable.id,
+          nextPartnerId,
+          cable,
+          branchState
+        );
+        return advanceFromFusionJoint(nextPartnerId, cable.id, branchState);
+      }
+
+      branchState.lastConnectorSide = null;
+      branchState.lastConnectorComponent = cable;
+      pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
+      return null;
+    }
+
+    function advanceFromFusionJoint(partnerId, fromMemberId, branchState) {
+      var partner = findPigtailInGraph(graph, partnerId);
+      if (!partner) {
+        pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
+        return null;
+      }
+      if (branchState.pt[partner.id]) {
+        pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
+        return null;
+      }
+
+      if (isCableGraphNode(partner)) {
+        var entryEnd = resolveFusionPartnerEntryEnd(partner, fromMemberId);
+        if (!entryEnd) {
+          pushTraceEvent('end', 'End of fiber', 0, { reflectance: OTDR_FAR_REFLECT_DB }, branchState);
+          return null;
+        }
+        return traverseCableFromEntry(partner, entryEnd, branchState);
+      }
+
+      branchState.pt[partner.id] = true;
+      traverseFiberSpan(resolveOtdrFiberLengthM(partner), branchState);
+      return continueFromPigtailConnector(partner, branchState);
     }
 
     function pushNodeEventAtKey(exitKey, branchState) {
@@ -1662,7 +1811,7 @@
             branchState.pc,
             branchState.pt
           );
-          if (cableExitStep && cableExitStep.kind === 'pigtail') {
+          if (cableExitStep && (cableExitStep.kind === 'pigtail' || cableExitStep.kind === 'cable')) {
             if (exitKey.indexOf('cpl:') === 0) {
               activeKey = pushNodeEventAtKey(exitKey, branchState);
               if (!activeKey) return;
@@ -1687,61 +1836,22 @@
           traversePigtailFiberSpan(p, branchState);
 
           if (p.fusedPartnerId) {
-            var fuseKey = p.fusionAssemblyId || (p.id + '|' + p.fusedPartnerId);
-            if (!branchState.fusedSeen[fuseKey]) {
-              branchState.fusedSeen[fuseKey] = true;
-              var spLoss = lookupFusionSpliceLoss(p.fusionAssemblyId, p);
-              spliceLossTotal += spLoss;
-              pushTraceEvent('splice', 'Fusion Splice', spLoss, null, branchState);
-            }
-            var partner = findPigtailInGraph(graph, p.fusedPartnerId);
-            if (partner && !branchState.pt[partner.id]) {
-              branchState.pt[partner.id] = true;
-              traverseFiberSpan(resolveOtdrFiberLengthM(partner), branchState);
-              var partnerPortKey = portKeyFromFiberSnap(partner.connector);
-              branchState.lastConnectorSide = null;
-              branchState.lastConnectorComponent = null;
-              if (isSplitterInputPortKey(partnerPortKey)) {
-                handleSplitterBranching(splitterIdFromPortKey(partnerPortKey), branchState);
-                return;
-              }
-              if (partnerPortKey && partnerPortKey.indexOf('cpl:') === 0) {
-                branchState.lastConnectorSide = partner.connector || null;
-                branchState.lastConnectorComponent = partner;
-                activeKey = pushNodeEventAtKey(partnerPortKey, branchState);
-                if (!activeKey) return;
-                if (tryAdvanceSplitterInput(activeKey, branchState)) return;
-              } else if (shouldEmitConnectorAtPort(
-                partnerPortKey,
-                graph,
-                branchState.pc,
-                branchState.pt,
-                branchState.fromSplitterBranch
-              )) {
-                branchState.lastConnectorSide = partner.connector || null;
-                branchState.lastConnectorComponent = partner;
-                activeKey = pushNodeEventAtKey(partnerPortKey, branchState);
-                if (!activeKey) return;
-                if (tryAdvanceSplitterInput(activeKey, branchState)) return;
-              } else if (partnerPortKey) {
-                activeKey = partnerPortKey;
-              } else {
-                return;
-              }
-            } else {
-              var tailOptics = resolveConnectorEventOptics(p.connector, p);
-              pushTraceEvent('end', 'End of fiber', tailOptics.loss, {
-                reflectance: tailOptics.reflectance != null ? tailOptics.reflectance : OTDR_FAR_REFLECT_DB,
-              }, branchState);
-              return;
-            }
-          } else {
-            var openTailOptics = resolveConnectorEventOptics(p.connector, p);
-            pushTraceEvent('end', 'End of fiber', openTailOptics.loss, {
-              reflectance: openTailOptics.reflectance != null ? openTailOptics.reflectance : OTDR_FAR_REFLECT_DB,
-            }, branchState);
-            return;
+            emitFusionSpliceIfNew(p.fusionAssemblyId, p.id, p.fusedPartnerId, p, branchState);
+            activeKey = advanceFromFusionJoint(p.fusedPartnerId, p.id, branchState);
+            if (!activeKey) return;
+            if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+            continue;
           }
+
+          pushOpenFiberEnd(branchState, p.connector, p);
+          return;
+        }
+
+        if (step.kind === 'cable') {
+          activeKey = traverseCableFromEntry(step.cable, step.entryEnd, branchState);
+          if (!activeKey) return;
+          if (tryAdvanceSplitterInput(activeKey, branchState)) return;
+          continue;
         }
       }
     }
