@@ -351,6 +351,7 @@
     var visitedCplEntry = {};
     var couplerPass = {};
     var visitedPcordHop = {};
+    var visitedMemberHop = {};
 
     function markPcord(id) {
       if (!id || pcords[id]) return false;
@@ -639,55 +640,123 @@
       /* OLT / VFL far end: core glows, no further hop */
     }
 
-    /** Mark laser exit at the far open end (bare tail or unplugged connector). */
-    function resolvePigtailFarExit(p, opts) {
+    function isCableNode(p) {
+      return !!(p && p.type === 'cable');
+    }
+
+    function cableUiEnd(end) {
+      return end === 'start' ? 'A' : 'B';
+    }
+
+    function oppositeCableMemberEnd(end) {
+      return end === 'start' ? 'end' : 'start';
+    }
+
+    function cablePartnerAtEnd(p, end) {
+      if (!p || !isCableNode(p)) return null;
+      return end === 'start' ? (p.startFusedPartnerId || null) : (p.endFusedPartnerId || null);
+    }
+
+    function resolvePartnerEntryEnd(partner, fromMemberId) {
+      if (!partner || !fromMemberId) return null;
+      if (isCableNode(partner)) {
+        if (partner.startFusedPartnerId === fromMemberId) return 'start';
+        if (partner.endFusedPartnerId === fromMemberId) return 'end';
+        return null;
+      }
+      if (partner.fusedPartnerId === fromMemberId) return 'end';
+      return 'end';
+    }
+
+    /** Mark laser exit at a free cable terminal (A = start, B = end). */
+    function markCableExit(p, end) {
+      if (!p || !isCableNode(p)) return;
+      if (cablePartnerAtEnd(p, end)) return;
+      pigtailExits[p.id] = cableUiEnd(end);
+    }
+
+    /** Light crosses a fusion weld into the next chain member. */
+    function injectFromFusion(partnerId, fromMemberId) {
+      if (!partnerId || !fromMemberId) return;
+      var partner = findPigtail(graph, partnerId);
+      if (!partner) return;
+      var entryEnd = resolvePartnerEntryEnd(partner, fromMemberId);
+      if (!entryEnd) return;
+      if (isCableNode(partner)) {
+        injectCable(partner.id, { entryEnd: entryEnd, fromFusion: true });
+      } else {
+        injectPigtail(partner.id, { entryEnd: entryEnd, fromFusion: true });
+      }
+    }
+
+    /**
+     * Light enters at one cable end, traverses the full span, and continues
+     * through any fusion on the opposite terminal.
+     */
+    function injectCable(id, opts) {
       opts = opts || {};
-      if (!p) return;
-      /* Welded fused pair: B ends meet at weld — far exit is the unplugged connector only */
-      if (opts.fusedWelded || isWeldedFusedPigtail(p)) {
-        if (isOpenEnd(p.connector)) {
-          pigtailExits[p.id] = 'A';
-        }
+      if (!id) return;
+      var p = findPigtail(graph, id);
+      if (!p || !isCableNode(p)) return;
+      var entryEnd = opts.entryEnd;
+      if (entryEnd !== 'start' && entryEnd !== 'end') return;
+      var hopKey = id + ':entry-' + entryEnd;
+      if (visitedMemberHop[hopKey]) return;
+      visitedMemberHop[hopKey] = true;
+      markPigtail(id);
+
+      var exitEnd = oppositeCableMemberEnd(entryEnd);
+      var partnerId = cablePartnerAtEnd(p, exitEnd);
+      if (partnerId) {
+        injectFromFusion(partnerId, id);
         return;
       }
-      if (isOpenEnd(p.tail)) {
-        pigtailExits[p.id] = 'B';
-        return;
-      }
-      if (isOpenEnd(p.connector)) {
-        pigtailExits[p.id] = 'A';
-      }
+      markCableExit(p, exitEnd);
     }
 
-    function isWeldedFusedPigtail(p) {
-      if (!p || !p.splicerWeldMachineId) return false;
-      if (p.fusedPartnerId) return true;
-      if (!global.FtthLab || typeof FtthLab.isPigtailFused !== 'function') return false;
-      return FtthLab.isPigtailFused(p);
-    }
-
-    /** Light enters at SC connector; exits the far open end (tail or connector). */
+    /**
+     * Pigtail: light enters at connector (A) or tail/weld (B) and propagates
+     * through fusions across N-segment welded chains.
+     */
     function injectPigtail(id, opts) {
       opts = opts || {};
       if (!id) return;
       var p = findPigtail(graph, id);
       if (!p) return;
-      markPigtail(id);
-
-      if (isWeldedFusedPigtail(p)) {
-        var partner = p.fusedPartnerId ? findPigtail(graph, p.fusedPartnerId) : null;
-        if (partner) markPigtail(partner.id);
-        resolvePigtailFarExit(p, { fusedWelded: true });
-        if (partner) resolvePigtailFarExit(partner, { fusedWelded: true });
+      if (isCableNode(p)) {
+        injectCable(id, opts);
         return;
       }
 
-      var connAtt = p.connector;
+      var entryEnd = opts.entryEnd || 'connector';
+      var hopKey = id + ':entry-' + entryEnd;
+      if (visitedMemberHop[hopKey]) return;
+      visitedMemberHop[hopKey] = true;
+      markPigtail(id);
+
+      if (entryEnd === 'connector') {
+        var connAtt = p.connector;
+        if (connAtt && connAtt.owner === 'coupler' && !opts.enteredViaCoupler) {
+          injectCoupler(connAtt.couplerId, connAtt.port);
+        }
+        if (p.fusedPartnerId) {
+          injectFromFusion(p.fusedPartnerId, id);
+          return;
+        }
+        if (isOpenEnd(p.tail)) {
+          pigtailExits[p.id] = 'B';
+        }
+        return;
+      }
+
+      /* Entered at tail / fusion weld — propagate toward connector. */
+      connAtt = p.connector;
       if (connAtt && connAtt.owner === 'coupler' && !opts.enteredViaCoupler) {
         injectCoupler(connAtt.couplerId, connAtt.port);
       }
-      resolvePigtailFarExit(p);
-      /* Tail parked on splice / termination — light stops at the tray */
+      if (isOpenEnd(p.connector)) {
+        pigtailExits[p.id] = 'A';
+      }
     }
 
     devices.forEach(function (d) {
@@ -795,19 +864,21 @@
         if (mid) {
           on = !!fusedGlow[mid];
         } else if (id) {
-          var fused = false;
-          if (global.FtthLab && typeof FtthLab.isPigtailFused === 'function' &&
-              typeof FtthLab.getFiberLaserGraph === 'function') {
+          var baseId = String(id).split(':')[0];
+          var suppressFusedPigtail = false;
+          if (global.FtthLab && typeof FtthLab.getFiberLaserGraph === 'function') {
             var graphPigtails = (FtthLab.getFiberLaserGraph() || {}).pigtails || [];
             var gi;
             for (gi = 0; gi < graphPigtails.length; gi++) {
-              if (graphPigtails[gi].id === id) {
-                fused = !!(graphPigtails[gi].splicerWeldMachineId && graphPigtails[gi].fusedPartnerId);
-                break;
-              }
+              if (graphPigtails[gi].id !== baseId) continue;
+              if (graphPigtails[gi].type === 'cable') break;
+              suppressFusedPigtail = !!(
+                graphPigtails[gi].splicerWeldMachineId && graphPigtails[gi].fusedPartnerId
+              );
+              break;
             }
           }
-          on = !!pt[id] && !fused;
+          on = !!(pt[id] || pt[baseId]) && !suppressFusedPigtail;
         }
         setFiberGlowClass(el, on, mode);
       });

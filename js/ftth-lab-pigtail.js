@@ -10283,12 +10283,20 @@
           type: 'cable',
           startKey: opticalEndpointKey(p, 'start'),
           endKey: opticalEndpointKey(p, 'end'),
+          startFusionAssemblyId: getMemberEndFusionAssemblyId(p, 'start') || null,
+          endFusionAssemblyId: getMemberEndFusionAssemblyId(p, 'end') || null,
+          fusionAssemblyId: getMemberEndFusionAssemblyId(p, 'end') || null,
+          startFusedPartnerId: getMemberEndFusedPartnerId(p, 'start') || null,
+          endFusedPartnerId: getMemberEndFusedPartnerId(p, 'end') || null,
+          fusedPartnerId: getMemberEndFusedPartnerId(p, 'end') || null,
+          startSplicerWeldMachineId: getMemberEndSplicerWeldMachineId(p, 'start') || null,
+          splicerWeldMachineId: getMemberEndSplicerWeldMachineId(p, 'end') || null,
           cableLength: pigtailLengthDisplayValue(p),
           lengthUnit: pigtailLengthUnit(p),
           lengthMeters: pigtailFiberLengthM(p),
           fiberLengthM: pigtailFiberLengthM(p),
-          freeStart: true,
-          freeEnd: true,
+          freeStart: !isMemberEndFused(p, 'start'),
+          freeEnd: !isMemberEndFused(p, 'end'),
         };
       }
       var partner = getFusedPartner(p);
@@ -10340,6 +10348,16 @@
       if (!map[id]) return;
       var pg = findPigtail(id);
       if (!pg || !isPigtailFused(pg)) return;
+      if (isCable(pg)) {
+        ['start', 'end'].forEach(function (end) {
+          if (!isMemberEndFused(pg, end)) return;
+          var asmId = getMemberEndFusionAssemblyId(pg, end);
+          if (asmId) fusedGlow[asmId] = true;
+          var partnerId = getMemberEndFusedPartnerId(pg, end);
+          if (partnerId) map[partnerId] = true;
+        });
+        return;
+      }
       fusedGlow[getPigtailFusionAssemblyId(pg) || pg.fusionAssemblyId] = true;
       var partner = getFusedPartner(pg);
       if (partner) map[partner.id] = true;
@@ -10408,7 +10426,8 @@
         } else if (id) {
           var baseId = String(id).split(':')[0];
           var pg = findPigtail(baseId);
-          on = !!(map[id] || map[baseId]) && (!pg || !isPigtailFused(pg));
+          on = !!(map[id] || map[baseId]);
+          if (on && pg && isPigtailFused(pg) && !isCable(pg)) on = false;
         }
         setGlow(el, on);
       });
