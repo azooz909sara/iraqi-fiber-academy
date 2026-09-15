@@ -10322,6 +10322,7 @@
     return pigtails.map(function (p) {
       if (isCable(p)) {
         syncCablePrepState(p);
+        var cableFiberM = pigtailFiberLengthM(p);
         return {
           id: p.id,
           type: 'cable',
@@ -10337,8 +10338,14 @@
           splicerWeldMachineId: getMemberEndSplicerWeldMachineId(p, 'end') || null,
           cableLength: pigtailLengthDisplayValue(p),
           lengthUnit: pigtailLengthUnit(p),
-          lengthMeters: pigtailFiberLengthM(p),
-          fiberLengthM: pigtailFiberLengthM(p),
+          lengthMeters: cableFiberM,
+          fiberLengthM: cableFiberM,
+          ax: p.ax,
+          ay: p.ay,
+          bx: p.bx,
+          by: p.by,
+          fixedLength: typeof p.fixedLength === 'number' ? p.fixedLength : null,
+          route: p.route && p.route.length ? p.route.slice() : null,
           freeStart: !isMemberEndFused(p, 'start'),
           freeEnd: !isMemberEndFused(p, 'end'),
         };
@@ -10382,6 +10389,12 @@
         lengthUnit: pigtailLengthUnit(p),
         lengthMeters: pigtailFiberLengthM(p),
         fiberLengthM: pigtailFiberLengthM(p),
+        ax: p.ax,
+        ay: p.ay,
+        bx: p.bx,
+        by: p.by,
+        fixedLength: typeof p.fixedLength === 'number' ? p.fixedLength : null,
+        route: p.route && p.route.length ? p.route.slice() : null,
       };
     });
   }
@@ -11054,6 +11067,7 @@
         return hitTestSplicerGroove(clientX, clientY);
       };
       FtthLab.placeCable = placeCable;
+      FtthLab.pigtailFiberLengthM = pigtailFiberLengthM;
 
       document.addEventListener('fusion-splicer:clampLid', function () {
         renderSplicerFiberOverlays();

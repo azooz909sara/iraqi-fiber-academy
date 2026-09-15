@@ -514,8 +514,8 @@
   var OTDR_FAR_REFLECT_DB = -14.8;
   var OTDR_FUSION_SPLICE_DB = 0.05;
   var OTDR_COUPLER_PASS_DB = 0.3;
-  var FIBER_ATTENUATION = 0.210;
   var VIAVI_MIN_SECTION_KM_FOR_SLOPE = 0.02;
+  var OTDR_FALLBACK_PX_PER_M = 160;
 
   function roundTrace2(n) {
     return Math.round(n * 100) / 100;
@@ -545,6 +545,55 @@
       return FtthLab.fiberSpanLossDb(lengthM, wavelengthNm);
     }
     return (Math.max(0, lengthM) / 1000) * labFiberAttenuationDbKm(wavelengthNm);
+  }
+
+  /** OTDR trace slope — aligned with FtthLab.fiberAttenuationDbPerKm (0.20 dB/km @ 1550). */
+  function getOtdrFiberAttenuationDbKm() {
+    return roundTrace3(labFiberAttenuationDbKm(parseOtdrWavelengthNm()));
+  }
+
+  function worldPxToMetersForOtdr(px) {
+    var n = Number(px);
+    if (!isFinite(n) || n <= 0) return 0;
+    if (global.FtthLab && typeof FtthLab.worldPxToMeters === 'function') {
+      return Math.max(0, FtthLab.worldPxToMeters(n));
+    }
+    return Math.max(0, n / OTDR_FALLBACK_PX_PER_M);
+  }
+
+  function resolveOtdrFiberGeometryLengthM(link) {
+    if (!link) return 0;
+    if (global.FtthLab && typeof FtthLab.pigtailFiberLengthM === 'function') {
+      var labLen = Number(FtthLab.pigtailFiberLengthM(link));
+      if (isFinite(labLen) && labLen > 0) return labLen;
+    }
+    if (link.route && link.route.length >= 2) {
+      var ri;
+      var routePx = 0;
+      for (ri = 1; ri < link.route.length; ri++) {
+        var p0 = link.route[ri - 1];
+        var p1 = link.route[ri];
+        if (!p0 || !p1) continue;
+        var rdx = (p1.x || 0) - (p0.x || 0);
+        var rdy = (p1.y || 0) - (p0.y || 0);
+        routePx += Math.sqrt(rdx * rdx + rdy * rdy);
+      }
+      var routeM = worldPxToMetersForOtdr(routePx);
+      if (routeM > 0) return routeM;
+    }
+    if (typeof link.fixedLength === 'number' && isFinite(link.fixedLength) && link.fixedLength > 0) {
+      return worldPxToMetersForOtdr(link.fixedLength);
+    }
+    if (typeof link.ax === 'number' && typeof link.bx === 'number') {
+      var dx = link.bx - link.ax;
+      var dy = (typeof link.by === 'number' ? link.by : 0) - (typeof link.ay === 'number' ? link.ay : 0);
+      return worldPxToMetersForOtdr(Math.sqrt(dx * dx + dy * dy));
+    }
+    return 0;
+  }
+
+  function cableEndpointKey(cableId, end) {
+    return 'cable:' + cableId + ':' + (end === 'start' ? 'start' : 'end');
   }
 
   function portKeyFromFiberSnap(att) {
@@ -583,17 +632,19 @@
   function resolveOtdrFiberLengthM(link) {
     if (!link) return 0;
     var cableLength = link.cableLength != null ? Number(link.cableLength) : NaN;
-    if (isFinite(cableLength) && cableLength >= 0) {
+    if (isFinite(cableLength) && cableLength > 0) {
       var unit = link.lengthUnit === 'km' ? 'km' : 'm';
       return Math.max(0, unit === 'km' ? cableLength * 1000 : cableLength);
     }
-    if (typeof link.otdrCableLengthM === 'number' && isFinite(link.otdrCableLengthM)) {
+    if (typeof link.otdrCableLengthM === 'number' && isFinite(link.otdrCableLengthM) && link.otdrCableLengthM > 0) {
       return Math.max(0, link.otdrCableLengthM);
     }
     if (typeof link.lengthMeters === 'number' && isFinite(link.lengthMeters) && link.lengthMeters > 0) {
       return Math.max(0, link.lengthMeters);
     }
-    return Math.max(0, Number(link.fiberLengthM) || 0);
+    var fiberLen = Number(link.fiberLengthM);
+    if (isFinite(fiberLen) && fiberLen > 0) return fiberLen;
+    return resolveOtdrFiberGeometryLengthM(link);
   }
 
   function readComponentLossDb(component, fallback) {
@@ -874,23 +925,53 @@
     return null;
   }
 
-  function lookupFusionSpliceLoss(assemblyId, pigtail) {
-    if (pigtail) {
-      var pigtailLoss = readComponentLossDb(pigtail, null);
-      if (pigtailLoss != null) return pigtailLoss;
+  function fusionPairMatchesLookup(pair, assemblyId, endpointKey, memberId) {
+    if (!pair) return false;
+    if (assemblyId && (pair.assemblyId === assemblyId || pair.fusionAssemblyId === assemblyId)) {
+      return true;
     }
+    if (endpointKey && (pair.leftKey === endpointKey || pair.rightKey === endpointKey)) {
+      return true;
+    }
+    if (memberId && (pair.leftId === memberId || pair.rightId === memberId)) {
+      if (!endpointKey) return true;
+      if (pair.leftKey === endpointKey || pair.rightKey === endpointKey) return true;
+    }
+    return false;
+  }
+
+  function readFusionPairSpliceLossDb(pair) {
+    if (!pair) return null;
+    if (typeof pair.spliceLossDb === 'number' && isFinite(pair.spliceLossDb)) {
+      return pair.spliceLossDb;
+    }
+    if (typeof pair.loss === 'number' && isFinite(pair.loss)) {
+      return pair.loss;
+    }
+    return null;
+  }
+
+  function lookupFusionSpliceLoss(assemblyId, member, opts) {
+    opts = opts || {};
+    var endpointKey = opts.endpointKey || null;
+    var memberId = member && member.id ? member.id : null;
+
+    if (member) {
+      var memberLoss = readComponentLossDb(member, null);
+      if (memberLoss != null) return memberLoss;
+    }
+
     if (global.FtthLab && typeof FtthLab.getFusedAssemblyOpticalPairs === 'function') {
       var pairs = FtthLab.getFusedAssemblyOpticalPairs() || [];
       var i;
       for (i = 0; i < pairs.length; i++) {
         var pair = pairs[i];
-        if (pair.assemblyId === assemblyId || pair.fusionAssemblyId === assemblyId) {
-          if (typeof pair.spliceLossDb === 'number' && isFinite(pair.spliceLossDb)) {
-            return pair.spliceLossDb;
-          }
-        }
+        if (!fusionPairMatchesLookup(pair, assemblyId, endpointKey, memberId)) continue;
+        var exactLoss = readFusionPairSpliceLossDb(pair);
+        if (exactLoss != null) return exactLoss;
       }
     }
+
     return OTDR_FUSION_SPLICE_DB;
   }
 
@@ -1003,8 +1084,7 @@
   }
 
   function getViaviFiberSlopeDbKm() {
-    if (parseOtdrWavelengthNm() === 1550) return 0.210;
-    return roundTrace3(labFiberAttenuationDbKm(parseOtdrWavelengthNm()));
+    return getOtdrFiberAttenuationDbKm();
   }
 
   /**
@@ -1534,7 +1614,7 @@
       branchState.lastTraversedSpanM = span;
       if (span <= 0) return 0;
       branchState.distanceM += span;
-      var segmentLoss = (span / 1000) * FIBER_ATTENUATION;
+      var segmentLoss = (span / 1000) * getOtdrFiberAttenuationDbKm();
       fiberLossTotal += segmentLoss;
       return segmentLoss;
     }
@@ -1554,11 +1634,12 @@
       pushTraceEvent('bend', 'Bend', bendLoss, { icon: 'bend' }, branchState);
     }
 
-    function emitFusionSpliceIfNew(assemblyId, leftId, rightId, memberForLoss, branchState) {
+    function emitFusionSpliceIfNew(assemblyId, leftId, rightId, memberForLoss, branchState, opts) {
+      opts = opts || {};
       var fuseKey = assemblyId || [leftId, rightId].sort().join('|');
       if (branchState.fusedSeen[fuseKey]) return;
       branchState.fusedSeen[fuseKey] = true;
-      var spLoss = lookupFusionSpliceLoss(assemblyId, memberForLoss);
+      var spLoss = lookupFusionSpliceLoss(assemblyId, memberForLoss, opts);
       spliceLossTotal += spLoss;
       pushTraceEvent('splice', 'Fusion Splice', spLoss, null, branchState);
     }
@@ -1615,7 +1696,8 @@
           cable.id,
           nextPartnerId,
           cable,
-          branchState
+          branchState,
+          { endpointKey: cableEndpointKey(cable.id, exitEnd) }
         );
         return advanceFromFusionJoint(nextPartnerId, cable.id, branchState);
       }
@@ -1836,7 +1918,14 @@
           traversePigtailFiberSpan(p, branchState);
 
           if (p.fusedPartnerId) {
-            emitFusionSpliceIfNew(p.fusionAssemblyId, p.id, p.fusedPartnerId, p, branchState);
+            emitFusionSpliceIfNew(
+              p.fusionAssemblyId,
+              p.id,
+              p.fusedPartnerId,
+              p,
+              branchState,
+              { endpointKey: 'pigtail:' + p.id + ':tail' }
+            );
             activeKey = advanceFromFusionJoint(p.fusedPartnerId, p.id, branchState);
             if (!activeKey) return;
             if (tryAdvanceSplitterInput(activeKey, branchState)) return;
