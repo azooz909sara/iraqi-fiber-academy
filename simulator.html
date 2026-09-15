@@ -148,6 +148,18 @@
                   justify-content 0.35s ease;
     }
 
+    /* FDT Head: keep quick-switcher label intact when toolbox is narrowed */
+    #toolbox .toolbox-item--fdt-head > .toolbox-item__text.toolbox-collapsible-text {
+      max-width: none;
+      min-width: 0;
+    }
+
+    #toolbox .toolbox-fdt-head__label {
+      overflow: visible;
+      text-overflow: clip;
+      white-space: nowrap;
+    }
+
     .toolbox-item__icon {
       transition: transform 0.25s ease;
     }
@@ -225,41 +237,6 @@
     #canvas-wrapper.is-panning {
       cursor: grabbing;
     }
-    .grid-controls {
-      position: absolute;
-      top: 0.75rem;
-      right: 0.75rem;
-      bottom: auto;
-      z-index: 600;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      background: rgba(26, 35, 50, 0.92);
-      border: 1px solid rgba(0, 229, 255, 0.15);
-      border-radius: 10px;
-      padding: 6px;
-      backdrop-filter: blur(8px);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-      pointer-events: auto;
-    }
-    .grid-ctrl-btn {
-      width: 32px;
-      height: 32px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 7px;
-      border: 1px solid rgba(0, 229, 255, 0.12);
-      background: #111827;
-      color: #94a3b8;
-      font-size: 15px;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .grid-ctrl-btn:hover { color: #00e5ff; border-color: rgba(0, 229, 255, 0.4); background: #1e2a3a; }
-    .grid-ctrl-btn.active { color: #39ff14; border-color: rgba(57, 255, 20, 0.4); }
-    .grid-ctrl-divider { height: 1px; background: rgba(0, 229, 255, 0.1); margin: 2px 0; }
-    #zoom-label { font-size: 9px; font-family: 'Cascadia Code', Consolas, monospace; color: #64748b; text-align: center; padding: 2px 0; }
 
     .map-layer-toggles { pointer-events: auto; }
     .map-layer-btn {
@@ -429,12 +406,6 @@
       display: flex;
     }
 
-    #simulator-container:fullscreen .grid-controls,
-    #simulator-container.is-fullscreen .grid-controls,
-    body.ftth-fake-fullscreen-active .grid-controls {
-      z-index: 650;
-    }
-
     #canvas-wrapper,
     #canvas-wrapper.map-container,
     #map-container {
@@ -510,7 +481,14 @@
 </head>
 <body class="bg-fiber-bg text-slate-100 font-sans h-screen flex flex-col overflow-hidden simulator-page-active">
 
-  <!-- Subscriber access gate (overlay only — does not remove canvas / workspace) -->
+  <!-- Subscriber access gate (overlay only — does not remove canvas / workspace). Hidden immediately on local file:// / localhost. -->
+  <script src="js/env-access.js"></script>
+  <script>
+    (function () {
+      var bypass = window.IFA_ENV && window.IFA_ENV.shouldBypassAccessControl && window.IFA_ENV.shouldBypassAccessControl();
+      if (bypass) document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
+    })();
+  </script>
   <div id="subscriber-gate" class="subscriber-gate subscriber-gate--visible" role="dialog" aria-modal="true" aria-labelledby="subscriber-gate-title" aria-hidden="false">
     <div class="subscriber-gate__backdrop" aria-hidden="true"></div>
     <div class="subscriber-gate__card" dir="rtl">
@@ -524,6 +502,17 @@
       </div>
     </div>
   </div>
+  <script>
+    (function () {
+      if (!window.IFA_ENV || !window.IFA_ENV.shouldBypassAccessControl || !window.IFA_ENV.shouldBypassAccessControl()) return;
+      var gate = document.getElementById('subscriber-gate');
+      if (!gate) return;
+      gate.hidden = true;
+      gate.setAttribute('aria-hidden', 'true');
+      gate.classList.remove('subscriber-gate--visible');
+      document.body.classList.remove('subscriber-gate-active');
+    })();
+  </script>
 
   <!-- Startup / Welcome (entry gate — map engine loads after project selection) -->
   <div id="startup-view" class="startup-view" role="main" aria-label="Welcome">
@@ -587,6 +576,7 @@
       <a href="index.html" class="hidden md:inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-fiber-border text-slate-400 hover:border-fiber-cyan hover:text-fiber-cyan transition-all">
         ← Back to Home
       </a>
+      <nav class="sim-switcher hidden md:flex items-center gap-2 flex-wrap" data-sim-switcher data-sim-switcher-class="hidden md:inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-fiber-border text-slate-400 hover:border-fiber-cyan hover:text-fiber-cyan transition-all" aria-label="Other simulators"></nav>
       <span class="text-slate-600">|</span>
       <div>
         <h1 class="text-sm font-bold text-white">FTTH Network Simulator</h1>
@@ -755,16 +745,11 @@
       <div id="virtual-city-view" class="simulator-view simulator-view--virtual flex flex-col flex-1 min-h-0" style="display:block">
 
       <div id="canvas-wrapper" class="map-viewport map-container flex-1 relative">
-        <!-- Fullscreen + reset zoom (zoom +/- moved to action bar) -->
-        <div class="grid-controls" id="grid-controls" aria-label="Map controls">
-          <button id="btn-fullscreen-map" type="button" class="grid-ctrl-btn" title="Fullscreen (keep Toolbox visible)" aria-label="Fullscreen">🖥️</button>
-          <div class="grid-ctrl-divider"></div>
-          <button id="btn-zoom-reset" type="button" class="grid-ctrl-btn" title="Reset Zoom" aria-label="Reset Zoom">⟲</button>
-        </div>
 
         <div id="canvas-zoom-inner" class="workspace-container map-canvas-inner">
           <div id="city-canvas" class="map-canvas relative" style="overflow: visible;">
             <div id="satellite-bg-layer" class="satellite-bg-layer" aria-hidden="true"></div>
+            <canvas id="image-map-grid-overlay" class="image-map-grid-overlay" aria-hidden="true"></canvas>
             <div id="street-layer" class="map-street-layer absolute inset-0 pointer-events-none" aria-hidden="true"></div>
             <div id="city-grid" class="relative z-20 grid gap-0"></div>
             <div id="workspace-items-layer" class="workspace-items-layer" aria-hidden="false"></div>
@@ -902,6 +887,8 @@
       </div>
       <span class="gis-status-bar__sep gis-status-bar__sep--hint" aria-hidden="true"></span>
       <div class="gis-status-bar__push-hint" id="status-bar-push-hint" title="Status">
+        <span id="status-bar-active-fdt" class="gis-status-bar__active-fdt" hidden aria-hidden="true"></span>
+        <span id="status-bar-fdt-sep" class="gis-status-bar__fdt-sep" hidden aria-hidden="true">|</span>
         <span id="status-bar-active-path" class="gis-status-bar__active-path">Active Path · ...</span>
         <span id="status-bar-dup-badge" class="gis-status-bar__dup-badge" hidden aria-hidden="true"></span>
       </div>
@@ -921,6 +908,8 @@
   <script src="js/settings/SimulatorSettings.js"></script>
   <script src="js/labels/LabelDataProviders.js"></script>
   <script src="js/FiberDesignManager.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
   <script src="js/FiberDesignUI.js"></script>
   <script src="js/FiberDesignMatrixModal.js"></script>
   <script src="js/SplicingActionUI.js"></script>
@@ -930,8 +919,10 @@
   <script src="js/fileMenuBar.js"></script>
   <script src="js/projectSetupModal.js"></script>
   <script src="js/startupView.js"></script>
+  <script src="js/imageMapProject.js"></script>
   <script src="js/ftth-simulator-core.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/platform-simulators.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
   <script type="module" src="js/simulator-access.js"></script>
 </body>

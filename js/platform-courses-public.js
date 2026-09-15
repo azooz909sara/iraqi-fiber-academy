@@ -105,7 +105,9 @@
     }
     var amount = Number(course && course.price);
     if (!isFinite(amount) || amount <= 0) return 'مجاناً';
-    return amount + ' ' + ((course && course.currency) || 'ر.س');
+    var label =
+      course && (course.currency === 'USD' || course.currency === '$') ? '$' : 'د.ع';
+    return amount + ' ' + label;
   }
 
   function accessPlanLabel(course) {
@@ -145,6 +147,9 @@
       '</footer>';
 
     return (
+      '<a class="public-course-card-link" href="course-details.html?id=' +
+      encodeURIComponent(course.id) +
+      '">' +
       '<article class="public-course-card" data-course-id="' +
       escapeHtml(course.id) +
       '" data-access-level="' +
@@ -170,7 +175,8 @@
       '</p>' +
       '</div>' +
       footer +
-      '</article>'
+      '</article>' +
+      '</a>'
     );
   }
 
@@ -232,6 +238,210 @@
   function initPublicCourses() {
     renderPublicCourses();
     bindLiveSync();
+    renderCourseDetailsPage();
+  }
+
+  function readAuthUser() {
+    try {
+      var raw = localStorage.getItem('ifa_auth_user');
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      return parsed && parsed.email ? parsed : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function viewerHasCourseAccess(course) {
+    if (window.PlatformSimulators && typeof window.PlatformSimulators.isAdminPreviewContext === 'function') {
+      /* ignore */
+    }
+    try {
+      if (new URLSearchParams(window.location.search).get('mode') === 'admin-preview') return true;
+    } catch (err) {
+      /* ignore */
+    }
+    var user = readAuthUser();
+    if (!user) return false;
+    if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
+    if (window.IFAAuth && typeof window.IFAAuth.hasActiveTrial === 'function' && window.IFAAuth.hasActiveTrial(user)) {
+      return true;
+    }
+    if (Number(user.trialExpiresAt) > Date.now()) return true;
+    if (user.isSubscriber) return true;
+    var enrolled = Array.isArray(user.enrolledCourseIds) ? user.enrolledCourseIds : [];
+    if (course && enrolled.indexOf(course.id) !== -1) return true;
+    return false;
+  }
+
+  function youtubeEmbed(url) {
+    var m = String(url || '').match(
+      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/
+    );
+    return m ? 'https://www.youtube.com/embed/' + m[1] : '';
+  }
+
+  function lessonCanPlay(lesson, course) {
+    if (lesson && lesson.isFreePreview) return true;
+    return viewerHasCourseAccess(course);
+  }
+
+  function renderLessonPlayer(lesson) {
+    var yt = youtubeEmbed(lesson.videoUrl);
+    if (yt) {
+      return (
+        '<div class="course-details__player">' +
+        '<iframe src="' +
+        escapeHtml(yt) +
+        '" title="' +
+        escapeHtml(lesson.title || 'فيديو') +
+        '" allowfullscreen></iframe>' +
+        '</div>'
+      );
+    }
+    if (lesson.videoUrl) {
+      return (
+        '<div class="course-details__player">' +
+        '<video controls src="' +
+        escapeHtml(lesson.videoUrl) +
+        '"></video>' +
+        '</div>'
+      );
+    }
+    return '<p class="course-details__no-video">لا يوجد فيديو مرفوع لهذه الحلقة بعد.</p>';
+  }
+
+  function renderCourseDetailsPage() {
+    var root = document.getElementById('courseDetailsRoot');
+    if (!root) return;
+    var courseId = '';
+    try {
+      courseId = String(new URLSearchParams(window.location.search).get('id') || '');
+    } catch (err) {
+      courseId = '';
+    }
+    var courses = fetchCoursesFromLocalStorage();
+    var course = null;
+    for (var i = 0; i < courses.length; i++) {
+      if (String(courses[i].id) === courseId) {
+        course = courses[i];
+        break;
+      }
+    }
+    if (!course) {
+      root.innerHTML =
+        '<p class="course-details__empty">الكورس غير موجود. <a href="index.html#courses">العودة للكورسات</a></p>';
+      return;
+    }
+
+    var lessons = Array.isArray(course.lessons) ? course.lessons.slice() : [];
+    lessons.sort(function (a, b) {
+      return (Number(a.order) || 0) - (Number(b.order) || 0);
+    });
+    var subscribed = viewerHasCourseAccess(course);
+    var activeId = '';
+    try {
+      activeId = String(new URLSearchParams(window.location.search).get('lesson') || '');
+    } catch (err2) {
+      activeId = '';
+    }
+    var active = null;
+    for (var j = 0; j < lessons.length; j++) {
+      if (String(lessons[j].id) === activeId) {
+        active = lessons[j];
+        break;
+      }
+    }
+    if (!active) {
+      for (var k = 0; k < lessons.length; k++) {
+        if (lessonCanPlay(lessons[k], course)) {
+          active = lessons[k];
+          break;
+        }
+      }
+    }
+    if (!active && lessons.length) active = lessons[0];
+
+    var listHtml = lessons.length
+      ? lessons
+          .map(function (lesson) {
+            var free = !!lesson.isFreePreview;
+            var canPlay = lessonCanPlay(lesson, course);
+            var isActive = active && String(active.id) === String(lesson.id);
+            var href =
+              'course-details.html?id=' +
+              encodeURIComponent(course.id) +
+              '&lesson=' +
+              encodeURIComponent(lesson.id);
+            var badge = free
+              ? '<span class="course-lesson__badge course-lesson__badge--free">معاينة مجانية</span>'
+              : canPlay
+                ? ''
+                : '<span class="course-lesson__badge course-lesson__badge--lock">🔒 يتطلب الاشتراك بالباقة</span>';
+            if (canPlay) {
+              return (
+                '<a class="course-lesson' +
+                (isActive ? ' is-active' : '') +
+                '" href="' +
+                href +
+                '">' +
+                '<span class="course-lesson__title">' +
+                escapeHtml(lesson.title || 'حلقة') +
+                '</span>' +
+                badge +
+                '</a>'
+              );
+            }
+            return (
+              '<div class="course-lesson course-lesson--locked">' +
+              '<span class="course-lesson__title">' +
+              escapeHtml(lesson.title || 'حلقة') +
+              '</span>' +
+              badge +
+              '<a class="course-lesson__plans" href="index.html#plans">عرض الباقات</a>' +
+              '</div>'
+            );
+          })
+          .join('')
+      : '<p class="course-details__empty">لا توجد حلقات بعد.</p>';
+
+    var playerHtml = '';
+    if (active && lessonCanPlay(active, course)) {
+      playerHtml =
+        '<h2 class="course-details__lesson-title">' +
+        escapeHtml(active.title || '') +
+        (active.isFreePreview ? ' <span class="course-lesson__badge course-lesson__badge--free">معاينة مجانية</span>' : '') +
+        '</h2>' +
+        (active.description ? '<p class="course-details__lesson-desc">' + escapeHtml(active.description) + '</p>' : '') +
+        renderLessonPlayer(active);
+    } else if (active) {
+      playerHtml =
+        '<div class="course-details__locked-panel">' +
+        '<p>🔒 يتطلب الاشتراك بالباقة</p>' +
+        '<a class="btn btn--primary" href="index.html#plans">عرض الباقات</a>' +
+        '</div>';
+    }
+
+    root.innerHTML =
+      '<header class="course-details__header">' +
+      '<p class="course-details__back"><a href="index.html#courses">← العودة للكورسات</a></p>' +
+      '<h1 class="course-details__title">' +
+      escapeHtml(course.title || '') +
+      '</h1>' +
+      '<p class="course-details__desc">' +
+      escapeHtml(course.description || '') +
+      '</p>' +
+      (subscribed ? '' : '<p class="course-details__hint">يمكنك مشاهدة الحلقات المحددة كمعاينة مجانية. بقية المحتوى يتطلب الاشتراك.</p>') +
+      '</header>' +
+      '<div class="course-details__layout">' +
+      '<aside class="course-details__curriculum">' +
+      '<h2>المنهج</h2>' +
+      listHtml +
+      '</aside>' +
+      '<section class="course-details__stage">' +
+      playerHtml +
+      '</section>' +
+      '</div>';
   }
 
   if (document.readyState === 'loading') {
@@ -242,4 +452,5 @@
 
   window.renderPublicCourses = renderPublicCourses;
   window.fetchCoursesFromLocalStorage = fetchCoursesFromLocalStorage;
+  window.renderCourseDetailsPage = renderCourseDetailsPage;
 })();

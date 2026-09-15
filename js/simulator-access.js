@@ -1,11 +1,27 @@
 /**
  * Restrict simulator.html to authenticated active subscribers.
  * Overlay only — never removes canvas / workspace DOM.
+ * Local file:// / localhost: full bypass (no gate).
+ * Production (irabi-fiber-academy.web.app): strict Firebase + subscription checks.
  */
 import { auth } from './firebase-config.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { syncUserProfile, checkSubscriberStatus } from './db-manager.js';
 import { loginWithGoogle } from './auth-manager.js';
+
+function shouldBypassAccessControl() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.shouldBypassAccessControl === 'function') {
+    return window.IFA_ENV.shouldBypassAccessControl();
+  }
+  try {
+    if (!window || !window.location) return false;
+    if (window.location.protocol === 'file:') return true;
+    var host = String(window.location.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch (err) {
+    return false;
+  }
+}
 
 function getGate() {
   return document.getElementById('subscriber-gate');
@@ -44,6 +60,11 @@ function setGateVisible(visible, reason) {
 }
 
 async function evaluateAccess(user) {
+  if (shouldBypassAccessControl()) {
+    setGateVisible(false);
+    return;
+  }
+
   setGateVisible(true, 'loading');
 
   if (!user) {
@@ -87,6 +108,14 @@ function bindGateActions() {
 
 function initSimulatorAccess() {
   bindGateActions();
+
+  if (shouldBypassAccessControl()) {
+    setGateVisible(false);
+    document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
+    return;
+  }
+
+  document.documentElement.setAttribute('data-ifa-access', 'enforced');
   setGateVisible(true, 'loading');
 
   onAuthStateChanged(auth, function (user) {

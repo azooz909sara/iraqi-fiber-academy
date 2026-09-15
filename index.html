@@ -36,22 +36,20 @@
         </ul>
         <div class="header__actions">
           <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <!-- Role menus (admin/instructor) injected only by auth-manager after authorization checks -->
+            <!--
+              Account menu (auth-manager):
+              - Toggle label always: الحساب + chevron
+              - Guest: تسجيل الدخول only
+              - Logged in: name + email, انضم إلينا كمدرب, تسجيل خروج at bottom
+            -->
             <div class="user-menu" id="userMenu" data-auth-guest="1">
               <button type="button" class="user-menu__toggle" id="userMenuToggle" aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">
-                <span class="user-menu__avatar" aria-hidden="true">ت</span>
-                <span class="user-menu__label">Profile</span>
+                <span class="user-menu__avatar" aria-hidden="true">?</span>
+                <span class="user-menu__label">الحساب</span>
                 <svg class="user-menu__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
               </button>
               <div class="user-menu__dropdown" id="userMenuDropdown" role="menu" hidden>
-                <div class="user-menu__info" role="none">
-                  <span class="user-menu__info-name">مستخدم تجريبي</span>
-                  <span class="user-menu__info-status">غير مشترك</span>
-                </div>
-                <div class="user-menu__divider" role="separator"></div>
-                <a href="#" class="user-menu__item user-menu__item--join" role="menuitem" data-join-instructor>انضم إلينا كمدرب</a>
-                <div class="user-menu__divider" role="separator"></div>
-                <a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>
+                <button type="button" class="user-menu__item user-menu__item--login" role="menuitem" data-auth-login>تسجيل الدخول</button>
               </div>
             </div>
           </div>
@@ -68,7 +66,7 @@
   </header>
 
   <main>
-    <section class="hero" id="hero">
+    <section class="hero hero--content-slider" id="hero">
       <div class="hero__bg">
         <div class="hero__glow"></div>
         <div class="hero__glow hero__glow--secondary"></div>
@@ -79,23 +77,11 @@
           <div class="fiber-line-animated"></div>
         </div>
       </div>
-      <div class="container hero__inner">
-        <div class="hero__content fade-in">
-          <div class="hero__badge"><span class="hero__badge-dot"></span> منصة تدريبية تفاعلية</div>
-          <h1 class="hero__title">تعلّم <span class="hero__title-highlight">شبكات FTTH</span><br>والألياف الضوئية عملياً</h1>
-          <p class="hero__description">أكاديمية الفايبر العراقية توفر لك بيئة محاكاة واقعية لتصميم وتركيب وصيانة شبكات الألياف الضوئية — من الأساسيات حتى الاحتراف، بدون مخاطر ميدانية.</p>
-          <div class="hero__actions">
-            <a href="#pricing" class="btn btn--primary">ابدأ التدريب الآن</a>
-            <a href="simulator.html" class="btn btn--outline">Try Simulator</a>
-          </div>
-          <div class="hero__trust">
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>محاكاة واقعية 100%</span></div>
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>شهادات معتمدة</span></div>
-            <div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>دعم فني متواصل</span></div>
-          </div>
-        </div>
-        <div class="hero__visual fade-in">
-          <div class="hero__visual-card">
+      <div class="hero-content-slider" id="heroSlideshow" aria-roledescription="carousel" aria-label="Homepage slides">
+        <div class="hero-content-slider__track" id="heroSlideshowSlides"></div>
+      </div>
+      <template id="heroNetworkTemplate">
+        <div class="hero__visual-card">
             <div class="hero__network" aria-label="FTTH Simulator — شبكة معدات الألياف الضوئية">
               <div class="hero__network-grid" aria-hidden="true"></div>
               <svg class="hero__network-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
@@ -266,18 +252,17 @@
             </div>
             <div class="hero__float-badge hero__float-badge--1">OTDR Readout</div>
             <div class="hero__float-badge hero__float-badge--2">FTH Simulator</div>
-          </div>
         </div>
-      </div>
+      </template>
     </section>
 
     <section class="stats" id="stats">
       <div class="container">
         <div class="stats__grid">
-          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" data-target="2500">0</div><div class="stat-card__label">طالب مسجّل</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" data-target="15000">0</div><div class="stat-card__label">كيلومتر محاكى</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" data-target="48">0</div><div class="stat-card__label">مشروع تدريبي</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" data-target="98">0</div><div class="stat-card__label">% رضا الطلاب</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="enrolledStudents" data-target="2500">0</div><div class="stat-card__label">طالب مسجّل</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="simulatedKilometers" data-target="15000">0</div><div class="stat-card__label">كيلومتر محاكى</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="trainingProjects" data-target="48">0</div><div class="stat-card__label">مشروع تدريبي</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="satisfactionRate" data-target="98" data-stat-suffix="%">0</div><div class="stat-card__label">% رضا الطلاب</div></div>
         </div>
       </div>
     </section>
@@ -289,18 +274,55 @@
           <h2 class="section__title">المحاكيات</h2>
           <p class="section__subtitle">أدوات محاكاة متقدمة مصممة خصيصاً لفنيي ومهندسي الألياف الضوئية</p>
         </div>
-        <div class="features__grid">
-          <a href="simulator.html" class="feature-card feature-card--link fade-in" aria-label="فتح محاكي FTTH">
+        <div class="features__grid" id="publicSimulatorsGrid">
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="ftth-simulator" data-simulator-href="simulator.html">
             <div class="feature-card__icon">🌐</div>
             <h3 class="feature-card__title">محاكي FTTH متكامل</h3>
             <p class="feature-card__desc">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
-            <span class="feature-card__tag">FTTH Simulator →</span>
-          </a>
-          <article class="feature-card fade-in"><div class="feature-card__icon">📊</div><h3 class="feature-card__title">محاكي OTDR افتراضي</h3><p class="feature-card__desc">تعلّم قراءة وتحليل منحنيات الانعكاس البصري (OTDR) وتحديد مواقع الأعطال بدقة دون معدات حقيقية.</p><span class="feature-card__tag">OTDR Simulator</span></article>
-          <article class="feature-card fade-in"><div class="feature-card__icon">⚡</div><h3 class="feature-card__title">قياس القدرة البصرية</h3><p class="feature-card__desc">تدرب على استخدام Power Meter لقياس مستويات الإشارة البصرية وضمان جودة الاتصال في كل نقطة.</p><span class="feature-card__tag">Power Meter</span></article>
-          <article class="feature-card fade-in"><div class="feature-card__icon">🔬</div><h3 class="feature-card__title">مختبر Fusion Splicer</h3><p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p><span class="feature-card__tag">Splicing Lab</span></article>
-          <article class="feature-card fade-in"><div class="feature-card__icon">📋</div><h3 class="feature-card__title">تقييمات وتقارير</h3><p class="feature-card__desc">احصل على تقارير أداء مفصّلة بعد كل جلسة تدريبية مع توصيات مخصصة لتحسين مهاراتك.</p><span class="feature-card__tag">Analytics</span></article>
-          <article class="feature-card fade-in"><div class="feature-card__icon">👨‍🏫</div><h3 class="feature-card__title">إشراف المدربين</h3><p class="feature-card__desc">تواصل مع مدربين معتمدين، احصل على ملاحظات مباشرة، وشارك في جلسات تدريبية جماعية.</p><span class="feature-card__tag">Instructor Panel</span></article>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="simulator.html" data-simulator-launch="ftth-simulator">افتح المحاكي</a>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="otdr-simulator" data-simulator-href="otdr-lab.html">
+            <div class="feature-card__icon">📊</div>
+            <h3 class="feature-card__title">مختبر OTDR (OTDR Lab)</h3>
+            <p class="feature-card__desc">ورشة OTDR كاملة بنفس بيئة مختبر اللحام: بناء المسارات، اللحام، القطع، ثم اختبار الانعكاس وتحليل المنحنيات.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="otdr-lab.html" data-simulator-launch="otdr-simulator">افتح المحاكي</a>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="power-meter" data-simulator-href="power-meter.html">
+            <div class="feature-card__icon">⚡</div>
+            <h3 class="feature-card__title">قياس القدرة البصرية</h3>
+            <p class="feature-card__desc">مدرّب OPM احترافي: أطوال موجية 1310/1490/1550، تحويل dBm↔mW، مرجع الخسارة، ومؤشرات Pass/Warning/Fail وفق GPON و EPON — مع ورشة ربط مصغّرة (Patch Cord · Pigtail · Splitter) لاختبار المسارات مباشرة بجانب جهاز القياس.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="power-meter.html" data-simulator-launch="power-meter">افتح المحاكي</a>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fusion-splicer" data-simulator-href="fusion-splicer.html" data-fusion-splicer-card>
+            <div class="feature-card__icon">🔬</div>
+            <h3 class="feature-card__title">مختبر Fusion Splicer</h3>
+            <p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="fusion-splicer.html" data-simulator-launch="fusion-splicer">افتح المحاكي</a>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fiber-anatomy" data-simulator-href="fiber-3d-simulator.html" data-anatomy-simulator-card>
+            <div class="feature-card__icon">🧬</div>
+            <h3 class="feature-card__title">Fiber Optics 3D / 2D Interactive Anatomy</h3>
+            <p class="feature-card__desc">شرّح كابلات Last Mile وFTTH حتى 288F: الغلاف → الأنابيب → 6 أو 12 ليف لكل أنبوب، مع تمييز 48F Last Mile و48F Feeder، وعلامات الشريط الأوسط لأنابيب T13–T24 في كابل 288F.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="fiber-3d-simulator.html" data-simulator-launch="fiber-anatomy">افتح المحاكي</a>
+            </div>
+          </article>
+          <article class="feature-card fade-in" data-simulator-card data-simulator-id="patch-panel-lab" data-simulator-href="ftth-lab.html" data-ftth-lab-card>
+            <div class="feature-card__icon">🔌</div>
+            <h3 class="feature-card__title">FTTH Network &amp; Patch Panel Lab</h3>
+            <p class="feature-card__desc">مختبر FTTH: مقسمات PLC، أسلاك Patch Cord بطرفي A وB بنفس منطق السحب اليدوي (بدون تتبع تلقائي)، يُحفظ المسار عند الإطباق (SC/APC أخضر · SC/PC أزرق)، مع تنبيه عدم التوافق وخصم خسارة إضافي دون حظر التوصيل.</p>
+            <div class="feature-card__access" data-simulator-access>
+              <a class="feature-card__open-btn" href="ftth-lab.html" data-simulator-launch="patch-panel-lab">افتح المحاكي</a>
+            </div>
+          </article>
         </div>
       </div>
     </section>
@@ -320,45 +342,31 @@
 
     <section class="section demo" id="demo">
       <div class="container">
-        <div class="demo__wrapper">
-          <div class="demo__content fade-in">
-            <span class="section__badge">معاينة المحاكي</span>
-            <h2 class="section__title" style="text-align:right">لمحة عن بيئة المحاكاة</h2>
-            <p class="section__subtitle" style="text-align:right;margin-inline:0">واجهة تفاعلية لمحاكاة شبكات الألياف الضوئية — جربها الآن</p>
-            <ul class="demo__features-list">
-              <li>تصميم شبكة FTTH كاملة بسحب وإفلات</li>
-              <li>محاكاة إشارات OTDR في الوقت الفعلي</li>
-              <li>قياس القدرة البصرية لكل نقطة</li>
-              <li>سيناريوهات أعطال واقعية للتدريب</li>
-            </ul>
-            <a href="simulator.html" class="btn btn--primary" style="margin-top:1.5rem">Try Simulator</a>
+        <div class="demo__wrapper" id="simulatorShowcase" data-sim-showcase>
+          <div class="demo__content sim-showcase__content">
+            <span class="section__badge">معاينة المحاكيات</span>
+            <div class="sim-showcase__copy" id="simShowcaseCopy" aria-live="polite">
+              <h2 class="section__title sim-showcase__title" id="simShowcaseTitle" style="text-align:right">محاكي FTTH متكامل</h2>
+              <p class="section__subtitle sim-showcase__desc" id="simShowcaseDesc" style="text-align:right;margin-inline:0">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
+              <a href="simulator.html" class="btn btn--primary sim-showcase__cta" id="simShowcaseCta" style="margin-top:1.5rem" data-simulator-launch="ftth-simulator">Try Simulator</a>
+            </div>
           </div>
-          <div class="demo__screen fade-in">
+          <div class="demo__screen sim-showcase__screen" id="simShowcaseScreen">
             <div class="demo__screen-header">
               <span class="demo__screen-dot demo__screen-dot--red"></span>
               <span class="demo__screen-dot demo__screen-dot--yellow"></span>
               <span class="demo__screen-dot demo__screen-dot--green"></span>
-              <span class="demo__screen-title">fiber-academy-simulator v2.0</span>
+              <span class="demo__screen-title" id="simShowcaseScreenTitle">fiber-academy-simulator v2.0</span>
             </div>
             <div class="demo__screen-body">
-              <div class="demo__mock-toolbar">
-                <span class="demo__mock-btn demo__mock-btn--active">FTTH</span>
-                <span class="demo__mock-btn">OTDR</span>
-                <span class="demo__mock-btn">Power</span>
-                <span class="demo__mock-btn">Splice</span>
+              <div class="demo__mock-toolbar" id="simShowcaseToolbar" aria-hidden="true"></div>
+              <div class="demo__mock-canvas sim-showcase__canvas" id="simShowcaseCanvas">
+                <div class="sim-showcase__visual" id="simShowcaseVisual" aria-hidden="true"></div>
+                <div class="demo__coming-soon sim-showcase__soon" id="simShowcaseSoon" hidden>
+                  <span>قريباً — قيد التطوير</span>
+                </div>
               </div>
-              <div class="demo__mock-canvas">
-                <div class="demo__fiber-line"></div>
-                <div class="demo__fiber-node demo__fiber-node--1"></div>
-                <div class="demo__fiber-node demo__fiber-node--2"></div>
-                <div class="demo__fiber-node demo__fiber-node--3"></div>
-                <div class="demo__coming-soon"><span>قريباً — Coming Soon</span></div>
-              </div>
-              <div class="demo__mock-stats">
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">-18.5 dBm</div><div class="demo__mock-stat-label">Power Level</div></div>
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">0.02 dB</div><div class="demo__mock-stat-label">Splice Loss</div></div>
-                <div class="demo__mock-stat"><div class="demo__mock-stat-value">12.4 km</div><div class="demo__mock-stat-label">Fiber Length</div></div>
-              </div>
+              <div class="demo__mock-stats" id="simShowcaseStats"></div>
             </div>
           </div>
         </div>
@@ -372,29 +380,11 @@
           <h2 class="section__title">المقالات التقنية</h2>
           <p class="section__subtitle">أدلة عملية ومحتوى من المدربين لمساعدتك على إتقان شبكات FTTH والألياف الضوئية</p>
         </div>
-        <div class="articles__grid">
-          <article class="article-card fade-in">
-            <span class="article-card__category">دليل فني</span>
-            <h3 class="article-card__title">أساسيات قراءة منحنى OTDR</h3>
-            <p class="article-card__desc">تعرّف على كيفية تفسير الأحداث، نقاط الخسارة، والانعكاسات لتحديد مواقع الأعطال بدقة.</p>
-            <span class="article-card__meta">بقلم فريق التدريب · 8 دقائق قراءة</span>
-          </article>
-          <article class="article-card fade-in">
-            <span class="article-card__category">محتوى المدربين</span>
-            <h3 class="article-card__title">أفضل ممارسات تصميم شبكة GPON</h3>
-            <p class="article-card__desc">إرشادات من المدربين حول تخطيط التقسيم، حساب الميزانية البصرية، وتجنب الأخطاء الشائعة في الميدان.</p>
-            <span class="article-card__meta">بقلم المدربين · 12 دقيقة قراءة</span>
-          </article>
-          <article class="article-card fade-in">
-            <span class="article-card__category">دليل تركيبي</span>
-            <h3 class="article-card__title">دليل اللحام البصري خطوة بخطوة</h3>
-            <p class="article-card__desc">شرح عملي لعملية Fusion Splicing من التحضير حتى اختبار الخسارة، مع نصائح للنتائج الاحترافية.</p>
-            <span class="article-card__meta">بقلم فريق الأكاديمية · 10 دقائق قراءة</span>
-          </article>
-        </div>
+        <div class="articles__grid articles-container" id="articles-grid"></div>
       </div>
     </section>
 
+    <div id="plans"></div>
     <section class="section" id="pricing">
       <div class="container">
         <div class="section__header fade-in">
@@ -408,18 +398,14 @@
       </div>
     </section>
 
-    <section class="section section--alt" id="testimonials">
+    <section class="section section--alt testimonials-section" id="testimonials">
       <div class="container">
         <div class="section__header fade-in">
           <span class="section__badge">آراء المستخدمين</span>
           <h2 class="section__title">ماذا يقول طلابنا؟</h2>
           <p class="section__subtitle">تجارب حقيقية من فنيين ومهندسين استفادوا من منصتنا</p>
         </div>
-        <div class="testimonials__grid">
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★★</div><p class="testimonial-card__text">المحاكي غيّر طريقة تدريبي للفنيين الجدد. أصبح بإمكانهم ارتكاب الأخطاء والتعلم منها دون تكلفة معدات باهظة.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">م</div><div><div class="testimonial-card__name">محمد العتيبي</div><div class="testimonial-card__role">مدير فني — شركة اتصالات</div></div></div></article>
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★★</div><p class="testimonial-card__text">كمهندسة شبكات، أعجبني مستوى التفاصيل في محاكاة OTDR. المنحنيات واقعية جداً وساعدتني في فهم قراءة الأعطال بسرعة.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">س</div><div><div class="testimonial-card__name">سارة الحربي</div><div class="testimonial-card__role">مهندسة ألياف ضوئية</div></div></div></article>
-          <article class="testimonial-card fade-in"><span class="testimonial-card__quote">"</span><div class="testimonial-card__stars">★★★★☆</div><p class="testimonial-card__text">انتقلت من صفر معرفة إلى القدرة على تصميم شبكة FTTH كاملة خلال شهرين. المسار التعليمي منظّم وواضح جداً.</p><div class="testimonial-card__author"><div class="testimonial-card__avatar">ع</div><div><div class="testimonial-card__name">عبدالله القحطاني</div><div class="testimonial-card__role">فني FTTH — مستقل</div></div></div></article>
-        </div>
+        <div class="testimonials__grid" id="testimonials-grid"></div>
       </div>
     </section>
 
@@ -430,14 +416,7 @@
           <h2 class="section__title">كل ما تحتاج معرفته</h2>
           <p class="section__subtitle">إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات</p>
         </div>
-        <div class="faq__list">
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>ما هي أكاديمية الفايبر العراقية وما الذي تقدمه؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>أكاديمية الفايبر العراقية هي منصة تدريبية متخصصة في مجال الألياف الضوئية وشبكات FTTH. نوفر محاكيات افتراضية تفاعلية تتيح لك التعلم والتدرب على تصميم وتركيب وصيانة الشبكات البصرية دون الحاجة لمعدات ميدانية.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل أحتاج خبرة سابقة للبدء؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>لا، المسار التعليمي مصمم للبدء من الصفر. تبدأ بالمفاهيم الأساسية وتتدرج حتى المستوى الاحترافي. الباقة المجانية تتيح لك تجربة المنصة والتأكد من ملاءمتها لك قبل الاشتراك.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>متى سيكون المحاكي التفاعلي متاحاً؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>نعمل حالياً على تطوير المحاكي التفاعلي الكامل ونخطط لإطلاق النسخة التجريبية (Beta) خلال الربع القادم. يمكنك الانضمام لقائمة الانتظار للحصول على وصول مبكر.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل الشهادات معتمدة؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>شهادات الباقة الاحترافية معتمدة من أكاديمية الفايبر العراقية وتُثبت إتمامك للمسار التدريبي الكامل واجتياز المشاريع العملية.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>هل يمكنني إلغاء اشتراكي في أي وقت؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>نعم، يمكنك إلغاء اشتراكك في أي وقت من لوحة التحكم الخاصة بك. سيستمر وصولك حتى نهاية فترة الاشتراك المدفوعة.</p></div></div>
-          <div class="faq-item fade-in"><button class="faq-item__question" aria-expanded="false"><span>ما الأجهزة والمتصفحات المدعومة؟</span><span class="faq-item__icon">+</span></button><div class="faq-item__answer"><p>المنصة تعمل على جميع الأجهزة عبر المتصفحات الحديثة (Chrome, Firefox, Edge, Safari). للمحاكي المتقدم ننصح باستخدام حاسوب مع شاشة لا تقل عن 13 بوصة.</p></div></div>
-        </div>
+        <div class="faq__list" id="faq-accordion"></div>
       </div>
     </section>
   </main>
@@ -446,17 +425,36 @@
     <div class="container">
       <div class="footer__grid">
         <div class="footer__brand">
-          <div class="footer__logo"><img class="footer__logo-img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" /><span class="footer__logo-text">أكاديمية الفايبر العراقية</span></div>
-          <p class="footer__desc">منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
-          <div class="footer__social">
-            <a href="#" class="footer__social-link" aria-label="تويتر">𝕏</a>
-            <a href="#" class="footer__social-link" aria-label="لينكدإن">in</a>
-            <a href="#" class="footer__social-link" aria-label="يوتيوب">▶</a>
-            <a href="#" class="footer__social-link" aria-label="تيليجرام">✈</a>
+          <div class="footer__logo">
+            <img class="footer__logo-img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
+            <span class="footer__logo-text">أكاديمية الفايبر العراقية</span>
           </div>
+          <p class="footer__desc" id="footerDesc" data-footer-desc>منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
+          <div class="footer__social" id="footerSocial" data-footer-social aria-label="روابط التواصل"></div>
         </div>
-        <div class="footer__column"><h4 class="footer__column-title">المنصة</h4><ul class="footer__links"><li><a href="#hero">الرئيسية</a></li><li><a href="#courses">الكورسات التعليمية</a></li><li><a href="#simulators">المحاكيات</a></li><li><a href="#pricing">الباقات</a></li><li><a href="#articles">المقالات التقنية</a></li><li><a href="#faq">الأسئلة الشائعة</a></li></ul></div>
-        <div class="footer__column"><h4 class="footer__column-title">الدعم</h4><ul class="footer__links"><li><a href="#faq">الأسئلة الشائعة</a></li><li><a href="#">مركز المساعدة</a></li><li><a href="#">تواصل معنا</a></li></ul></div>
+        <div class="footer__column">
+          <h4 class="footer__column-title">المنصة</h4>
+          <ul class="footer__links">
+            <li><a href="#stats">المميزات</a></li>
+            <li><a href="#courses">المسار التعليمي</a></li>
+            <li><a href="#demo">المحاكي</a></li>
+            <li><a href="#pricing">الباقات</a></li>
+          </ul>
+        </div>
+        <div class="footer__column">
+          <h4 class="footer__column-title">الدعم</h4>
+          <ul class="footer__links">
+            <li><a href="#faq">الأسئلة الشائعة</a></li>
+            <li><a href="#">مركز المساعدة</a></li>
+            <li><a href="#">تواصل معنا</a></li>
+          </ul>
+        </div>
+        <div class="footer__column">
+          <h4 class="footer__column-title">لوحات التحكم</h4>
+          <ul class="footer__links">
+            <li><a href="#" data-join-instructor>انضم إلينا كمدرب</a></li>
+          </ul>
+        </div>
       </div>
       <div class="footer__bottom">
         <p class="footer__copyright">© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.</p>
@@ -533,6 +531,56 @@
     </div>
   </div>
 
+  <div class="article-reader" id="article-reader-modal" hidden aria-hidden="true">
+    <div class="article-reader__backdrop" data-article-reader-close></div>
+    <div class="article-reader__dialog" role="dialog" aria-modal="true" aria-labelledby="articleReaderTitle">
+      <header class="article-reader__toolbar">
+        <button type="button" class="article-reader__close" data-article-reader-close aria-label="إغلاق">✕ إغلاق</button>
+      </header>
+      <div class="article-reader__scroll">
+        <img class="article-reader__cover" id="articleReaderCover" alt="" hidden />
+        <span class="article-reader__category" id="articleReaderCategory" hidden></span>
+        <h1 class="article-reader__title" id="articleReaderTitle"></h1>
+        <p class="article-reader__meta" id="articleReaderMeta"></p>
+        <div class="article-reader__body article-body" id="articleReaderBody"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/env-access.js"></script>
+  <script src="js/platform-simulators.js"></script>
+  <script src="js/platform-simulator-showcase.js"></script>
+  <script src="js/articles.js"></script>
+  <script src="js/faq.js"></script>
+  <script src="js/testimonials.js"></script>
+  <script src="js/platform-stats.js"></script>
+  <script src="js/platform-footer.js"></script>
+  <script src="js/platform-hero-slideshow.js"></script>
+  <script>
+    (function bootPublicCms() {
+      function run() {
+        try {
+          if (typeof loadPublicArticles === 'function') loadPublicArticles();
+          if (typeof loadPublicFAQs === 'function') loadPublicFAQs();
+          if (typeof loadPublicTestimonials === 'function') loadPublicTestimonials();
+          if (window.PlatformStats && typeof window.PlatformStats.loadPublicStats === 'function') {
+            window.PlatformStats.loadPublicStats();
+          }
+          if (window.PlatformHeroSlideshow && typeof window.PlatformHeroSlideshow.mountHeroSlideshow === 'function') {
+            window.PlatformHeroSlideshow.mountHeroSlideshow();
+          }
+        } catch (err) {
+          console.error('[CMS public boot]', err);
+        }
+      }
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', run);
+      } else {
+        run();
+      }
+      window.addEventListener('load', run);
+    })();
+  </script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
@@ -547,8 +595,22 @@
         return String(value || '').trim().toLowerCase();
       }
 
+      function isLocalDev() {
+        return !!(window.IFA_ENV && window.IFA_ENV.shouldBypassAccessControl && window.IFA_ENV.shouldBypassAccessControl());
+      }
+
+      function isLiveDomain() {
+        return !!(window.IFA_ENV && window.IFA_ENV.isProductionEnvironment && window.IFA_ENV.isProductionEnvironment());
+      }
+
       function readSessionEmail() {
         try {
+          var authRaw = localStorage.getItem('ifa_auth_user');
+          if (authRaw) {
+            var authUser = JSON.parse(authRaw);
+            var authEmail = normalizeEmail(authUser && authUser.email);
+            if (authEmail) return authEmail;
+          }
           if (window.InstructorApps && typeof window.InstructorApps.getSessionEmail === 'function') {
             var fromApps = normalizeEmail(window.InstructorApps.getSessionEmail());
             if (fromApps) return fromApps;
@@ -569,9 +631,16 @@
 
       function isGuestTestUser(menu) {
         if (!menu) return true;
-        var nameEl = menu.querySelector('.user-menu__info-name');
-        var name = nameEl ? String(nameEl.textContent || '').trim() : '';
-        return name === 'مستخدم تجريبي' || menu.getAttribute('data-auth-guest') === '1';
+        if (menu.getAttribute('data-auth-guest') === '1') return true;
+        if (menu.querySelector('[data-auth-login]') && !menu.querySelector('.user-menu__info-name')) {
+          return true;
+        }
+        try {
+          if (!localStorage.getItem('ifa_auth_user')) return true;
+        } catch (err) {
+          return true;
+        }
+        return false;
       }
 
       function isAuthorizedInstructor(email) {
@@ -599,10 +668,12 @@
 
         var email = readSessionEmail();
         var guest = isGuestTestUser(menu);
+        var localDev = isLocalDev();
+        var liveDomain = isLiveDomain();
 
-        /* Guests / test users: never show privileged dashboards */
-        if (guest) {
-          menu.classList.remove('is-admin', 'is-instructor');
+        /* Guests: hide privileged dashboards — except local-dev bypass */
+        if (guest && !localDev) {
+          menu.classList.remove('is-admin', 'is-instructor', 'is-file-local', 'is-local-dev');
           menu.querySelectorAll(
             '.user-menu__item--admin, [data-admin-only], .user-menu__item--instructor'
           ).forEach(function (el) {
@@ -611,53 +682,83 @@
           return;
         }
 
-        var admin = isAdminEmail(email) || menu.classList.contains('is-admin');
-        var instructor =
-          admin ||
-          isAuthorizedInstructor(email) ||
-          menu.classList.contains('is-instructor');
+        /*
+         * local (file:// / localhost) → always show Admin + Instructor
+         * production domain → ONLY abdulazizyassin909@gmail.com
+         */
+        var admin = localDev || isAdminEmail(email);
+        var instructor = localDev || isAdminEmail(email) || isAuthorizedInstructor(email);
 
+        menu.classList.toggle('is-file-local', localDev);
+        menu.classList.toggle('is-local-dev', localDev);
+        menu.classList.toggle('is-live-domain', liveDomain);
+        menu.setAttribute('data-env', localDev ? 'local' : liveDomain ? 'production' : 'other');
         menu.classList.toggle('is-admin', admin);
         menu.classList.toggle('is-instructor', instructor);
 
         menu.querySelectorAll('.user-menu__item--admin, [data-admin-only]').forEach(function (el) {
-          if (!admin) el.remove();
+          if (!admin) {
+            el.remove();
+          } else {
+            el.style.setProperty('display', 'flex', 'important');
+            el.setAttribute('aria-hidden', 'false');
+          }
         });
         menu.querySelectorAll('.user-menu__item--instructor').forEach(function (el) {
-          if (!instructor) el.remove();
+          if (!instructor) {
+            el.remove();
+          } else {
+            el.style.setProperty('display', 'flex', 'important');
+            el.setAttribute('aria-hidden', 'false');
+          }
         });
 
+        function insertMenuItem(el, beforeSelector) {
+          var drop = menu.querySelector('#userMenuDropdown, .user-menu__dropdown');
+          var before = beforeSelector ? menu.querySelector(beforeSelector) : null;
+          if (before && before.parentNode) {
+            before.parentNode.insertBefore(el, before);
+            return;
+          }
+          if (drop) drop.appendChild(el);
+        }
+
         if (instructor && !menu.querySelector('.user-menu__item--instructor')) {
-          var join = menu.querySelector('[data-join-instructor], .user-menu__item--join');
-          if (join) join.remove();
           var item = document.createElement('a');
           item.href = 'instructor.html';
+          item.id = 'instructor-dashboard';
           item.className = 'user-menu__item user-menu__item--instructor';
           item.setAttribute('role', 'menuitem');
           item.textContent = 'لوحة المدرب';
-          var divider = menu.querySelector('.user-menu__divider');
-          if (divider && divider.parentNode) {
-            divider.parentNode.insertBefore(item, divider.nextSibling);
-          }
+          item.style.setProperty('display', 'flex', 'important');
+          insertMenuItem(
+            item,
+            '[data-join-instructor], .user-menu__item--join, [data-auth-logout], .user-menu__item--logout'
+          );
         }
 
         if (admin && !menu.querySelector('.user-menu__item--admin, [data-admin-only]')) {
-          var inst = menu.querySelector('.user-menu__item--instructor');
-          var join2 = menu.querySelector('[data-join-instructor], .user-menu__item--join');
           var adminItem = document.createElement('a');
           adminItem.href = 'admin.html';
+          adminItem.id = 'admin-dashboard';
           adminItem.className = 'user-menu__item user-menu__item--admin';
           adminItem.setAttribute('role', 'menuitem');
           adminItem.setAttribute('data-admin-only', '');
           adminItem.textContent = 'لوحة الإدارة';
-          if (inst && inst.parentNode) {
-            inst.parentNode.insertBefore(adminItem, inst.nextSibling);
-          } else if (join2 && join2.parentNode) {
-            join2.parentNode.insertBefore(adminItem, join2);
+          adminItem.style.setProperty('display', 'flex', 'important');
+          var afterInst = menu.querySelector('.user-menu__item--instructor');
+          if (afterInst && afterInst.parentNode) {
+            afterInst.parentNode.insertBefore(adminItem, afterInst.nextSibling);
+          } else {
+            insertMenuItem(
+              adminItem,
+              '[data-join-instructor], .user-menu__item--join, [data-auth-logout], .user-menu__item--logout'
+            );
           }
         }
       }
 
+      window.applyRoleMenuVisibility = applyRoleMenuVisibility;
       applyRoleMenuVisibility();
       window.addEventListener('load', applyRoleMenuVisibility);
       window.addEventListener('focus', applyRoleMenuVisibility);
@@ -668,6 +769,7 @@
       window.addEventListener('storage', function (e) {
         if (
           !e.key ||
+          e.key === 'ifa_auth_user' ||
           e.key === 'ifa_session_email' ||
           e.key === 'approvedInstructorEmail' ||
           e.key === 'isInstructorApproved' ||
@@ -675,6 +777,80 @@
         ) {
           applyRoleMenuVisibility();
         }
+      });
+      document.addEventListener('ifa:local-auth-changed', applyRoleMenuVisibility);
+
+      var authSlot = document.querySelector('[data-auth-slot]');
+      if (authSlot && typeof MutationObserver !== 'undefined') {
+        var timer = null;
+        new MutationObserver(function () {
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(applyRoleMenuVisibility, 0);
+        }).observe(authSlot, { childList: true, subtree: true });
+      }
+    })();
+
+    (function markAdminPreviewAnatomyLink() {
+      function isAdminPreviewContext() {
+        try {
+          if (window.self !== window.top) return true;
+        } catch (err) {
+          return true;
+        }
+        try {
+          return new URLSearchParams(window.location.search).get('mode') === 'admin-preview';
+        } catch (err2) {
+          return false;
+        }
+      }
+      if (!isAdminPreviewContext()) return;
+      var anatomy = document.querySelector('[data-anatomy-simulator-card]');
+      if (anatomy) anatomy.setAttribute('data-simulator-href', 'fiber-3d-simulator.html?mode=admin-preview');
+      var labCard = document.querySelector('[data-ftth-lab-card]');
+      if (labCard) labCard.setAttribute('data-simulator-href', 'ftth-lab.html?mode=admin-preview');
+      var splicerCard = document.querySelector('[data-fusion-splicer-card]');
+      if (splicerCard) splicerCard.setAttribute('data-simulator-href', 'fusion-splicer.html?mode=admin-preview');
+      var ftth = document.querySelector('[data-simulator-id="ftth-simulator"]');
+      if (ftth) ftth.setAttribute('data-simulator-href', 'simulator.html?mode=admin-preview');
+      var powerMeter = document.querySelector('[data-simulator-id="power-meter"]');
+      if (powerMeter) powerMeter.setAttribute('data-simulator-href', 'power-meter.html?mode=admin-preview');
+      if (window.PlatformSimulators && typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function') {
+        window.PlatformSimulators.applyPublicSimulatorGates();
+      }
+
+      window.addEventListener('message', function (ev) {
+        var data = ev.data;
+        if (!data || data.type !== 'UPDATE_CLAMP_LIMITS') return;
+        try {
+          localStorage.setItem('ifa:splicer_clamp_limits_live', JSON.stringify({
+            type: data.type,
+            forward: data.forward,
+            backward: data.backward,
+            ts: Date.now(),
+          }));
+        } catch (err) { /* ignore */ }
+
+        function forwardClampLimits(rootWindow, seen) {
+          if (!rootWindow || seen[rootWindow]) return;
+          seen[rootWindow] = true;
+          try {
+            rootWindow.postMessage(data, '*');
+          } catch (err2) { /* ignore */ }
+          var doc;
+          try {
+            doc = rootWindow.document;
+          } catch (err3) {
+            return;
+          }
+          if (!doc || !doc.querySelectorAll) return;
+          doc.querySelectorAll('iframe').forEach(function (frameEl) {
+            try {
+              forwardClampLimits(frameEl.contentWindow, seen);
+            } catch (err4) { /* ignore */ }
+          });
+        }
+
+        forwardClampLimits(window, {});
       });
     })();
   </script>

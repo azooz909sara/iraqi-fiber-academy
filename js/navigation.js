@@ -101,7 +101,13 @@
     }
 
     var menuItem = e.target.closest ? e.target.closest('.user-menu__item') : null;
-    if (menuItem && menu) {
+    /* Keep menu open for auth actions — auth-manager re-renders and reopens */
+    if (
+      menuItem &&
+      menu &&
+      !menuItem.hasAttribute('data-auth-login') &&
+      !menuItem.hasAttribute('data-auth-logout')
+    ) {
       menu.classList.remove('open');
       var toggleBtn = menu.querySelector('.user-menu__toggle');
       var drop = menu.querySelector('.user-menu__dropdown');

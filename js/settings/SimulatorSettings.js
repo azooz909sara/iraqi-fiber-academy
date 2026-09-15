@@ -1,6 +1,12 @@
 /**
  * FTTH Simulator — layout/label settings persistence and apply helpers.
  * Extracted from ftth-simulator-core.js (Phase 1).
+ *
+ * FTTH Lab toolbox icon overrides live in js/settings/FtthLabSettings.js
+ * (localStorage key: ifa_ftth_lab_config).
+ * Optical Power Meter toolbox config is independent: js/settings/OpmSettings.js
+ * (localStorage key: ifa_opm_config).
+ * Optical Power Meter projects: ifa_opm_projects (never ifa_ftth_lab_projects).
  */
 (function (global) {
   'use strict';

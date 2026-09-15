@@ -61,15 +61,34 @@
       .filter(Boolean);
   }
 
-  function accessLabel(level) {
-    var meta =
-      Plans && typeof Plans.getAccessMeta === 'function'
-        ? Plans.getAccessMeta(level)
-        : null;
-    if (meta && meta.label) return meta.label;
-    if (level === 'free') return 'مجاني';
-    if (level === 'professional') return 'احترافي';
-    return 'قياسي';
+  function parsePriceValue(val) {
+    if (Plans && typeof Plans.parsePrice === 'function') return Plans.parsePrice(val);
+    if (window.PlatformCourses && typeof window.PlatformCourses.parsePrice === 'function') {
+      return window.PlatformCourses.parsePrice(val);
+    }
+    var clean = String(val == null ? '' : val).replace(/,/g, '').trim();
+    var n = Number(clean);
+    return isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  function formatPriceInputValue(val) {
+    var n = parsePriceValue(val);
+    if (!n) return '';
+    if (Plans && typeof Plans.formatGroupedAmount === 'function') return Plans.formatGroupedAmount(n);
+    if (window.PlatformCourses && typeof window.PlatformCourses.formatGroupedAmount === 'function') {
+      return window.PlatformCourses.formatGroupedAmount(n);
+    }
+    return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  function bindPriceInput(id) {
+    var el = $(id);
+    if (!el || el.dataset.priceBound === '1') return;
+    el.dataset.priceBound = '1';
+    el.addEventListener('blur', function () {
+      if (!String(el.value || '').trim()) return;
+      el.value = formatPriceInputValue(el.value);
+    });
   }
 
   function readCategoriesFromForm() {
@@ -115,9 +134,11 @@
     list.innerHTML = plans
       .map(function (plan) {
         var priceLabel =
-          Number(plan.price) === 0
-            ? 'مجاناً'
-            : escapeHtml(plan.price) + ' ' + escapeHtml(plan.currency || 'ر.س');
+          Plans && typeof Plans.formatPrice === 'function'
+            ? Plans.formatPrice(plan)
+            : parsePriceValue(plan.price) === 0
+              ? 'مجاناً'
+              : escapeHtml(formatPriceInputValue(plan.price)) + ' د.ع';
         var linked = countLinkedCourses(plan);
         return (
           '<article class="admin-plan-card' +
@@ -138,11 +159,11 @@
           '<p class="admin-plan-card__desc">' +
           escapeHtml(plan.description || '—') +
           '</p>' +
-          '<p class="admin-plan-card__meta">مستوى: ' +
-          escapeHtml(accessLabel(plan.accessLevel)) +
-          ' · ' +
+          '<p class="admin-plan-card__meta">' +
           linked +
-          ' كورس منشور</p>' +
+          ' كورس منشور · ' +
+          (Array.isArray(plan.allowedSimulators) ? plan.allowedSimulators.length : 0) +
+          ' محاكيات</p>' +
           '</div>' +
           '<div class="admin-plan-card__price">' +
           '<strong>' +
@@ -182,6 +203,30 @@
       .join('');
   }
 
+  function writeSimulatorChecks(ids) {
+    var selected = {};
+    (ids || []).forEach(function (id) {
+      selected[String(id)] = true;
+    });
+    document.querySelectorAll('#planEditorSimulators input[name="planSimulator"]').forEach(function (input) {
+      input.checked = !!selected[input.value];
+    });
+  }
+
+  function readSimulatorChecks() {
+    var ids = [];
+    document.querySelectorAll('#planEditorSimulators input[name="planSimulator"]:checked').forEach(function (input) {
+      if (input.value) ids.push(input.value);
+    });
+    if (window.PlatformSimulators && typeof window.PlatformSimulators.normalizeSimulatorIds === 'function') {
+      return window.PlatformSimulators.normalizeSimulatorIds(ids);
+    }
+    if (Plans && typeof Plans.normalizeSimulatorIds === 'function') {
+      return Plans.normalizeSimulatorIds(ids);
+    }
+    return ids;
+  }
+
   function openModal(plan) {
     editingId = plan ? String(plan.id) : null;
     var modal = $('planEditorModal');
@@ -190,16 +235,16 @@
     if (title) title.textContent = plan ? 'تعديل الباقة' : 'إضافة باقة جديدة';
     $('planEditorName').value = plan ? plan.name : '';
     $('planEditorDescription').value = plan ? plan.description || '' : '';
-    $('planEditorPrice').value = plan ? String(plan.price) : '0';
+    $('planEditorPrice').value = plan ? formatPriceInputValue(plan.price) : '';
     $('planEditorCurrency').value = plan ? plan.currency || 'ر.س' : 'ر.س';
     $('planEditorPeriod').value = plan ? plan.period || '' : 'شهرياً';
-    $('planEditorAccessLevel').value = plan ? plan.accessLevel || 'standard' : 'standard';
     $('planEditorCta').value = plan ? plan.ctaLabel || 'اشترك الآن' : 'اشترك الآن';
     $('planEditorCtaStyle').value = plan && plan.ctaStyle === 'primary' ? 'primary' : 'outline';
     $('planEditorFeatured').checked = !!(plan && plan.featured);
     $('planEditorBadge').value = plan ? plan.badge || '' : '';
     $('planEditorFeatures').value = plan ? featuresToText(plan.features) : '';
     writeCategoriesToForm(plan ? plan.courseCategories : ['individual']);
+    writeSimulatorChecks(plan ? plan.allowedSimulators : []);
     modal.hidden = false;
     var scroll = modal.querySelector('.admin-modal__scroll');
     if (scroll) scroll.scrollTop = 0;
@@ -215,16 +260,16 @@
     return {
       name: $('planEditorName').value.trim(),
       description: $('planEditorDescription').value.trim(),
-      price: Number($('planEditorPrice').value) || 0,
+      price: parsePriceValue($('planEditorPrice') && $('planEditorPrice').value),
       currency: $('planEditorCurrency').value.trim() || 'ر.س',
       period: $('planEditorPeriod').value.trim(),
-      accessLevel: $('planEditorAccessLevel').value || 'standard',
       courseCategories: readCategoriesFromForm(),
       ctaLabel: $('planEditorCta').value.trim() || 'اشترك الآن',
       ctaStyle: $('planEditorCtaStyle').value,
       featured: $('planEditorFeatured').checked,
       badge: $('planEditorBadge').value.trim(),
       features: textToFeatures($('planEditorFeatures').value),
+      allowedSimulators: readSimulatorChecks(),
     };
   }
 
@@ -290,6 +335,7 @@
 
     var form = $('planEditorForm');
     if (form) form.addEventListener('submit', onSubmit);
+    bindPriceInput('planEditorPrice');
 
     document.querySelectorAll('[data-close-plan-modal]').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
@@ -320,7 +366,7 @@
     window.addEventListener('ifa:platform-plans-changed', renderPlansList);
     document.addEventListener('ifa:platform-courses-changed', renderPlansList);
     window.addEventListener('storage', function (e) {
-      if (!e.key || e.key === 'platform_plans' || e.key === 'platform_courses') renderPlansList();
+      if (!e.key || e.key === 'platform_plans' || e.key === 'ifa_pricing_plans' || e.key === 'platform_courses') renderPlansList();
     });
 
     renderPlansList();

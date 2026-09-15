@@ -1,0 +1,38 @@
+---
+description: LOCKED — Cable drawing, save, and layer isolation invariants (do not modify)
+alwaysApply: true
+---
+
+# Cable Drawing & Save Logic — LOCKED (Red Line)
+
+**Do not modify, refactor, or "improve" cable drawing/saving without explicit user approval.** Future features must work around this logic, never through it.
+
+## Protected files
+
+- `js/drawingEngine.js` — pen/cable draft, `finishPenDrawing`, `collectCompleteCablePointsForSave`, `onPenPointerDown`, `onPenDblClick`
+- `js/ftth-simulator-core.js` — `saveCableToDatabase`, `buildCableUnifiedCenterline`, `joinCableToTrench`, `isCablePenDrawActive`, `onPlacedNodeClick` cable branch
+- `js/pathwayEditor.js` — cable-first `pointerdown` routing before map/path pick
+
+## 1. Strict single continuous LineString
+
+- Cable = **one** connected feature from first click to double-click finish.
+- Single click = **add vertex only**. Never auto-split, auto-finish, auto-cut, or truncate at handholes (H1), trench junctions, or intersections.
+- **Forbidden for cable mode:** `splitPenPathAtNode`, `tryPenReconnect`, auto `finishPenDrawing` on path-endpoint/node snap, Enter-to-finish, mid-draw `joinCableToTrench` / `alignCablePointsToTrench`.
+
+## 2. Double-click commit only
+
+- **Only** valid cable save triggers: `finishPenDrawing({ fromDoubleClick: true })` or `{ emergency: true }`.
+- On save: persist the **full** coordinates array (first → last user vertex) via `collectCompleteCablePointsForSave` → `saveCableToDatabase`.
+- **Never** call `joinCableToTrench` after save (it replaces geometry with a single trench). Keep `userDrawn: true`, `mergedToTrench: false`.
+- Do not `slice`, `split`, or drop segments at handholes when committing.
+
+## 3. Event isolation while cable tool is active
+
+- Lower layers (excavation hits, handholes, map pick) must **not** steal clicks during cable draw.
+- Route clicks to pen/cable vertex add (`onPenPointerDown` / `addPenVertexFromEvent`); forward handhole clicks via `onPlacedNodeClick` cable branch.
+- Skip creating `draw-path-hit` during `isCablePenDrawActive()`; prioritize cable pen in `pathwayEditor` `onDown` before path selection.
+
+## When adding unrelated features
+
+- Do not touch the symbols above unless the user explicitly requests a cable-logic change.
+- If a new feature needs map/path interaction, guard with `isCablePenDrawActive()` and defer — never break cable continuity or save geometry.

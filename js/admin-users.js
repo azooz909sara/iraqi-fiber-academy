@@ -73,6 +73,8 @@
         status: 'active',
         createdAt: '2026-06-01T10:00:00.000Z',
         subscriptionEndsAt: '2026-12-31T23:59:59.000Z',
+        planId: 'plan_standard',
+        enrolledCourseIds: [],
       },
       {
         id: 'usr_example_2',
@@ -82,6 +84,8 @@
         status: 'active',
         createdAt: '2026-07-15T10:00:00.000Z',
         subscriptionEndsAt: '2026-11-30T23:59:59.000Z',
+        planId: 'plan_free',
+        enrolledCourseIds: [],
       },
     ];
   }
@@ -127,6 +131,16 @@
     var list = getActiveUsers();
     for (var i = 0; i < list.length; i++) {
       if (list[i].id === id) return list[i];
+    }
+    return null;
+  }
+
+  function findUserByEmail(email) {
+    var key = normalizeEmail(email);
+    if (!key) return null;
+    var list = getActiveUsers();
+    for (var i = 0; i < list.length; i++) {
+      if (normalizeEmail(list[i].email) === key) return list[i];
     }
     return null;
   }
@@ -199,6 +213,22 @@
           ? (payload && payload.subscriptionEndsAt) ||
             new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString()
           : null,
+      planId: String((payload && payload.planId) || ''),
+      enrolledCourseIds: Array.isArray(payload && payload.enrolledCourseIds)
+        ? payload.enrolledCourseIds
+        : [],
+      trialExpiresAt: (function () {
+        if (payload && payload.trialExpiresAt) return Number(payload.trialExpiresAt) || Date.parse(payload.trialExpiresAt) || 0;
+        if (role !== 'student') return 0;
+        try {
+          var raw = localStorage.getItem('ifa_platform_settings');
+          var days = raw ? Number(JSON.parse(raw).freeTrialDays) : 0;
+          if (isFinite(days) && days > 0) return Date.now() + days * 24 * 60 * 60 * 1000;
+        } catch (err) {
+          /* ignore */
+        }
+        return 0;
+      })(),
     };
     var list = getUsers();
     list.unshift(user);
@@ -343,6 +373,7 @@
     getUsers: getActiveUsers,
     getArchivedUsers: getArchivedUsers,
     findUser: findUser,
+    findUserByEmail: findUserByEmail,
     addUser: addUser,
     updateUser: updateUser,
     setUserStatus: setUserStatus,

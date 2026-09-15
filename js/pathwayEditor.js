@@ -1733,6 +1733,7 @@
       if (e.button !== 0) return;
       var S = sim();
 
+      /* Cable pen first: DrawingEngine cues → save trails → FiberDesignManager matrix */
       if (b()?.isCablePenDrawActive?.()) {
         if (global.FTTHDrawingEngine?.onPenPointerDown?.(e)) return;
       }

@@ -17,15 +17,42 @@
   var matrixEl = null;
   var matrixOpen = false;
   var matrixEventsBound = false;
+  var activeMatrixTab = 'distribution'; // distribution | ring
   var activeCabinetFilter = 'all';
+
+  function resolveActiveFdtFilterId() {
+    try {
+      if (global.FTTHActiveFdt && typeof global.FTTHActiveFdt.getActiveFdtId === 'function') {
+        return global.FTTHActiveFdt.getActiveFdtId();
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function applyActiveFdtMatrixFilter(fdtId) {
+    if (fdtId) activeCabinetFilter = String(fdtId);
+    if (matrixEl && !matrixEl.classList.contains('hidden')) {
+      refreshMatrix();
+    }
+  }
   var activeClosureFilter = 'all';
   var activeSortMode = 'cindex'; // insertion, chronological, cindex
   var dragState = null;
   var resizeState = null;
+  var colResizeState = null;
   var MIN_WIN_W = 360;
   var MIN_WIN_H = 220;
+  var MIN_COL_W = 48;
+  /** @type {Object<string, Object<string, number>>} persisted col widths per matrix tab */
+  var matrixColumnWidths = {
+    distribution: Object.create(null),
+    ring: Object.create(null),
+  };
+  var COL_WIDTHS_STORAGE_KEY = 'ifa_fd_matrix_col_widths';
 
   var MATRIX_COLUMNS = [
+    { key: 'splitter_fiber_no', label: 'Splitter Fiber No.' },
+    { key: 'pigtails_fiber_color', label: 'Pigtails (fiber color)', colorCell: true },
     { key: 'm_cable_id', label: 'M-Cable ID' },
     { key: 'm_tube_color', label: 'Cable tube color', colorCell: true },
     { key: 'm_fiber_color', label: 'Cable (Fiber color)', colorCell: true },
@@ -34,7 +61,20 @@
     { key: 's_tube_color', label: 'S-Cable Tube color', colorCell: true },
     { key: 's_fiber_color', label: 'FAT Cable (Fiber color)', colorCell: true },
     { key: 'fiber_type', label: 'Fiber Type' },
-    { key: 'fat_id', label: 'FAT ID' },
+    { key: 'fat_id', label: 'FAT ID / Pole ID' },
+    { key: 'design_path', label: 'Design Path' },
+  ];
+
+  var RING_MATRIX_COLUMNS = [
+    { key: 'feeder_cable_id', label: 'CABLE ID' },
+    { key: 'cable_layer', label: 'Cable Layer' },
+    { key: 'tube_label', label: 'TUBE Colour', tubeCell: true },
+    { key: 'cabinet_id', label: 'FDT_ID' },
+    { key: 'splice_tray', label: 'Splice Tray' },
+    { key: 'fiber_label', label: 'Tray Fiber Color', fiberCell: true },
+    { key: 'pigtail_no', label: 'Pigtail_No' },
+    { key: 'spliter', label: 'Spliter' },
+    { key: 'splitter_port', label: 'Splitter Port' },
   ];
 
   var ROWSPAN_GROUP_KEYS = [
@@ -44,6 +84,18 @@
     's_cable_id',
     's_tube_color',
     'fat_id',
+    'design_path',
+  ];
+
+  /* ring_block_id isolates Main vs Backup so shared cells span only within each 12-row unit */
+  var RING_ROWSPAN_GROUP_KEYS = [
+    'ring_block_id',
+    'feeder_cable_id',
+    'cable_layer',
+    'tube_label',
+    'cabinet_id',
+    'splice_tray',
+    'splitter_port',
   ];
 
   var FIBER_COLOR_CSS = {
@@ -52,17 +104,56 @@
     green: '#16a34a',
     brown: '#92400e',
     slate: '#64748b',
+    grey: '#64748b',
+    gray: '#64748b',
     white: '#f8fafc',
     red: '#dc2626',
     black: '#1e293b',
     yellow: '#eab308',
     violet: '#7c3aed',
     rose: '#e11d48',
+    pink: '#e11d48',
     aqua: '#06b6d4',
+    cyan: '#06b6d4',
   };
+
+  function loadColumnWidths() {
+    try {
+      var raw = global.localStorage && global.localStorage.getItem(COL_WIDTHS_STORAGE_KEY);
+      if (!raw) return;
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return;
+      ['distribution', 'ring'].forEach(function (tab) {
+        if (!parsed[tab] || typeof parsed[tab] !== 'object') return;
+        matrixColumnWidths[tab] = Object.create(null);
+        Object.keys(parsed[tab]).forEach(function (key) {
+          var n = Number(parsed[tab][key]);
+          if (n >= MIN_COL_W && isFinite(n)) matrixColumnWidths[tab][key] = Math.round(n);
+        });
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function persistColumnWidths() {
+    try {
+      if (global.localStorage) {
+        global.localStorage.setItem(COL_WIDTHS_STORAGE_KEY, JSON.stringify({
+          distribution: matrixColumnWidths.distribution || {},
+          ring: matrixColumnWidths.ring || {},
+        }));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function getColumnWidthMap(tabId) {
+    var tab = tabId || activeMatrixTab || 'distribution';
+    if (!matrixColumnWidths[tab]) matrixColumnWidths[tab] = Object.create(null);
+    return matrixColumnWidths[tab];
+  }
 
   function init(api) {
     deps = Object.assign({}, deps || {}, api || {});
+    loadColumnWidths();
     ensureStyles();
   }
 
@@ -118,11 +209,15 @@
     return (cables || []).slice();
   }
 
+  /**
+   * Sidebar Fiber Design inspection: show cables for the selected node freely.
+   * Do NOT filter by locked Active FDT — matrix viewer keeps that domain filter.
+   */
   function collectNodeCables(nodeData) {
     if (!nodeData || !nodeData.cables) return [];
     var inbound = Array.isArray(nodeData.cables.inbound) ? nodeData.cables.inbound : [];
     var outbound = Array.isArray(nodeData.cables.outbound) ? nodeData.cables.outbound : [];
-    return inbound.concat(outbound);
+    return inbound.concat(outbound).filter(Boolean);
   }
 
   function hasFiberDesignContent(nodeData) {
@@ -331,11 +426,47 @@
 
   /* ═══════════════ Floating Matrix Viewer ═══════════════ */
 
-  function fiberColorStyle(colorName) {
+  function isBlankMatrixValue(val) {
+    if (val == null) return true;
+    var s = String(val).trim();
+    if (!s) return true;
+    if (s === '—' || s === '–' || s === '-') return true;
+    var lower = s.toLowerCase();
+    return lower === 'null' || lower === 'undefined' || lower === 'n/a';
+  }
+
+  /** Direct Cabinet→Pole rows (no HH-Closure / S-Cable) — always sort to matrix bottom. */
+  function isDirectNoClosureRow(row) {
+    if (!row) return false;
+    if (row.direct_cabinet_pole) return true;
+    if (String(row.path_source || '') === 'interactive_trail_direct') return true;
+    return false;
+  }
+
+  function compareDirectRowsLast(a, b) {
+    var ad = isDirectNoClosureRow(a) ? 1 : 0;
+    var bd = isDirectNoClosureRow(b) ? 1 : 0;
+    return ad - bd;
+  }
+
+  function fiberColorStyle(colorName, striped) {
+    if (isBlankMatrixValue(colorName)) {
+      /* Empty sub-cable / unused color cells: no tint — match plain dark empty cells */
+      return '';
+    }
     var key = String(colorName || '').trim().toLowerCase();
-    var bg = FIBER_COLOR_CSS[key] || '#334155';
+    var bg = FIBER_COLOR_CSS[key];
+    if (!bg) {
+      /* Unknown non-blank token still blank-styled rather than slate fill */
+      return '';
+    }
     var fg = (key === 'white' || key === 'yellow') ? '#0f172a' : '#f8fafc';
-    return 'background-color:' + bg + ';color:' + fg + ';';
+    var style = 'background-color:' + bg + ';color:' + fg + ';';
+    if (striped) {
+      style +=
+        'background-image:repeating-linear-gradient(135deg,rgba(0,0,0,0.55) 0 3px,transparent 3px 7px);';
+    }
+    return style;
   }
 
   function groupKeyForRow(row, fields) {
@@ -347,14 +478,15 @@
     return parts.join('\u0001');
   }
 
-  function applyRowspanMetadata(rows) {
+  function applyRowspanMetadata(rows, groupKeys) {
     if (!rows || !rows.length) return rows;
+    var keys = groupKeys && groupKeys.length ? groupKeys : ROWSPAN_GROUP_KEYS;
     var r;
     var col;
-    for (col = 0; col < ROWSPAN_GROUP_KEYS.length; col++) {
-      var field = ROWSPAN_GROUP_KEYS[col];
+    for (col = 0; col < keys.length; col++) {
+      var field = keys[col];
       // CRITICAL FIX: closure_id and s_cable_id must merge independently of parent fields
-      var parentFields = (field === 'closure_id' || field === 's_cable_id') ? [field] : ROWSPAN_GROUP_KEYS.slice(0, col + 1);
+      var parentFields = (field === 'closure_id' || field === 's_cable_id') ? [field] : keys.slice(0, col + 1);
       var i = 0;
       while (i < rows.length) {
         var baseKey = groupKeyForRow(rows[i], parentFields);
@@ -420,20 +552,41 @@
     return html;
   }
 
-  function renderMatrixTable(rows) {
+  function renderColGroup(columns) {
+    var widths = getColumnWidthMap();
+    return '<colgroup>' + columns.map(function (col) {
+      var w = widths[col.key];
+      return '<col data-col-key="' + escapeAttr(col.key) + '"' +
+        (w ? ' style="width:' + w + 'px"' : '') + '>';
+    }).join('') + '</colgroup>';
+  }
+
+  function renderMatrixTable(rows, options) {
+    options = options || {};
+    var columns = options.columns || MATRIX_COLUMNS;
+    var rowspanKeys = options.rowspanKeys || ROWSPAN_GROUP_KEYS;
+    var widths = getColumnWidthMap();
     // Always render table headers, even with no data
-    var head = MATRIX_COLUMNS.map(function (col) {
-      return '<th scope="col">' + escapeHtml(col.label) + '</th>';
+    var head = columns.map(function (col) {
+      var w = widths[col.key];
+      var thStyle = w ? ('width:' + w + 'px;min-width:' + w + 'px') : '';
+      return '<th scope="col" data-col-key="' + escapeAttr(col.key) + '"' +
+        (thStyle ? ' style="' + thStyle + '"' : '') + '>' +
+        '<span class="fd-matrix-th__label">' + escapeHtml(col.label) + '</span>' +
+        '<span class="fd-matrix-col-resizer" data-col-resize="' + escapeAttr(col.key) +
+        '" role="separator" aria-orientation="vertical" title="Drag to resize column"></span>' +
+        '</th>';
     }).join('');
 
     var body = '';
     if (rows && rows.length) {
-      var annotated = applyRowspanMetadata(rows.slice());
+      var annotated = applyRowspanMetadata(rows.slice(), rowspanKeys);
       body = annotated.map(function (row) {
-        var cells = MATRIX_COLUMNS.map(function (col) {
+        var cells = columns.map(function (col) {
           if (row['_skip_' + col.key]) return '';
-          var val = row[col.key] != null ? String(row[col.key]) : '—';
-          if (col.key === 'fat_id') {
+          var rawVal = row[col.key];
+          var val = !isBlankMatrixValue(rawVal) ? String(rawVal) : '';
+          if (col.key === 'fat_id' && val) {
             var num = val.match(/(\d+)/);
             val = num ? num[1] : val;
           }
@@ -441,8 +594,37 @@
           var cls = 'fd-matrix-cell';
           var style = '';
           if (col.colorCell) {
-            cls += ' fd-matrix-cell--color';
-            style = fiberColorStyle(val);
+            if (isBlankMatrixValue(rawVal)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color';
+              style = fiberColorStyle(val);
+            }
+          }
+          if (col.tubeCell) {
+            var tubeSrc = row.tube_color || rawVal;
+            if (isBlankMatrixValue(tubeSrc)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color fd-matrix-cell--tube';
+              if (row.tube_striped) cls += ' fd-matrix-cell--striped';
+              style = fiberColorStyle(tubeSrc, !!row.tube_striped);
+            }
+          }
+          if (col.fiberCell) {
+            var fiberSrc = row.fiber_color || rawVal;
+            if (isBlankMatrixValue(fiberSrc)) {
+              cls += ' fd-matrix-cell--empty-color';
+              style = '';
+              val = '';
+            } else {
+              cls += ' fd-matrix-cell--color fd-matrix-cell--fiber';
+              style = fiberColorStyle(fiberSrc);
+            }
           }
           if (col.key === 'fiber_type') {
             cls += ' fd-matrix-cell--type-' + escapeAttr(val.toLowerCase());
@@ -453,13 +635,127 @@
         }).join('');
         return '<tr>' + cells + '</tr>';
       }).join('');
+    } else {
+      body = '<tr><td class="fd-matrix-empty" colspan="' + columns.length + '">' +
+        escapeHtml(options.emptyText || 'No splice rows for the current filters.') +
+        '</td></tr>';
     }
 
     return '<div class="fd-matrix-scroll">' +
       '<table class="fd-matrix-table" cellspacing="0" cellpadding="0">' +
+      renderColGroup(columns) +
       '<thead><tr>' + head + '</tr></thead>' +
       '<tbody>' + body + '</tbody>' +
       '</table></div>';
+  }
+
+  function findColByKey(table, key) {
+    if (!table || !key) return null;
+    var cols = table.querySelectorAll('col[data-col-key]');
+    var i;
+    for (i = 0; i < cols.length; i++) {
+      if (cols[i].getAttribute('data-col-key') === key) return cols[i];
+    }
+    return null;
+  }
+
+  function findThByKey(table, key) {
+    if (!table || !key) return null;
+    var ths = table.querySelectorAll('th[data-col-key]');
+    var i;
+    for (i = 0; i < ths.length; i++) {
+      if (ths[i].getAttribute('data-col-key') === key) return ths[i];
+    }
+    return null;
+  }
+
+  function applyColumnWidth(table, key, widthPx) {
+    if (!table || !key) return;
+    var w = Math.max(MIN_COL_W, Math.round(widthPx));
+    getColumnWidthMap()[key] = w;
+    var col = findColByKey(table, key);
+    if (col) col.style.width = w + 'px';
+    var th = findThByKey(table, key);
+    if (th) {
+      th.style.width = w + 'px';
+      th.style.minWidth = w + 'px';
+    }
+    var sum = 0;
+    var hasAny = false;
+    var cols = table.querySelectorAll('col[data-col-key]');
+    var i;
+    for (i = 0; i < cols.length; i++) {
+      var ck = cols[i].getAttribute('data-col-key');
+      var stored = getColumnWidthMap()[ck];
+      if (stored) {
+        hasAny = true;
+        sum += stored;
+      } else {
+        sum += Math.max(MIN_COL_W, Math.round(cols[i].getBoundingClientRect().width) || 96);
+      }
+    }
+    if (hasAny) table.style.minWidth = sum + 'px';
+  }
+
+  function endColumnResize() {
+    if (!colResizeState) return;
+    var handle = colResizeState.handle;
+    var pointerId = colResizeState.pointerId;
+    colResizeState = null;
+    if (handle) {
+      handle.removeEventListener('pointermove', onColumnResizePointerMove);
+      handle.removeEventListener('pointerup', onColumnResizePointerUp);
+      handle.removeEventListener('pointercancel', onColumnResizePointerUp);
+      if (pointerId != null) {
+        try { handle.releasePointerCapture(pointerId); } catch (e) { /* ignore */ }
+      }
+    }
+    if (document.body) document.body.classList.remove('fd-matrix-col-resizing');
+    persistColumnWidths();
+  }
+
+  function onColumnResizePointerMove(e) {
+    if (!colResizeState) return;
+    var next = colResizeState.startW + (e.clientX - colResizeState.startX);
+    applyColumnWidth(colResizeState.table, colResizeState.key, next);
+  }
+
+  function onColumnResizePointerUp() {
+    endColumnResize();
+  }
+
+  function bindColumnResize(scope) {
+    var root = scope || matrixEl;
+    if (!root) return;
+    var table = root.querySelector('.fd-matrix-table');
+    if (!table || table._fdColResizeBound) return;
+    table._fdColResizeBound = true;
+
+    table.addEventListener('pointerdown', function (e) {
+      var handle = e.target && e.target.closest
+        ? e.target.closest('[data-col-resize]')
+        : null;
+      if (!handle || !table.contains(handle)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      var key = handle.getAttribute('data-col-resize');
+      var th = handle.closest('th');
+      if (!key || !th) return;
+      if (colResizeState) endColumnResize();
+      colResizeState = {
+        key: key,
+        table: table,
+        handle: handle,
+        startX: e.clientX,
+        startW: th.getBoundingClientRect().width,
+        pointerId: e.pointerId,
+      };
+      if (document.body) document.body.classList.add('fd-matrix-col-resizing');
+      handle.addEventListener('pointermove', onColumnResizePointerMove);
+      handle.addEventListener('pointerup', onColumnResizePointerUp);
+      handle.addEventListener('pointercancel', onColumnResizePointerUp);
+      try { handle.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    });
   }
 
   function renderSortOptions() {
@@ -477,13 +773,468 @@
     return html;
   }
 
+  function getCurrentMatrixRows() {
+    var mgr = getManager();
+    if (activeMatrixTab === 'ring') {
+      return mgr && mgr.getRingMatrixRows ? mgr.getRingMatrixRows() : [];
+    }
+    /* Strict per-FDT partition: prefer live active FDT over "all" */
+    var liveFdt = resolveActiveFdtFilterId();
+    var cabinetFilter = activeCabinetFilter;
+    if (liveFdt && (cabinetFilter === 'all' || !cabinetFilter)) {
+      cabinetFilter = String(liveFdt);
+      activeCabinetFilter = cabinetFilter;
+    }
+    var rows = mgr && mgr.getSpliceMatrixRows
+      ? mgr.getSpliceMatrixRows({
+        cabinet: cabinetFilter,
+        closure: activeClosureFilter,
+      })
+      : [];
+    rows = sortRowsByMode(rows);
+    /*
+     * Per-cabinet view: renumber PLC in display order within this FDT domain.
+     */
+    if (cabinetFilter !== 'all' && activeClosureFilter === 'all' &&
+        mgr && typeof mgr.applyPlcSplitterMapping === 'function') {
+      rows = mgr.applyPlcSplitterMapping(rows);
+    }
+    return rows;
+  }
+
+  function renderMatrixTabs() {
+    return '<div class="fd-float__tabs" role="tablist" aria-label="Fiber Design Matrix views">' +
+      '<button type="button" class="fd-float__tab' +
+      (activeMatrixTab === 'distribution' ? ' is-active' : '') +
+      '" role="tab" aria-selected="' + (activeMatrixTab === 'distribution' ? 'true' : 'false') +
+      '" data-matrix-tab="distribution">Distribution Matrix</button>' +
+      '<button type="button" class="fd-float__tab' +
+      (activeMatrixTab === 'ring' ? ' is-active' : '') +
+      '" role="tab" aria-selected="' + (activeMatrixTab === 'ring' ? 'true' : 'false') +
+      '" data-matrix-tab="ring">Ring Fiber Design (OLT to Cabinets)</button>' +
+      '</div>';
+  }
+
+  function getMatrixFilterSummary() {
+    var cabLabel = activeCabinetFilter === 'all' ? 'All Cabinets' : String(activeCabinetFilter);
+    var cloLabel = activeClosureFilter === 'all' ? 'All Closures' : String(activeClosureFilter);
+    var sortLabel = 'Ascending C-Index';
+    if (activeSortMode === 'insertion') sortLabel = 'Insertion Order';
+    else if (activeSortMode === 'chronological') sortLabel = 'Chronological/Path Order';
+    else if (activeSortMode === 'cindex') sortLabel = 'Ascending C-Index';
+
+    if (matrixEl) {
+      var cabSel = matrixEl.querySelector('#fd-matrix-cabinet-filter');
+      var cloSel = matrixEl.querySelector('#fd-matrix-closure-filter');
+      if (cabSel && cabSel.selectedOptions && cabSel.selectedOptions[0]) {
+        cabLabel = cabSel.selectedOptions[0].textContent || cabLabel;
+      }
+      if (cloSel && cloSel.selectedOptions && cloSel.selectedOptions[0]) {
+        cloLabel = cloSel.selectedOptions[0].textContent || cloLabel;
+      }
+    }
+    return {
+      cabinet: cabLabel,
+      closure: cloLabel,
+      sort: sortLabel,
+    };
+  }
+
+  function buildMatrixPrintStyles() {
+    return [
+      '@page{size:A4 landscape;margin:10mm;}',
+      '*{box-sizing:border-box;}',
+      'html,body{margin:0;padding:0;background:#ffffff;color:#111111;',
+      'font-family:Arial,Helvetica,sans-serif;}',
+      'body{padding:8px 12px;}',
+      '.fd-print-report__title{margin:0 0 4px;font-size:16px;font-weight:700;color:#0f172a;}',
+      '.fd-print-report__meta{margin:0 0 10px;font-size:10px;color:#334155;line-height:1.45;}',
+      '.fd-print-report__meta strong{color:#0f172a;}',
+      '.fd-matrix-scroll{overflow:visible!important;max-width:none!important;border:1px solid #cbd5e1;border-radius:0;}',
+      '.fd-matrix-table{width:100%;border-collapse:collapse;min-width:0!important;font-size:9px;table-layout:auto;}',
+      '.fd-matrix-table thead{display:table-header-group;}',
+      '.fd-matrix-table thead th{',
+      'position:static!important;padding:5px 6px;text-align:left;background:#e2e8f0!important;color:#0f172a!important;',
+      'font-weight:700;border:1px solid #94a3b8;white-space:nowrap;font-size:8px;text-transform:uppercase;}',
+      '.fd-matrix-table tbody td{',
+      'padding:4px 6px;border:1px solid #94a3b8;color:#0f172a;vertical-align:middle;background:#ffffff;}',
+      '.fd-matrix-table tbody tr{page-break-inside:avoid;}',
+      '.fd-matrix-table tbody tr:nth-child(even) td{background:#f8fafc;}',
+      '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;}',
+      '.fd-matrix-cell--empty-color{background:transparent!important;color:inherit;font-weight:400;text-transform:none;}',
+      '.fd-matrix-cell--type-main{font-weight:700;color:#166534;}',
+      '.fd-matrix-cell--type-expansion{font-weight:700;color:#1d4ed8;}',
+      '.fd-matrix-empty,.fd-matrix-error{padding:12px;border:1px dashed #94a3b8;color:#475569;text-align:center;}',
+      '.fd-matrix-col-resizer{display:none!important;}',
+      '.fd-print-no-print{display:none!important;}',
+      '@media print{',
+      'body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}',
+      '.fd-print-no-print{display:none!important;}',
+      '}',
+    ].join('');
+  }
+
+  function hexToRgb(hex) {
+    if (!hex) return [255, 255, 255];
+    var h = String(hex).replace('#', '');
+    if (h.length === 3) {
+      h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    }
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+
+  function formatMatrixCellText(row, col) {
+    var rawVal = row[col.key];
+    var val = !isBlankMatrixValue(rawVal) ? String(rawVal) : '';
+    if (col.key === 'fat_id' && val) {
+      var num = val.match(/(\d+)/);
+      val = num ? num[1] : val;
+    }
+    if (col.colorCell && isBlankMatrixValue(rawVal)) return '';
+    if (col.tubeCell) {
+      var tubeSrc = row.tube_color || rawVal;
+      return isBlankMatrixValue(tubeSrc) ? '' : String(tubeSrc);
+    }
+    if (col.fiberCell) {
+      var fiberSrc = row.fiber_color || rawVal;
+      return isBlankMatrixValue(fiberSrc) ? '' : String(fiberSrc);
+    }
+    return val;
+  }
+
+  function getMatrixCellPdfColors(srcRow, col) {
+    var defaultText = [15, 23, 42];
+    var defaultFill = [255, 255, 255];
+
+    if (col.colorCell) {
+      var raw = srcRow[col.key];
+      if (isBlankMatrixValue(raw)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var key = String(raw).trim().toLowerCase();
+      var bg = FIBER_COLOR_CSS[key];
+      if (!bg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(bg),
+        textColor: (key === 'white' || key === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.tubeCell) {
+      var tubeSrc = srcRow.tube_color || srcRow[col.key];
+      if (isBlankMatrixValue(tubeSrc)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var tKey = String(tubeSrc).trim().toLowerCase();
+      var tBg = FIBER_COLOR_CSS[tKey];
+      if (!tBg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(tBg),
+        textColor: (tKey === 'white' || tKey === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.fiberCell) {
+      var fiberSrc = srcRow.fiber_color || srcRow[col.key];
+      if (isBlankMatrixValue(fiberSrc)) {
+        return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      }
+      var fKey = String(fiberSrc).trim().toLowerCase();
+      var fBg = FIBER_COLOR_CSS[fKey];
+      if (!fBg) return { fillColor: defaultFill, textColor: defaultText, fontStyle: 'normal' };
+      return {
+        fillColor: hexToRgb(fBg),
+        textColor: (fKey === 'white' || fKey === 'yellow') ? hexToRgb('#0f172a') : hexToRgb('#f8fafc'),
+        fontStyle: 'bold',
+      };
+    }
+    if (col.key === 'fiber_type') {
+      var typeVal = String(srcRow.fiber_type || '').toLowerCase();
+      if (typeVal === 'main') {
+        return { fillColor: defaultFill, textColor: hexToRgb('#166534'), fontStyle: 'bold' };
+      }
+      if (typeVal === 'expansion') {
+        return { fillColor: defaultFill, textColor: hexToRgb('#1d4ed8'), fontStyle: 'bold' };
+      }
+    }
+    return null;
+  }
+
+  function chunkMatrixRowsForPdfExport(rows, boundaryKeys) {
+    if (!rows || !rows.length) return [];
+    var keys = boundaryKeys && boundaryKeys.length ? boundaryKeys : ['m_cable_id'];
+    var chunks = [];
+    var current = [];
+    var prevKey = null;
+    var i;
+    for (i = 0; i < rows.length; i++) {
+      var key = groupKeyForRow(rows[i], keys);
+      if (current.length && key !== prevKey) {
+        chunks.push(current);
+        current = [];
+      }
+      current.push(rows[i]);
+      prevKey = key;
+    }
+    if (current.length) chunks.push(current);
+    return chunks;
+  }
+
+  function refinePdfChunkSizes(chunks, isRing) {
+    if (isRing || !chunks || !chunks.length) return chunks || [];
+    var maxRows = 30;
+    var refined = [];
+    var ci;
+    for (ci = 0; ci < chunks.length; ci++) {
+      var chunk = chunks[ci];
+      if (chunk.length <= maxRows) {
+        refined.push(chunk);
+        continue;
+      }
+      var subChunks = chunkMatrixRowsForPdfExport(
+        chunk,
+        ['m_cable_id', 'closure_id', 's_cable_id']
+      );
+      var si;
+      for (si = 0; si < subChunks.length; si++) {
+        if (subChunks[si].length <= maxRows) {
+          refined.push(subChunks[si]);
+        } else {
+          refined = refined.concat(chunkMatrixRowsForPdfExport(
+            subChunks[si],
+            ['m_cable_id', 'closure_id', 's_cable_id', 'fat_id']
+          ));
+        }
+      }
+    }
+    return refined;
+  }
+
+  function getMatrixPdfChunkBoundaryKeys(isRing) {
+    if (isRing) return ['ring_block_id'];
+    return ['m_cable_id', 'closure_id'];
+  }
+
+  function buildAutoTableBodyWithRowspan(annotated, columns) {
+    var body = [];
+    var ri;
+    for (ri = 0; ri < annotated.length; ri++) {
+      var row = annotated[ri];
+      var line = [];
+      var ci;
+      for (ci = 0; ci < columns.length; ci++) {
+        var col = columns[ci];
+        if (row['_skip_' + col.key]) continue;
+        var text = formatMatrixCellText(row, col);
+        var rs = row['_rs_' + col.key] || 1;
+        if (rs > 1) {
+          line.push({ content: text, rowSpan: rs });
+        } else {
+          line.push(text);
+        }
+      }
+      body.push(line);
+    }
+    return body;
+  }
+
+  function applyMatrixPdfCellStyles(data, columns, annotated) {
+    if (data.section !== 'body') return;
+    var col = columns[data.column.index];
+    if (!col) return;
+    var srcRow = annotated[data.row.index];
+    if (!srcRow) return;
+    var colors = getMatrixCellPdfColors(srcRow, col);
+    if (colors) {
+      data.cell.styles.fillColor = colors.fillColor;
+      data.cell.styles.textColor = colors.textColor;
+      if (colors.fontStyle) data.cell.styles.fontStyle = colors.fontStyle;
+      return;
+    }
+    if (data.row.index % 2 === 1) {
+      data.cell.styles.fillColor = [248, 250, 252];
+    }
+  }
+
+  function buildMatrixAutoTableOptions(columns, margin) {
+    return {
+      margin: margin,
+      theme: 'grid',
+      tableWidth: 'auto',
+      rowPageBreak: 'avoid',
+      styles: {
+        font: 'helvetica',
+        fontSize: 7,
+        cellPadding: 1.4,
+        overflow: 'linebreak',
+        valign: 'middle',
+        lineColor: [148, 163, 184],
+        lineWidth: 0.1,
+        textColor: [15, 23, 42],
+        fillColor: [255, 255, 255],
+      },
+      headStyles: {
+        fillColor: [226, 232, 240],
+        textColor: [15, 23, 42],
+        fontStyle: 'bold',
+        fontSize: 6.5,
+        halign: 'left',
+      },
+    };
+  }
+
+  function buildMatrixPdfFilename(isRing) {
+    var prefix = isRing ? 'ring-fiber-design' : 'fiber-design-matrix';
+    var stamp = new Date();
+    var y = stamp.getFullYear();
+    var m = stamp.getMonth() + 1;
+    var d = stamp.getDate();
+    var hh = stamp.getHours();
+    var mm = stamp.getMinutes();
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
+    return prefix + '-' + y + pad2(m) + pad2(d) + '-' + pad2(hh) + pad2(mm) + '.pdf';
+  }
+
+  function buildMatrixPrintDocument(rows) {
+    var summary = getMatrixFilterSummary();
+    var stamp = new Date();
+    var stampText = stamp.toLocaleString();
+    var isRing = activeMatrixTab === 'ring';
+    var title = isRing
+      ? 'Ring Fiber Design (OLT to Cabinets)'
+      : 'Fiber Design Matrix';
+    var tableHtml = isRing
+      ? renderMatrixTable(rows || [], {
+        columns: RING_MATRIX_COLUMNS,
+        rowspanKeys: RING_ROWSPAN_GROUP_KEYS,
+        emptyText: 'No OLT feeder → cabinet allocations found.',
+      })
+      : renderMatrixTable(rows || []);
+    var meta = isRing
+      ? ('<strong>Generated:</strong> ' + escapeHtml(stampText) +
+        ' · <strong>Rule:</strong> 1 tube / cabinet · Main S1 (IN01–12→IN1) + Backup S2 (IN13–24→IN2)' +
+        ' · <strong>Rows:</strong> ' + String((rows && rows.length) || 0))
+      : ('<strong>Generated:</strong> ' + escapeHtml(stampText) + ' · ' +
+        '<strong>Cabinet:</strong> ' + escapeHtml(summary.cabinet) + ' · ' +
+        '<strong>Closure:</strong> ' + escapeHtml(summary.closure) + ' · ' +
+        '<strong>Sort:</strong> ' + escapeHtml(summary.sort) + ' · ' +
+        '<strong>Rows:</strong> ' + String((rows && rows.length) || 0));
+    return '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>' +
+      '<title>' + escapeHtml(title) + '</title>' +
+      '<style>' + buildMatrixPrintStyles() + '</style></head><body>' +
+      '<header class="fd-print-report__header">' +
+      '<h1 class="fd-print-report__title">' + escapeHtml(title) + '</h1>' +
+      '<p class="fd-print-report__meta">' + meta + '</p></header>' +
+      tableHtml +
+      '</body></html>';
+  }
+
+  function exportMatrixPdf() {
+    try {
+      if (!window.jspdf || !window.jspdf.jsPDF) {
+        window.alert('PDF export libraries failed to load. Please refresh the page and try again.');
+        return;
+      }
+      var rows = getCurrentMatrixRows();
+      var isRing = activeMatrixTab === 'ring';
+      var columns = isRing ? RING_MATRIX_COLUMNS : MATRIX_COLUMNS;
+      var rowspanKeys = isRing ? RING_ROWSPAN_GROUP_KEYS : ROWSPAN_GROUP_KEYS;
+      var title = isRing
+        ? 'Ring Fiber Design (OLT to Cabinets)'
+        : 'Fiber Design Matrix';
+      var summary = getMatrixFilterSummary();
+      var stampText = new Date().toLocaleString();
+      var boundaryKeys = getMatrixPdfChunkBoundaryKeys(isRing);
+      var chunks = refinePdfChunkSizes(
+        chunkMatrixRowsForPdfExport(rows, boundaryKeys),
+        isRing
+      );
+      var headers = columns.map(function (col) { return col.label; });
+      var margin = { top: 14, right: 8, bottom: 8, left: 8 };
+      var tableBaseOptions = buildMatrixAutoTableOptions(columns, margin);
+
+      var jsPDF = window.jspdf.jsPDF;
+      var doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+      var pageW = doc.internal.pageSize.getWidth();
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, margin.left, 10);
+
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(51, 65, 85);
+      var meta = isRing
+        ? ('Generated: ' + stampText +
+          '  |  Rule: 1 tube / cabinet  |  Main S1 + Backup S2  |  Rows: ' +
+          String((rows && rows.length) || 0))
+        : ('Generated: ' + stampText +
+          '  |  Cabinet: ' + summary.cabinet +
+          '  |  Closure: ' + summary.closure +
+          '  |  Sort: ' + summary.sort +
+          '  |  Rows: ' + String((rows && rows.length) || 0));
+      doc.text(meta, margin.left, 14.5, { maxWidth: pageW - margin.left - margin.right });
+
+      if (!chunks.length) {
+        doc.setFontSize(9);
+        doc.setTextColor(71, 85, 105);
+        doc.text(
+          isRing ? 'No OLT feeder to cabinet allocations found.' : 'No splice rows for the current filters.',
+          margin.left,
+          22
+        );
+        doc.save(buildMatrixPdfFilename(isRing));
+        return;
+      }
+
+      if (typeof doc.autoTable !== 'function') {
+        window.alert('PDF table plugin failed to load. Please refresh the page and try again.');
+        return;
+      }
+
+      var chunkIdx;
+      var tableStartY = 18;
+      for (chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
+        if (chunkIdx > 0) {
+          doc.addPage();
+          tableStartY = margin.top;
+        }
+        var chunkRows = chunks[chunkIdx];
+        var annotated = applyRowspanMetadata(chunkRows.slice(), rowspanKeys);
+        var body = buildAutoTableBodyWithRowspan(annotated, columns);
+
+        doc.autoTable(Object.assign({}, tableBaseOptions, {
+          head: [headers],
+          body: body,
+          startY: tableStartY,
+          showHead: 'everyPage',
+          didParseCell: function (data) {
+            applyMatrixPdfCellStyles(data, columns, annotated);
+          },
+        }));
+      }
+
+      doc.save(buildMatrixPdfFilename(isRing));
+    } catch (e) {
+      console.error('[FiberDesignUI] exportMatrixPdf EXCEPTION:', e.message || e);
+      window.alert('Failed to export Fiber Design Matrix PDF.');
+    }
+  }
+
   function sortRowsByMode(rows) {
     if (!rows || !rows.length) return rows;
     var sorted = rows.slice();
-    
+
     if (activeSortMode === 'insertion') {
       // Sort by closure_order (insertion order)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         if (a.closure_order !== b.closure_order) {
           return (a.closure_order || 0) - (b.closure_order || 0);
         }
@@ -499,6 +1250,8 @@
     } else if (activeSortMode === 'chronological') {
       // Sort by closure_id (chronological/path order)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         if (a.cabinet_label !== b.cabinet_label) {
           return String(a.cabinet_label || '').localeCompare(String(b.cabinet_label || ''), undefined, { numeric: true });
         }
@@ -513,6 +1266,8 @@
     } else if (activeSortMode === 'cindex') {
       // Sort by C-index (extract numeric suffix from closure_id)
       sorted.sort(function (a, b) {
+        var directCmp = compareDirectRowsLast(a, b);
+        if (directCmp !== 0) return directCmp;
         function extractCIndex(closureId) {
           var m = String(closureId || '').match(/C(\d+)/i);
           return m ? parseInt(m[1], 10) : 0;
@@ -529,8 +1284,46 @@
         }
         return 0;
       });
+    } else {
+      sorted.sort(compareDirectRowsLast);
     }
     return sorted;
+  }
+
+  function renderDistributionToolbar(rows) {
+    return '<div class="fd-float__toolbar">' +
+      '<label class="fd-float__filter-label" for="fd-matrix-cabinet-filter">Cabinet Filter</label>' +
+      '<select id="fd-matrix-cabinet-filter" class="fd-float__filter-select">' +
+      renderCabinetFilterOptions() +
+      '</select>' +
+      '<label class="fd-float__filter-label" for="fd-matrix-closure-filter">Closure Filter</label>' +
+      '<select id="fd-matrix-closure-filter" class="fd-float__filter-select">' +
+      renderClosureFilterOptions() +
+      '</select>' +
+      '<label class="fd-float__filter-label" for="fd-matrix-sort-mode" style="margin-left: 20px;">Sort By</label>' +
+      '<select id="fd-matrix-sort-mode" class="fd-float__filter-select">' +
+      renderSortOptions() +
+      '</select>' +
+      '<div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">' +
+      '<button id="btn-zoom-out" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">-</button>' +
+      '<span id="zoom-text-display" style="color: #a0aabf; font-size: 13px;">100%</span>' +
+      '<button id="btn-zoom-in" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">+</button>' +
+      '</div>' +
+      '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export current matrix as PDF">' +
+      'Export PDF</button>' +
+      '<span class="fd-float__badge">AutoFiberEngine · DFS</span>' +
+      '<span class="fd-float__row-count">' + rows.length + ' splice row(s)</span>' +
+      '</div>';
+  }
+
+  function renderRingToolbar(rows) {
+    return '<div class="fd-float__toolbar">' +
+      '<span class="fd-float__badge">Ring Feeder · Main (S1) + Backup (S2)</span>' +
+      '<span class="fd-float__hint-inline">Independent 12-row blocks · Main IN01–12/IN1 · Backup IN13–24/IN2</span>' +
+      '<button type="button" id="btn-export-matrix-pdf" class="fd-float__export-btn" title="Export ring matrix as PDF">' +
+      'Export PDF</button>' +
+      '<span class="fd-float__row-count">' + rows.length + ' fiber row(s)</span>' +
+      '</div>';
   }
 
   function renderMatrixBody() {
@@ -540,61 +1333,36 @@
     try {
       var mgr = getManager();
       if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: manager=' + (mgr ? 'found' : 'null'));
+      console.log('[FiberDesignUI] renderMatrixBody: manager=' + (mgr ? 'found' : 'null') +
+        ', tab=' + activeMatrixTab);
       }
+
+      var rows = getCurrentMatrixRows();
+      var tableHtml;
+      var toolbar;
+
+      if (activeMatrixTab === 'ring') {
+        toolbar = renderRingToolbar(rows);
+        tableHtml = renderMatrixTable(rows, {
+          columns: RING_MATRIX_COLUMNS,
+          rowspanKeys: RING_ROWSPAN_GROUP_KEYS,
+          emptyText: 'No OLT→Cabinet feeder allocations found. Draw an FTTH feeder (48/72/144/288F) from OLT to FDT cabinets.',
+        });
+      } else {
+        toolbar = renderDistributionToolbar(rows);
+        tableHtml = renderMatrixTable(rows);
+      }
+
       if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: activeCabinetFilter=' + activeCabinetFilter + ', activeClosureFilter=' + activeClosureFilter + ', activeSortMode=' + activeSortMode);
+      console.log('[FiberDesignUI] renderMatrixBody SUCCESS rows=' + (rows ? rows.length : 0));
       }
 
-      var rows = mgr && mgr.getSpliceMatrixRows
-        ? mgr.getSpliceMatrixRows({
-          cabinet: activeCabinetFilter,
-          closure: activeClosureFilter,
-        })
-        : [];
-
-      // Apply sorting based on selected mode
-      rows = sortRowsByMode(rows);
-
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: rows=' + (rows ? rows.length : 0));
-      }
-      var engineBadge = '<span class="fd-float__badge">AutoFiberEngine · DFS</span>';
-
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody: calling renderMatrixTable');
-      }
-      var tableHtml = renderMatrixTable(rows);
-      if (DEBUG) {
-      console.log('[FiberDesignUI] renderMatrixBody SUCCESS');
-      }
-
-      return '<div class="fd-float__toolbar">' +
-        '<label class="fd-float__filter-label" for="fd-matrix-cabinet-filter">Cabinet Filter</label>' +
-        '<select id="fd-matrix-cabinet-filter" class="fd-float__filter-select">' +
-        renderCabinetFilterOptions() +
-        '</select>' +
-        '<label class="fd-float__filter-label" for="fd-matrix-closure-filter">Closure Filter</label>' +
-        '<select id="fd-matrix-closure-filter" class="fd-float__filter-select">' +
-        renderClosureFilterOptions() +
-        '</select>' +
-        '<label class="fd-float__filter-label" for="fd-matrix-sort-mode" style="margin-left: 20px;">Sort By</label>' +
-        '<select id="fd-matrix-sort-mode" class="fd-float__filter-select">' +
-        renderSortOptions() +
-        '</select>' +
-        '<div style="display: inline-flex; align-items: center; gap: 8px; margin-left: 20px;">' +
-        '<button id="btn-zoom-out" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">-</button>' +
-        '<span id="zoom-text-display" style="color: #a0aabf; font-size: 13px;">100%</span>' +
-        '<button id="btn-zoom-in" style="padding: 2px 10px; background: #2a2d3d; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; font-weight: bold;">+</button>' +
-        '</div>' +
-        engineBadge +
-        '<span class="fd-float__row-count">' + rows.length + ' splice row(s)</span>' +
-        '</div>' +
-        tableHtml;
+      return renderMatrixTabs() + toolbar + tableHtml;
     } catch (e) {
       console.error('[FiberDesignUI] renderMatrixBody EXCEPTION:', e.message);
       console.error('[FiberDesignUI] renderMatrixBody STACK:', e.stack);
-      return '<div class="fd-matrix-error">Error rendering matrix: ' + e.message + '</div>';
+      return renderMatrixTabs() +
+        '<div class="fd-matrix-error">Error rendering matrix: ' + e.message + '</div>';
     }
   }
 
@@ -629,16 +1397,46 @@
         refreshMatrix();
       });
     }
+
+    var exportBtn = root.querySelector('#btn-export-matrix-pdf');
+    if (exportBtn && !exportBtn._fdBound) {
+      exportBtn._fdBound = true;
+      exportBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        exportMatrixPdf();
+      });
+    }
+
+    root.querySelectorAll('[data-matrix-tab]').forEach(function (tabBtn) {
+      if (tabBtn._fdBound) return;
+      tabBtn._fdBound = true;
+      tabBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        var next = tabBtn.getAttribute('data-matrix-tab') || 'distribution';
+        if (next === activeMatrixTab) return;
+        activeMatrixTab = next;
+        refreshMatrix();
+      });
+    });
+
+    bindColumnResize(root);
   }
 
   function refreshMatrix(payload) {
     if (!matrixEl || !matrixOpen) return;
+    if (colResizeState) endColumnResize();
     var body = matrixEl.querySelector('.fd-float__body');
     if (!body) return;
     body.innerHTML = renderMatrixBody();
     bindMatrixFilter(body);
     if (payload && payload.reason === 'path-merged' && payload.merge) {
       matrixEl.setAttribute('data-last-merge-cable', String(payload.merge.cableId || ''));
+    }
+    if (payload && payload.reason === 'interactive-trail') {
+      matrixEl.setAttribute('data-last-path-source', 'interactive-trail');
+      matrixEl.setAttribute('data-design-version', String(payload.version || ''));
     }
   }
 
@@ -879,6 +1677,10 @@
           currentMatrixZoom -= ZOOM_STEP;
           applyMatrixZoom();
         }
+      } else if (target.closest('#btn-export-matrix-pdf')) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (matrixOpen) exportMatrixPdf();
       }
     });
 
@@ -1052,7 +1854,12 @@
         mgr.ensureDisplayData();
       }
 
-      activeCabinetFilter = options.cabinetFilter != null ? String(options.cabinetFilter) : 'all';
+      if (options.cabinetFilter != null) {
+        activeCabinetFilter = String(options.cabinetFilter);
+      } else {
+        var liveFdt = resolveActiveFdtFilterId();
+        activeCabinetFilter = liveFdt ? String(liveFdt) : 'all';
+      }
       activeClosureFilter = options.closureFilter != null ? String(options.closureFilter) : 'all';
       
       refreshMatrix();
@@ -1155,6 +1962,21 @@
       'font-size:0.58rem;padding:0.12rem 0.4rem;border-radius:0.25rem;',
       'background:rgba(56,189,248,0.12);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);}',
       '.fd-float__row-count{margin-left:auto;font-size:0.6rem;color:#64748b;font-family:ui-monospace,Consolas,monospace;}',
+      '.fd-float__export-btn{',
+      'margin-left:0.35rem;padding:0.28rem 0.65rem;border-radius:0.3rem;cursor:pointer;',
+      'border:1px solid rgba(56,189,248,0.45);background:rgba(14,165,233,0.18);color:#7dd3fc;',
+      'font-size:0.65rem;font-weight:700;letter-spacing:0.02em;}',
+      '.fd-float__export-btn:hover{background:rgba(14,165,233,0.32);color:#e0f2fe;}',
+      '.fd-float__tabs{display:flex;flex-wrap:wrap;gap:0.35rem;margin:0 0 0.65rem;}',
+      '.fd-float__tab{',
+      'border:1px solid rgba(71,85,105,0.85);background:#1e293b;color:#94a3b8;',
+      'border-radius:0.35rem;padding:0.35rem 0.65rem;font-size:0.68rem;font-weight:700;',
+      'cursor:pointer;}',
+      '.fd-float__tab:hover{color:#e2e8f0;border-color:rgba(148,163,184,0.7);}',
+      '.fd-float__tab.is-active{',
+      'background:rgba(14,165,233,0.2);border-color:rgba(56,189,248,0.55);color:#7dd3fc;}',
+      '.fd-float__hint-inline{font-size:0.6rem;color:#64748b;}',
+      '.fd-matrix-cell--striped{box-shadow:inset 0 0 0 1px rgba(255,255,255,0.25);}',
       /* OS-style resize handles (all edges + corners) */
       '.fd-float__resize{position:absolute;z-index:5;background:transparent;}',
       '.fd-float__resize--n{left:8px;right:8px;top:-3px;height:8px;cursor:ns-resize;}',
@@ -1166,16 +1988,30 @@
       '.fd-float__resize--se{bottom:-4px;right:-4px;width:14px;height:14px;cursor:nwse-resize;}',
       '.fd-float__resize--sw{bottom:-4px;left:-4px;width:14px;height:14px;cursor:nesw-resize;}',
       '.fd-matrix-scroll{overflow:auto;max-width:100%;border:1px solid rgba(51,65,85,0.75);border-radius:0.4rem;}',
-      '.fd-matrix-table{width:100%;border-collapse:collapse;min-width:900px;font-size:0.65rem;}',
+      '.fd-matrix-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;min-width:900px;font-size:0.65rem;}',
       '.fd-matrix-table thead th{',
-      'position:sticky;top:0;z-index:2;padding:0.4rem 0.5rem;text-align:left;',
+      'position:sticky;top:0;z-index:2;padding:0.4rem 0.65rem 0.4rem 0.5rem;text-align:left;',
       'background:#1e293b;color:#cbd5e1;font-weight:700;border-bottom:1px solid rgba(71,85,105,0.85);',
-      'white-space:nowrap;font-size:0.58rem;text-transform:uppercase;letter-spacing:0.04em;}',
+      'border-right:1px solid rgba(71,85,105,0.55);',
+      'white-space:nowrap;font-size:0.58rem;text-transform:uppercase;letter-spacing:0.04em;',
+      'overflow:hidden;user-select:none;-webkit-user-select:none;',
+      'box-sizing:border-box;}',
+      '.fd-matrix-th__label{display:block;overflow:hidden;text-overflow:ellipsis;}',
+      '.fd-matrix-col-resizer{',
+      'position:absolute;top:0;right:-3px;width:7px;height:100%;cursor:col-resize;z-index:3;',
+      'touch-action:none;}',
+      '.fd-matrix-col-resizer:hover,.fd-matrix-col-resizer:active{',
+      'background:linear-gradient(90deg,transparent 2px,rgba(56,189,248,0.85) 2px,rgba(56,189,248,0.85) 4px,transparent 4px);}',
+      'body.fd-matrix-col-resizing,body.fd-matrix-col-resizing *{cursor:col-resize!important;user-select:none!important;}',
       '.fd-matrix-table tbody td{',
       'padding:0.3rem 0.5rem;border-bottom:1px solid rgba(30,41,59,0.85);',
-      'border-right:1px solid rgba(30,41,59,0.55);color:#e2e8f0;vertical-align:middle;}',
+      'border-right:1px solid rgba(30,41,59,0.55);color:#e2e8f0;vertical-align:middle;',
+      'overflow:hidden;text-overflow:ellipsis;}',
       '.fd-matrix-table tbody tr:nth-child(even) td{background:rgba(15,23,42,0.35);}',
       '.fd-matrix-cell--color{font-weight:700;text-transform:capitalize;text-shadow:0 1px 1px rgba(0,0,0,0.35);}',
+      '.fd-matrix-cell--empty-color{background:transparent!important;background-image:none!important;',
+      'color:inherit;font-weight:400;text-transform:none;text-shadow:none;}',
+      '.fd-matrix-cell--tube{white-space:nowrap;}',
       '.fd-matrix-cell--type-main{font-weight:700;color:#4ade80;}',
       '.fd-matrix-cell--type-expansion{font-weight:700;color:#60a5fa;}',
       '.fd-matrix-empty{',
@@ -1192,8 +2028,13 @@
     clearActiveTab: clearActiveTab,
     sortCablesForTabs: sortCablesForTabs,
     openMatrix: openMatrix,
+    onActiveFdtChanged: function (fdtId) {
+      /* Matrix stays on Active FDT domain; sidebar inspection remains free for any cabinet. */
+      applyActiveFdtMatrixFilter(fdtId);
+    },
     closeMatrix: closeMatrix,
     refreshMatrix: refreshMatrix,
+    exportMatrixPdf: exportMatrixPdf,
     onPathMerged: onPathMerged,
     isMatrixOpen: function () { return matrixOpen; },
     open: openMatrix,

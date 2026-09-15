@@ -22,6 +22,9 @@
 
   var Sim = {
     activeCityId: 'training_city_1',
+    coordinateMode: 'geographic',
+    uploadedMapLayout: null,
+    uploadedMapImage: null,
     selectedTool: null,
     selectedCableSpec: null,
     cableDraftFrom: null,
@@ -59,6 +62,8 @@
       pole: 0,
       cableByCapacity: {},
     },
+    /* Per-cabinet (FDT) naming domains — keyed by FDT node id */
+    countersByCabinet: {},
     excavationPaths: [],
     excavationPathId: 0,
     fiberCablePaths: [],
@@ -105,6 +110,11 @@
       topologyTreeFocus: null,
       pathHighlightFromSidebar: false,
       sidebarEditMode: false,
+      /** Active Cabinet/FDT node id — scopes naming, badges, and matrix.
+       *  Locked: only toolbox quick-switcher may change this (never map inspect). */
+      activeFdtId: null,
+      /** Once user picks a toolbox batch, never auto-advance/reset it. */
+      cableBatchLocked: false,
       toolboxWidth: 250,
       evalPanelWidth: 256,
       sidePanelResizeBound: false,
@@ -164,14 +174,15 @@
 
   var CELL = {
     BUILD: 'build', STREET: 'street', SIDEWALK: 'sidewalk',
+    CANVAS: 'canvas',
     ITPC: 'itpc', PARK: 'park', POI: 'poi', RES_BLOCK: 'res_block',
   };
 
   var HOME_COUNTS = [4, 6, 7, 8, 10, 12, 15, 18, 24, 32, 48, 64];
-  var SIDEWALK_TOOLS = { handhole: 1, fat_handhole: 1, fdt: 1 };
+  var SIDEWALK_TOOLS = { handhole: 1, fat_handhole: 1, fdt: 1, olt: 1 };
 
   var EQUIPMENT = [
-    { id: 'olt', label: 'OLT / ITPC Exchange', icon: '📡', color: '#7c3aed', itpcOnly: true },
+    { id: 'olt', label: 'OLT / ITPC Exchange', icon: '🏛️', color: '#7c3aed', visual: 'olt' },
     { id: 'fdt', label: 'FDT', icon: 'FDT', color: '#f59e0b', visual: 'fdt' },
     { id: 'closure', label: 'Closure', icon: '🟥', color: '#ef4444', visual: 'closure', nestOnly: true },
   ];
@@ -236,6 +247,17 @@
     global.FTTHSimulatorSettings.saveSettings();
   }
 
+  function emptyCabinetCounters() {
+    return {
+      handhole: 0,
+      closure: 0,
+      fatHandhole: 0,
+      fatSystem: 0,
+      pole: 0,
+      cableByCapacity: {},
+    };
+  }
+
   function resetNameCounters() {
     Sim.counters.handhole = 0;
     Sim.counters.closure = 0;
@@ -244,6 +266,606 @@
     Sim.counters.fatSystem = 0;
     Sim.counters.pole = 0;
     Sim.counters.cableByCapacity = {};
+    Sim.countersByCabinet = {};
+  }
+
+  function getActiveFdtId() {
+    return Sim.ui && Sim.ui.activeFdtId ? String(Sim.ui.activeFdtId) : null;
+  }
+
+  function getActiveFdtNode() {
+    var id = getActiveFdtId();
+    return id ? findNode(id) : null;
+  }
+
+  function getActiveFdtLabel() {
+    var n = getActiveFdtNode();
+    if (!n) return '';
+    return getFdtCabinetCode(n) || n.autoName || ('FDT');
+  }
+
+  function getActiveFdtNumber() {
+    var label = getActiveFdtLabel();
+    var m = String(label || '').match(/(\d+)\s*$/);
+    return m ? m[1] : '';
+  }
+
+  function ensureCabinetCounterBucket(cabinetId) {
+    if (!cabinetId) return emptyCabinetCounters();
+    var key = String(cabinetId);
+    if (!Sim.countersByCabinet) Sim.countersByCabinet = {};
+    if (!Sim.countersByCabinet[key]) {
+      Sim.countersByCabinet[key] = emptyCabinetCounters();
+    } else if (!Sim.countersByCabinet[key].cableByCapacity) {
+      Sim.countersByCabinet[key].cableByCapacity = {};
+    }
+    return Sim.countersByCabinet[key];
+  }
+
+  function mirrorActiveCabinetCountersToSim() {
+    var cabId = getActiveFdtId();
+    if (!cabId) return;
+    var bucket = ensureCabinetCounterBucket(cabId);
+    Sim.counters.handhole = bucket.handhole || 0;
+    Sim.counters.closure = bucket.closure || 0;
+    Sim.counters.fatHandhole = bucket.fatHandhole || 0;
+    Sim.counters.fatSystem = bucket.fatSystem || 0;
+    Sim.counters.pole = bucket.pole || 0;
+    Sim.counters.cableByCapacity = JSON.parse(JSON.stringify(bucket.cableByCapacity || {}));
+  }
+
+  function nodeBelongsToCabinet(node, cabinetId) {
+    if (!cabinetId) return true;
+    if (!node) return false;
+    if (node.type === 'fdt') return String(node.id) === String(cabinetId);
+    if (node.type === 'olt') return false;
+    return String(node.ownerFdtId || '') === String(cabinetId);
+  }
+
+  function resolveCableOwnerFdtId(cable) {
+    if (!cable) return null;
+    if (cable.ownerFdtId && findNode(cable.ownerFdtId)) return String(cable.ownerFdtId);
+    if (cable.mainCableTrail && cable.mainCableTrail.cabinetId) {
+      return String(cable.mainCableTrail.cabinetId);
+    }
+    if (cable.subCableTrail && cable.subCableTrail.closureId) {
+      var clo = findNode(cable.subCableTrail.closureId);
+      if (clo && clo.ownerFdtId) return String(clo.ownerFdtId);
+      var viaClo = findServingFdt(clo);
+      if (viaClo) return String(viaClo.id);
+    }
+    var ends = getCableEndpointNodes(cable.pointSnapNodeIds || []);
+    var fdt = (ends.start && ends.start.type === 'fdt') ? ends.start
+      : (ends.end && ends.end.type === 'fdt') ? ends.end
+      : findServingFdt(ends.start) || findServingFdt(ends.end);
+    return fdt ? String(fdt.id) : getActiveFdtId();
+  }
+
+  function cableBelongsToCabinet(cableOrId, cabinetId) {
+    if (!cabinetId) return true;
+    if (cableOrId == null) return false;
+    var cable = cableOrId;
+    if (typeof cableOrId !== 'object') {
+      cable = findPathByRef({ type: 'fiber', id: cableOrId });
+    }
+    if (!cable) return false;
+    return String(resolveCableOwnerFdtId(cable) || '') === String(cabinetId);
+  }
+
+  /**
+   * Cabinet scope for Evaluation/Details inspection of a selected node.
+   * Returns that node's owner cabinet — never the locked Active FDT fallback —
+   * so foreign-cabinet reviews stay visible without shifting draw domain.
+   * null = show linked assets without cabinet filtering.
+   */
+  function resolveInspectionCabinetId(node) {
+    if (!node) return null;
+    if (node.type === 'fdt') return String(node.id);
+    if (node.ownerFdtId) return String(node.ownerFdtId);
+    return null;
+  }
+
+  /** Cabinet id for the current Evaluation selection (node or path), if any. */
+  function getInspectedCabinetId() {
+    if (Sim.selectedNodeId) {
+      return resolveInspectionCabinetId(findNode(Sim.selectedNodeId));
+    }
+    if (!Sim.selectedPath) return null;
+    var meta = getPathSidebarMeta(Sim.selectedPath);
+    if (!meta || !meta.path) return null;
+    var path = meta.path;
+    var pType = Sim.selectedPath.type;
+    if (pType === 'fiber' || pType === 'cable') {
+      return resolveCableOwnerFdtId(path);
+    }
+    if (path.ownerFdtId) return String(path.ownerFdtId);
+    var linked = (Sim.nodes || []).filter(function (n) {
+      return n && (n.type === 'handhole' || n.type === 'fat_handhole' || n.type === 'fdt') &&
+        pathEndpointTouchesNode(path, n);
+    });
+    var i;
+    for (i = 0; i < linked.length; i++) {
+      if (linked[i].type === 'fdt') return String(linked[i].id);
+      if (linked[i].ownerFdtId) return String(linked[i].ownerFdtId);
+    }
+    return null;
+  }
+
+  function formatCabinetBadgeSuffix(cabinetId) {
+    if (!cabinetId) return '';
+    var fdt = findNode(cabinetId);
+    if (!fdt) return '';
+    var label = getFdtCabinetCode(fdt) || fdt.autoName || '';
+    return label ? (' · ' + label) : '';
+  }
+
+  /** Details-panel section suffix: inspected cabinet when reviewing, else Active FDT. */
+  function formatDetailsPanelFdtBadgeSuffix() {
+    var inspected = getInspectedCabinetId();
+    if (inspected) return formatCabinetBadgeSuffix(inspected);
+    return formatActiveFdtBadgeSuffix();
+  }
+
+  /**
+   * Infer trench ownership from endpoint assets / hosted cables.
+   * Strict: trenches owned by another cabinet are excluded from the active domain.
+   */
+  function excavationBelongsToCabinet(path, cabinetId) {
+    if (!cabinetId) return true;
+    if (!path) return false;
+    if (path.ownerFdtId && findNode(path.ownerFdtId)) {
+      return String(path.ownerFdtId) === String(cabinetId);
+    }
+
+    var sawOwn = false;
+    var sawForeign = false;
+    var i;
+    var nodes = Sim.nodes || [];
+    for (i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      if (!n) continue;
+      if (n.type !== 'handhole' && n.type !== 'fat_handhole' &&
+          n.type !== 'fdt' && n.type !== 'pole_foundation') continue;
+      if (!pathEndpointTouchesNode(path, n)) continue;
+      if (n.type === 'fdt') {
+        if (String(n.id) === String(cabinetId)) sawOwn = true;
+        else sawForeign = true;
+      } else if (nodeBelongsToCabinet(n, cabinetId)) {
+        sawOwn = true;
+      } else if (n.ownerFdtId) {
+        sawForeign = true;
+      }
+    }
+
+    var cables = Sim.fiberCablePaths || [];
+    for (i = 0; i < cables.length; i++) {
+      var c = cables[i];
+      if (!c) continue;
+      var onTrench = c.hostTrenchId === path.id || c.trenchPathId === path.id ||
+        ((c.trenchPathIds || []).indexOf(path.id) >= 0);
+      if (!onTrench) continue;
+      if (cableBelongsToCabinet(c, cabinetId)) sawOwn = true;
+      else if (resolveCableOwnerFdtId(c)) sawForeign = true;
+    }
+
+    if (sawOwn) return true;
+    if (sawForeign) return false;
+    return true;
+  }
+
+  function syncSelectionToActiveFdt() {
+    var cabId = getActiveFdtId();
+    if (!cabId) return false;
+    var cleared = false;
+
+    if (Sim.selectedNodeId) {
+      var node = findNode(Sim.selectedNodeId);
+      if (node && !nodeBelongsToCabinet(node, cabId)) {
+        Sim.selectedNodeId = null;
+        document.querySelectorAll('.placed-node.selected').forEach(function (el) {
+          el.classList.remove('selected');
+        });
+        cleared = true;
+      }
+    }
+
+    if (Sim.selectedPath) {
+      var meta = getPathSidebarMeta(Sim.selectedPath);
+      var path = meta && meta.path;
+      var pType = Sim.selectedPath.type;
+      var outOfScope = false;
+      if (!path) {
+        outOfScope = true;
+      } else if (pType === 'fiber' || pType === 'cable') {
+        outOfScope = !cableBelongsToCabinet(path, cabId);
+      } else if (pType === 'excavation') {
+        outOfScope = !excavationBelongsToCabinet(path, cabId);
+      }
+      if (outOfScope) {
+        Sim.selectedPath = null;
+        if (Sim.pathEdit) {
+          Sim.pathEdit.editingPathId = null;
+          Sim.pathEdit.editActive = false;
+        }
+        cleared = true;
+      }
+    }
+
+    if (cleared) {
+      clearTopologyHighlight();
+      Sim.ui.topologyTreeFocus = null;
+      Sim.ui.pathHighlightFromSidebar = false;
+      Sim.ui.sidebarEditMode = false;
+    }
+    return cleared;
+  }
+
+  function syncSmartBarActiveFdtBadge() {
+    var badge = document.getElementById('status-bar-active-fdt');
+    var sep = document.getElementById('status-bar-fdt-sep');
+    var label = getActiveFdtLabel();
+    var num = getActiveFdtNumber();
+    if (!badge) return;
+    if (!label) {
+      badge.hidden = true;
+      badge.setAttribute('aria-hidden', 'true');
+      badge.textContent = '';
+      badge.removeAttribute('title');
+      if (sep) {
+        sep.hidden = true;
+        sep.setAttribute('aria-hidden', 'true');
+      }
+      return;
+    }
+    var text = 'FDT ' + (num || String(label).replace(/^FDT\s*/i, ''));
+    badge.hidden = false;
+    badge.removeAttribute('aria-hidden');
+    badge.textContent = text;
+    badge.title = 'Active cabinet · ' + label;
+    if (sep) {
+      sep.hidden = false;
+      sep.removeAttribute('aria-hidden');
+    }
+  }
+
+  function ensureNodeOwnerFdt(node) {
+    if (!node || node.type === 'fdt' || node.type === 'olt') return null;
+    if (node.ownerFdtId && findNode(node.ownerFdtId)) return String(node.ownerFdtId);
+    var active = getActiveFdtId();
+    if (active) {
+      node.ownerFdtId = active;
+      return active;
+    }
+    var serving = findServingFdt(node);
+    if (serving) {
+      node.ownerFdtId = String(serving.id);
+      return node.ownerFdtId;
+    }
+    return null;
+  }
+
+  function migrateOwnerFdtIdsFromMap() {
+    (Sim.nodes || []).forEach(function (node) {
+      if (!node || node.type === 'fdt' || node.type === 'olt') return;
+      if (node.ownerFdtId && findNode(node.ownerFdtId)) return;
+      var serving = findServingFdt(node);
+      if (serving) node.ownerFdtId = String(serving.id);
+      else if (getActiveFdtId()) node.ownerFdtId = getActiveFdtId();
+    });
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      if (!cable) return;
+      if (cable.ownerFdtId && findNode(cable.ownerFdtId)) return;
+      var oid = resolveCableOwnerFdtId(cable);
+      if (oid) cable.ownerFdtId = oid;
+    });
+  }
+
+  /**
+   * Set Active FDT. Strict lock: map/draw/select must NOT change cabinet context.
+   * Allowed only via:
+   *   - opts.manual (toolbox quick-switcher arrows/dropdown)
+   *   - opts.bootstrap (no active FDT yet — first cabinet / load fallback)
+   */
+  function setActiveFdt(fdtNodeOrId, opts) {
+    opts = opts || {};
+    if (!opts.manual && !opts.bootstrap) {
+      return false;
+    }
+    var node = null;
+    if (fdtNodeOrId && typeof fdtNodeOrId === 'object') node = fdtNodeOrId;
+    else if (fdtNodeOrId != null) node = findNode(fdtNodeOrId);
+    if (!node || node.type !== 'fdt') return false;
+    var id = String(node.id);
+    var changed = String(Sim.ui.activeFdtId || '') !== id;
+    Sim.ui.activeFdtId = id;
+    ensureCabinetCounterBucket(id);
+    mirrorActiveCabinetCountersToSim();
+    /* Batch preference is independently locked — never auto-reset here. */
+    refreshBatchDuplicationHint(getActiveCableKind());
+    updateToolboxAssetCounts();
+    if (changed || opts.force) {
+      /* Manual switch only: drop selections that belong to another cabinet. */
+      if (opts.manual) syncSelectionToActiveFdt();
+    }
+    syncActiveFdtChrome();
+    if (changed || opts.force) {
+      if (global.FTTHFiberDesignUI && typeof global.FTTHFiberDesignUI.onActiveFdtChanged === 'function') {
+        global.FTTHFiberDesignUI.onActiveFdtChanged(id, getActiveFdtLabel());
+      }
+      updateMetrics();
+      renderUnifiedSidebar();
+      renderGlobalDrawingLayer();
+    }
+    return true;
+  }
+
+  function ensureActiveFdtFallback() {
+    if (getActiveFdtNode()) return getActiveFdtId();
+    var fdts = (Sim.nodes || []).filter(function (n) { return n && n.type === 'fdt'; });
+    if (!fdts.length) {
+      Sim.ui.activeFdtId = null;
+      syncActiveFdtChrome();
+      return null;
+    }
+    fdts.sort(function (a, b) {
+      return String(a.autoName || a.id).localeCompare(String(b.autoName || b.id), undefined, { numeric: true });
+    });
+    setActiveFdt(fdts[0], { bootstrap: true, force: true });
+    return getActiveFdtId();
+  }
+
+  function formatActiveFdtBadgeSuffix() {
+    var label = getActiveFdtLabel();
+    return label ? (' · ' + label) : '';
+  }
+
+  function listFdtNodesSorted() {
+    var fdts = (Sim.nodes || []).filter(function (n) { return n && n.type === 'fdt'; });
+    fdts.sort(function (a, b) {
+      return String(a.autoName || a.id).localeCompare(String(b.autoName || b.id), undefined, { numeric: true });
+    });
+    return fdts;
+  }
+
+  function cycleActiveFdt(delta) {
+    var fdts = listFdtNodesSorted();
+    if (!fdts.length) return false;
+    var cur = getActiveFdtId();
+    var idx = 0;
+    var i;
+    for (i = 0; i < fdts.length; i++) {
+      if (String(fdts[i].id) === String(cur)) {
+        idx = i;
+        break;
+      }
+    }
+    var next = fdts[(idx + (delta || 1) + fdts.length * 10) % fdts.length];
+    return setActiveFdt(next, { manual: true, force: true });
+  }
+
+  function closeFdtHeadMenu(head) {
+    if (!head) {
+      document.querySelectorAll('.toolbox-fdt-head__menu').forEach(function (m) {
+        m.hidden = true;
+        m.classList.remove('is-open');
+      });
+      document.querySelectorAll('.toolbox-fdt-head__badge[aria-expanded="true"]').forEach(function (b) {
+        b.setAttribute('aria-expanded', 'false');
+      });
+      return;
+    }
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (menu) {
+      menu.hidden = true;
+      menu.classList.remove('is-open');
+    }
+    if (badge) badge.setAttribute('aria-expanded', 'false');
+  }
+
+  function openFdtHeadMenu(head) {
+    if (!head) return;
+    closeFdtHeadMenu();
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (!menu) return;
+    menu.hidden = false;
+    menu.classList.add('is-open');
+    if (badge) badge.setAttribute('aria-expanded', 'true');
+  }
+
+  function rebuildFdtHeadMenu(head) {
+    if (!head) return;
+    var menu = head.querySelector('.toolbox-fdt-head__menu');
+    if (!menu) return;
+    var fdts = listFdtNodesSorted();
+    var activeId = getActiveFdtId();
+    menu.innerHTML = '';
+    if (!fdts.length) {
+      var empty = document.createElement('div');
+      empty.className = 'toolbox-fdt-head__menu-empty';
+      empty.textContent = 'No cabinets placed';
+      menu.appendChild(empty);
+      return;
+    }
+    fdts.forEach(function (fdt) {
+      var opt = document.createElement('button');
+      opt.type = 'button';
+      opt.className = 'toolbox-fdt-head__option';
+      opt.setAttribute('role', 'option');
+      opt.dataset.fdtId = String(fdt.id);
+      var lbl = getFdtCabinetCode(fdt) || fdt.autoName || String(fdt.id);
+      opt.textContent = lbl;
+      opt.title = 'Switch to ' + lbl;
+      if (activeId && String(fdt.id) === String(activeId)) {
+        opt.classList.add('is-active');
+        opt.setAttribute('aria-selected', 'true');
+      } else {
+        opt.setAttribute('aria-selected', 'false');
+      }
+      menu.appendChild(opt);
+    });
+  }
+
+  /** FDT Head switcher — exclusively on the FDT toolbox card (Body tools never show this). */
+  function ensureFdtHeadSwitcher(fdtCard) {
+    if (!fdtCard) return null;
+    fdtCard.classList.add('toolbox-item--fdt-head');
+    var head = fdtCard.querySelector('.toolbox-fdt-head');
+    if (!head) {
+      head = document.createElement('div');
+      head.className = 'toolbox-fdt-head';
+      head.setAttribute('data-fdt-head', '1');
+      head.innerHTML =
+        '<button type="button" class="toolbox-fdt-head__arrow" data-fdt-cycle="-1" aria-label="Previous FDT" title="Previous FDT">&lt;</button>' +
+        '<button type="button" class="toolbox-fdt-head__badge" data-fdt-menu-trigger="1" aria-haspopup="listbox" aria-expanded="false" title="Select active FDT">' +
+          '<span class="toolbox-fdt-head__label">FDT —</span>' +
+          '<span class="toolbox-fdt-head__chevron" aria-hidden="true">▾</span>' +
+        '</button>' +
+        '<button type="button" class="toolbox-fdt-head__arrow" data-fdt-cycle="1" aria-label="Next FDT" title="Next FDT">&gt;</button>' +
+        '<div class="toolbox-fdt-head__menu" data-fdt-menu="1" role="listbox" hidden></div>';
+      /* Keep switcher below the main row even if controls are injected later */
+      fdtCard.appendChild(head);
+    }
+    fdtCard.classList.add('toolbox-item--fdt-head');
+    return head;
+  }
+
+  function formatFdtSwitcherLabel(label, num) {
+    if (!label && !num) return 'FDT —';
+    if (num) return 'FDT ' + num;
+    var raw = String(label || '').trim();
+    var m = raw.match(/(\d+)\s*$/);
+    if (m) return 'FDT ' + m[1];
+    if (/^FDT/i.test(raw)) return raw.replace(/^FDT\s*/i, 'FDT ').replace(/\s+/g, ' ').trim();
+    return raw || 'FDT —';
+  }
+
+  function syncFdtHeadSwitcher() {
+    var box = document.getElementById('toolbox-items');
+    if (!box) return;
+    /* Strip legacy / misplaced badges from Body tools */
+    box.querySelectorAll('.toolbox-active-fdt-status').forEach(function (el) {
+      el.remove();
+    });
+    box.querySelectorAll('.toolbox-fdt-head').forEach(function (head) {
+      var host = head.closest('.toolbox-item[data-type], .toolbox-card[data-type]');
+      if (!host || host.getAttribute('data-type') !== 'fdt') head.remove();
+    });
+
+    var fdtCard = box.querySelector('.toolbox-item[data-type="fdt"], .toolbox-card[data-type="fdt"]');
+    if (!fdtCard) return;
+    var head = ensureFdtHeadSwitcher(fdtCard);
+    if (!head) return;
+
+    /* Ensure DOM order: icon/text → controls → switcher (controls stay top-right) */
+    var controls = fdtCard.querySelector(':scope > .toolbox-item-controls');
+    if (controls && controls.nextElementSibling !== head) {
+      fdtCard.appendChild(controls);
+    }
+    if (head.parentElement === fdtCard) fdtCard.appendChild(head);
+
+    var fdts = listFdtNodesSorted();
+    var label = getActiveFdtLabel();
+    var num = getActiveFdtNumber();
+    var statusText = formatFdtSwitcherLabel(label, num);
+    var labelEl = head.querySelector('.toolbox-fdt-head__label');
+    if (labelEl) labelEl.textContent = statusText;
+    var badge = head.querySelector('.toolbox-fdt-head__badge');
+    if (badge) {
+      badge.title = fdts.length ? ('Active cabinet · ' + statusText) : 'Place an FDT to begin';
+      badge.setAttribute('aria-label', fdts.length ? ('Select active cabinet, ' + statusText) : 'No FDT placed');
+      badge.disabled = !fdts.length;
+    }
+    head.querySelectorAll('.toolbox-fdt-head__arrow').forEach(function (btn) {
+      btn.disabled = fdts.length < 2;
+    });
+    rebuildFdtHeadMenu(head);
+    if (!fdts.length) closeFdtHeadMenu(head);
+  }
+
+  function bindFdtHeadSwitcherEvents() {
+    var box = document.getElementById('toolbox-items');
+    if (!box || box.dataset.fdtHeadBound === '1') return;
+    box.dataset.fdtHeadBound = '1';
+
+    box.addEventListener('click', function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var head = t.closest('[data-fdt-head]');
+      if (!head || !box.contains(head)) return;
+
+      var cycleBtn = t.closest('[data-fdt-cycle]');
+      if (cycleBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        var delta = parseInt(cycleBtn.getAttribute('data-fdt-cycle'), 10) || 1;
+        closeFdtHeadMenu(head);
+        cycleActiveFdt(delta);
+        return;
+      }
+
+      var option = t.closest('.toolbox-fdt-head__option[data-fdt-id]');
+      if (option) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeFdtHeadMenu(head);
+        setActiveFdt(option.getAttribute('data-fdt-id'), { manual: true, force: true });
+        return;
+      }
+
+      var trigger = t.closest('[data-fdt-menu-trigger]');
+      if (trigger) {
+        e.preventDefault();
+        e.stopPropagation();
+        var menu = head.querySelector('.toolbox-fdt-head__menu');
+        if (menu && !menu.hidden) closeFdtHeadMenu(head);
+        else {
+          rebuildFdtHeadMenu(head);
+          openFdtHeadMenu(head);
+        }
+      }
+    }, true);
+
+    document.addEventListener('click', function (e) {
+      var t = e.target;
+      if (t && t.closest && t.closest('[data-fdt-head]')) return;
+      closeFdtHeadMenu();
+    });
+  }
+
+  function syncActiveFdtChrome() {
+    var label = getActiveFdtLabel();
+
+    var evalHeader = document.querySelector('#evaluation-panel .evaluation-panel__header h2');
+    if (evalHeader) {
+      evalHeader.setAttribute('data-active-fdt', label || '');
+      evalHeader.textContent = label ? ('Evaluation' + formatActiveFdtBadgeSuffix()) : 'Evaluation';
+    }
+    var evalSub = document.querySelector('#evaluation-panel .evaluation-panel__header p');
+    if (evalSub && evalSub.getAttribute('dir') === 'rtl') {
+      evalSub.setAttribute('data-active-fdt', label || '');
+    }
+
+    bindFdtHeadSwitcherEvents();
+    syncFdtHeadSwitcher();
+    syncSmartBarActiveFdtBadge();
+
+    /* Details AB_LM titles follow the inspected item's cabinet; Active FDT chrome stays above. */
+    var detailsSuffix = formatDetailsPanelFdtBadgeSuffix();
+    document.querySelectorAll('#property-panel-body .sidebar-section__title[data-ab-base]').forEach(function (titleEl) {
+      var base = titleEl.getAttribute('data-ab-base') || '';
+      var arrow = titleEl.querySelector('.sidebar-section__toggle');
+      var suffix = titleEl.getAttribute('data-ab-suffix');
+      if (suffix == null) suffix = detailsSuffix;
+      if (arrow) {
+        titleEl.innerHTML = '';
+        titleEl.appendChild(arrow);
+        titleEl.appendChild(document.createTextNode(base + suffix));
+      } else {
+        titleEl.textContent = base + suffix;
+      }
+    });
   }
 
   function parseLabeledNumericId(value, pattern) {
@@ -277,11 +899,13 @@
     return max;
   }
 
-  function collectHandholeNumericIds(excludeNodeId) {
+  function collectHandholeNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'handhole') return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.autoName, /^H(\d+)$/i);
       if (n != null) ids.push(n);
     });
@@ -299,57 +923,67 @@
     return ids;
   }
 
-  function collectFatHandholeNumericIds(excludeNodeId) {
+  function collectFatHandholeNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'fat_handhole') return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.autoName, /^FH(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectFatSystemNumericIds(excludeNodeId) {
+  function collectFatSystemNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'fat_handhole' || !node.fatSystemName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.fatSystemName, /^FAT(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectPoleNumericIds(excludeNodeId) {
+  function collectPoleNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || node.type !== 'pole_foundation' || !node.hasPole || !node.poleName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.poleName, /^P(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectClosureNumericIds(excludeNodeId) {
+  function collectClosureNumericIds(excludeNodeId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     (Sim.nodes || []).forEach(function (node) {
       if (!node || !node.closureName) return;
       if (excludeNodeId && node.id === excludeNodeId) return;
+      if (scope && !nodeBelongsToCabinet(node, scope)) return;
       var n = parseLabeledNumericId(node.closureName, /C(\d+)$/i);
       if (n != null) ids.push(n);
     });
     return ids;
   }
 
-  function collectCableBatchIdsForCapacity(capacity, excludeCableId) {
+  function collectCableBatchIdsForCapacity(capacity, excludeCableId, cabinetId) {
+    var scope = cabinetId !== undefined ? cabinetId : getActiveFdtId();
     var ids = [];
     var cap = parseInt(capacity, 10);
     if (!cap || cap <= 0) return ids;
     (Sim.fiberCablePaths || []).forEach(function (cable) {
       if (!cable) return;
       if (excludeCableId && cable.id === excludeCableId) return;
+      if (scope && !cableBelongsToCabinet(cable, scope)) return;
       var cableCap = cable.capacity || getCableCapacityForKind(cable.kind);
       if (cableCap !== cap) return;
       var batch = cable.batch;
@@ -361,28 +995,66 @@
     (Sim.connections || []).forEach(function (conn) {
       if (!conn || !conn.name || !conn.capacity) return;
       if (conn.capacity !== cap) return;
+      if (scope && conn.ownerFdtId && String(conn.ownerFdtId) !== String(scope)) return;
       var batch = parseLabeledNumericId(conn.name, new RegExp('^' + cap + 'F(\\d+)$', 'i'));
       if (batch != null) ids.push(batch);
     });
     return ids;
   }
 
+  /**
+   * Keep pen/draft/labels aligned with the locked toolbox batch.
+   * Never auto-advances batch numbers — that is a manual toolbox preference.
+   */
   function syncDefaultCableBatchesToMap() {
-    var cfg = ensureCableConfig();
-    Object.keys(cfg).forEach(function (key) {
-      var entry = cfg[key];
-      if (!entry) return;
-      var cap = entry.capacity || (key === 'lastmile' ? 12 : 72);
-      entry.batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
-    });
-    if (Sim.penDraft && Sim.penDraft.lineMode === 'cable') {
+    var cabId = getActiveFdtId();
+    if (Sim.penDraft && Sim.penDraft.lineMode === 'cable' && !Sim.penDraft.continueFromCable) {
       var kind = Sim.penDraft.kind || getActiveCableKind();
       if (kind) {
         Sim.penDraft.batch = getCableBatchForKind(kind);
         Sim.penDraft.capacity = getCableCapacityForKind(kind);
+        Sim.penDraft.cableName = resolveActiveToolboxCableLabel(kind);
+        if (cabId) Sim.penDraft.ownerFdtId = cabId;
       }
     }
+    refreshCableConfiguratorLabels();
     updateFieldStatusCounters();
+  }
+
+  function lockActiveCableBatchPreference() {
+    if (!Sim.ui) Sim.ui = {};
+    Sim.ui.cableBatchLocked = true;
+  }
+
+  /** Push current toolbox capacity/batch into pen + draft + Smart Bar immediately. */
+  function syncActiveCableBatchToEngines(kind) {
+    kind = kind || getActiveCableKind();
+    if (!kind) return;
+    var key = getCableConfigKey(kind);
+    var capacity = getCableCapacityForKind(key);
+    var batch = getCableBatchForKind(key);
+    var label = formatCableLabel(capacity, batch);
+
+    if (Sim.pen && Sim.pen.lineMode === 'cable') {
+      var penKey = getCableConfigKey(Sim.pen.cableKind || key);
+      if (penKey === key) {
+        Sim.pen.cableKind = Sim.pen.cableKind || key;
+        Sim.pen.cableCapacity = capacity;
+        Sim.pen.selectedLineId = cableIdForKind(Sim.pen.cableKind, capacity);
+      }
+    }
+
+    if (Sim.penDraft && Sim.penDraft.lineMode === 'cable' && !Sim.penDraft.continueFromCable) {
+      var draftKey = getCableConfigKey(Sim.penDraft.kind || key);
+      if (draftKey === key) {
+        Sim.penDraft.kind = Sim.penDraft.kind || key;
+        Sim.penDraft.capacity = capacity;
+        Sim.penDraft.batch = batch;
+        Sim.penDraft.cableName = label;
+      }
+    }
+
+    setPushHint(getActivePathStatusLabel());
   }
 
   /* ─── Map history (undo / redo) ─── */
@@ -397,6 +1069,8 @@
       excavationPathId: Sim.excavationPathId,
       fiberCablePathId: Sim.fiberCablePathId,
       counters: JSON.parse(JSON.stringify(Sim.counters)),
+      countersByCabinet: JSON.parse(JSON.stringify(Sim.countersByCabinet || {})),
+      activeFdtId: Sim.ui.activeFdtId || null,
       cableDraftFrom: Sim.cableDraftFrom,
     };
   }
@@ -414,6 +1088,9 @@
     Sim.excavationPathId = state.excavationPathId || 0;
     Sim.fiberCablePathId = state.fiberCablePathId || 0;
     Sim.counters = JSON.parse(JSON.stringify(state.counters));
+    Sim.countersByCabinet = JSON.parse(JSON.stringify(state.countersByCabinet || {}));
+    if (!Sim.ui) Sim.ui = {};
+    Sim.ui.activeFdtId = state.activeFdtId || null;
     Sim.cableDraftFrom = state.cableDraftFrom;
     syncNameCountersFromNodes();
     syncDefaultCableBatchesToMap();
@@ -483,65 +1160,114 @@
   }
 
   function syncNameCountersFromNodes() {
+    migrateOwnerFdtIdsFromMap();
     resetNameCounters();
-    Sim.counters.handhole = maxNumericId(collectHandholeNumericIds());
     Sim.counters.fdt = maxNumericId(collectFdtNumericIds());
-    Sim.counters.fatHandhole = maxNumericId(collectFatHandholeNumericIds());
-    Sim.counters.fatSystem = maxNumericId(collectFatSystemNumericIds());
-    Sim.counters.pole = maxNumericId(collectPoleNumericIds());
-    Sim.counters.closure = maxNumericId(collectClosureNumericIds());
+
+    var cabinetIds = {};
+    (Sim.nodes || []).forEach(function (node) {
+      if (node && node.type === 'fdt') cabinetIds[String(node.id)] = true;
+      if (node && node.ownerFdtId) cabinetIds[String(node.ownerFdtId)] = true;
+    });
+    (Sim.fiberCablePaths || []).forEach(function (cable) {
+      var oid = resolveCableOwnerFdtId(cable);
+      if (oid) cabinetIds[oid] = true;
+    });
+
+    Object.keys(cabinetIds).forEach(function (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.handhole = maxNumericId(collectHandholeNumericIds(null, cabId));
+      bucket.fatHandhole = maxNumericId(collectFatHandholeNumericIds(null, cabId));
+      bucket.fatSystem = maxNumericId(collectFatSystemNumericIds(null, cabId));
+      bucket.pole = maxNumericId(collectPoleNumericIds(null, cabId));
+      bucket.closure = maxNumericId(collectClosureNumericIds(null, cabId));
+      bucket.cableByCapacity = {};
+      var cableCapKeys = {};
+      (Sim.fiberCablePaths || []).forEach(function (cable) {
+        if (!cable || !cableBelongsToCabinet(cable, cabId)) return;
+        var cap = cable.capacity || getCableCapacityForKind(cable.kind);
+        if (cap) cableCapKeys[cap] = true;
+      });
+      Object.keys(cableCapKeys).forEach(function (capKey) {
+        var cap = parseInt(capKey, 10);
+        var maxBatch = maxNumericId(collectCableBatchIdsForCapacity(cap, null, cabId));
+        if (maxBatch > 0) bucket.cableByCapacity[cap] = maxBatch;
+      });
+    });
+
     Sim.nodes.forEach(function (node) {
       if (node.type === 'pole_foundation' && node.hasPole && !node.poleName) assignPoleName(node);
     });
-    var cableCapKeys = {};
-    (Sim.fiberCablePaths || []).forEach(function (cable) {
-      if (!cable) return;
-      var cap = cable.capacity || getCableCapacityForKind(cable.kind);
-      if (cap) cableCapKeys[cap] = true;
-    });
-    (Sim.connections || []).forEach(function (conn) {
-      if (conn && conn.capacity) cableCapKeys[conn.capacity] = true;
-    });
-    Object.keys(cableCapKeys).forEach(function (capKey) {
-      var cap = parseInt(capKey, 10);
-      var maxBatch = maxNumericId(collectCableBatchIdsForCapacity(cap));
-      if (maxBatch > 0) Sim.counters.cableByCapacity[cap] = maxBatch;
-    });
+
+    if (!getActiveFdtNode()) ensureActiveFdtFallback();
+    else mirrorActiveCabinetCountersToSim();
   }
 
   function assignCableAsBuiltLabel(meta) {
     var cap = meta.capacity || getCableCapacityForKind(meta.kind) || 12;
+    var cabId = (meta && meta.ownerFdtId) || getActiveFdtId();
     var batch = meta.batch;
     if (batch == null) {
-      batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap));
+      batch = findLowestAvailableNumericId(collectCableBatchIdsForCapacity(cap, null, cabId));
     } else {
       batch = Math.max(1, parseInt(batch, 10) || 1);
     }
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      if (!bucket.cableByCapacity[cap]) bucket.cableByCapacity[cap] = 0;
+      bucket.cableByCapacity[cap] = Math.max(bucket.cableByCapacity[cap], batch);
+    }
     if (!Sim.counters.cableByCapacity[cap]) Sim.counters.cableByCapacity[cap] = 0;
-    Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], batch);
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.cableByCapacity[cap] = Math.max(Sim.counters.cableByCapacity[cap], batch);
+    }
     return formatCableLabel(cap, batch);
   }
 
   function assignPoleName(node) {
     if (!node || node.type !== 'pole_foundation') return;
-    var poleId = findLowestAvailableNumericId(collectPoleNumericIds(node.id));
+    var cabId = ensureNodeOwnerFdt(node);
+    var poleId = findLowestAvailableNumericId(collectPoleNumericIds(node.id, cabId));
     node.poleName = 'P' + poleId;
-    Sim.counters.pole = Math.max(Sim.counters.pole || 0, poleId);
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.pole = Math.max(bucket.pole || 0, poleId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.pole = Math.max(Sim.counters.pole || 0, poleId);
+    }
   }
 
   function assignAutoName(type, node) {
-    if (type === 'handhole') {
-      var handholeId = findLowestAvailableNumericId(collectHandholeNumericIds(node && node.id));
-      node.autoName = 'H' + handholeId;
-      Sim.counters.handhole = Math.max(Sim.counters.handhole || 0, handholeId);
-    } else if (type === 'fdt') {
+    if (type === 'fdt') {
       var fdtId = findLowestAvailableNumericId(collectFdtNumericIds(node && node.id));
       node.autoName = 'FDT' + fdtId;
       Sim.counters.fdt = Math.max(Sim.counters.fdt || 0, fdtId);
+      ensureCabinetCounterBucket(node.id);
+      /* Active FDT is set after the node is pushed to Sim.nodes (see addNode). */
+      return;
+    }
+    var cabId = ensureNodeOwnerFdt(node);
+    if (type === 'handhole') {
+      var handholeId = findLowestAvailableNumericId(collectHandholeNumericIds(node && node.id, cabId));
+      node.autoName = 'H' + handholeId;
+      if (cabId) {
+        var hb = ensureCabinetCounterBucket(cabId);
+        hb.handhole = Math.max(hb.handhole || 0, handholeId);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.handhole = Math.max(Sim.counters.handhole || 0, handholeId);
+      }
     } else if (type === 'fat_handhole') {
-      var fhId = findLowestAvailableNumericId(collectFatHandholeNumericIds(node && node.id));
+      var fhId = findLowestAvailableNumericId(collectFatHandholeNumericIds(node && node.id, cabId));
       node.autoName = 'FH' + fhId;
-      Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole || 0, fhId);
+      if (cabId) {
+        var fb = ensureCabinetCounterBucket(cabId);
+        fb.fatHandhole = Math.max(fb.fatHandhole || 0, fhId);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.fatHandhole = Math.max(Sim.counters.fatHandhole || 0, fhId);
+      }
     }
   }
 
@@ -571,26 +1297,46 @@
    */
   function assignFatSystemName(target) {
     if (!target || target.type !== 'fat_handhole') return;
+    var cabId = ensureNodeOwnerFdt(target);
 
     var inherited = extractHandholeNumericId(target);
     if (inherited != null) {
       target.fatSystemName = 'FAT' + inherited;
-      /* Keep global counter ahead of inherited IDs so later sequential assigns stay unique */
-      Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, inherited);
+      if (cabId) {
+        var bucket = ensureCabinetCounterBucket(cabId);
+        bucket.fatSystem = Math.max(bucket.fatSystem || 0, inherited);
+      }
+      if (!cabId || cabId === getActiveFdtId()) {
+        Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, inherited);
+      }
       return;
     }
 
-    var fatId = findLowestAvailableNumericId(collectFatSystemNumericIds(target && target.id));
+    var fatId = findLowestAvailableNumericId(collectFatSystemNumericIds(target && target.id, cabId));
     target.fatSystemName = 'FAT' + fatId;
-    Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, fatId);
+    if (cabId) {
+      var b2 = ensureCabinetCounterBucket(cabId);
+      b2.fatSystem = Math.max(b2.fatSystem || 0, fatId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.fatSystem = Math.max(Sim.counters.fatSystem || 0, fatId);
+    }
   }
 
   function assignClosureName(target) {
     if (!target || target.type !== 'handhole') return;
-    var closureId = findLowestAvailableNumericId(collectClosureNumericIds(target && target.id));
+    var cabId = ensureNodeOwnerFdt(target);
+    var closureId = findLowestAvailableNumericId(collectClosureNumericIds(target && target.id, cabId));
     target.closureCount = closureId;
-    target.closureName = (target.autoName || 'H1') + 'C' + closureId;
-    Sim.counters.closure = Math.max(Sim.counters.closure || 0, closureId);
+    /* Short C# within each FDT domain (H labels already restart per cabinet). */
+    target.closureName = 'C' + closureId;
+    if (cabId) {
+      var bucket = ensureCabinetCounterBucket(cabId);
+      bucket.closure = Math.max(bucket.closure || 0, closureId);
+    }
+    if (!cabId || cabId === getActiveFdtId()) {
+      Sim.counters.closure = Math.max(Sim.counters.closure || 0, closureId);
+    }
   }
 
   function formatCableLabel(capacity, batch) {
@@ -669,9 +1415,11 @@
     Sim.ui.cableCapacity[kind] = capacity;
     refreshCableConfiguratorLabels(box);
     var grp = cableGroupByKind(kind);
-    if (grp && Sim.pen.lineMode === 'cable' && Sim.pen.cableKind === kind) {
+    if (grp && Sim.pen.lineMode === 'cable' &&
+        getCableConfigKey(Sim.pen.cableKind) === getCableConfigKey(kind)) {
       armPenCable(grp, capacity, box, null);
     }
+    syncActiveCableBatchToEngines(kind);
     updateFieldStatusCounters();
   }
 
@@ -702,11 +1450,14 @@
     var kindKey = kind ? getCableConfigKey(kind) : kind;
     var capKey = resolveCableCapacityValue(capacity, kindKey);
     if (!kindKey || !(capKey > 0) || batchNumber == null) return false;
+    var cabId = getActiveFdtId();
 
     for (var i = 0; i < Sim.fiberCablePaths.length; i++) {
       var cable = Sim.fiberCablePaths[i];
       if (!cable) continue;
       if (excludeCableId && String(cable.id) === String(excludeCableId)) continue;
+      /* Same batch on another FDT is allowed — domains are independent */
+      if (cabId && !cableBelongsToCabinet(cable, cabId)) continue;
       if (Number(cable.batch) !== Number(batchNumber)) continue;
       if (getCableConfigKey(cable.kind) !== kindKey) continue;
       if (resolveCableCapacityValue(cable, kindKey) !== capKey) continue;
@@ -775,18 +1526,101 @@
       activeEl.setAttribute('aria-hidden', 'false');
       var restore = Sim.ui.pushHint || getActivePathStatusLabel() || ACTIVE_PATH_IDLE_LABEL;
       activeEl.textContent = restore;
+      activeEl.title = restore;
     } else if (wrap) {
       wrap.textContent = Sim.ui.pushHint || ACTIVE_PATH_IDLE_LABEL;
     }
     if (wrap) {
       wrap.classList.remove('gis-status-bar__push-hint--alarm');
-      wrap.title = 'Active Path';
+      var restoreTitle = (activeEl && activeEl.textContent) ||
+        Sim.ui.pushHint || ACTIVE_PATH_IDLE_LABEL;
+      wrap.title = restoreTitle;
+      setStatusBarInteractivePathMode(isInteractiveCablePathStatusActive());
     }
   }
 
   var ACTIVE_PATH_IDLE_LABEL = 'Active Path · ...';
+  var ACTIVE_PATH_PREFIX_RE = /^Active Path\s*·\s*/i;
+
+  function stripActivePathPrefix(msg) {
+    return String(msg == null ? '' : msg).replace(ACTIVE_PATH_PREFIX_RE, '');
+  }
+
+  /** True while Main/Sub interactive trail is driving the status slot (no idle prefix). */
+  function isInteractiveCablePathStatusActive() {
+    if (Sim.mainCableStartConfirmUntil && Date.now() < Sim.mainCableStartConfirmUntil) return true;
+    if (Sim.subCableStartConfirmUntil && Date.now() < Sim.subCableStartConfirmUntil) return true;
+    if (Sim.mainCableCheckpointConfirmUntil && Date.now() < Sim.mainCableCheckpointConfirmUntil) {
+      return true;
+    }
+    if (Sim.subCableDropConfirmUntil && Date.now() < Sim.subCableDropConfirmUntil) return true;
+    var draft = Sim.penDraft;
+    if (draft && draft.subCableTrail && draft.subCableTrail.closureLabel) return true;
+    if (draft && draft.mainCableTrail && draft.mainCableTrail.cabinetLabel) return true;
+    if (!draft && Sim.subCableTrail && Sim.subCableTrail.closureLabel) return true;
+    if (!draft && Sim.mainCableTrail && Sim.mainCableTrail.cabinetLabel) return true;
+    return false;
+  }
+
+  function formatInteractiveSubCablePathLabel(subTrail) {
+    if (!subTrail || !subTrail.closureLabel) return '';
+    var subCableDes = String(subTrail.cableName || '').trim();
+    var subHead = subCableDes
+      ? (String(subTrail.closureLabel) + ' ' + subCableDes + ' S-Cable')
+      : (String(subTrail.closureLabel) + ' S-Cable');
+    var subParts = [subHead];
+    (subTrail.drops || []).forEach(function (d) {
+      if (d && d.label) subParts.push(String(d.label));
+    });
+    return subParts.join(' --> ');
+  }
+
+  function formatInteractiveMainCablePathLabel(trail) {
+    if (!trail || !trail.cabinetLabel) return '';
+    var mainCableDes = String(trail.cableName || '').trim();
+    var mainHead = mainCableDes
+      ? (String(trail.cabinetLabel) + ' ' + mainCableDes + ' M-Cable')
+      : (String(trail.cabinetLabel) + ' M-Cable');
+    var parts = [mainHead];
+    (trail.closures || []).forEach(function (c) {
+      if (c && c.label) parts.push(String(c.label));
+    });
+    if (!(trail.closures || []).length) {
+      (trail.drops || []).forEach(function (d) {
+        if (d && d.label) parts.push(String(d.label));
+      });
+    }
+    return parts.join(' --> ');
+  }
 
   function getActivePathStatusLabel() {
+    /* Phase 1: keep Main Cable cabinet registration visible in Active Path slot */
+    if (Sim.mainCableStartConfirmUntil && Date.now() < Sim.mainCableStartConfirmUntil &&
+        Sim.mainCableStartConfirmMsg) {
+      return stripActivePathPrefix(Sim.mainCableStartConfirmMsg);
+    }
+    /* Phase 3: Sub-Cable start confirmation */
+    if (Sim.subCableStartConfirmUntil && Date.now() < Sim.subCableStartConfirmUntil &&
+        Sim.subCableStartConfirmMsg) {
+      return stripActivePathPrefix(Sim.subCableStartConfirmMsg);
+    }
+    /* Phase 3: progressive Sub-Cable → FH/pole sequence (no "Active Path" prefix while drawing)
+       Format: C3 12F8 S-Cable --> FH45 --> FH46 --> FH47 */
+    var subTrail = (Sim.penDraft && Sim.penDraft.subCableTrail) || Sim.subCableTrail;
+    if (subTrail && subTrail.closureLabel) {
+      if (Sim.subCableTrailStatusMsg) {
+        return stripActivePathPrefix(Sim.subCableTrailStatusMsg);
+      }
+      return formatInteractiveSubCablePathLabel(subTrail);
+    }
+    /* Phase 2: progressive Main Cable → closure sequence while drawing */
+    var trail = (Sim.penDraft && Sim.penDraft.mainCableTrail) || Sim.mainCableTrail;
+    if (trail && trail.cabinetLabel) {
+      if (Sim.mainCableTrailStatusMsg) {
+        return stripActivePathPrefix(Sim.mainCableTrailStatusMsg);
+      }
+      return formatInteractiveMainCablePathLabel(trail);
+    }
     var draft = Sim.penDraft;
     if (draft && draft.points && draft.points.length > 0) {
       if (draft.lineMode === 'cable') {
@@ -876,13 +1710,25 @@
     if (!cfg) return;
     setActiveCableKind(kind);
     cfg.batch = Math.max(1, Math.min(999, parseInt(batch, 10) || 1));
+    lockActiveCableBatchPreference();
+    /* Keep pen armed on this kind so Active Path / draft never stay on a stale batch. */
+    if (Sim.pen) {
+      if (Sim.pen.lineMode !== 'cable' || getCableConfigKey(Sim.pen.cableKind) !== getCableConfigKey(kind)) {
+        var grp = cableGroupByKind(kind);
+        if (grp) {
+          armPenCable(grp, cfg.capacity, box || document.getElementById('toolbox-items'), null);
+        } else {
+          Sim.pen.lineMode = 'cable';
+          Sim.pen.cableKind = kind;
+          Sim.pen.cableCapacity = cfg.capacity;
+        }
+      } else {
+        Sim.pen.cableCapacity = cfg.capacity;
+      }
+    }
     refreshBatchDuplicationHint(kind);
     refreshCableConfiguratorLabels(box);
-    if (Sim.pen.lineMode === 'cable' && Sim.pen.cableKind === kind && Sim.penDraft) {
-      Sim.penDraft.batch = cfg.batch;
-      Sim.penDraft.capacity = cfg.capacity;
-      syncPenDraftCableFromToolbox(Sim.penDraft);
-    }
+    syncActiveCableBatchToEngines(kind);
     updateFieldStatusCounters();
   }
 
@@ -1293,13 +2139,26 @@
     var cableBatch = meta.batch || getCableBatchForKind(meta.kind) || 1;
     var cableCapacity = meta.capacity || getCableCapacityForKind(meta.kind) || 12;
     setActiveCableKind(meta.kind);
+    var ownerFdtId = meta.ownerFdtId ||
+      (meta.mainCableTrail && meta.mainCableTrail.cabinetId) ||
+      getActiveFdtId() ||
+      null;
+    /* Active FDT stays locked — map/cable save must not switch cabinet context. */
     var toolboxLabel = meta.cableName || assignCableAsBuiltLabel({
       kind: meta.kind,
       capacity: cableCapacity,
       batch: cableBatch,
+      ownerFdtId: ownerFdtId,
     });
+    if (ownerFdtId) {
+      var cabBucket = ensureCabinetCounterBucket(ownerFdtId);
+      if (!cabBucket.cableByCapacity[cableCapacity]) cabBucket.cableByCapacity[cableCapacity] = 0;
+      cabBucket.cableByCapacity[cableCapacity] =
+        Math.max(cabBucket.cableByCapacity[cableCapacity], cableBatch);
+    }
     if (!Sim.counters.cableByCapacity[cableCapacity]) Sim.counters.cableByCapacity[cableCapacity] = 0;
-    Sim.counters.cableByCapacity[cableCapacity] = Math.max(Sim.counters.cableByCapacity[cableCapacity], cableBatch);
+    Sim.counters.cableByCapacity[cableCapacity] =
+      Math.max(Sim.counters.cableByCapacity[cableCapacity], cableBatch);
     var connectedTo = buildCableConnectedToFromSnapLabels(snapLabels);
 
     Sim.fiberCablePathId++;
@@ -1324,6 +2183,46 @@
       pointSnapNodeIds: pointSnapNodeIds.slice(),
       snapLabels: snapLabels.slice(),
     };
+    if (ownerFdtId) cableRef.ownerFdtId = String(ownerFdtId);
+
+    /* Phase 2–3: optional Main/Sub Cable visual sequences — metadata only */
+    if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
+      cableRef.mainCableTrail = {
+        cabinetId: meta.mainCableTrail.cabinetId || null,
+        cabinetLabel: meta.mainCableTrail.cabinetLabel || '',
+        cableRoleLabel: meta.mainCableTrail.cableRoleLabel || 'M-CABLE',
+        cableName: meta.mainCableTrail.cableName || toolboxLabel,
+        closures: Array.isArray(meta.mainCableTrail.closures)
+          ? meta.mainCableTrail.closures.map(function (c) {
+            return { id: c && c.id, label: c && c.label };
+          })
+          : [],
+        drops: Array.isArray(meta.mainCableTrail.drops)
+          ? meta.mainCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : [],
+        nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
+          ? meta.mainCableTrail.nodeIds.slice()
+          : [],
+      };
+    }
+    if (meta.subCableTrail && typeof meta.subCableTrail === 'object') {
+      cableRef.subCableTrail = {
+        closureId: meta.subCableTrail.closureId || null,
+        closureLabel: meta.subCableTrail.closureLabel || '',
+        cableRoleLabel: meta.subCableTrail.cableRoleLabel || 'S-CABLE',
+        cableName: meta.subCableTrail.cableName || toolboxLabel,
+        drops: Array.isArray(meta.subCableTrail.drops)
+          ? meta.subCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : [],
+        nodeIds: Array.isArray(meta.subCableTrail.nodeIds)
+          ? meta.subCableTrail.nodeIds.slice()
+          : [],
+      };
+    }
 
     Sim.fiberCablePaths.push(cableRef);
     finalizeSavedCableTopology(cableRef);
@@ -1334,6 +2233,10 @@
        with an already-saved capacity+batch+kind (see ensurePenDraft). */
     updateHintAlarm(DEFAULT_TOOLBOX_FOOTER_HINT, false);
 
+    /* Keep the user-selected batch locked after routing/save (e.g. stay on 12F4). */
+    lockActiveCableBatchPreference();
+    syncActiveCableBatchToEngines(meta.kind);
+
     saveState();
     renderGlobalDrawingLayer();
     requestCanvasRedraw();
@@ -1343,7 +2246,20 @@
     if (DEBUG) {
       console.log('[saveCableToDatabase] saved cable:', cableId, pointsToSave.length, 'vertices');
     }
-    notifyFiberDesignTopologyChanged();
+    /* Phase 4: interactive trails → matrix immediately; otherwise debounced topology refresh */
+    if (cableRef.mainCableTrail || cableRef.subCableTrail) {
+      notifyFiberDesignTopologyChanged({
+        immediate: true,
+        interactive: true,
+        path: {
+          cableId: cableId,
+          mainCableTrail: cableRef.mainCableTrail || null,
+          subCableTrail: cableRef.subCableTrail || null,
+        },
+      });
+    } else {
+      notifyFiberDesignTopologyChanged();
+    }
 
     return { type: 'fiber', id: cableId, cable: cableRef };
   }
@@ -1466,6 +2382,50 @@
     };
     cable.userDrawn = true;
     cable.mergedToTrench = false;
+    var extendOwner = meta.ownerFdtId ||
+      (meta.mainCableTrail && meta.mainCableTrail.cabinetId) ||
+      cable.ownerFdtId ||
+      getActiveFdtId() ||
+      null;
+    if (extendOwner) cable.ownerFdtId = String(extendOwner);
+    /* Phase 2–3: merge visual Main/Sub Cable trail metadata when continuing a draw */
+    if (meta.mainCableTrail && typeof meta.mainCableTrail === 'object') {
+      cable.mainCableTrail = {
+        cabinetId: meta.mainCableTrail.cabinetId || (cable.mainCableTrail && cable.mainCableTrail.cabinetId) || null,
+        cabinetLabel: meta.mainCableTrail.cabinetLabel || (cable.mainCableTrail && cable.mainCableTrail.cabinetLabel) || '',
+        cableRoleLabel: meta.mainCableTrail.cableRoleLabel || 'M-CABLE',
+        cableName: meta.mainCableTrail.cableName || cable.name || cable.asBuiltId || '',
+        closures: Array.isArray(meta.mainCableTrail.closures)
+          ? meta.mainCableTrail.closures.map(function (c) {
+            return { id: c && c.id, label: c && c.label };
+          })
+          : ((cable.mainCableTrail && cable.mainCableTrail.closures) || []).slice(),
+        drops: Array.isArray(meta.mainCableTrail.drops)
+          ? meta.mainCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : ((cable.mainCableTrail && cable.mainCableTrail.drops) || []).slice(),
+        nodeIds: Array.isArray(meta.mainCableTrail.nodeIds)
+          ? meta.mainCableTrail.nodeIds.slice()
+          : ((cable.mainCableTrail && cable.mainCableTrail.nodeIds) || []).slice(),
+      };
+    }
+    if (meta.subCableTrail && typeof meta.subCableTrail === 'object') {
+      cable.subCableTrail = {
+        closureId: meta.subCableTrail.closureId || (cable.subCableTrail && cable.subCableTrail.closureId) || null,
+        closureLabel: meta.subCableTrail.closureLabel || (cable.subCableTrail && cable.subCableTrail.closureLabel) || '',
+        cableRoleLabel: meta.subCableTrail.cableRoleLabel || 'S-CABLE',
+        cableName: meta.subCableTrail.cableName || cable.name || cable.asBuiltId || '',
+        drops: Array.isArray(meta.subCableTrail.drops)
+          ? meta.subCableTrail.drops.map(function (d) {
+            return { id: d && d.id, label: d && d.label };
+          })
+          : ((cable.subCableTrail && cable.subCableTrail.drops) || []).slice(),
+        nodeIds: Array.isArray(meta.subCableTrail.nodeIds)
+          ? meta.subCableTrail.nodeIds.slice()
+          : ((cable.subCableTrail && cable.subCableTrail.nodeIds) || []).slice(),
+      };
+    }
 
     finalizeSavedCableTopology(cable);
     snapCableEndpointsToHandholeCenters(cable);
@@ -1482,7 +2442,19 @@
     if (DEBUG) {
       console.log('[extendCableInDatabase] extended cable:', cable.id, cable.points.length, 'vertices');
     }
-    notifyFiberDesignTopologyChanged();
+    if (cable.mainCableTrail || cable.subCableTrail) {
+      notifyFiberDesignTopologyChanged({
+        immediate: true,
+        interactive: true,
+        path: {
+          cableId: cable.id,
+          mainCableTrail: cable.mainCableTrail || null,
+          subCableTrail: cable.subCableTrail || null,
+        },
+      });
+    } else {
+      notifyFiberDesignTopologyChanged();
+    }
 
     return { type: 'fiber', id: cable.id, cable: cable };
   }
@@ -3079,8 +4051,14 @@
    * Evaluation-only: cables that truly belong inside this trench.
    * Rejects stray cables hosted on other excavations that only appear via stale
    * cableIds / junction trenchPathIds listings.
+   *
+   * @param {string} trenchId
+   * @param {string|null|undefined} scopeCabinetId
+   *   - undefined: default to Active FDT (toolbox draw domain)
+   *   - null: no cabinet filter (free trench inspection — show all in-trench cables)
+   *   - string: filter to that cabinet only
    */
-  function getCablesStrictlyOnTrench(trenchId) {
+  function getCablesStrictlyOnTrench(trenchId, scopeCabinetId) {
     if (!trenchId) return [];
     var trench = findPathByRef({ type: 'excavation', id: trenchId });
     if (!trench) return [];
@@ -3106,6 +4084,7 @@
       addCandidate(findPathByRef({ type: 'fiber', id: cid }));
     });
 
+    var cabId = scopeCabinetId !== undefined ? scopeCabinetId : getActiveFdtId();
     return candidates.filter(function (cable) {
       var primary = cable.hostTrenchId || cable.trenchPathId || null;
       var inPathIds = (cable.trenchPathIds || []).indexOf(trenchId) >= 0;
@@ -3123,8 +4102,14 @@
         if (resolved && resolved.id !== trenchId && !multi) return false;
       }
 
+      if (cabId && !cableBelongsToCabinet(cable, cabId)) return false;
       return true;
     });
+  }
+
+  /** Free Evaluation inspection: every cable physically inside the trench, any cabinet. */
+  function getCablesOnTrenchForInspection(trenchId) {
+    return getCablesStrictlyOnTrench(trenchId, null);
   }
 
   function pathLengthMeters(path) {
@@ -3463,8 +4448,11 @@
   }
 
   function getCablesThroughNode(node) {
+    var cabId = resolveInspectionCabinetId(node);
     return (Sim.fiberCablePaths || []).filter(function (c) {
-      return cablePassesThroughNode(c, node);
+      if (!cablePassesThroughNode(c, node)) return false;
+      if (cabId && !cableBelongsToCabinet(c, cabId)) return false;
+      return true;
     });
   }
 
@@ -3672,10 +4660,13 @@
   function getEntityLabelEntries() {
     var entries = global.FTTHLabelDataProviders.getEntityLabelEntries();
     var VM = global.FTTHVisibilityManager;
-    if (!VM || !VM.isNodeVisible) return entries;
     return entries.filter(function (entry) {
       var node = findNode(entry.nodeId);
-      return VM.isNodeVisible(node);
+      if (!node) return false;
+      if (VM && VM.isNodeVisible && !VM.isNodeVisible(node)) return false;
+      /* Pole-attached FAT handhole: suppress all overlay labels (FH# must not overlap FAT#). */
+      if (node.type === 'fat_handhole' && node.hasFatPole) return false;
+      return true;
     });
   }
 
@@ -3744,6 +4735,7 @@
     if (item.visual === 'fat_pole') return fatPoleIconHtml(s);
     if (item.visual === 'closure') return closureIconSvg(s);
     if (item.visual === 'fdt') return fdtCabinetGlyphHtml(s);
+    if (item.visual === 'olt') return oltBuildingGlyphHtml(s);
     if (item.visual === 'excav') return excavationToolIconSvg(item.routeKind, s);
     if (item.visual === 'excav_pen') return excavationPenIconSvg(s);
     if (item.visual === 'splitter') return splitterIconSvg(item.variant || '1x8', s);
@@ -4315,6 +5307,11 @@
       satLayer.style.width = w + 'px';
       satLayer.style.height = h + 'px';
     }
+    var gridOverlay = document.getElementById('image-map-grid-overlay');
+    if (gridOverlay) {
+      gridOverlay.style.width = w + 'px';
+      gridOverlay.style.height = h + 'px';
+    }
 
     var svg = getGlobalDrawingLayer();
     if (svg) {
@@ -4395,20 +5392,29 @@
 
   function getExcavationsLinkedToNode(node) {
     if (!node) return [];
+    var cabId = resolveInspectionCabinetId(node);
     return (Sim.excavationPaths || []).filter(function (path) {
-      return pathEndpointTouchesNode(path, node);
+      if (!pathEndpointTouchesNode(path, node)) return false;
+      if (cabId && !excavationBelongsToCabinet(path, cabId)) return false;
+      return true;
     });
   }
 
   function getCablesLinkedToNode(node) {
     // Strict: only cables that themselves connect/terminate/intersect this node.
     // Do NOT dump all cables from parent trenches that merely touch the node.
+    // Inspection scope follows the selected node's owner (Active FDT stays locked).
     return getCablesThroughNode(node) || [];
   }
 
   function getHandholesLinkedToExcavation(path) {
+    var cabId = getActiveFdtId();
+    if (path && path.ownerFdtId) cabId = String(path.ownerFdtId);
     return (Sim.nodes || []).filter(function (n) {
-      return (n.type === 'handhole' || n.type === 'fat_handhole') && excavationPassesThroughNode(path, n);
+      if (!(n.type === 'handhole' || n.type === 'fat_handhole')) return false;
+      if (!excavationPassesThroughNode(path, n)) return false;
+      if (cabId && !nodeBelongsToCabinet(n, cabId)) return false;
+      return true;
     });
   }
 
@@ -4598,7 +5604,6 @@
     try {
       var isFs = isAppFullscreen();
       var buttons = [
-        document.getElementById('btn-fullscreen-map'),
         document.getElementById('btn-fullscreen'),
       ].filter(Boolean);
       buttons.forEach(function (btn) {
@@ -4671,7 +5676,6 @@
 
   function bindFullscreenButton() {
     var buttons = [
-      document.getElementById('btn-fullscreen-map'),
       document.getElementById('btn-fullscreen'),
     ].filter(function (btn) { return btn && btn.dataset.ftthFsBound !== '1'; });
     if (!buttons.length && document.documentElement.dataset.ftthFsChangeBound === '1') return;
@@ -5307,31 +6311,10 @@
     box.appendChild(section);
   }
 
+  /** Floating emergency save badge removed — finish via double-click / standard gestures only. */
   function syncCableEmergencySaveButton() {
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!wrap) return;
     var btn = document.getElementById('cable-emergency-save-btn');
-    var show = isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable' &&
-      Sim.penDraft && Sim.penDraft.points && Sim.penDraft.points.length >= 2;
-    if (!show) {
-      if (btn) btn.style.display = 'none';
-      return;
-    }
-    if (!btn) {
-      btn = document.createElement('button');
-      btn.id = 'cable-emergency-save-btn';
-      btn.type = 'button';
-      btn.className = 'cable-emergency-save-btn';
-      btn.textContent = 'إنهاء وحفظ الكيبل';
-      btn.setAttribute('aria-label', 'Finish and save cable');
-      btn.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        global.FTTHDrawingEngine?.finishPenDrawing?.({ trimDblClick: false, emergency: true });
-      });
-      wrap.appendChild(btn);
-    }
-    btn.style.display = '';
+    if (btn && btn.parentNode) btn.parentNode.removeChild(btn);
   }
 
   function isQuickNestToolSelected() {
@@ -5362,10 +6345,16 @@
     var wrap = document.getElementById('canvas-wrapper');
     var canvas = getDrawingCanvas();
     if (!wrap) return;
+    var cablePenActive = !!(isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable');
     wrap.classList.toggle('pen-tool-active', isPenToolSelected());
     wrap.classList.toggle('pen-tool-ready', isPenToolActive());
-    wrap.classList.toggle('pen-cable-mode', !!(isPenToolActive() && Sim.pen && Sim.pen.lineMode === 'cable'));
+    wrap.classList.toggle('pen-cable-mode', cablePenActive);
     wrap.classList.toggle('pen-drawing-active', !!(isPenToolActive() && Sim.penDraft && Sim.penDraft.points.length));
+    /* Phase 3: hide labels only while a cable stroke is in progress; restore on commit */
+    wrap.classList.toggle(
+      'cable-pen-labels-hidden',
+      !!(cablePenActive && hasActiveDrawingStroke())
+    );
     if (canvas) {
       canvas.classList.toggle('pen-tool-active', isPenToolSelected());
       canvas.classList.toggle('pen-tool-ready', isPenToolActive());
@@ -6425,8 +7414,13 @@
     }
     node.labelOffsets = snap.labelOffsets ? JSON.parse(JSON.stringify(snap.labelOffsets)) : {};
     snapNodeToCell(node);
+    if (snap.type !== 'fdt' && snap.type !== 'olt') ensureNodeOwnerFdt(node);
     assignAutoName(snap.type, node);
     Sim.nodes.push(node);
+    /* Bootstrap Active FDT only when none is set — never steal focus from a locked cabinet. */
+    if (snap.type === 'fdt' && !getActiveFdtId()) {
+      setActiveFdt(node, { bootstrap: true, force: true });
+    }
     renderNode(node);
     selectNode(node.id);
     rememberLastInstalledElement(getNodeAutoLabel(node) || node.autoName || node.type);
@@ -6734,7 +7728,15 @@
     Sim.pen.cableCapacity = capacity;
     Sim.pen.cableKind = grp.kind;
     Sim.pen.selectedLineId = cableIdForKind(grp.kind, capacity);
-    Sim.penDraft = null;
+    /* Preserve in-progress draft batch/capacity when re-arming the same cable kind. */
+    if (Sim.penDraft && Sim.penDraft.lineMode === 'cable' &&
+        getCableConfigKey(Sim.penDraft.kind) === getCableConfigKey(grp.kind) &&
+        Sim.penDraft.points && Sim.penDraft.points.length &&
+        !Sim.penDraft.continueFromCable) {
+      syncPenDraftCableFromToolbox(Sim.penDraft);
+    } else if (!(Sim.penDraft && Sim.penDraft.continueFromCable)) {
+      Sim.penDraft = null;
+    }
     Sim.selectedPath = null;
     Sim.selectedTool = PEN_TOOL_ID;
     Sim.selectedCableSpec = null;
@@ -6758,6 +7760,8 @@
     }
     refreshBatchDuplicationHint(grp.kind);
     syncPenModeClass();
+    lockActiveCableBatchPreference();
+    syncActiveCableBatchToEngines(grp.kind);
     var label = getCableLabelForKind(grp.kind);
     updateStatus('Pen · ' + grp.label + ' · ' + label + ' — draw only over existing excavation paths');
     updateFieldStatusCounters();
@@ -7085,6 +8089,7 @@
   }
 
   function isDrawableSurfaceXY(x, y) {
+    if (isCanvas2dCoordinateMode()) return true;
     var cell = workspaceXYToCell(x, y);
     var t = getCellType(cell.col, cell.row);
     return t === CELL.SIDEWALK || t === CELL.STREET;
@@ -7243,6 +8248,7 @@
       id: pathId,
       segIndex: segIndex,
     };
+    /* Map/path inspection is read-only for Active FDT — toolbox switcher only. */
     Sim.ui.topologyTreeFocus = {
       kind: pathType === 'fiber' ? 'cable' : 'excavation',
       pathType: pathType,
@@ -7483,6 +8489,10 @@
       patchVertexDragVisuals: patchVertexDragVisuals,
       updateStatus: updateStatus,
       setPushHint: setPushHint,
+      setActiveFdt: setActiveFdt,
+      getActiveFdtId: getActiveFdtId,
+      getActiveFdtLabel: getActiveFdtLabel,
+      findServingFdt: findServingFdt,
       syncGisStatusBar: syncGisStatusBar,
       saveState: saveState,
       findPathByRef: findPathByRef,
@@ -7519,6 +8529,7 @@
       nextCableName: nextCableName,
       getCableLabelForKind: getCableLabelForKind,
       getCableBatchForKind: getCableBatchForKind,
+      syncActiveCableBatchToEngines: syncActiveCableBatchToEngines,
       getCableCapacityForKind: getCableCapacityForKind,
       getActiveCableKind: getActiveCableKind,
       refreshBatchDuplicationHint: refreshBatchDuplicationHint,
@@ -7587,6 +8598,7 @@
       registerCableOnTrench: registerCableOnTrench,
       getCablesOnTrench: getCablesOnTrench,
       getCablesStrictlyOnTrench: getCablesStrictlyOnTrench,
+      getCablesOnTrenchForInspection: getCablesOnTrenchForInspection,
       getChildClosureSegments: getChildClosureSegments,
       unregisterCableFromTrench: unregisterCableFromTrench,
       deleteExcavationWithContents: deleteExcavationWithContents,
@@ -8002,8 +9014,10 @@
 
     function appendEquipmentItem(item) {
       var el = document.createElement('div');
+      var isFdt = item.id === 'fdt';
       el.className = 'toolbox-item flex items-center gap-3 p-3 rounded-xl border border-fiber-border bg-fiber-card hover:border-fiber-cyan/40 transition-all select-none cursor-pointer';
       el.dataset.type = item.id;
+      if (isFdt) el.classList.add('toolbox-item--fdt-head');
       if (item.nestOnly) el.classList.add('toolbox-item--nest');
       if (isDraggableTool(item)) {
         el.draggable = true;
@@ -8044,6 +9058,8 @@
     global.FTTHToolboxInventory?.bindToolbox?.(box);
     global.FTTHToolboxManager?.onToolboxRendered?.(box);
     updateToolboxAssetCounts();
+    bindFdtHeadSwitcherEvents();
+    syncActiveFdtChrome();
   }
 
   /* ─── Field SVG icons ─── */
@@ -8220,6 +9236,12 @@
     var h = Math.max(26, Math.round(s * 1.14));
     return '<div class="fdt-cabinet-glyph" style="width:' + s + 'px;height:' + h + 'px" aria-hidden="true">' +
       '<div class="fdt-body"><div class="fdt-door"></div><span class="fdt-label">FDT</span></div></div>';
+  }
+
+  function oltBuildingGlyphHtml(size) {
+    var s = size || iconBaseSize('olt') || 28;
+    return '<div class="olt-building-glyph" style="width:' + s + 'px;height:' + s + 'px" aria-hidden="true">' +
+      '<span class="olt-glyph" role="img" aria-label="OLT">🏛️</span></div>';
   }
 
   function greenTriangleIconSvg(size, classExtra) {
@@ -8568,7 +9590,9 @@
     } else if (node.type === 'olt') {
       layers.push(
         '<div class="placed-node__glyph-anchor">' +
-          '<div class="placed-node__layer placed-node__layer--base placed-node__layer--olt"><span class="olt-glyph">OLT</span></div>' +
+          '<div class="placed-node__layer placed-node__layer--base placed-node__layer--olt">' +
+            oltBuildingGlyphHtml(sz()) +
+          '</div>' +
         '</div>'
       );
     }
@@ -8739,7 +9763,14 @@
     return { cfg: cfg, cols: cols, rows: rows, cellSize: cfg.cellSize, cells: cells };
   }
 
+  function isCanvas2dCoordinateMode() {
+    return Sim.coordinateMode === 'canvas2d';
+  }
+
   function generateLayout(cityId) {
+    if (cityId === 'uploaded_map' && Sim.uploadedMapLayout) {
+      return Sim.uploadedMapLayout;
+    }
     if (cityId === 'training_city_2') return generateCity2();
     if (cityId === 'training_city_3') return generateCity3();
     return generateCity1();
@@ -8790,6 +9821,9 @@
     }
     bindDragDropCleanup();
     bindToolboxDragPreview();
+    if (global.FTTHImageMapProject?.onCityRendered) {
+      global.FTTHImageMapProject.onCityRendered();
+    }
   }
 
   function onWorkspaceGridDrop(e) {
@@ -8888,8 +9922,8 @@
   }
 
   function canPlaceVirtual(type, col, row) {
+    if (isCanvas2dCoordinateMode()) return true;
     var t = getCellType(col, row);
-    if (type === 'olt') return t === CELL.ITPC;
     if (SIDEWALK_TOOLS[type]) return t === CELL.SIDEWALK;
     return false;
   }
@@ -9253,6 +10287,7 @@
       return false;
     }
     target.hasClosure = true;
+    ensureNodeOwnerFdt(target);
     ensureNodeLabelOffsets(target);
     if (target.type === 'handhole') {
       assignClosureName(target);
@@ -9278,6 +10313,7 @@
       return false;
     }
     target.hasFatPole = true;
+    ensureNodeOwnerFdt(target);
     assignFatSystemName(target);
     ensureNodeLabelOffsets(target);
     if (target.labelOffsets.primary) delete target.labelOffsets.primary;
@@ -9289,8 +10325,8 @@
     } else {
       global.FTTHDrawingEngine?.requestMapLabelsRedraw?.();
     }
-    /* Drop stale LabelManager overlay text (FH##) — do not wait for pan/click */
-    global.FTTHLabelManager?.refresh?.();
+    /* Drop stale LabelManager overlay text (FH##) — force clear, do not wait for pan/click */
+    global.FTTHLabelManager?.refresh?.({ force: true });
     rememberLastInstalledElement(target.fatSystemName);
     notifyFiberDesignTopologyChanged();
     updateStatus('FAT Pole mounted — ' + target.fatSystemName + ' ✓');
@@ -9359,7 +10395,7 @@
       return false;
     }
     if (!canPlaceVirtual(type, col, row)) {
-      updateStatus('Placement Error: sidewalk / ITPC only', true);
+      updateStatus('Placement Error: sidewalk only', true);
       return false;
     }
     addNode(type, col, row, variant, dropPt);
@@ -9386,8 +10422,12 @@
     if (variant) node.variant = variant;
     node.locked = false;
     snapNodeToCell(node);
+    if (type !== 'fdt' && type !== 'olt') ensureNodeOwnerFdt(node);
     assignAutoName(type, node);
     Sim.nodes.push(node);
+    if (type === 'fdt' && !getActiveFdtId()) {
+      setActiveFdt(node, { bootstrap: true, force: true });
+    }
     renderNode(node);
     rememberLastInstalledElement(getNodeAutoLabel(node) || node.autoName || type);
     updateMetrics();
@@ -9818,6 +10858,7 @@
     Sim.ui.pathHighlightFromSidebar = !!options.fromSidebar;
     Sim.selectedNodeId = nodeId;
     var node = findNode(nodeId);
+    /* Active FDT is locked — map/sidebar selection never switches cabinet context. */
     if (Sim.selectedPath) {
       Sim.selectedPath = null;
       if (Sim.pathEdit) {
@@ -9906,9 +10947,15 @@
     }
   }
 
-  function notifyFiberDesignTopologyChanged() {
-    if (global.FTTHFiberDesignManager && global.FTTHFiberDesignManager.notifyTopologyChanged) {
-      global.FTTHFiberDesignManager.notifyTopologyChanged();
+  function notifyFiberDesignTopologyChanged(opts) {
+    opts = opts || {};
+    if (global.FTTHFiberDesignManager) {
+      if (opts.immediate && opts.interactive &&
+          typeof global.FTTHFiberDesignManager.notifyInteractivePathCommitted === 'function') {
+        global.FTTHFiberDesignManager.notifyInteractivePathCommitted(opts.path || null);
+      } else if (typeof global.FTTHFiberDesignManager.notifyTopologyChanged === 'function') {
+        global.FTTHFiberDesignManager.notifyTopologyChanged(opts);
+      }
     }
     syncSplicingToolbarState();
   }
@@ -10158,12 +11205,19 @@
     var collapsed = collapsible && !!(Sim.ui.sidebarSectionCollapsed && Sim.ui.sidebarSectionCollapsed[sectionKey]);
     var arrowCls = 'toggle-arrow sidebar-section__toggle' + (collapsed ? ' collapsed' : '');
     var cardsCls = 'sidebar-section__cards' + (collapsed ? ' hidden' : '');
+    var suffix = '';
+    if (!options.skipFdtSuffix) {
+      if (options.fdtSuffix != null) suffix = options.fdtSuffix;
+      else suffix = formatDetailsPanelFdtBadgeSuffix();
+    }
+    var displayTitle = title + suffix;
     var titleInner = collapsible
-      ? '<span class="' + arrowCls + '" data-sidebar-section-toggle="' + escapeSidebarHtml(sectionKey) + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-label="Toggle ' + escapeSidebarHtml(title) + '">▾</span>' +
-        escapeSidebarHtml(title)
-      : escapeSidebarHtml(title);
+      ? '<span class="' + arrowCls + '" data-sidebar-section-toggle="' + escapeSidebarHtml(sectionKey) + '" role="button" tabindex="0" aria-expanded="' + (collapsed ? 'false' : 'true') + '" aria-label="Toggle ' + escapeSidebarHtml(displayTitle) + '">▾</span>' +
+        escapeSidebarHtml(displayTitle)
+      : escapeSidebarHtml(displayTitle);
     return '<section class="sidebar-section' + modCls + '">' +
-      '<h3 class="sidebar-section__title">' + titleInner + '</h3>' +
+      '<h3 class="sidebar-section__title" data-ab-base="' + escapeSidebarHtml(title) +
+      '" data-ab-suffix="' + escapeSidebarHtml(suffix) + '">' + titleInner + '</h3>' +
       '<ul class="' + cardsCls + '">' + body + '</ul>' +
       '</section>';
   }
@@ -10197,27 +11251,35 @@
 
   function renderThreeSectionSidebar(node, focus) {
     focus = focus || Sim.ui.topologyTreeFocus || { kind: 'node', nodeId: node.id };
+    /* Inspect selected node's own cabinet domain — Active FDT chrome stays locked. */
+    var cabId = resolveInspectionCabinetId(node);
+    /* Trench focus: list every in-trench cable (any cabinet), like free node/closure inspection. */
+    var trenchInspectMode = focus.kind === 'excavation' && !!focus.pathId;
+
     var excavations = getExcavationsLinkedToNode(node);
     var cables = sortCablesForLaneOrder(getCablesLinkedToNode(node));
 
     /* Path focus isolates Evaluation only for map picks.
        Sidebar focus keeps the full linked inventory; only the active card is marked. */
     if (!Sim.ui.pathHighlightFromSidebar) {
-      if (focus.kind === 'excavation' && focus.pathId) {
+      if (trenchInspectMode) {
         var focusedEx = excavations.filter(function (ex) { return ex.id === focus.pathId; });
         if (!focusedEx.length) {
           var aloneEx = findPathByRef({ type: 'excavation', id: focus.pathId });
           if (aloneEx) focusedEx = [aloneEx];
         }
         excavations = focusedEx;
-        /* Strict: only cables physically inside this trench — never stray hosts. */
-        cables = sortCablesForLaneOrder(getCablesStrictlyOnTrench(focus.pathId) || []);
+        /* All cables physically inside this trench — not filtered by Active/inspected FDT. */
+        cables = sortCablesForLaneOrder(getCablesOnTrenchForInspection(focus.pathId) || []);
       } else if (focus.kind === 'cable' && focus.pathId) {
         var focusedCable = findPathByRef({ type: 'fiber', id: focus.pathId });
         cables = focusedCable ? [focusedCable] : [];
         var hostTrench = focusedCable ? resolveTrenchForCable(focusedCable) : null;
         excavations = hostTrench ? [hostTrench] : [];
       }
+    } else if (trenchInspectMode) {
+      /* Sidebar trench card focus: still expose full in-trench cable list for comparison. */
+      cables = sortCablesForLaneOrder(getCablesOnTrenchForInspection(focus.pathId) || []);
     }
 
     var holeActive = focus.kind === 'node' || focus.kind === 'pole' ||
@@ -10226,12 +11288,14 @@
 
     var excavHtml = '';
     excavations.forEach(function (ex) {
+      if (!trenchInspectMode && cabId && !excavationBelongsToCabinet(ex, cabId)) return;
       var exActive = focus.kind === 'excavation' && focus.pathId === ex.id;
       excavHtml += renderExcavationSidebarCard(ex, exActive);
     });
 
     var cableHtml = '';
     cables.forEach(function (cable) {
+      if (!trenchInspectMode && cabId && !cableBelongsToCabinet(cable, cabId)) return;
       cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
     });
 
@@ -10255,9 +11319,10 @@
     var cableHtml = '';
 
     if (pathType === 'excavation') {
+      /* Free trench inspection: always show the trench + every cable inside it. */
       var pathActive = focus.kind === 'excavation' && focus.pathId === path.id;
       excavHtml = renderExcavationSidebarCard(path, pathActive);
-      sortCablesForLaneOrder(getCablesStrictlyOnTrench(path.id) || []).forEach(function (cable) {
+      sortCablesForLaneOrder(getCablesOnTrenchForInspection(path.id) || []).forEach(function (cable) {
         cableHtml += renderCableSidebarCard(cable, focus.kind === 'cable' && focus.pathId === cable.id);
       });
     } else if (pathType === 'fiber') {
@@ -10561,6 +11626,7 @@
   function handleTopologyTreeFocus(btn) {
     var kind = btn.getAttribute('data-topology-focus');
     if (!kind) return;
+    /* Sidebar focus is inspection-only — never gated by / never changes Active FDT. */
     if (kind === 'node') {
       var nodeId = btn.getAttribute('data-focus-node-id') || Sim.selectedNodeId;
       if (nodeId) {
@@ -10762,7 +11828,7 @@
     }
     Sim.moveNodeId = nodeId;
     selectNode(nodeId);
-    updateStatus('Move mode — click destination sidewalk/ITPC cell');
+    updateStatus('Move mode — click destination sidewalk cell');
   }
 
   function toggleNodeLock(nodeId) {
@@ -10920,16 +11986,60 @@
     syncGisStatusBarCoords(Sim.ui?.lastKnownCanvasCoords || Sim.ui?.lastCanvasPointer || null);
   }
 
-  function setPushHint(msg) {
+  function setStatusBarInteractivePathMode(enabled) {
+    var wrap = document.getElementById('status-bar-push-hint');
+    var group = wrap && wrap.closest
+      ? wrap.closest('.gis-status-bar__group--rotation')
+      : null;
+    if (wrap) {
+      if (enabled) wrap.classList.add('is-interactive-path');
+      else wrap.classList.remove('is-interactive-path');
+    }
+    if (group) {
+      if (enabled) group.classList.add('is-interactive-path');
+      else group.classList.remove('is-interactive-path');
+    }
+  }
+
+  /**
+   * Update Active Path / push-hint slot.
+   * @param {string|null|undefined} msg
+   * @param {{ interactivePath?: boolean }} [opts]
+   *   interactivePath:true → full trail layout, no idle "Active Path" prefix.
+   *   interactivePath:false → idle layout. Omit → infer from live trail/confirm state.
+   */
+  function setPushHint(msg, opts) {
     if (!Sim.ui) Sim.ui = {};
+    opts = opts || {};
     var next = (msg == null || msg === '') ? ACTIVE_PATH_IDLE_LABEL : String(msg);
+    var interactive = typeof opts.interactivePath === 'boolean'
+      ? opts.interactivePath
+      : isInteractiveCablePathStatusActive();
+
+    if (interactive) {
+      next = stripActivePathPrefix(next);
+      if (!next) next = ACTIVE_PATH_IDLE_LABEL;
+    } else {
+      /* Idle / batch selection: always show the original "Active Path · …" form. */
+      if (next !== ACTIVE_PATH_IDLE_LABEL && !ACTIVE_PATH_PREFIX_RE.test(next) &&
+          !/^(Main Cable|Sub-Cable|Checkpoint|Drop)\b/i.test(next)) {
+        next = 'Active Path · ' + next;
+      }
+      interactive = false;
+    }
+
     Sim.ui.pushHint = next;
+    setStatusBarInteractivePathMode(!!interactive && next !== ACTIVE_PATH_IDLE_LABEL);
     var activeEl = document.getElementById('status-bar-active-path');
     if (activeEl) {
       activeEl.textContent = next;
+      activeEl.title = next;
     } else {
       var el = document.getElementById('status-bar-push-hint');
-      if (el && !Sim.ui.batchDuplicationWarning) el.textContent = next;
+      if (el && !Sim.ui.batchDuplicationWarning) {
+        el.textContent = next;
+        el.title = next;
+      }
     }
     /* Keep duplication badge on top when active — Active Path stays stored for restore. */
     if (Sim.ui.batchDuplicationWarning) {
@@ -11068,8 +12178,15 @@
     var cs = Sim.layout?.cellSize || 50;
     var total = 0;
     if (!editor?.getPathLength) return 0;
-    (Sim.excavationPaths || []).forEach(function (p) { total += editor.getPathLength(p, cs); });
-    (Sim.fiberCablePaths || []).forEach(function (p) { total += editor.getPathLength(p, cs); });
+    var cabId = getActiveFdtId();
+    (Sim.excavationPaths || []).forEach(function (p) {
+      if (cabId && !excavationBelongsToCabinet(p, cabId)) return;
+      total += editor.getPathLength(p, cs);
+    });
+    (Sim.fiberCablePaths || []).forEach(function (p) {
+      if (cabId && !cableBelongsToCabinet(p, cabId)) return;
+      total += editor.getPathLength(p, cs);
+    });
     return total;
   }
 
@@ -11207,26 +12324,32 @@
 
   function countPlacedAssetByToolId(toolId) {
     var nodes = Sim.nodes || [];
+    var cabId = getActiveFdtId();
+    function inScope(n) {
+      if (!cabId) return true;
+      if (toolId === 'fdt' || toolId === 'olt') return true;
+      return nodeBelongsToCabinet(n, cabId);
+    }
     if (toolId === 'olt') {
       return nodes.filter(function (n) { return n && n.type === 'olt'; }).length;
     }
     if (toolId === 'handhole') {
-      return nodes.filter(function (n) { return n && n.type === 'handhole'; }).length;
+      return nodes.filter(function (n) { return n && n.type === 'handhole' && inScope(n); }).length;
     }
     if (toolId === 'fat_handhole') {
-      return nodes.filter(function (n) { return n && n.type === 'fat_handhole'; }).length;
+      return nodes.filter(function (n) { return n && n.type === 'fat_handhole' && inScope(n); }).length;
     }
     if (toolId === 'fdt') {
       return nodes.filter(function (n) { return n && n.type === 'fdt'; }).length;
     }
     if (toolId === 'closure') {
       return nodes.filter(function (n) {
-        return n && n.hasClosure && (n.type === 'handhole' || n.type === 'fat_handhole');
+        return n && n.hasClosure && (n.type === 'handhole' || n.type === 'fat_handhole') && inScope(n);
       }).length;
     }
     if (toolId === 'fat_pole') {
       return nodes.filter(function (n) {
-        return n && n.type === 'fat_handhole' && n.hasFatPole;
+        return n && n.type === 'fat_handhole' && n.hasFatPole && inScope(n);
       }).length;
     }
     return 0;
@@ -11288,10 +12411,23 @@
     var mc = document.getElementById('metric-components');
     var mconn = document.getElementById('metric-connections');
     var mlength = document.getElementById('metric-length');
-    if (mc) mc.textContent = String(Sim.nodes.length);
+    var cabId = getActiveFdtId();
+    var scopedNodes = (Sim.nodes || []).filter(function (n) {
+      if (!cabId) return true;
+      if (n && n.type === 'fdt') return String(n.id) === String(cabId);
+      if (n && n.type === 'olt') return true;
+      return nodeBelongsToCabinet(n, cabId);
+    });
+    var scopedCables = (Sim.fiberCablePaths || []).filter(function (c) {
+      return !cabId || cableBelongsToCabinet(c, cabId);
+    });
+    var scopedExcav = (Sim.excavationPaths || []).filter(function (p) {
+      return !cabId || excavationBelongsToCabinet(p, cabId);
+    });
+    if (mc) mc.textContent = String(scopedNodes.length);
     if (mconn) {
-      var pathCount = (Sim.excavationPaths?.length || 0) + (Sim.fiberCablePaths?.length || 0);
-      mconn.textContent = String(Sim.connections.length + pathCount);
+      var pathCount = scopedExcav.length + scopedCables.length;
+      mconn.textContent = String((Sim.connections.length || 0) + pathCount);
     }
     if (mlength) {
       var cs = Sim.layout?.cellSize || 50;
@@ -11303,6 +12439,7 @@
     Sim.metrics.fdtCount = Sim.nodes.filter(function (n) { return n.type === 'fdt'; }).length;
     updateFieldStatusCounters();
     updateToolboxAssetCounts();
+    syncActiveFdtChrome();
   }
 
   function syncPanelToggleArrows() {
@@ -12898,7 +14035,6 @@
 
     var zi = document.getElementById('btn-zoom-in');
     var zo = document.getElementById('btn-zoom-out');
-    var zr = document.getElementById('btn-zoom-reset');
     /* Same multiplicative notch + animation pipeline as mouse-wheel (deltaMode===1). */
     if (zi) zi.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
@@ -12907,11 +14043,6 @@
     if (zo) zo.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
       applyAnimatedMapZoom(0.96, pivot.x, pivot.y);
-    });
-    if (zr) zr.addEventListener('click', function () {
-      Sim.zoom = clampMapZoom(1);
-      centerMapInViewport();
-      applyMapTransform();
     });
 
     var clr = document.getElementById('btn-clear');
@@ -12928,6 +14059,9 @@
   }
 
   function clearWorkspace() {
+    if (global.FTTHImageMapProject?.onWorkspaceCleared) {
+      global.FTTHImageMapProject.onWorkspaceCleared();
+    }
     Sim.nodes = [];
     Sim.connections = [];
     Sim.excavationPaths = [];
@@ -12949,10 +14083,11 @@
   }
 
   function serializeProjectState() {
-    return {
+    var payload = {
       version: 1,
       savedAt: new Date().toISOString(),
       layout: Sim.activeCityId,
+      coordinateMode: Sim.coordinateMode || 'geographic',
       zoom: Sim.zoom,
       panX: Sim.panX,
       panY: Sim.panY,
@@ -12965,6 +14100,10 @@
         activeCableKind: Sim.ui.activeCableKind || 'distribution',
       },
     };
+    if (global.FTTHImageMapProject?.extendSerialize) {
+      global.FTTHImageMapProject.extendSerialize(payload);
+    }
+    return payload;
   }
 
   function restoreProjectState(payload) {
@@ -12989,6 +14128,11 @@
       if (payload.ui.cableCapacity) Sim.ui.cableCapacity = JSON.parse(JSON.stringify(payload.ui.cableCapacity));
       if (payload.ui.splitterVariant) Sim.ui.splitterVariant = payload.ui.splitterVariant;
       if (payload.ui.activeCableKind) Sim.ui.activeCableKind = payload.ui.activeCableKind;
+    }
+    if (payload.coordinateMode) Sim.coordinateMode = payload.coordinateMode;
+    else if (payload.layout !== 'uploaded_map') Sim.coordinateMode = 'geographic';
+    if (global.FTTHImageMapProject?.restoreFromProject) {
+      global.FTTHImageMapProject.restoreFromProject(payload);
     }
     renderVirtualCity();
     syncAllCablePathsToTrenches();
@@ -13374,6 +14518,18 @@
     setPushHint: setPushHint,
     sync: syncGisStatusBar,
     refreshFromContext: refreshPushHintFromContext,
+  };
+
+  global.FTTHActiveFdt = {
+    /** Requires { manual:true } (toolbox) or { bootstrap:true } (no active FDT yet). */
+    setActiveFdt: setActiveFdt,
+    getActiveFdtId: getActiveFdtId,
+    getActiveFdtLabel: getActiveFdtLabel,
+    getActiveFdtNumber: getActiveFdtNumber,
+    nodeBelongsToCabinet: nodeBelongsToCabinet,
+    cableBelongsToCabinet: cableBelongsToCabinet,
+    excavationBelongsToCabinet: excavationBelongsToCabinet,
+    syncChrome: syncActiveFdtChrome,
   };
 
   var deferBoot = !!document.getElementById('startup-view');

@@ -2,19 +2,21 @@
   'use strict';
 
   document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.faq-item').forEach(function (item) {
-      const question = item.querySelector('.faq-item__question');
-      question.addEventListener('click', function () {
-        const isActive = item.classList.contains('active');
-        document.querySelectorAll('.faq-item').forEach(function (other) {
-          other.classList.remove('active');
-          other.querySelector('.faq-item__question').setAttribute('aria-expanded', 'false');
-        });
-        if (!isActive) {
-          item.classList.add('active');
-          question.setAttribute('aria-expanded', 'true');
-        }
+    document.addEventListener('click', function (e) {
+      var question = e.target.closest ? e.target.closest('.faq-item__question') : null;
+      if (!question) return;
+      var item = question.closest('.faq-item');
+      if (!item) return;
+      var isActive = item.classList.contains('active');
+      document.querySelectorAll('.faq-item').forEach(function (other) {
+        other.classList.remove('active');
+        var q = other.querySelector('.faq-item__question');
+        if (q) q.setAttribute('aria-expanded', 'false');
       });
+      if (!isActive) {
+        item.classList.add('active');
+        question.setAttribute('aria-expanded', 'true');
+      }
     });
 
     var modal = document.getElementById('instructorModal');
@@ -189,24 +191,86 @@
       if (!button) return;
       var planId = button.getAttribute('data-plan') || '';
       var planName = '';
+      var plan = null;
       if (window.PlatformPlans && typeof window.PlatformPlans.findPlan === 'function') {
-        var plan = window.PlatformPlans.findPlan(planId);
+        plan = window.PlatformPlans.findPlan(planId);
         if (plan) planName = plan.name;
       }
       if (!planName) {
         var legacy = { free: 'المجانية', standard: 'القياسية', professional: 'الاحترافية' };
         planName = legacy[planId] || planId;
       }
+      if (window.PlatformSimulators && typeof window.PlatformSimulators.subscribeCurrentUserToPlan === 'function') {
+        try {
+          window.PlatformSimulators.subscribeCurrentUserToPlan(planId);
+          alert('تم تفعيل اشتراكك في باقة: ' + planName + '\nستظهر المحاكيات المسموحة في قسم المحاكيات.');
+          return;
+        } catch (err) {
+          alert((err && err.message) || 'تعذر تفعيل الاشتراك.\nالباقة المختارة: ' + planName);
+          return;
+        }
+      }
       alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });
 
-    document.querySelectorAll('.demo__mock-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        document.querySelectorAll('.demo__mock-btn').forEach(function (b) {
-          b.classList.remove('demo__mock-btn--active');
-        });
-        this.classList.add('demo__mock-btn--active');
-      });
+    if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+      window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+    }
+
+    function refreshSimulatorPublicState() {
+      if (
+        window.PlatformSimulators &&
+        typeof window.PlatformSimulators.isSimulatorUnderDevelopment === 'function' &&
+        typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function'
+      ) {
+        window.PlatformSimulators.applyPublicSimulatorGates();
+      }
+      if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+        window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+      }
+    }
+
+    window.addEventListener('ifa:platform-settings-changed', refreshSimulatorPublicState);
+
+    if (window.PlatformFooter && typeof window.PlatformFooter.applyFooter === 'function') {
+      window.PlatformFooter.applyFooter(document);
+    }
+    window.addEventListener('ifa:platform-footer-changed', function () {
+      if (window.PlatformFooter && typeof window.PlatformFooter.applyFooter === 'function') {
+        window.PlatformFooter.applyFooter(document);
+      }
+    });
+
+    function readShowcaseIntervalMs() {
+      if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.getRotateMs === 'function') {
+        return window.PlatformSimulatorShowcase.getRotateMs();
+      }
+      try {
+        var raw = JSON.parse(localStorage.getItem('ifa_simulator_showcase') || '{}');
+        var sec = Number(raw._intervalSeconds);
+        if (!isFinite(sec) || sec < 2) sec = 5;
+        if (sec > 60) sec = 60;
+        return Math.round(sec) * 1000;
+      } catch (err) {
+        return 5000;
+      }
+    }
+
+    function restartShowcaseRotation() {
+      if (!window.PlatformSimulatorShowcase) return;
+      if (typeof window.PlatformSimulatorShowcase.restartShowcaseTimer === 'function') {
+        window.PlatformSimulatorShowcase.restartShowcaseTimer();
+        return;
+      }
+      if (typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {
+        window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+      }
+    }
+
+    window.addEventListener('ifa:simulator-showcase-changed', restartShowcaseRotation);
+    window.addEventListener('storage', function (e) {
+      if (e.key === 'ifa_simulator_showcase') restartShowcaseRotation();
+      if (e.key === 'ifa_platform_settings') refreshSimulatorPublicState();
     });
   });
 })();

@@ -118,6 +118,35 @@
     card.addEventListener('click', beginNewEmptyProjectSetup);
 
     grid.appendChild(card);
+
+    var uploadCard = document.createElement('button');
+    uploadCard.type = 'button';
+    uploadCard.className = 'startup-view__template-card startup-view__template-card--upload';
+    uploadCard.setAttribute('aria-label', 'Upload your map image (2D canvas grid)');
+
+    var uploadIcon = document.createElement('span');
+    uploadIcon.className = 'startup-view__template-icon';
+    uploadIcon.setAttribute('aria-hidden', 'true');
+    uploadIcon.textContent = '🗺️';
+
+    var uploadTitle = document.createElement('span');
+    uploadTitle.className = 'startup-view__template-title';
+    uploadTitle.textContent = 'Upload Your Map';
+
+    var uploadDesc = document.createElement('span');
+    uploadDesc.className = 'startup-view__template-desc';
+    uploadDesc.textContent = 'Hand-drawn or scanned map · 2D grid overlay · no EPSG';
+
+    uploadCard.appendChild(uploadIcon);
+    uploadCard.appendChild(uploadTitle);
+    uploadCard.appendChild(uploadDesc);
+    uploadCard.addEventListener('click', function () {
+      if (global.FTTHImageMapProject?.openImageFilePicker) {
+        global.FTTHImageMapProject.openImageFilePicker();
+      }
+    });
+
+    grid.appendChild(uploadCard);
   }
 
   function setProjectLoaded(loaded, opts) {

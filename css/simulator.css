@@ -1,6 +1,21 @@
 /* FTTH Simulator — Google Maps × Residential Complex */
 
 /* ─── Subscriber access gate (overlay; canvas stays in DOM) ─── */
+/* Local-dev (file:// / localhost): never show the subscriber wall */
+html[data-ifa-access='local-bypass'] .subscriber-gate,
+html[data-ifa-access='local-bypass'] #subscriber-gate {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+.sim-switcher {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
 .subscriber-gate {
   position: fixed;
   inset: 0;
@@ -1258,8 +1273,41 @@ body.simulator-page-active #toolbox {
   z-index: 0;
   pointer-events: none;
   background-repeat: no-repeat;
-  background-position: 0 0;
+  background-position: center center;
   will-change: auto;
+}
+
+.image-map-grid-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: none;
+  width: 100%;
+  height: 100%;
+}
+
+#city-canvas.map-canvas--image-map .map-street-layer {
+  display: none !important;
+}
+
+#city-canvas.map-canvas--image-map .grid-cell {
+  background: transparent !important;
+  border-color: transparent !important;
+}
+
+#city-canvas.map-canvas--image-map .grid-cell .cell-label {
+  display: none;
+}
+
+#city-canvas.map-canvas--image-map .cell-canvas {
+  background: transparent;
+  cursor: crosshair;
+}
+
+.startup-view__template-card--upload .startup-view__template-icon {
+  background: rgba(0, 229, 255, 0.12);
+  border-color: rgba(0, 229, 255, 0.35);
 }
 
 .free-nodes-layer {
@@ -1392,10 +1440,6 @@ body.simulator-page-active #toolbox {
 
 .map-viewport.map-mode-select.is-panning {
   cursor: grabbing;
-}
-
-.map-viewport .grid-controls {
-  pointer-events: auto;
 }
 
 /* ─── Residential blocks ─── */
@@ -2919,6 +2963,215 @@ body.simulator-page-active #toolbox {
 
 .toolbox-item--has-count {
   position: relative;
+}
+
+/* Legacy badge — never show on Body tools */
+.toolbox-active-fdt-status {
+  display: none !important;
+}
+
+/* FDT Head card: top row (icon/label/controls) + full-width switcher below */
+.toolbox-item.toolbox-item--fdt-head {
+  display: grid !important;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon text controls"
+    "switcher switcher switcher";
+  align-items: center;
+  column-gap: 0.65rem;
+  row-gap: 0.4rem;
+  /* Controls are in-flow on this card — don't reserve absolute eye padding */
+  padding-right: 0.75rem !important;
+  overflow: visible;
+}
+
+.toolbox-item--fdt-head > .toolbox-item__icon {
+  grid-area: icon;
+  align-self: center;
+}
+
+.toolbox-item--fdt-head > .toolbox-item__text {
+  grid-area: text;
+  min-width: 0;
+  max-width: none;
+  align-self: center;
+}
+
+.toolbox-item--fdt-head > .toolbox-item-controls {
+  grid-area: controls;
+  position: static !important;
+  top: auto !important;
+  right: auto !important;
+  transform: none !important;
+  align-self: center;
+  justify-self: end;
+  z-index: 3;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.toolbox-item--fdt-head > .toolbox-fdt-head {
+  grid-area: switcher;
+}
+
+.toolbox-fdt-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: stretch;
+  gap: 0.3rem;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  flex: none;
+  box-sizing: border-box;
+}
+
+.toolbox-fdt-head__arrow {
+  flex: 0 0 auto;
+  width: 1.4rem;
+  min-width: 1.4rem;
+  height: 1.55rem;
+  padding: 0;
+  border-radius: 0.3rem;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  background: rgba(15, 23, 42, 0.65);
+  color: #fbbf24;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.toolbox-fdt-head__arrow:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: rgba(245, 158, 11, 0.7);
+}
+
+.toolbox-fdt-head__arrow:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.toolbox-fdt-head__badge {
+  flex: 1 1 auto;
+  /* Grow between arrows, but never collapse the cabinet label to a letter */
+  min-width: max-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.45rem;
+  border-radius: 0.35rem;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.toolbox-fdt-head__badge:hover:not(:disabled),
+.toolbox-fdt-head__badge[aria-expanded="true"] {
+  background: rgba(245, 158, 11, 0.24);
+  border-color: rgba(251, 191, 36, 0.75);
+}
+
+.toolbox-fdt-head__badge:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.toolbox-fdt-head__label {
+  flex: 0 0 auto;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: nowrap;
+  min-width: max-content;
+}
+
+.toolbox-fdt-head__chevron {
+  flex: 0 0 auto;
+  font-size: 9px;
+  opacity: 0.85;
+}
+
+.toolbox-fdt-head__menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.2rem);
+  z-index: 40;
+  max-height: 10rem;
+  overflow: auto;
+  padding: 0.25rem;
+  border-radius: 0.4rem;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+}
+
+.toolbox-fdt-head__menu[hidden] {
+  display: none !important;
+}
+
+.toolbox-fdt-head__option {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.45rem;
+  margin: 0;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.toolbox-fdt-head__option:hover {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fde68a;
+}
+
+.toolbox-fdt-head__option.is-active {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fbbf24;
+}
+
+.toolbox-fdt-head__menu-empty {
+  padding: 0.4rem 0.45rem;
+  color: #94a3b8;
+  font-size: 10px;
+  font-style: italic;
+}
+
+#toolbox.collapsed .toolbox-fdt-head {
+  display: none;
+}
+
+/* Collapsed icon rail: restore absolute count badge behavior on FDT card */
+#toolbox.collapsed .toolbox-item--fdt-head {
+  display: flex !important;
+  grid-template-columns: none;
+  grid-template-areas: none;
+  padding-right: 0.35rem !important;
+  row-gap: 0;
+}
+
+#toolbox.collapsed .toolbox-item--fdt-head > .toolbox-item-controls {
+  position: absolute !important;
+  inset: 0;
+  right: auto;
+  top: auto;
+  transform: none !important;
+  pointer-events: none;
 }
 
 .toolbox-asset-count {
@@ -5037,6 +5290,12 @@ canvas {
   gap: 0.4rem;
 }
 
+.gis-status-bar__group--rotation.is-interactive-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .gis-status-bar__group--rotation .gis-status-bar__sep--hint {
   margin-left: 0.1rem;
   margin-right: 0.05rem;
@@ -5048,6 +5307,20 @@ canvas {
   justify-content: flex-start;
   text-align: left;
   margin: 0;
+}
+
+/* Interactive Main/Sub cable path: expand so full FH/pole chain is visible */
+.gis-status-bar__group--rotation .gis-status-bar__push-hint.is-interactive-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+}
+
+.gis-status-bar__group--rotation .gis-status-bar__push-hint.is-interactive-path .gis-status-bar__active-path {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .gis-status-bar__label {
@@ -5182,8 +5455,9 @@ canvas {
 }
 
 .gis-status-bar__push-hint {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: min(72vw, 920px);
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -5195,6 +5469,43 @@ canvas {
   color: #7dd3fc;
   letter-spacing: 0.01em;
   transition: color 0.2s ease;
+}
+
+.gis-status-bar__active-fdt {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 0;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.14);
+  color: #fbbf24;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.gis-status-bar__active-fdt[hidden] {
+  display: none !important;
+}
+
+.gis-status-bar__fdt-sep {
+  flex: 0 0 auto;
+  display: inline-block;
+  margin: 0 0.4rem;
+  color: #64748b;
+  font-weight: 600;
+  font-size: 10px;
+  line-height: 1;
+  user-select: none;
+}
+
+.gis-status-bar__fdt-sep[hidden] {
+  display: none !important;
 }
 
 .gis-status-bar__active-path {
@@ -5907,10 +6218,6 @@ body.ftth-fake-fullscreen-active .workspace-container {
 body.ftth-fake-fullscreen-active #city-canvas {
   min-width: 0 !important;
   min-height: 0 !important;
-}
-#simulator-container.is-fullscreen .grid-controls,
-body.ftth-fake-fullscreen-active .grid-controls {
-  z-index: 650;
 }
 body.ftth-fake-fullscreen-active {
   overflow: hidden !important;
@@ -8110,6 +8417,80 @@ body.ftth-low-zoom-performance .map-label {
   stroke: #2563eb;
 }
 
+/* Phase 1 — Main Cable start cue at Cabinet/FDT (hover red → confirm green) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-hover circle {
+  stroke: #dc2626 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-hover .qfield-crosshair__plus line {
+  stroke: #dc2626 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-confirm circle {
+  stroke: #16a34a !important;
+  stroke-width: 2.2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--cabinet-confirm .qfield-crosshair__plus line {
+  stroke: #16a34a !important;
+}
+
+/* Phase 2 — Main Cable closure checkpoint (hover yellow → confirm green) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-hover circle {
+  stroke: #eab308 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-hover .qfield-crosshair__plus line {
+  stroke: #eab308 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-confirm circle {
+  stroke: #16a34a !important;
+  stroke-width: 2.2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--closure-confirm .qfield-crosshair__plus line {
+  stroke: #16a34a !important;
+}
+
+/* Phase 3 — Sub-Cable start (sky) / drop targets (orange) */
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-closure-hover circle {
+  stroke: #38bdf8 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-closure-hover .qfield-crosshair__plus line {
+  stroke: #38bdf8 !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-drop-hover circle {
+  stroke: #f97316 !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: none !important;
+}
+
+.qfield-crosshair--pen-target.qfield-crosshair--cable-tool.qfield-crosshair--sub-drop-hover .qfield-crosshair__plus line {
+  stroke: #f97316 !important;
+}
+
+/* Phase 3 — hide map labels while cable pen is active; restore on complete */
+#canvas-wrapper.cable-pen-labels-hidden .field-node-label,
+#canvas-wrapper.cable-pen-labels-hidden .pole-label,
+#canvas-wrapper.cable-pen-labels-hidden #global-map-labels-layer,
+#canvas-wrapper.cable-pen-labels-hidden .global-map-labels-layer,
+#canvas-wrapper.cable-pen-labels-hidden .map-label {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .qfield-crosshair--pen-target.qfield-crosshair--excav-tool circle {
   stroke: #78716c;
 }
@@ -9719,10 +10100,27 @@ body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
   shape-rendering: geometricPrecision;
 }
 
-.placed-node__layer--olt .olt-glyph {
-  font-size: 8px;
-  font-weight: 800;
-  color: #e9d5ff;
+.placed-node__layer--olt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.olt-building-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.placed-node__layer--olt .olt-glyph,
+.olt-building-glyph .olt-glyph {
+  display: block;
+  font-size: 1.35em;
+  line-height: 1;
+  text-align: center;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
 /* LM_Holes — As-Built GIS glyphs */
@@ -9799,31 +10197,7 @@ body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
 }
 
 .cable-emergency-save-btn {
-  position: absolute;
-  bottom: 1.25rem;
-  right: 1.25rem;
-  z-index: 120;
-  padding: 0.45rem 0.85rem;
-  border-radius: 999px;
-  border: 1px solid rgba(34, 197, 94, 0.65);
-  background: rgba(22, 101, 52, 0.92);
-  color: #ecfdf5;
-  font-size: 0.78rem;
-  font-weight: 600;
-  line-height: 1.2;
-  cursor: pointer;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
-  pointer-events: auto;
-  transition: background 0.15s ease, transform 0.12s ease;
-}
-
-.cable-emergency-save-btn:hover {
-  background: rgba(21, 128, 61, 0.98);
-  transform: translateY(-1px);
-}
-
-.cable-emergency-save-btn:active {
-  transform: translateY(0);
+  display: none !important;
 }
 
 .map-label--node {
@@ -9833,4 +10207,66 @@ body.is-resizing-side-panel #evaluation-panel .evaluation-panel__header {
 .map-label--cable {
   paint-order: normal;
   opacity: 0.95;
+}
+
+/* -- Fiber Design Matrix: Excel-style column resize -- */
+.fd-matrix-table {
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.fd-matrix-table thead th {
+  position: sticky;
+  top: 0;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  border-right: 1px solid rgba(71, 85, 105, 0.55);
+}
+
+.fd-matrix-th__label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fd-matrix-col-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 3;
+  touch-action: none;
+}
+
+.fd-matrix-col-resizer:hover,
+.fd-matrix-col-resizer:active {
+  background: linear-gradient(
+    90deg,
+    transparent 2px,
+    rgba(56, 189, 248, 0.85) 2px,
+    rgba(56, 189, 248, 0.85) 4px,
+    transparent 4px
+  );
+}
+
+body.fd-matrix-col-resizing,
+body.fd-matrix-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.fd-matrix-table tbody td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Distribution Matrix: PLC splitter / pigtail columns */
+.fd-matrix-table th[data-col-key=" splitter_fiber_no\],
+.fd-matrix-table td.fd-matrix-cell[data-col-key=\splitter_fiber_no\] {
+ white-space: nowrap;
+ font-variant-numeric: tabular-nums;
 }
