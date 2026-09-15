@@ -688,11 +688,46 @@
     syncFooterLivePreview();
   }
 
+  async function saveFooterFromForm() {
+    if (!window.PlatformFooter) return;
+    var draft = collectFooterDraftFromForm();
+    var status = $('cmsFooterSaveStatus');
+    try {
+      if (window.PlatformFooterFirestore && typeof window.PlatformFooterFirestore.saveSettings === 'function') {
+        await window.PlatformFooterFirestore.saveSettings(draft);
+      } else {
+        await window.PlatformFooter.saveFooterSettings(draft);
+      }
+      loadFooterEditorForm();
+      if (status) status.textContent = 'تم حفظ إعدادات التذييل في Firestore';
+      toast('تم حفظ إعدادات التذييل');
+      reloadSitePreview();
+    } catch (err) {
+      if (status) status.textContent = (err && err.message) || 'تعذّر الحفظ';
+      toast((err && err.message) || 'تعذّر حفظ إعدادات التذييل', true);
+    }
+  }
+
   function bindFooterEditor() {
     var form = $('cmsFooterForm');
     if (!form || !window.PlatformFooter) return;
 
     loadFooterEditorForm();
+    document.addEventListener('ifa:platform-footer-changed', loadFooterEditorForm);
+    window.addEventListener('ifa:platform-footer-changed', loadFooterEditorForm);
+
+    (function waitForFirestoreFooter(attempts) {
+      if (window.PlatformFooterFirestore && typeof window.PlatformFooterFirestore.subscribe === 'function') {
+        window.PlatformFooterFirestore.subscribe(function () {
+          loadFooterEditorForm();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForFirestoreFooter(attempts + 1);
+      }, 50);
+    })(0);
 
     if (!form.dataset.bound) {
       form.dataset.bound = '1';
@@ -710,34 +745,37 @@
 
       form.addEventListener('submit', function (e) {
         e.preventDefault();
-        var draft = collectFooterDraftFromForm();
-        var saved = window.PlatformFooter.saveFooterSettings(draft);
-        loadFooterEditorForm();
-        var status = $('cmsFooterSaveStatus');
-        if (status) status.textContent = 'تم حفظ إعدادات التذييل';
-        toast('تم حفظ إعدادات التذييل');
-        reloadSitePreview();
+        saveFooterFromForm();
       });
 
       var resetBtn = $('cmsFooterReset');
       if (resetBtn) {
-        resetBtn.addEventListener('click', function () {
+        resetBtn.addEventListener('click', async function () {
           if (!window.confirm('استعادة إعدادات التذييل الافتراضية؟')) return;
           var emptySocial = {};
           window.PlatformFooter.SOCIAL_ORDER.forEach(function (item) {
             emptySocial[item.id] = '';
           });
-          window.PlatformFooter.saveFooterSettings({
-            description: {
-              text: window.PlatformFooter.DEFAULT_DESCRIPTION,
-              fontSize: 0.9,
-              color: '#94a3b8',
-            },
-            social: emptySocial,
-          });
-          loadFooterEditorForm();
-          toast('تمت استعادة الإعدادات الافتراضية');
-          reloadSitePreview();
+          try {
+            var defaults = {
+              description: {
+                text: window.PlatformFooter.DEFAULT_DESCRIPTION,
+                fontSize: 0.9,
+                color: '#94a3b8',
+              },
+              social: emptySocial,
+            };
+            if (window.PlatformFooterFirestore && typeof window.PlatformFooterFirestore.saveSettings === 'function') {
+              await window.PlatformFooterFirestore.saveSettings(defaults);
+            } else {
+              await window.PlatformFooter.saveFooterSettings(defaults);
+            }
+            loadFooterEditorForm();
+            toast('تمت استعادة الإعدادات الافتراضية');
+            reloadSitePreview();
+          } catch (err) {
+            toast((err && err.message) || 'تعذّر استعادة الإعدادات', true);
+          }
         });
       }
     }

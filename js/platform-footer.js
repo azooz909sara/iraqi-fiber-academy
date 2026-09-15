@@ -96,13 +96,34 @@
     };
   }
 
+  function usesFirestoreFooter() {
+    return !!(
+      global.PlatformFooterFirestore &&
+      typeof global.PlatformFooterFirestore.isReady === 'function' &&
+      global.PlatformFooterFirestore.isReady()
+    );
+  }
+
   function normalizeSettings(raw) {
     var base = defaultSettings();
     var src = raw && typeof raw === 'object' ? raw : {};
     var desc = src.description && typeof src.description === 'object' ? src.description : {};
-    base.description.text = String(desc.text != null ? desc.text : base.description.text).trim() || DEFAULT_DESCRIPTION;
-    base.description.fontSize = clampFontSize(desc.fontSize != null ? desc.fontSize : base.description.fontSize);
-    base.description.color = normalizeColor(desc.color, base.description.color);
+    if (typeof src.description === 'string') {
+      base.description.text = String(src.description).trim() || DEFAULT_DESCRIPTION;
+      base.description.fontSize = clampFontSize(
+        src.fontSize != null ? src.fontSize : base.description.fontSize
+      );
+    } else {
+      base.description.text = String(desc.text != null ? desc.text : base.description.text).trim() || DEFAULT_DESCRIPTION;
+      base.description.fontSize = clampFontSize(desc.fontSize != null ? desc.fontSize : base.description.fontSize);
+      base.description.color = normalizeColor(desc.color, base.description.color);
+    }
+    if (src.fontSize != null && typeof src.description !== 'object') {
+      base.description.fontSize = clampFontSize(src.fontSize);
+    }
+    if (typeof src.description === 'object' && src.description) {
+      base.description.color = normalizeColor(desc.color, base.description.color);
+    }
     var incomingSocial = src.social && typeof src.social === 'object' ? src.social : {};
     SOCIAL_ORDER.forEach(function (item) {
       base.social[item.id] = normalizeSocialUrl(item.id, incomingSocial[item.id] || '');
@@ -111,6 +132,9 @@
   }
 
   function getFooterSettings() {
+    if (usesFirestoreFooter()) {
+      return global.PlatformFooterFirestore.getCachedSettings();
+    }
     return normalizeSettings(readJson());
   }
 
@@ -131,6 +155,9 @@
       });
     }
     current = normalizeSettings(current);
+    if (global.PlatformFooterFirestore && typeof global.PlatformFooterFirestore.saveSettings === 'function') {
+      return global.PlatformFooterFirestore.saveSettings(patch);
+    }
     try {
       localStorage.setItem(KEY, JSON.stringify(current));
     } catch (err) {
@@ -141,7 +168,7 @@
     } catch (err2) {
       /* ignore */
     }
-    return current;
+    return Promise.resolve(current);
   }
 
   function socialIconSvg(type) {
@@ -169,11 +196,13 @@
 
   function buildSocialHtml(settings) {
     return SOCIAL_ORDER.map(function (item) {
-      var href = settings.social[item.id];
+      var href = String((settings.social && settings.social[item.id]) || '').trim();
       if (!href) return '';
       var external = href.indexOf('mailto:') !== 0 && href.indexOf('tel:') !== 0;
       return (
-        '<a class="footer__social-link" href="' +
+        '<a class="footer__social-link" data-social-id="' +
+        escapeHtml(item.id) +
+        '" href="' +
         escapeHtml(href) +
         '" aria-label="' +
         escapeHtml(item.label) +
@@ -205,8 +234,24 @@
     return settings;
   }
 
+  function bindFirestoreSubscription() {
+    (function waitForFirestore(attempts) {
+      if (global.PlatformFooterFirestore && typeof global.PlatformFooterFirestore.subscribe === 'function') {
+        global.PlatformFooterFirestore.subscribe(function () {
+          applyFooter(document);
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      global.setTimeout(function () {
+        waitForFirestore(attempts + 1);
+      }, 50);
+    })(0);
+  }
+
   function boot() {
     applyFooter(document);
+    bindFirestoreSubscription();
   }
 
   global.PlatformFooter = {
@@ -215,9 +260,11 @@
     DEFAULT_DESCRIPTION: DEFAULT_DESCRIPTION,
     getFooterSettings: getFooterSettings,
     saveFooterSettings: saveFooterSettings,
+    normalizeSettings: normalizeSettings,
     normalizeSocialUrl: normalizeSocialUrl,
     applyFooter: applyFooter,
     buildSocialHtml: buildSocialHtml,
+    usesFirestore: usesFirestoreFooter,
   };
 
   if (document.readyState === 'loading') {
@@ -230,6 +277,7 @@
     applyFooter(document);
   });
   global.addEventListener('storage', function (e) {
+    if (usesFirestoreFooter()) return;
     if (e.key === KEY) applyFooter(document);
   });
 })(typeof window !== 'undefined' ? window : this);
