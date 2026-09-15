@@ -136,12 +136,17 @@
     if (!center) return false;
     var hit = findStrippedFiberAtClient(center.x, center.y);
     if (!hit || hit.isCleaned) return false;
+    var ruinedCleave = !!(hit.isCleaved);
     if (!markFiberCleaned(hit.id)) return false;
     if (!cleanedToastIds) cleanedToastIds = {};
     if (!cleanedToastIds[hit.id]) {
       cleanedToastIds[hit.id] = true;
-      showToast('Fiber Cleaned ✨');
-      setStatus('Fiber cleaned · ready for cleave / splice');
+      if (ruinedCleave) {
+        showToast('Fiber cleaned — cleave ruined, re-cleave required');
+      } else {
+        showToast('Fiber Cleaned ✨');
+        setStatus('Fiber cleaned · ready for cleave / splice');
+      }
     }
     return true;
   }

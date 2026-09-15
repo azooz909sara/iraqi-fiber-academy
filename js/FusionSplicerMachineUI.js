@@ -22,10 +22,11 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
   var FALLBACK_BARE_EXPOSED_PX = 16;
   var BUFFER_RESIDUE_STROKE = '#7FB5F5';
 
+  /** Minimum strip work done — arc blocked only when stripStage < 1 and not isStripped. */
   function isDockedFiberStripped(fiber) {
     if (!fiber) return false;
     if (fiber.isStripped === true) return true;
-    return (Number(fiber.stripStage) || 0) >= 2 || !!fiber.stripFrontierLock;
+    return (Number(fiber.stripStage) || 0) >= 1;
   }
 
   function isDockedFiberClean(fiber) {
@@ -36,19 +37,24 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     return !!(fiber && (fiber.isCleaved === true || fiber.cleaved === true));
   }
 
-  /** Loss hierarchy: uncleaved → dirty → perfect. Never blocks on uncleaved. */
+  /** Perfect prep: bare glass exposed, cleaned, precision-cleaved. */
+  function isDockedFiberFullyPrepped(fiber) {
+    if (!fiber) return false;
+    return (Number(fiber.stripStage) || 0) >= 2 &&
+      isDockedFiberClean(fiber) &&
+      isDockedFiberCleaved(fiber);
+  }
+
   function calculateSpliceLoss(fiberA, fiberB) {
-    if (!isDockedFiberCleaved(fiberA) || !isDockedFiberCleaved(fiberB)) {
-      return Math.round((Math.random() * 2.0 + 1.5) * 100) / 100;
+    if (isDockedFiberFullyPrepped(fiberA) && isDockedFiberFullyPrepped(fiberB)) {
+      return Math.round((0.01 + Math.random() * 0.01) * 100) / 100;
     }
-    if (!isDockedFiberClean(fiberA) || !isDockedFiberClean(fiberB)) {
-      return Math.round((Math.random() * 0.7 + 0.5) * 100) / 100;
-    }
-    return Math.round((Math.random() * 0.04 + 0.01) * 100) / 100;
+    return Math.round((Math.random() * 3.5 + 1.5) * 100) / 100;
   }
 
   /**
    * Preparation-state hierarchy for fusion splice loss.
+   * Only unstripped fibers block the arc; all other bad prep welds with high loss.
    * Returns { canSplice, reason, lossDb, statusLabel, cameraLabel, warnUi, criticalFail }.
    */
   function evaluateSpliceOutcome(pair) {
@@ -74,40 +80,30 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         criticalFail: true,
       };
     }
-    var uncleaved = !isDockedFiberCleaved(pair.left) || !isDockedFiberCleaved(pair.right);
-    var dirty = !uncleaved &&
-      (!isDockedFiberClean(pair.left) || !isDockedFiberClean(pair.right));
-    var reason = uncleaved ? 'uncleaved' : (dirty ? 'dirty' : 'perfect');
-    var lossDb = calculateSpliceLoss(pair.left, pair.right);
-    if (reason === 'uncleaved') {
+    if (isDockedFiberFullyPrepped(pair.left) && isDockedFiberFullyPrepped(pair.right)) {
+      var perfectLoss = calculateSpliceLoss(pair.left, pair.right);
       return {
         canSplice: true,
-        reason: 'uncleaved',
-        lossDb: lossDb,
-        statusLabel: 'SPLICE FAILED: UNCLEAVED FIBER',
-        cameraLabel: 'SPLICE FAILED: BAD CLEAVE',
-        warnUi: true,
-        criticalFail: true,
-      };
-    }
-    if (reason === 'dirty') {
-      return {
-        canSplice: true,
-        reason: 'dirty',
-        lossDb: lossDb,
-        statusLabel: 'SPLICE OK (DIRTY)',
-        cameraLabel: 'SPLICE OK (DIRTY)',
-        warnUi: true,
+        reason: 'perfect',
+        lossDb: perfectLoss,
+        statusLabel: 'SPLICE OK',
+        cameraLabel: 'SPLICE LOSS',
+        warnUi: false,
         criticalFail: false,
       };
     }
+    var lossDb = calculateSpliceLoss(pair.left, pair.right);
+    var uncleaved = !isDockedFiberCleaved(pair.left) || !isDockedFiberCleaved(pair.right);
+    var reason = uncleaved ? 'uncleaved' : 'bad_prep';
+    var statusLabel = uncleaved ? 'HIGH LOSS: UNCLEAVED' : 'HIGH LOSS: BAD PREP';
+    var cameraLabel = uncleaved ? 'HIGH LOSS: UNCLEAVED' : 'HIGH LOSS: BAD PREP';
     return {
       canSplice: true,
-      reason: 'perfect',
+      reason: reason,
       lossDb: lossDb,
-      statusLabel: 'SPLICE OK',
-      cameraLabel: 'SPLICE LOSS',
-      warnUi: false,
+      statusLabel: statusLabel,
+      cameraLabel: cameraLabel,
+      warnUi: true,
       criticalFail: false,
     };
   }
@@ -817,18 +813,13 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       var splicerScreen = q('lossEst');
       if (!splicerScreen || lossDb == null || !isFinite(lossDb)) return;
       splicerScreen.classList.remove('is-high-loss', 'is-splice-failed', 'is-splice-dirty');
-      if (outcome.reason === 'uncleaved') {
+      if (outcome.reason === 'uncleaved' || outcome.reason === 'bad_prep') {
+        var warnColor = '#ff9800';
+        var warnLabel = outcome.statusLabel || 'HIGH LOSS';
         splicerScreen.innerHTML =
-          '<span style="color: #ff4444; font-weight: bold;">SPLICE FAILED: UNCLEAVED FIBER<br>LOSS: ' +
-          lossDb.toFixed(2) + ' dB</span>';
-        splicerScreen.classList.add('is-splice-failed');
-        return;
-      }
-      if (outcome.reason === 'dirty') {
-        splicerScreen.innerHTML =
-          '<span style="color: #ff9800; font-weight: bold;">SPLICE OK (DIRTY)<br>LOSS: ' +
-          lossDb.toFixed(2) + ' dB</span>';
-        splicerScreen.classList.add('is-splice-dirty', 'is-high-loss');
+          '<span style="color: ' + warnColor + '; font-weight: bold;">' + warnLabel +
+          '<br>LOSS: ' + lossDb.toFixed(2) + ' dB</span>';
+        splicerScreen.classList.add('is-high-loss');
         return;
       }
       splicerScreen.textContent = 'EST.LOSS: ' + lossDb.toFixed(2) + ' dB';
@@ -844,9 +835,9 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         statusText.classList.remove('is-splice-failed', 'is-splice-dirty');
         if (outcome.reason === 'perfect') {
           statusText.style.color = 'var(--accent-green)';
-        } else if (outcome.reason === 'dirty') {
+        } else if (outcome.reason === 'uncleaved' || outcome.reason === 'bad_prep') {
           statusText.style.color = 'var(--accent-orange)';
-          statusText.classList.add('is-splice-dirty');
+          statusText.classList.add('is-high-loss');
         } else {
           statusText.style.color = '#ff4444';
           statusText.classList.add('is-splice-failed');
@@ -877,8 +868,9 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         lossDb: outcome.lossDb,
         loss: outcome.lossDb,
         machineId: boundMachineId,
-        dirty: outcome.reason === 'dirty',
+        badPrep: outcome.reason === 'bad_prep',
         uncleaved: outcome.reason === 'uncleaved',
+        highLoss: outcome.reason === 'uncleaved' || outcome.reason === 'bad_prep',
         outcomeReason: outcome.reason,
       });
     }
@@ -1386,17 +1378,16 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         var lossLabel = state.spliceLossDb.toFixed(2) + ' dB';
         var lossFontSize = Math.max(28, Math.round(h * 0.28));
         var outcomeReason = state.spliceOutcomeReason;
-        var warnLoss = outcomeReason === 'dirty' || outcomeReason === 'uncleaved';
-        var criticalLoss = outcomeReason === 'uncleaved';
-        var dirtyLoss = outcomeReason === 'dirty';
-        var lossColor = criticalLoss ? '#f44336' : (dirtyLoss ? '#ff9800' : '#00e5ff');
-        var lossShadow = criticalLoss
-          ? 'rgba(244, 67, 54, 0.55)'
-          : (dirtyLoss ? 'rgba(255, 152, 0, 0.55)' : 'rgba(0, 229, 255, 0.55)');
+        var warnLoss = outcomeReason === 'bad_prep' || outcomeReason === 'uncleaved';
+        var highLoss = warnLoss;
+        var lossColor = highLoss ? '#ff9800' : '#00e5ff';
+        var lossShadow = highLoss
+          ? 'rgba(255, 152, 0, 0.55)'
+          : 'rgba(0, 229, 255, 0.55)';
         var cameraLabel = outcomeReason === 'uncleaved'
-          ? 'SPLICE FAILED: BAD CLEAVE'
-          : (outcomeReason === 'dirty'
-            ? 'SPLICE OK (DIRTY)'
+          ? 'HIGH LOSS: UNCLEAVED'
+          : (outcomeReason === 'bad_prep'
+            ? 'HIGH LOSS: BAD PREP'
             : 'SPLICE LOSS');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1408,7 +1399,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         ctx.shadowBlur = 0;
         ctx.font = '500 ' + Math.max(10, Math.round(lossFontSize * 0.28)) + 'px "Orbitron", monospace';
         ctx.fillStyle = warnLoss
-          ? (criticalLoss ? 'rgba(244, 67, 54, 0.75)' : 'rgba(255, 152, 0, 0.75)')
+          ? 'rgba(255, 152, 0, 0.75)'
           : 'rgba(0, 229, 255, 0.55)';
         ctx.fillText(cameraLabel, cx, cy + lossFontSize * 0.72);
       } else if (state.fiberPlaced.L || state.fiberPlaced.R) {

@@ -3974,6 +3974,11 @@
 
   function cableSplicerDockAdapter(p, end) {
     end = cableEndFromToken(end);
+    syncCablePrepState(p);
+    var stripStage = getCableEndStripStage(p, end);
+    var isStripped = end === 'start'
+      ? !!(p.startIsStripped || stripStage >= 1)
+      : !!(p.isStripped || stripStage >= 1);
     return {
       id: p.id,
       type: 'cable',
@@ -3984,9 +3989,11 @@
       isSnappedToSplicer: cableEndSnappedToSplicer(p, end),
       snappedSplicerId: end === 'start' ? p.startSnappedSplicerId : p.snappedSplicerId,
       snappedSplicerSide: end === 'start' ? p.startSnappedSplicerSide : p.snappedSplicerSide,
+      isStripped: isStripped,
+      isCleaned: isCableEndCleaned(p, end),
       isCleaved: isCableEndCleaved(p, end),
       cleaved: isCableEndCleaved(p, end),
-      stripStage: getCableEndStripStage(p, end),
+      stripStage: stripStage,
       fiberStrip: ensureCableEndStrip(p, end),
       connector: { attached: null, mismatch: false },
       tail: { attached: null },
@@ -7364,7 +7371,39 @@
     var end = target ? target.end : 'end';
     if (!p || !isCableEndFullyStripped(p, end)) return null;
     if (isCableEndCleaned(p, end)) return null;
-    return { id: fiberTargetId(p, end), end: end, isCleaned: false, type: isCable(p) ? 'cable' : 'pigtail' };
+    return {
+      id: fiberTargetId(p, end),
+      end: end,
+      isCleaned: false,
+      isCleaved: isCableEndCleaved(p, end),
+      type: isCable(p) ? 'cable' : 'pigtail',
+    };
+  }
+
+  /** Late wipe on a cleaved end ruins the precision cut — forces re-cleave (1→2→3 order). */
+  function invalidateCableEndCleave(p, end) {
+    if (!p || !isCableEndCleaved(p, end)) return false;
+    end = resolveCableEnd(p, end);
+    if (isCable(p)) {
+      if (end === 'start') {
+        p.startIsCleaved = false;
+        p.startCleaved = false;
+        p.startCleavedStripLock = null;
+        if (p.startPrepState) p.startPrepState.cleaved = false;
+      } else {
+        p.isCleaved = false;
+        p.cleaved = false;
+        p.cleavedStripLock = null;
+        if (p.endPrepState) p.endPrepState.cleaved = false;
+      }
+    } else {
+      p.isCleaved = false;
+      p.cleaved = false;
+      p.cleavedStripLock = null;
+      if (p.prepState) p.prepState.cleaved = false;
+    }
+    syncCablePrepState(p);
+    return true;
   }
 
   /** Mark a fully stripped pigtail bare fiber as cleaned. */
@@ -7374,6 +7413,8 @@
     var end = target.end || 'end';
     if (!p || !isCableEndFullyStripped(p, end)) return false;
     if (isCableEndCleaned(p, end)) return false;
+    var ruinedCleave = isCableEndCleaved(p, end);
+    if (ruinedCleave) invalidateCableEndCleave(p, end);
     if (end === 'start') p.startIsCleaned = true;
     else p.isCleaned = true;
     syncCablePrepState(p);
@@ -7383,6 +7424,9 @@
     updateInspector();
     if (isCable(p)) selectCable(p.id);
     else selectPigtail(p.id);
+    if (ruinedCleave) {
+      setStatus('Fiber cleaned · cleave ruined — re-cleave before splice');
+    }
     return true;
   }
 
