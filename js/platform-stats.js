@@ -1,5 +1,5 @@
 /**
- * Public landing page statistics — localStorage CMS (ifa_platform_stats).
+ * Public landing page statistics — Firestore settings/stats (real-time) with local fallback.
  */
 (function (global) {
   'use strict';
@@ -12,6 +12,14 @@
     trainingProjects: 48,
     satisfactionRate: 98,
   };
+
+  function usesFirestoreStats() {
+    return !!(
+      global.PlatformStatsFirestore &&
+      typeof global.PlatformStatsFirestore.isReady === 'function' &&
+      global.PlatformStatsFirestore.isReady()
+    );
+  }
 
   function readJson() {
     try {
@@ -32,6 +40,9 @@
   }
 
   function normalizeStats(raw) {
+    if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.normalizeStats === 'function') {
+      return global.PlatformStatsFirestore.normalizeStats(raw);
+    }
     var src = raw && typeof raw === 'object' ? raw : {};
     return {
       enrolledStudents: clampInt(src.enrolledStudents, DEFAULTS.enrolledStudents, 0, 99999999),
@@ -49,11 +60,17 @@
   }
 
   function getStats() {
-    return normalizeStats(readJson());
+    if (usesFirestoreStats()) {
+      return global.PlatformStatsFirestore.getCachedStats();
+    }
+    return normalizeStats(readJson() || DEFAULTS);
   }
 
   function saveStats(patch) {
     var next = normalizeStats(Object.assign({}, getStats(), patch || {}));
+    if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.saveStats === 'function') {
+      return global.PlatformStatsFirestore.saveStats(next);
+    }
     try {
       localStorage.setItem(KEY, JSON.stringify(next));
     } catch (err) {
@@ -64,7 +81,7 @@
     } catch (err2) {
       /* ignore */
     }
-    return next;
+    return Promise.resolve(next);
   }
 
   function applyLandingStats(root) {
@@ -83,6 +100,21 @@
     applyLandingStats(document);
   }
 
+  function bindFirestoreSubscription() {
+    (function waitForFirestore(attempts) {
+      if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.subscribe === 'function') {
+        global.PlatformStatsFirestore.subscribe(function () {
+          loadPublicStats();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      global.setTimeout(function () {
+        waitForFirestore(attempts + 1);
+      }, 50);
+    })(0);
+  }
+
   global.PlatformStats = {
     KEY: KEY,
     DEFAULTS: DEFAULTS,
@@ -92,15 +124,25 @@
     formatStatNumber: formatStatNumber,
     applyLandingStats: applyLandingStats,
     loadPublicStats: loadPublicStats,
+    usesFirestore: usesFirestoreStats,
   };
 
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', loadPublicStats);
+    document.addEventListener('DOMContentLoaded', function () {
+      loadPublicStats();
+      bindFirestoreSubscription();
+    });
   } else {
     loadPublicStats();
+    bindFirestoreSubscription();
   }
 
+  global.addEventListener('ifa:platform-stats-changed', function () {
+    loadPublicStats();
+  });
+
   global.addEventListener('storage', function (e) {
+    if (usesFirestoreStats()) return;
     if (e.key === KEY) loadPublicStats();
   });
 })(typeof window !== 'undefined' ? window : this);

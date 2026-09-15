@@ -778,41 +778,53 @@
       '%</span><span class="cms-stats-preview__label">رضا الطلاب</span></div>';
   }
 
-  function saveStatsFromForm() {
+  async function saveStatsFromForm() {
     if (!window.PlatformStats) return;
-    var saved = window.PlatformStats.saveStats({
+    var status = $('cmsStatsSaveStatus');
+    var payload = {
       enrolledStudents: $('cmsStatEnrolledStudents') && $('cmsStatEnrolledStudents').value,
       simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
       trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
       satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
-    });
-    renderStatsPreview(saved);
-    var status = $('cmsStatsSaveStatus');
-    if (status) {
-      status.textContent =
-        'تم الحفظ — طلاب: ' +
-        window.PlatformStats.formatStatNumber(saved.enrolledStudents) +
-        ' · كم: ' +
-        window.PlatformStats.formatStatNumber(saved.simulatedKilometers);
+    };
+    try {
+      var saved = await window.PlatformStats.saveStats(payload);
+      renderStatsPreview(saved);
+      if (status) {
+        status.textContent =
+          'تم الحفظ في Firestore — طلاب: ' +
+          window.PlatformStats.formatStatNumber(saved.enrolledStudents) +
+          ' · كم: ' +
+          window.PlatformStats.formatStatNumber(saved.simulatedKilometers);
+      }
+      toast('تم حفظ إحصائيات الموقع');
+      reloadSitePreview();
+    } catch (err) {
+      if (status) status.textContent = (err && err.message) || 'تعذّر الحفظ';
+      toast((err && err.message) || 'تعذّر حفظ الإحصائيات', true);
     }
-    toast('تم حفظ إحصائيات الموقع');
-    reloadSitePreview();
   }
 
-  function resetStatsToDefaults() {
+  async function resetStatsToDefaults() {
     if (!window.PlatformStats) return;
     if (!window.confirm('استعادة الإحصائيات الافتراضية؟')) return;
     var defaults = window.PlatformStats.DEFAULTS;
-    window.PlatformStats.saveStats(defaults);
-    renderStatsEditor();
-    toast('تمت استعادة الإحصائيات الافتراضية');
-    reloadSitePreview();
+    try {
+      await window.PlatformStats.saveStats(defaults);
+      renderStatsEditor();
+      toast('تمت استعادة الإحصائيات الافتراضية');
+      reloadSitePreview();
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر استعادة الإحصائيات', true);
+    }
   }
 
   function bindStatsEditor() {
     var form = $('cmsStatsForm');
     if (!form || !window.PlatformStats) return;
     renderStatsEditor();
+    document.addEventListener('ifa:platform-stats-changed', renderStatsEditor);
+    window.addEventListener('ifa:platform-stats-changed', renderStatsEditor);
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       saveStatsFromForm();
