@@ -16,7 +16,18 @@
       .replace(/"/g, '&quot;');
   }
 
+  function usesFirestorePricing() {
+    return !!(
+      window.PlatformPricingFirestore &&
+      typeof window.PlatformPricingFirestore.isReady === 'function' &&
+      window.PlatformPricingFirestore.isReady()
+    );
+  }
+
   function getPlans() {
+    if (usesFirestorePricing()) {
+      return window.PlatformPricingFirestore.getCachedPlans();
+    }
     if (window.PlatformPlans && typeof window.PlatformPlans.getPlans === 'function') {
       return window.PlatformPlans.getPlans();
     }
@@ -175,15 +186,31 @@
   function bind() {
     renderPublicPlans();
     window.addEventListener('storage', function (e) {
+      if (usesFirestorePricing()) return;
       if (!e.key || e.key === 'platform_plans' || e.key === 'platform_courses') {
         renderPublicPlans();
       }
     });
+    document.addEventListener('ifa:pricing-firestore-changed', renderPublicPlans);
+    window.addEventListener('ifa:pricing-firestore-changed', renderPublicPlans);
     document.addEventListener('ifa:platform-plans-changed', renderPublicPlans);
     window.addEventListener('ifa:platform-plans-changed', renderPublicPlans);
     document.addEventListener('ifa:platform-courses-changed', renderPublicPlans);
     window.addEventListener('ifa:platform-courses-changed', renderPublicPlans);
+    (function waitForFirestoreSubscribe(attempts) {
+      if (window.PlatformPricingFirestore && typeof window.PlatformPricingFirestore.subscribe === 'function') {
+        window.PlatformPricingFirestore.subscribe(function () {
+          renderPublicPlans();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForFirestoreSubscribe(attempts + 1);
+      }, 50);
+    })(0);
     window.setInterval(function () {
+      if (usesFirestorePricing()) return;
       var next = signature(getPlans());
       if (next !== lastSignature) renderPublicPlans();
     }, 2000);

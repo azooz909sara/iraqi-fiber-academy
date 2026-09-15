@@ -122,10 +122,25 @@
     }).length;
   }
 
+  function usesFirestorePricing() {
+    return !!(
+      window.PlatformPricingFirestore &&
+      typeof window.PlatformPricingFirestore.isReady === 'function' &&
+      window.PlatformPricingFirestore.isReady()
+    );
+  }
+
+  function getPlansList() {
+    if (usesFirestorePricing()) {
+      return window.PlatformPricingFirestore.getCachedPlans();
+    }
+    return Plans ? Plans.getPlans() : [];
+  }
+
   function renderPlansList() {
     var list = $('adminPlansList');
-    if (!list || !Plans) return;
-    var plans = Plans.getPlans();
+    if (!list || (!Plans && !window.PlatformPricingFirestore)) return;
+    var plans = getPlansList();
     if (!plans.length) {
       list.innerHTML =
         '<div class="admin-empty" role="status"><p>لا توجد باقات بعد. أضف باقة جديدة.</p></div>';
@@ -273,17 +288,28 @@
     };
   }
 
-  function onSubmit(e) {
+  async function onSubmit(e) {
     e.preventDefault();
-    if (!Plans) return;
+    if (!Plans && !window.PlatformPricingFirestore) return;
     var payload = collectPayload();
+    var Firestore = window.PlatformPricingFirestore;
     try {
-      if (editingId) {
-        Plans.updatePlan(editingId, payload);
-        toast('تم تحديث الباقة — ستظهر على الموقع فوراً');
-      } else {
-        Plans.addPlan(payload);
-        toast('تمت إضافة الباقة — ستظهر على الموقع فوراً');
+      if (Firestore && typeof Firestore.addPlan === 'function') {
+        if (editingId) {
+          await Firestore.updatePlan(editingId, payload);
+          toast('تم تحديث الباقة في Firestore — ستظهر على الموقع فوراً');
+        } else {
+          await Firestore.addPlan(payload);
+          toast('تمت إضافة الباقة إلى Firestore — ستظهر على الموقع فوراً');
+        }
+      } else if (Plans) {
+        if (editingId) {
+          Plans.updatePlan(editingId, payload);
+          toast('تم تحديث الباقة — ستظهر على الموقع فوراً');
+        } else {
+          Plans.addPlan(payload);
+          toast('تمت إضافة الباقة — ستظهر على الموقع فوراً');
+        }
       }
       closeModal();
       renderPlansList();
@@ -292,12 +318,11 @@
     }
   }
 
-  function handleDeletePlan(id) {
+  async function handleDeletePlan(id) {
     var key = String(id || '').trim();
-    if (!key || !Plans) return;
+    if (!key || (!Plans && !window.PlatformPricingFirestore)) return;
     if (!window.confirm('حذف هذه الباقة من الموقع؟')) return;
 
-    // Optimistic DOM removal for instant feedback
     document.querySelectorAll('.admin-plan-card[data-plan-id]').forEach(function (card) {
       if (String(card.getAttribute('data-plan-id')) === key && card.parentNode) {
         card.parentNode.removeChild(card);
@@ -305,7 +330,12 @@
     });
 
     try {
-      Plans.deletePlan(key);
+      var Firestore = window.PlatformPricingFirestore;
+      if (Firestore && typeof Firestore.deletePlan === 'function') {
+        await Firestore.deletePlan(key);
+      } else if (Plans) {
+        Plans.deletePlan(key);
+      }
       toast('تم حذف الباقة');
       renderPlansList();
     } catch (err) {
@@ -315,14 +345,20 @@
   }
 
   function handleEditPlan(id) {
-    var plan = Plans.findPlan(id);
+    var Firestore = window.PlatformPricingFirestore;
+    var plan =
+      Firestore && typeof Firestore.findPlan === 'function'
+        ? Firestore.findPlan(id)
+        : Plans && Plans.findPlan
+          ? Plans.findPlan(id)
+          : null;
     if (plan) openModal(plan);
   }
 
   function bind() {
     Plans = window.PlatformPlans;
-    if (!Plans) {
-      console.warn('[AdminPlans] PlatformPlans missing');
+    if (!Plans && !window.PlatformPricingFirestore) {
+      console.warn('[AdminPlans] PlatformPlans and PlatformPricingFirestore missing');
       return;
     }
 
@@ -362,12 +398,30 @@
       }
     });
 
+    document.addEventListener('ifa:pricing-firestore-changed', renderPlansList);
+    window.addEventListener('ifa:pricing-firestore-changed', renderPlansList);
     document.addEventListener('ifa:platform-plans-changed', renderPlansList);
     window.addEventListener('ifa:platform-plans-changed', renderPlansList);
     document.addEventListener('ifa:platform-courses-changed', renderPlansList);
     window.addEventListener('storage', function (e) {
-      if (!e.key || e.key === 'platform_plans' || e.key === 'ifa_pricing_plans' || e.key === 'platform_courses') renderPlansList();
+      if (usesFirestorePricing()) return;
+      if (!e.key || e.key === 'platform_plans' || e.key === 'ifa_pricing_plans' || e.key === 'platform_courses') {
+        renderPlansList();
+      }
     });
+
+    (function waitForFirestoreSubscribe(attempts) {
+      if (window.PlatformPricingFirestore && typeof window.PlatformPricingFirestore.subscribe === 'function') {
+        window.PlatformPricingFirestore.subscribe(function () {
+          renderPlansList();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForFirestoreSubscribe(attempts + 1);
+      }, 50);
+    })(0);
 
     renderPlansList();
   }

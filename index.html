@@ -36,22 +36,7 @@
         </ul>
         <div class="header__actions">
           <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <!--
-              Account menu (auth-manager):
-              - Toggle label always: الحساب + chevron
-              - Guest: تسجيل الدخول only
-              - Logged in: name + email, انضم إلينا كمدرب, تسجيل خروج at bottom
-            -->
-            <div class="user-menu" id="userMenu" data-auth-guest="1">
-              <button type="button" class="user-menu__toggle" id="userMenuToggle" aria-expanded="false" aria-haspopup="true" aria-controls="userMenuDropdown">
-                <span class="user-menu__avatar" aria-hidden="true">?</span>
-                <span class="user-menu__label">الحساب</span>
-                <svg class="user-menu__chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-              </button>
-              <div class="user-menu__dropdown" id="userMenuDropdown" role="menu" hidden>
-                <button type="button" class="user-menu__item user-menu__item--login" role="menuitem" data-auth-login>تسجيل الدخول</button>
-              </div>
-            </div>
+            <button type="button" class="auth-login-btn" data-auth-login>تسجيل الدخول</button>
           </div>
           <a href="#pricing" class="header__cta">ابدأ مجاناً</a>
         </div>
@@ -585,12 +570,11 @@
   <script src="js/platform-courses.js"></script>
   <script src="js/platform-courses-public.js"></script>
   <script src="js/platform-plans.js"></script>
+  <script type="module" src="js/platform-plans-firestore-sync.js"></script>
   <script src="js/platform-plans-public.js"></script>
   <script>
     /* Role-gated menu hardening before/alongside auth-manager */
     (function () {
-      var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
-
       function normalizeEmail(value) {
         return String(value || '').trim().toLowerCase();
       }
@@ -624,9 +608,21 @@
         return '';
       }
 
-      function isAdminEmail(email) {
-        var key = normalizeEmail(email);
-        return !!key && ADMIN_EMAILS.indexOf(key) !== -1;
+      function readSessionRole() {
+        try {
+          var authRaw = localStorage.getItem('ifa_auth_user');
+          if (authRaw) {
+            return String((JSON.parse(authRaw) || {}).role || '');
+          }
+        } catch (err) { /* ignore */ }
+        return '';
+      }
+
+      function isAdminSession() {
+        if (window.IFAAuth && typeof window.IFAAuth.isAdminUser === 'function') {
+          return window.IFAAuth.isAdminUser(window.IFAAuth.getAuthState().profile);
+        }
+        return readSessionRole() === 'admin';
       }
 
       function isGuestTestUser(menu) {
@@ -682,12 +678,9 @@
           return;
         }
 
-        /*
-         * local (file:// / localhost) → always show Admin + Instructor
-         * production domain → ONLY abdulazizyassin909@gmail.com
-         */
-        var admin = localDev || isAdminEmail(email);
-        var instructor = localDev || isAdminEmail(email) || isAuthorizedInstructor(email);
+        /* local dev bypass, or Firestore RBAC role === admin */
+        var admin = localDev || isAdminSession();
+        var instructor = localDev || isAdminSession() || isAuthorizedInstructor(email);
 
         menu.classList.toggle('is-file-local', localDev);
         menu.classList.toggle('is-local-dev', localDev);

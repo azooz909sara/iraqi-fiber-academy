@@ -1,22 +1,28 @@
 /**
- * Google Sign-In UI + Firebase Auth state (ES module).
- * Mount points: elements with [data-auth-slot] in index.html / simulator.html.
+ * Firebase Auth (Email/Password + Google) + header UI (ES module).
+ * Mount points: elements with [data-auth-slot] in index.html / simulator pages.
  *
- * Landing profile dropdown:
- * - Guest: Profile toggle → dropdown with "تسجيل الدخول" only
- * - Authenticated: name + email/status at top, role links, "تسجيل خروج" at bottom
- * Local session mirror in localStorage (`ifa_auth_user`) for instant UI toggle / file:// fallback.
+ * Guest: "تسجيل الدخول" button → auth modal (login / sign-up).
+ * Authenticated: profile dropdown with email + "تسجيل خروج".
+ * Local session mirror in localStorage (`ifa_auth_user`) for profile fields / route guards.
  */
 import { auth, provider } from './firebase-config.js';
 import {
   signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
   onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { syncUserProfile } from './db-manager.js';
+import { syncUserProfile, createUserProfileOnSignUp } from './db-manager.js';
 
-/** Hard allow-list for admin dashboard access (normalized lowercase). */
-var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
+/**
+ * RBAC: admin access is granted only when Firestore users/{uid}.role === 'admin'.
+ * See js/db-manager.js for first-time admin promotion steps in Firebase Console.
+ */
+console.info(
+  '[IFA Auth] RBAC: promote your account in Firestore → users/{uid} → set role field to "admin"'
+);
 var LOCAL_AUTH_KEY = 'ifa_auth_user';
 var LOCAL_DEV_EMAIL = 'abdulazizyassin909@gmail.com';
 
@@ -24,6 +30,11 @@ var slots = [];
 var lastUser = null;
 var lastProfile = null;
 var refreshSlots = function () {};
+var authChangeListeners = [];
+var authModalMode = 'login';
+var authModalBound = false;
+var profileSynced = true;
+var authInitialized = false;
 
 function escapeHtml(value) {
   return String(value == null ? '' : value)
@@ -195,6 +206,175 @@ function notifyLocalAuthChanged(detail) {
   }
 }
 
+function notifyAuthChange(user, meta) {
+  meta = meta || {};
+  var identity = resolveActiveIdentity();
+  var payload = {
+    user: user || identity.user || null,
+    profile: identity.profile || null,
+    isLoggedIn: !!(user || identity.user),
+    email: user && user.email ? normalizeEmail(user.email) : identity.user && identity.user.email,
+    profileSynced: meta.profileSynced !== undefined ? meta.profileSynced : profileSynced,
+  };
+  authChangeListeners.forEach(function (fn) {
+    try {
+      fn(payload);
+    } catch (err) {
+      console.error('[Auth] onAuthChange listener failed', err);
+    }
+  });
+  try {
+    window.dispatchEvent(new CustomEvent('ifa:auth-changed', { detail: payload }));
+  } catch (err2) {
+    /* ignore */
+  }
+}
+
+function formatAuthError(err) {
+  var code = err && err.code ? String(err.code) : '';
+  if (code === 'auth/invalid-email') return 'البريد الإلكتروني غير صالح.';
+  if (code === 'auth/user-disabled') return 'تم تعطيل هذا الحساب.';
+  if (code === 'auth/user-not-found') return 'لا يوجد حساب بهذا البريد.';
+  if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+    return 'البريد أو كلمة المرور غير صحيحة.';
+  }
+  if (code === 'auth/email-already-in-use') return 'هذا البريد مسجّل مسبقاً. جرّب تسجيل الدخول.';
+  if (code === 'auth/weak-password') return 'كلمة المرور ضعيفة (6 أحرف على الأقل).';
+  if (code === 'auth/too-many-requests') return 'محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.';
+  if (code === 'auth/network-request-failed') return 'تعذّر الاتصال. تحقق من الشبكة.';
+  return (err && err.message) || 'حدث خطأ. حاول مرة أخرى.';
+}
+
+function setAuthModalError(message) {
+  var el = document.getElementById('authModalError');
+  if (!el) return;
+  if (!message) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.textContent = message;
+}
+
+function setAuthModalMode(mode) {
+  authModalMode = mode === 'signup' ? 'signup' : 'login';
+  var modal = document.getElementById('authModal');
+  if (!modal) return;
+  modal.setAttribute('data-auth-mode', authModalMode);
+  var title = modal.querySelector('[data-auth-modal-title]');
+  var submit = modal.querySelector('[data-auth-submit]');
+  var switchLogin = modal.querySelector('[data-auth-switch-login]');
+  var switchSignup = modal.querySelector('[data-auth-switch-signup]');
+  if (title) {
+    title.textContent = authModalMode === 'signup' ? 'إنشاء حساب' : 'تسجيل الدخول';
+  }
+  if (submit) {
+    submit.textContent = authModalMode === 'signup' ? 'إنشاء حساب' : 'تسجيل الدخول';
+  }
+  if (switchLogin) switchLogin.hidden = authModalMode === 'login';
+  if (switchSignup) switchSignup.hidden = authModalMode === 'signup';
+  setAuthModalError('');
+}
+
+function ensureAuthModal() {
+  if (document.getElementById('authModal')) return;
+  var wrap = document.createElement('div');
+  wrap.className = 'auth-modal';
+  wrap.id = 'authModal';
+  wrap.hidden = true;
+  wrap.setAttribute('data-auth-mode', 'login');
+  wrap.innerHTML =
+    '<div class="auth-modal__backdrop" data-auth-modal-close tabindex="-1" aria-hidden="true"></div>' +
+    '<div class="auth-modal__panel" role="dialog" aria-modal="true" aria-labelledby="authModalTitle">' +
+      '<button type="button" class="auth-modal__close" data-auth-modal-close aria-label="إغلاق">&times;</button>' +
+      '<h2 class="auth-modal__title" id="authModalTitle" data-auth-modal-title>تسجيل الدخول</h2>' +
+      '<p class="auth-modal__hint">استخدم بريدك وكلمة المرور للوصول إلى المحاكيات واللوحات.</p>' +
+      '<p class="auth-modal__error" id="authModalError" role="alert" hidden></p>' +
+      '<form class="auth-modal__form" id="authModalForm" novalidate>' +
+        '<label class="auth-modal__field">' +
+          '<span>البريد الإلكتروني</span>' +
+          '<input type="email" name="email" data-auth-email autocomplete="email" dir="ltr" required />' +
+        '</label>' +
+        '<label class="auth-modal__field">' +
+          '<span>كلمة المرور</span>' +
+          '<input type="password" name="password" data-auth-password autocomplete="current-password" minlength="6" required />' +
+        '</label>' +
+        '<button type="submit" class="auth-modal__submit" data-auth-submit>تسجيل الدخول</button>' +
+      '</form>' +
+      '<div class="auth-modal__switch">' +
+        '<button type="button" class="auth-modal__switch-btn" data-auth-switch-signup>ليس لديك حساب؟ إنشاء حساب</button>' +
+        '<button type="button" class="auth-modal__switch-btn" data-auth-switch-login hidden>لديك حساب؟ تسجيل الدخول</button>' +
+      '</div>' +
+      '<div class="auth-modal__divider" role="separator"><span>أو</span></div>' +
+      '<button type="button" class="auth-modal__google" data-auth-google>متابعة بحساب Google</button>' +
+    '</div>';
+  document.body.appendChild(wrap);
+
+  if (!authModalBound) {
+    authModalBound = true;
+    wrap.addEventListener('click', function (e) {
+      if (e.target && e.target.closest && e.target.closest('[data-auth-modal-close]')) {
+        closeAuthModal();
+      }
+    });
+    wrap.querySelector('[data-auth-switch-signup]').addEventListener('click', function () {
+      setAuthModalMode('signup');
+      var pwd = wrap.querySelector('[data-auth-password]');
+      if (pwd) pwd.setAttribute('autocomplete', 'new-password');
+    });
+    wrap.querySelector('[data-auth-switch-login]').addEventListener('click', function () {
+      setAuthModalMode('login');
+      var pwd = wrap.querySelector('[data-auth-password]');
+      if (pwd) pwd.setAttribute('autocomplete', 'current-password');
+    });
+    wrap.querySelector('[data-auth-google]').addEventListener('click', function () {
+      loginWithGoogle();
+    });
+    wrap.querySelector('#authModalForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      handleAuthModalSubmit();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && wrap && !wrap.hidden) closeAuthModal();
+    });
+  }
+}
+
+function openAuthModal(mode) {
+  ensureAuthModal();
+  setAuthModalMode(mode || 'login');
+  var modal = document.getElementById('authModal');
+  var emailInput = modal && modal.querySelector('[data-auth-email]');
+  if (modal) {
+    modal.hidden = false;
+    document.body.classList.add('auth-modal-open');
+  }
+  if (emailInput) {
+    window.setTimeout(function () {
+      emailInput.focus();
+    }, 0);
+  }
+}
+
+function closeAuthModal() {
+  var modal = document.getElementById('authModal');
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove('auth-modal-open');
+  setAuthModalError('');
+}
+
+function closeUserMenuDropdown() {
+  var menu = document.getElementById('userMenu');
+  if (!menu) return;
+  menu.classList.remove('open');
+  var toggle = menu.querySelector('.user-menu__toggle');
+  var drop = menu.querySelector('.user-menu__dropdown');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+  if (drop) drop.hidden = true;
+}
+
 function getFirstName(user) {
   var full = (user && (user.displayName || user.name || user.email)) || 'User';
   return String(full).trim().split(/\s+/)[0] || 'User';
@@ -233,15 +413,6 @@ function readLocalSessionEmail() {
   return '';
 }
 
-function isAdminEmail(email) {
-  var key = normalizeEmail(email);
-  if (!key) return false;
-  for (var i = 0; i < ADMIN_EMAILS.length; i++) {
-    if (key === ADMIN_EMAILS[i]) return true;
-  }
-  return false;
-}
-
 /** file:// or localhost / 127.0.0.1 — local development bypass */
 function isLocalDevEnvironment() {
   if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isLocalDevEnvironment === 'function') {
@@ -277,9 +448,9 @@ function shouldBypassAccessControl() {
 }
 
 /** Local → always show Admin + Instructor; production → admin email allow-list only */
-function shouldShowDashboardLinks(email) {
+function shouldShowDashboardLinks(_email, profile) {
   if (shouldBypassAccessControl()) return true;
-  return isAdminEmail(email);
+  return isAdminUser(profile);
 }
 
 /** Seed / upgrade a full-privilege local session for free local development. */
@@ -304,14 +475,8 @@ function ensureLocalDevSession() {
   });
 }
 
-function isAdminUser(profile, email) {
-  if (shouldBypassAccessControl()) return true;
-  var resolved = normalizeEmail(email || (profile && profile.email) || '');
-  if (isAdminEmail(resolved)) return true;
-  if (!profile) return false;
-  if (profile.isAdmin === true) return true;
-  if (String(profile.role || '').toLowerCase() === 'admin') return true;
-  return false;
+function isAdminUser(profile) {
+  return !!(profile && String(profile.role || '') === 'admin');
 }
 
 function isInstructorUser(profile, email) {
@@ -324,7 +489,7 @@ function isInstructorUser(profile, email) {
       readLocalSessionEmail()
   );
 
-  if (isAdminUser(profile, checkEmail)) return true;
+  if (isAdminUser(profile)) return true;
 
   if (profile && (profile.isInstructor === true || String(profile.role || '').toLowerCase() === 'instructor')) {
     return true;
@@ -468,14 +633,12 @@ function userMenuHtml(options) {
 }
 
 function loggedOutHtml(variant) {
-  if (variant === 'simulator') {
-    return (
-      '<button type="button" class="auth-login-btn auth-login-btn--sim" data-auth-login>' +
-      'تسجيل الدخول' +
-      '</button>'
-    );
-  }
-  return guestMenuHtml();
+  var btnClass = variant === 'simulator' ? 'auth-login-btn auth-login-btn--sim' : 'auth-login-btn';
+  return (
+    '<button type="button" class="' +
+    btnClass +
+    '" data-auth-login>تسجيل الدخول</button>'
+  );
 }
 
 function loggedInHtml(user, variant, profile) {
@@ -498,7 +661,7 @@ function loggedInHtml(user, variant, profile) {
     fullName: getFullName(user, profile),
     email: email,
     avatarHtml: avatarHtml(user, firstName),
-    showDashboards: shouldShowDashboardLinks(email),
+    showDashboards: shouldShowDashboardLinks(email, profile),
   });
 }
 
@@ -606,9 +769,9 @@ function loginLocalSession(options) {
       : localBypass
         ? true
         : !!options.isSubscriber,
-    isAdmin: treatAsStudent ? false : localBypass ? true : options.isAdmin === true || isAdminEmail(email),
+    isAdmin: treatAsStudent ? false : localBypass ? true : options.isAdmin === true,
     isInstructor: treatAsStudent ? false : localBypass ? true : !!options.isInstructor,
-    role: treatAsStudent ? 'student' : localBypass ? 'admin' : options.role || (isAdminEmail(email) ? 'admin' : 'student'),
+    role: treatAsStudent ? 'student' : localBypass ? 'admin' : options.role || 'user',
     planId: (directoryUser && directoryUser.planId) || options.planId || '',
     enrolledCourseIds: (directoryUser && directoryUser.enrolledCourseIds) || options.enrolledCourseIds || [],
     trialExpiresAt: trialExpiryMs(directoryUser && directoryUser.trialExpiresAt) || options.trialExpiresAt,
@@ -631,43 +794,73 @@ function simulateLocalLogin() {
   loginLocalSession({ email: email });
 }
 
-export async function loginWithGoogle() {
+export async function loginWithEmailPassword(email, password) {
+  var key = normalizeEmail(email);
+  if (!key || key.indexOf('@') === -1) {
+    throw new Error('البريد الإلكتروني غير صالح.');
+  }
+  if (!password || String(password).length < 6) {
+    throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+  }
+  var result = await signInWithEmailAndPassword(auth, key, String(password));
+  closeAuthModal();
+  return result.user;
+}
+
+export async function signUpWithEmailPassword(email, password) {
+  var key = normalizeEmail(email);
+  if (!key || key.indexOf('@') === -1) {
+    throw new Error('البريد الإلكتروني غير صالح.');
+  }
+  if (!password || String(password).length < 6) {
+    throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+  }
+  var result = await createUserWithEmailAndPassword(auth, key, String(password));
+  await createUserProfileOnSignUp(result.user);
+  closeAuthModal();
+  return result.user;
+}
+
+async function handleAuthModalSubmit() {
+  var modal = document.getElementById('authModal');
+  if (!modal) return;
+  var emailInput = modal.querySelector('[data-auth-email]');
+  var passwordInput = modal.querySelector('[data-auth-password]');
+  var submitBtn = modal.querySelector('[data-auth-submit]');
+  var email = emailInput ? emailInput.value : '';
+  var password = passwordInput ? passwordInput.value : '';
+  setAuthModalError('');
+  if (submitBtn) submitBtn.disabled = true;
   try {
-    var result = await signInWithPopup(auth, provider);
-    if (result && result.user) {
-      loginLocalSession({
-        name: result.user.displayName || '',
-        email: result.user.email || '',
-        photoURL: result.user.photoURL || '',
-      });
+    if (authModalMode === 'signup') {
+      await signUpWithEmailPassword(email, password);
+    } else {
+      await loginWithEmailPassword(email, password);
     }
+  } catch (err) {
+    setAuthModalError(formatAuthError(err));
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+export async function loginWithGoogle() {
+  setAuthModalError('');
+  try {
+    await signInWithPopup(auth, provider);
+    closeAuthModal();
   } catch (err) {
     if (err && (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request')) {
       return;
     }
-    console.warn('[Auth] Google sign-in unavailable — using local session', err);
-    if (!getLocalAuthUser()) simulateLocalLogin();
+    setAuthModalError(formatAuthError(err));
+    console.warn('[Auth] Google sign-in failed', err);
   }
-}
-
-/** Landing menu: flip to logged-in via localStorage and re-render instantly. */
-function handleMenuSignIn() {
-  if (getLocalAuthUser() || lastUser) {
-    refreshSlots();
-    openUserMenuDropdown();
-    return;
-  }
-  loginLocalSession();
 }
 
 export async function logoutUser() {
-  clearLocalAuthUser();
-  lastUser = null;
-  lastProfile = null;
-  refreshSlots();
-  notifyLocalAuthChanged({ type: 'logout' });
-  openUserMenuDropdown();
-
+  closeUserMenuDropdown();
+  closeAuthModal();
   try {
     if (auth.currentUser) {
       await signOut(auth);
@@ -675,6 +868,12 @@ export async function logoutUser() {
   } catch (err) {
     console.error('[Auth] Sign-out failed:', err);
   }
+  clearLocalAuthUser();
+  lastUser = null;
+  lastProfile = null;
+  refreshSlots();
+  notifyLocalAuthChanged({ type: 'logout' });
+  notifyAuthChange(null, { profileSynced: true });
 }
 
 function bindAuthClicks() {
@@ -683,13 +882,12 @@ function bindAuthClicks() {
     if (loginEl) {
       e.preventDefault();
       e.stopPropagation();
-      var slot = loginEl.closest('[data-auth-slot]');
-      var variant = slotVariant(slot);
-      if (variant === 'simulator') {
-        loginWithGoogle();
-      } else {
-        handleMenuSignIn();
+      if (lastUser || getLocalAuthUser()) {
+        refreshSlots();
+        openUserMenuDropdown();
+        return;
       }
+      openAuthModal('login');
       return;
     }
     var logoutEl = e.target && e.target.closest ? e.target.closest('[data-auth-logout]') : null;
@@ -731,6 +929,7 @@ function enforceSimulatorPageFromAuth() {
 }
 
 function initAuthUI() {
+  ensureAuthModal();
   bindAuthClicks();
   slots = Array.prototype.slice.call(document.querySelectorAll('[data-auth-slot]'));
 
@@ -754,51 +953,59 @@ function initAuthUI() {
   enforceSimulatorPageFromAuth();
 
   onAuthStateChanged(auth, function (user) {
+    authInitialized = true;
     lastUser = user || null;
     if (!user) {
       lastProfile = null;
+      profileSynced = true;
       if (shouldBypassAccessControl()) {
         ensureLocalDevSession();
+      } else {
+        clearLocalAuthUser();
       }
-      /* Keep local session if Firebase signed out but local auth still set */
       refreshSlots();
       notifyLocalAuthChanged({ type: getLocalAuthUser() ? 'local-session' : 'logout' });
+      notifyAuthChange(null, { profileSynced: true });
       return;
     }
 
     var email = normalizeEmail(user.email || '');
-    var localBypass = shouldBypassAccessControl();
+    profileSynced = false;
     setLocalAuthUser({
       name: user.displayName || '',
       email: email,
       photoURL: user.photoURL || '',
-      isSubscriber: localBypass ? true : false,
-      isAdmin: localBypass ? true : isAdminEmail(email),
-      isInstructor: localBypass ? true : false,
-      role: localBypass || isAdminEmail(email) ? 'admin' : 'student',
+      isSubscriber: false,
+      isAdmin: false,
+      isInstructor: false,
+      role: 'user',
     });
     refreshSlots();
     notifyLocalAuthChanged({ type: 'login', email: email });
+    notifyAuthChange(user, { profileSynced: false });
 
     syncUserProfile(user)
       .then(function (profile) {
-        lastProfile = profile;
-        if (profile && profile.email) {
-          setLocalAuthUser({
-            name: profile.name || user.displayName || '',
-            email: profile.email || user.email || '',
-            photoURL: user.photoURL || profile.photo || '',
-            isSubscriber: localBypass ? true : !!profile.isSubscriber,
-            isAdmin: localBypass ? true : !!profile.isAdmin || isAdminEmail(profile.email || user.email),
-            isInstructor: localBypass ? true : !!profile.isInstructor,
-            role: localBypass ? 'admin' : profile.role || '',
-          });
-        }
+        lastProfile = profile || null;
+        var role = String((profile && profile.role) || 'user');
+        setLocalAuthUser({
+          name: (profile && profile.name) || user.displayName || '',
+          email: (profile && profile.email) || user.email || '',
+          photoURL: user.photoURL || (profile && profile.photo) || '',
+          isSubscriber: !!(profile && profile.isSubscriber),
+          isAdmin: role === 'admin',
+          isInstructor: !!(profile && profile.isInstructor),
+          role: role,
+        });
+        profileSynced = true;
         refreshSlots();
         notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+        notifyAuthChange(user, { profileSynced: true });
       })
       .catch(function (err) {
+        profileSynced = true;
         console.error('[Auth] syncUserProfile failed:', err);
+        notifyAuthChange(user, { profileSynced: true });
       });
   });
 
@@ -829,9 +1036,52 @@ function initAuthUI() {
 initAuthUI();
 
 window.IFAAuth = {
+  auth: auth,
+  getCurrentUser: function () {
+    return lastUser;
+  },
   getLocalAuthUser: getLocalAuthUser,
+  getAuthState: function () {
+    return resolveActiveIdentity();
+  },
+  isAuthInitialized: function () {
+    return authInitialized;
+  },
+  isLoggedIn: function () {
+    if (lastUser) return true;
+    if (shouldBypassAccessControl() && getLocalAuthUser()) return true;
+    return !!getLocalAuthUser();
+  },
+  onAuthChange: function (callback) {
+    if (typeof callback !== 'function') return function () {};
+    authChangeListeners.push(callback);
+    try {
+      var identity = resolveActiveIdentity();
+      callback({
+        user: lastUser || identity.user,
+        profile: lastProfile || identity.profile,
+        isLoggedIn: !!(lastUser || getLocalAuthUser()),
+        email: lastUser && lastUser.email ? normalizeEmail(lastUser.email) : readLocalSessionEmail(),
+        profileSynced: profileSynced,
+      });
+    } catch (err) {
+      console.error('[Auth] onAuthChange initial callback failed', err);
+    }
+    return function () {
+      authChangeListeners = authChangeListeners.filter(function (fn) {
+        return fn !== callback;
+      });
+    };
+  },
+  loginWithEmailPassword: loginWithEmailPassword,
+  signUpWithEmailPassword: signUpWithEmailPassword,
+  loginWithGoogle: loginWithGoogle,
+  logout: logoutUser,
+  openAuthModal: openAuthModal,
   setLocalAuthUser: setLocalAuthUser,
   clearLocalAuthUser: clearLocalAuthUser,
   loginLocalSession: loginLocalSession,
   hasActiveTrial: hasActiveTrial,
+  isAdminUser: isAdminUser,
+  isInstructorUser: isInstructorUser,
 };

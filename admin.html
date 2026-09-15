@@ -652,7 +652,7 @@
         </div>
         <div class="admin-plans-list" id="adminPlansList"></div>
         <div class="admin-panel__footer">
-          <p class="admin-panel__meta">التغييرات تُحفظ في <code>platform_plans</code> و<code>ifa_pricing_plans</code> وتُحدَّث على الموقع تلقائياً.</p>
+          <p class="admin-panel__meta">التغييرات تُحفظ في Firestore (<code>pricing</code>) وتُحدَّث على الموقع فوراً عبر المزامنة الحية.</p>
         </div>
       </section>
 
@@ -1210,6 +1210,7 @@
   </div>
 
   <script src="js/env-access.js"></script>
+  <script type="module" src="js/admin-guard.js"></script>
   <script src="js/platform-simulators.js"></script>
   <script src="js/platform-simulator-showcase.js"></script>
   <script src="js/articles.js"></script>
@@ -1223,6 +1224,7 @@
   <script src="js/platform-courses.js"></script>
   <script src="js/admin-courses-ui.js"></script>
   <script src="js/platform-plans.js"></script>
+  <script type="module" src="js/platform-plans-firestore-sync.js"></script>
   <script src="js/admin-plans-ui.js"></script>
   <script src="js/settings/FtthLabSettings.js"></script>
   <script src="js/ftth-lab-settings-cms.js"></script>

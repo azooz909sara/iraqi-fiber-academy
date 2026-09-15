@@ -1,5 +1,11 @@
 /**
  * Cloud Firestore user profiles & subscriber flags.
+ *
+ * FIRST ADMIN SETUP (one-time):
+ * 1. Sign up / sign in once so users/{uid} exists.
+ * 2. Firebase Console → Firestore Database → users → open your document (doc id = Auth uid).
+ * 3. Set field `role` to `admin` (string). Save.
+ * 4. Sign out and back in (or refresh) so the client picks up the new role.
  */
 import { db } from './firebase-config.js';
 import {
@@ -7,6 +13,35 @@ import {
   getDoc,
   setDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+/**
+ * Create users/{uid} immediately after Email/Password sign-up.
+ * @param {import('firebase/auth').User} user
+ * @returns {Promise<object|null>}
+ */
+export async function createUserProfileOnSignUp(user) {
+  if (!user || !user.uid) return null;
+
+  var profile = {
+    uid: user.uid,
+    email: user.email || null,
+    role: 'user',
+    createdAt: new Date(),
+  };
+
+  await setDoc(doc(db, 'users', user.uid), profile);
+  return profile;
+}
+
+/**
+ * @param {string} uid
+ * @returns {Promise<object|null>}
+ */
+export async function fetchUserProfile(uid) {
+  if (!uid) return null;
+  var snap = await getDoc(doc(db, 'users', uid));
+  return snap.exists() ? snap.data() : null;
+}
 
 /**
  * Ensure users/{uid} exists; create a default non-subscriber profile if missing.
@@ -30,7 +65,7 @@ export async function syncUserProfile(user) {
     photo: user.photoURL || null,
     isSubscriber: false,
     isAdmin: false,
-    role: 'student',
+    role: 'user',
     createdAt: new Date(),
   };
 
@@ -59,6 +94,5 @@ export async function checkAdminStatus(uid) {
   var snap = await getDoc(doc(db, 'users', uid));
   if (!snap.exists()) return false;
   var data = snap.data() || {};
-  if (data.isAdmin === true) return true;
-  return String(data.role || '').toLowerCase() === 'admin';
+  return String(data.role || '') === 'admin';
 }
