@@ -287,6 +287,84 @@
     return window.PlatformSimulatorsFirestore || null;
   }
 
+  function isSimulatorsFirestoreModuleReady() {
+    var Firestore = getSimulatorsFirestoreApi();
+    return !!(Firestore && typeof Firestore.saveSimulatorsBundle === 'function');
+  }
+
+  function formatSimulatorsFirestoreLoadError(err) {
+    var message = err && err.message ? String(err.message) : '';
+    if (message.indexOf('Failed to fetch') !== -1 || message.indexOf('fetch') !== -1) {
+      return 'تعذّر تحميل js/firestore-simulators.js — تحقق من النشر أو أعد تحميل الصفحة';
+    }
+    return 'تعذّر تحميل Firestore للمحاكيات: ' + (message || 'خطأ غير معروف');
+  }
+
+  async function waitForSimulatorsFirestoreApi(maxMs) {
+    var timeoutMs = maxMs == null ? 12000 : maxMs;
+    if (isSimulatorsFirestoreModuleReady()) {
+      return getSimulatorsFirestoreApi();
+    }
+
+    if (window.__ifaSimulatorsFirestoreReady) {
+      try {
+        await Promise.race([
+          window.__ifaSimulatorsFirestoreReady,
+          new Promise(function (_, reject) {
+            window.setTimeout(function () {
+              reject(new Error('simulators-firestore-ready-timeout'));
+            }, timeoutMs);
+          }),
+        ]);
+      } catch (err) {
+        if (!isSimulatorsFirestoreModuleReady()) {
+          console.warn('[CMS simulators] ready promise settled without API', err);
+        }
+      }
+    }
+
+    if (isSimulatorsFirestoreModuleReady()) {
+      return getSimulatorsFirestoreApi();
+    }
+
+    try {
+      await import('./firestore-simulators.js');
+    } catch (err) {
+      console.error('[CMS simulators] dynamic import fallback failed', err);
+      throw window.__ifaSimulatorsFirestoreLoadError || err;
+    }
+
+    if (!isSimulatorsFirestoreModuleReady()) {
+      throw new Error('PlatformSimulatorsFirestore missing after import');
+    }
+    return getSimulatorsFirestoreApi();
+  }
+
+  function updateSimulatorsSaveButtonState() {
+    var btn = $('cmsSimulatorsSaveAll');
+    var status = $('cmsSimulatorsSaveAllStatus');
+    if (!btn) return;
+
+    if (isSimulatorsFirestoreModuleReady()) {
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      if (
+        status &&
+        (status.textContent === 'جاري تحميل Firestore للمحاكيات...' ||
+          status.textContent === 'تعذّر تحميل Firestore للمحاكيات — أعد تحميل الصفحة')
+      ) {
+        status.textContent = '';
+      }
+      return;
+    }
+
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    if (status && !status.textContent) {
+      status.textContent = 'جاري تحميل Firestore للمحاكيات...';
+    }
+  }
+
   function formatSimulatorsPublishError(err) {
     var Firestore = getSimulatorsFirestoreApi();
     if (Firestore && typeof Firestore.formatFirestoreWriteError === 'function') {
@@ -505,13 +583,25 @@
       return false;
     }
 
-    var Firestore = getSimulatorsFirestoreApi();
-    if (!Firestore || typeof Firestore.saveSimulatorsBundle !== 'function') {
-      toast('تعذّر الاتصال بـ Firestore للمحاكيات — تأكد من تحميل platform-simulators-firestore-sync.js', true);
+    var status = $('cmsSimulatorsSaveAllStatus');
+    var Firestore;
+    try {
+      Firestore = await waitForSimulatorsFirestoreApi(12000);
+    } catch (err) {
+      console.error('[CMS simulators] Firestore module unavailable', err);
+      var loadMessage = formatSimulatorsFirestoreLoadError(err);
+      if (status) status.textContent = loadMessage;
+      toast(loadMessage, true);
       return false;
     }
 
-    var status = $('cmsSimulatorsSaveAllStatus');
+    if (!Firestore || typeof Firestore.saveSimulatorsBundle !== 'function') {
+      var missingMessage =
+        'تعذّر الاتصال بـ Firestore للمحاكيات — تأكد من تحميل platform-simulators-firestore-sync.js';
+      if (status) status.textContent = missingMessage;
+      toast(missingMessage, true);
+      return false;
+    }
     try {
       await runWithCmsPublishProgress('جاري نشر المحاكيات...', async function (setPct) {
         setPct(15);
@@ -596,7 +686,13 @@
     if (intervalForm && window.PlatformSimulatorShowcase) {
       intervalForm.addEventListener('submit', async function (e) {
         e.preventDefault();
-        var Firestore = getSimulatorsFirestoreApi();
+        var Firestore;
+        try {
+          Firestore = await waitForSimulatorsFirestoreApi(12000);
+        } catch (err) {
+          toast(formatSimulatorsFirestoreLoadError(err), true);
+          return;
+        }
         if (!Firestore || typeof Firestore.saveShowcaseMetaToFirestore !== 'function') {
           toast('تعذّر الاتصال بـ Firestore للمحاكيات', true);
           return;
@@ -626,37 +722,51 @@
     }
 
     renderSimulatorShowcaseManager();
+    updateSimulatorsSaveButtonState();
 
-    (function waitForSimulatorsMigration(attempts) {
+    function onSimulatorsFirestoreReady() {
+      updateSimulatorsSaveButtonState();
+      runSimulatorsLocalToFirestoreMigration(true);
+
       var Firestore = getSimulatorsFirestoreApi();
-      if (Firestore && typeof Firestore.migrateLocalCacheToFirestore === 'function') {
-        runSimulatorsLocalToFirestoreMigration(true);
+      if (Firestore && typeof Firestore.subscribe === 'function' && !window.__ifaSimulatorsCmsSubscribed) {
+        window.__ifaSimulatorsCmsSubscribed = true;
+        Firestore.subscribe(function () {
+          renderSimulatorShowcaseManager();
+          var intervalInputEl = $('cmsShowcaseInterval');
+          if (intervalInputEl && window.PlatformSimulatorShowcase) {
+            intervalInputEl.value = String(window.PlatformSimulatorShowcase.getIntervalSeconds());
+          }
+        });
+      }
+    }
+
+    window.addEventListener('ifa:simulators-firestore-ready', onSimulatorsFirestoreReady);
+    document.addEventListener('ifa:simulators-firestore-ready', onSimulatorsFirestoreReady);
+
+    window.addEventListener('ifa:simulators-firestore-load-error', function (e) {
+      var status = $('cmsSimulatorsSaveAllStatus');
+      var err = e && e.detail;
+      var message = formatSimulatorsFirestoreLoadError(err);
+      if (status) status.textContent = message;
+      updateSimulatorsSaveButtonState();
+    });
+
+    (function waitForSimulatorsModuleReady(attempts) {
+      if (isSimulatorsFirestoreModuleReady()) {
+        onSimulatorsFirestoreReady();
         return;
       }
-      if (attempts > 120) return;
-      window.setTimeout(function () {
-        waitForSimulatorsMigration(attempts + 1);
-      }, 50);
-    })(0);
-
-    (function attachSimulatorsFirestoreSubscribe(attempts) {
-      var Firestore = getSimulatorsFirestoreApi();
-      if (Firestore && typeof Firestore.subscribe === 'function') {
-        if (!window.__ifaSimulatorsCmsSubscribed) {
-          window.__ifaSimulatorsCmsSubscribed = true;
-          Firestore.subscribe(function () {
-            renderSimulatorShowcaseManager();
-            var intervalInputEl = $('cmsShowcaseInterval');
-            if (intervalInputEl && window.PlatformSimulatorShowcase) {
-              intervalInputEl.value = String(window.PlatformSimulatorShowcase.getIntervalSeconds());
-            }
-          });
+      updateSimulatorsSaveButtonState();
+      if (attempts > 240) {
+        var status = $('cmsSimulatorsSaveAllStatus');
+        if (status) {
+          status.textContent = 'تعذّر تحميل Firestore للمحاكيات — أعد تحميل الصفحة';
         }
         return;
       }
-      if (attempts > 120) return;
       window.setTimeout(function () {
-        attachSimulatorsFirestoreSubscribe(attempts + 1);
+        waitForSimulatorsModuleReady(attempts + 1);
       }, 50);
     })(0);
 
@@ -664,6 +774,7 @@
     if (saveAllBtn && !saveAllBtn.dataset.bound) {
       saveAllBtn.dataset.bound = '1';
       saveAllBtn.addEventListener('click', function () {
+        if (saveAllBtn.disabled) return;
         saveAllSimulatorShowcaseCards();
       });
     }

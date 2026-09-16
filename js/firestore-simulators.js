@@ -321,6 +321,16 @@ function formatFirestoreWriteError(err) {
   return 'فشل نشر المحاكيات إلى Firestore: ' + message;
 }
 
+function buildFirestorePayload(bundle) {
+  var normalized = normalizeBundle(bundle);
+  return {
+    simulatorsMeta: normalized.simulatorsMeta,
+    showcaseStore: normalized.showcaseStore,
+    platformSettings: normalized.platformSettings,
+    updatedAt: serverTimestamp(),
+  };
+}
+
 async function writeBundleToFirestore(bundle) {
   var normalized = normalizeBundle(bundle);
   await setDoc(SIMULATORS_REF, buildFirestorePayload(normalized), { merge: true });
@@ -420,14 +430,14 @@ export function listenToSimulatorsMeta(callback) {
   return subscribeSimulators(callback);
 }
 
-function buildFirestorePayload(bundle) {
-  var normalized = normalizeBundle(bundle);
-  return {
-    simulatorsMeta: normalized.simulatorsMeta,
-    showcaseStore: normalized.showcaseStore,
-    platformSettings: normalized.platformSettings,
-    updatedAt: serverTimestamp(),
-  };
+export function whenSimulatorsFirestoreReady() {
+  if (window.PlatformSimulatorsFirestore && typeof window.PlatformSimulatorsFirestore.saveSimulatorsBundle === 'function') {
+    return Promise.resolve(window.PlatformSimulatorsFirestore);
+  }
+  if (window.__ifaSimulatorsFirestoreReady) {
+    return window.__ifaSimulatorsFirestoreReady;
+  }
+  return Promise.resolve(window.PlatformSimulatorsFirestore || null);
 }
 
 export async function saveSimulatorMetaToFirestore(patch) {
@@ -527,6 +537,7 @@ window.addEventListener('ifa:auth-changed', function (e) {
 var api = {
   subscribe: subscribeSimulators,
   listenToSimulatorsMeta: listenToSimulatorsMeta,
+  whenReady: whenSimulatorsFirestoreReady,
   getCachedSimulatorsBundle: getCachedSimulatorsBundle,
   isReady: isSimulatorsSnapshotReady,
   saveSimulatorMetaToFirestore: saveSimulatorMetaToFirestore,
@@ -539,5 +550,9 @@ var api = {
 
 window.PlatformSimulatorsFirestore = api;
 startSimulatorsFirestoreSync();
+
+if (typeof window.__ifaSimulatorsFirestoreReadyResolve === 'function') {
+  window.__ifaSimulatorsFirestoreReadyResolve(api);
+}
 
 export default api;
