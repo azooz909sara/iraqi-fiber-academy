@@ -379,8 +379,31 @@
       });
   }
 
+  function usesFirestoreCourses() {
+    return !!(
+      global.PlatformCoursesFirestore &&
+      typeof global.PlatformCoursesFirestore.isReady === 'function' &&
+      global.PlatformCoursesFirestore.isReady()
+    );
+  }
+
+  function isFirestoreCoursesBootstrapping() {
+    var FS = global.PlatformCoursesFirestore;
+    if (!FS || typeof FS.isReady !== 'function') return false;
+    if (!FS.isReady()) return true;
+    if (typeof FS.isSeeding === 'function' && FS.isSeeding()) return true;
+    return false;
+  }
+
+  function readFirestoreCourses() {
+    if (!usesFirestoreCourses()) return [];
+    return (global.PlatformCoursesFirestore.getCachedCourses() || []).map(normalizeCourse).filter(Boolean);
+  }
+
   function normalizeCourse(raw) {
     if (!raw || typeof raw !== 'object') return null;
+    var rawStatus = String(raw.status || '').toLowerCase();
+    var trashFromStatus = rawStatus === 'trash' || rawStatus === 'deleted';
     var email = normalizeEmail(raw.instructorEmail);
     var name = String(raw.instructorName || '').trim();
     var academy = isAcademyAssignment(email, name);
@@ -392,7 +415,7 @@
       id: raw.id || uid('course'),
       title: String(raw.title || '').trim(),
       description: String(raw.description || '').trim(),
-      status: normalizeStatus(raw.status),
+      status: trashFromStatus ? 'draft' : normalizeStatus(raw.status),
       category: normalizeCategory(raw.category),
       instructorEmail: email,
       instructorName: name,
@@ -437,7 +460,7 @@
       enrolledCount: Number(raw.enrolledCount) || 0,
       views: Number(raw.views) || 0,
       source: raw.source === 'instructor' ? 'instructor' : 'admin',
-      softDeleted: !!raw.softDeleted,
+      softDeleted: trashFromStatus ? true : !!raw.softDeleted,
       previousStatus: raw.previousStatus ? normalizeStatus(raw.previousStatus) : '',
       deletedAt: raw.deletedAt || '',
       sortOrder: (function () {
@@ -587,7 +610,9 @@
         });
     if (!needs) return (list || []).slice().sort(sortByDisplayOrder);
     var ordered = withSequentialSortOrder(list);
-    emitChanged(ordered, { type: 'ensure-order' });
+    if (!usesFirestoreCourses()) {
+      emitChanged(ordered, { type: 'ensure-order' });
+    }
     return ordered;
   }
 
@@ -603,6 +628,10 @@
   }
 
   function getCourses() {
+    if (isFirestoreCoursesBootstrapping()) return [];
+    if (usesFirestoreCourses()) {
+      return ensureDisplayOrder(readFirestoreCourses());
+    }
     ensureSeeded();
     var list = readJson(COURSES_KEY, []);
     list = (Array.isArray(list) ? list : []).map(normalizeCourse).filter(Boolean);
@@ -610,6 +639,12 @@
   }
 
   function saveCourses(list, detail) {
+    if (usesFirestoreCourses()) {
+      console.warn(
+        '[PlatformCourses] saveCourses ignored while Firestore sync is active — use PlatformCoursesFirestore CRUD'
+      );
+      return assignSortOrderFromArray(list || []);
+    }
     /* Preserve array order — source of truth after drag-reorder. */
     var normalized = assignSortOrderFromArray(list || []);
     emitChanged(normalized, detail);
@@ -617,14 +652,30 @@
   }
 
   function findCourse(id) {
+    var key = String(id || '');
+    if (!key) return null;
+    if (isFirestoreCoursesBootstrapping()) return null;
+    if (usesFirestoreCourses() && global.PlatformCoursesFirestore.findCourse) {
+      var cached = global.PlatformCoursesFirestore.findCourse(key);
+      return cached ? normalizeCourse(cached) : null;
+    }
     var list = getCourses();
     for (var i = 0; i < list.length; i++) {
-      if (list[i].id === id) return list[i];
+      if (list[i].id === key) return list[i];
     }
     return null;
   }
 
   function getPublished() {
+    if (isFirestoreCoursesBootstrapping()) return [];
+    if (usesFirestoreCourses()) {
+      return readFirestoreCourses()
+        .filter(function (c) {
+          return c.status === 'published' && !c.softDeleted;
+        })
+        .slice()
+        .sort(sortByDisplayOrder);
+    }
     return getCourses()
       .filter(function (c) {
         return c.status === 'published' && !c.softDeleted;
@@ -638,6 +689,9 @@
    * Rewrites sortOrder from the final array index into platform_courses.
    */
   function reorderCourses(orderedIds) {
+    if (usesFirestoreCourses() && global.PlatformCoursesFirestore.reorderCourses) {
+      return global.PlatformCoursesFirestore.reorderCourses(orderedIds);
+    }
     var all = getCourses().slice().sort(sortByDisplayOrder);
     var byId = {};
     all.forEach(function (c) {
@@ -764,6 +818,12 @@
   }
 
   function addCourse(payload) {
+    if (usesFirestoreCourses()) {
+      console.warn(
+        '[PlatformCourses] addCourse ignored while Firestore sync is active — use PlatformCoursesFirestore.addCourse'
+      );
+      return null;
+    }
     var list = getCourses();
     var instructorEmail = normalizeEmail(payload && payload.instructorEmail);
     var instructorName = resolveInstructorName(instructorEmail, payload && payload.instructorName);
@@ -800,6 +860,12 @@
   }
 
   function updateCourse(id, patch) {
+    if (usesFirestoreCourses()) {
+      console.warn(
+        '[PlatformCourses] updateCourse ignored while Firestore sync is active — use PlatformCoursesFirestore.updateCourse'
+      );
+      return findCourse(id);
+    }
     var list = getCourses();
     var found = null;
     list = list.map(function (c) {
@@ -903,6 +969,10 @@
     COURSES_KEY: COURSES_KEY,
     ACADEMY_NAME: ACADEMY_NAME,
     ACADEMY_EMAIL: ACADEMY_EMAIL,
+    uid: uid,
+    defaultSeedCourses: seedCourses,
+    usesFirestore: usesFirestoreCourses,
+    isFirestoreBootstrapping: isFirestoreCoursesBootstrapping,
     COURSE_PRESETS: COURSE_PRESETS,
     getPresetsGrouped: getPresetsGrouped,
     findPreset: findPreset,

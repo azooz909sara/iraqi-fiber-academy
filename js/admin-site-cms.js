@@ -5,8 +5,17 @@
   'use strict';
 
   var editingArticleId = null;
+  var articleToggleInFlight = false;
+  var pendingArticleCoverFile = null;
+  var articlesBinView = false;
+  var articlesLiveBound = false;
+  var faqBinView = false;
+  var tstBinView = false;
   var editingFaqId = null;
+  var faqToggleInFlight = false;
   var editingTestimonialId = null;
+  var tstToggleInFlight = false;
+  var pendingTestimonialAvatarFile = null;
   var selectedEditorImage = null;
   var resizeState = null;
   var dragState = null;
@@ -101,15 +110,70 @@
       .replace(/"/g, '&quot;');
   }
 
-  function statusBadge(status, type) {
-    if (type === 'testimonial') {
-      return status === 'hidden'
-        ? '<span class="cms-status cms-status--draft">مخفي</span>'
-        : '<span class="cms-status cms-status--published">منشور</span>';
+  function statusBadge(status) {
+    if (status === 'trash') {
+      return '<span class="cms-status cms-status--trash">مهمل</span>';
     }
     return status === 'draft'
       ? '<span class="cms-status cms-status--draft">مسودة</span>'
       : '<span class="cms-status cms-status--published">منشور</span>';
+  }
+
+  function updateArticlesBinToolbar() {
+    var toggle = document.querySelector('[data-article-bin-toggle]');
+    var addBtn = document.querySelector('[data-article-add]');
+    var count =
+      window.PlatformArticles && typeof window.PlatformArticles.getTrashedArticles === 'function'
+        ? window.PlatformArticles.getTrashedArticles().length
+        : 0;
+    if (toggle) {
+      toggle.textContent = articlesBinView
+        ? 'العودة للقائمة'
+        : count > 0
+          ? 'سلة المهملات (' + count + ')'
+          : 'سلة المهملات';
+      toggle.setAttribute('aria-pressed', articlesBinView ? 'true' : 'false');
+    }
+    if (addBtn) addBtn.hidden = articlesBinView;
+  }
+
+  function updateFaqBinToolbar() {
+    var toggle = document.querySelector('[data-faq-bin-toggle]');
+    var addBtn = document.querySelector('[data-faq-add]');
+    var count =
+      window.PlatformFaqs && typeof window.PlatformFaqs.getTrashedFaqs === 'function'
+        ? window.PlatformFaqs.getTrashedFaqs().length
+        : 0;
+    if (toggle) {
+      toggle.textContent = faqBinView
+        ? 'العودة للقائمة'
+        : count > 0
+          ? 'سلة المهملات (' + count + ')'
+          : 'سلة المهملات';
+      toggle.setAttribute('aria-pressed', faqBinView ? 'true' : 'false');
+    }
+    if (addBtn) addBtn.hidden = faqBinView;
+  }
+
+  function updateTestimonialsBinToolbar() {
+    var toggle = document.querySelector('[data-tst-bin-toggle]');
+    var addBtn = document.querySelector('[data-tst-add]');
+    var restoreBtn = document.querySelector('[data-tst-restore-defaults]');
+    var count =
+      window.PlatformTestimonials &&
+      typeof window.PlatformTestimonials.getTrashedTestimonials === 'function'
+        ? window.PlatformTestimonials.getTrashedTestimonials().length
+        : 0;
+    if (toggle) {
+      toggle.textContent = tstBinView
+        ? 'العودة للقائمة'
+        : count > 0
+          ? 'سلة المهملات (' + count + ')'
+          : 'سلة المهملات';
+      toggle.setAttribute('aria-pressed', tstBinView ? 'true' : 'false');
+    }
+    if (addBtn) addBtn.hidden = tstBinView;
+    if (restoreBtn) restoreBtn.hidden = tstBinView;
   }
 
   function toast(message, isError) {
@@ -1693,12 +1757,112 @@
   }
 
   /* ---------- Articles ---------- */
+  function usesFirestoreArticles() {
+    return !!(
+      window.PlatformArticlesFirestore &&
+      typeof window.PlatformArticlesFirestore.isReady === 'function' &&
+      window.PlatformArticlesFirestore.isReady()
+    );
+  }
+
+  function articleCoverExtension(file) {
+    var name = String((file && file.name) || 'cover.jpg');
+    var ext = name.indexOf('.') > -1 ? name.split('.').pop() : 'jpg';
+    ext = String(ext).replace(/[^a-z0-9]/gi, '').toLowerCase();
+    return ext || 'jpg';
+  }
+
+  async function uploadArticleCoverFile(articleId, file) {
+    var mod = await import('./cms-storage.js');
+    var path =
+      'cms/articles/' + String(articleId) + '/cover.' + articleCoverExtension(file);
+    return mod.uploadCmsFile(path, file);
+  }
+
+  async function resolveArticleImageForSave(articleId) {
+    var image = String(
+      ($('articleEditorImageData') && $('articleEditorImageData').value) ||
+        ($('articleEditorImageUrl') && $('articleEditorImageUrl').value) ||
+        ''
+    ).trim();
+    if (pendingArticleCoverFile) {
+      image = await uploadArticleCoverFile(articleId, pendingArticleCoverFile);
+      pendingArticleCoverFile = null;
+      if ($('articleEditorImageData')) $('articleEditorImageData').value = image;
+      if ($('articleEditorImageUrl')) $('articleEditorImageUrl').value = image;
+      var preview = $('articleEditorImagePreview');
+      if (preview) {
+        preview.src = image;
+        preview.hidden = !image;
+      }
+      var fileInput = $('articleEditorImageFile');
+      if (fileInput) fileInput.value = '';
+      return image;
+    }
+    if (usesFirestoreArticles()) {
+      var mod = await import('./cms-storage.js');
+      if (image && mod.rejectDataUrl(image)) {
+        throw new Error('صورة المقال يجب رفعها إلى التخزين — لا يُسمح بحفظ base64 في Firestore.');
+      }
+    }
+    return image;
+  }
+
+  function isArticlesFirestoreModuleReady() {
+    return !!(
+      window.PlatformArticlesFirestore &&
+      typeof window.PlatformArticlesFirestore.isReady === 'function' &&
+      window.PlatformArticlesFirestore.isReady()
+    );
+  }
+
+  function isArticlesAdminDataLoading() {
+    var Firestore = window.PlatformArticlesFirestore;
+    if (!Firestore) return true;
+    if (typeof Firestore.isReady === 'function' && !Firestore.isReady()) return true;
+    if (typeof Firestore.isSeeding === 'function' && Firestore.isSeeding()) return true;
+    return false;
+  }
+
   function renderArticlesTable() {
     var body = $('cmsArticlesBody');
     if (!body || !window.PlatformArticles) return;
-    var list = window.PlatformArticles.getArticles();
+    updateArticlesBinToolbar();
+    var list = articlesBinView
+      ? window.PlatformArticles.getTrashedArticles()
+      : window.PlatformArticles.getArticles();
     if (!list.length) {
-      body.innerHTML = '<tr><td colspan="5" class="admin-empty-cell">لا توجد مقالات.</td></tr>';
+      var emptyMessage = articlesBinView ? 'سلة المهملات فارغة.' : 'لا توجد مقالات.';
+      if (!articlesBinView && isArticlesAdminDataLoading()) {
+        emptyMessage = 'جاري تحميل المقالات…';
+      }
+      body.innerHTML =
+        '<tr><td colspan="5" class="admin-empty-cell">' + emptyMessage + '</td></tr>';
+      return;
+    }
+    if (articlesBinView) {
+      body.innerHTML = list
+        .map(function (a) {
+          return (
+            '<tr><td>' +
+            escapeHtml(a.title) +
+            '</td><td>' +
+            escapeHtml(a.category) +
+            '</td><td>' +
+            statusBadge(a.status) +
+            '</td><td>' +
+            escapeHtml(a.tags) +
+            '</td><td class="admin-table__actions">' +
+            '<button class="admin-btn admin-btn--ghost" type="button" data-article-restore="' +
+            escapeHtml(a.id) +
+            '">استعادة</button>' +
+            '<button class="admin-btn admin-btn--danger" type="button" data-article-purge="' +
+            escapeHtml(a.id) +
+            '">حذف نهائي</button>' +
+            '</td></tr>'
+          );
+        })
+        .join('');
       return;
     }
     body.innerHTML = list
@@ -1716,7 +1880,7 @@
           '<button class="admin-btn admin-btn--ghost" type="button" data-article-toggle="' +
           escapeHtml(a.id) +
           '">' +
-          (a.status === 'published' ? 'إلغاء النشر' : 'نشر') +
+          (a.status === 'published' ? 'مسودة' : 'نشر') +
           '</button>' +
           '<button class="admin-btn admin-btn--ghost" type="button" data-article-edit="' +
           escapeHtml(a.id) +
@@ -1732,6 +1896,9 @@
 
   function openArticleModal(article) {
     editingArticleId = article && article.id ? article.id : null;
+    pendingArticleCoverFile = null;
+    var coverFileInput = $('articleEditorImageFile');
+    if (coverFileInput) coverFileInput.value = '';
     clearImageSelection();
     $('articleEditorId').value = editingArticleId || '';
     $('articleEditorTitle').value = article ? article.title : '';
@@ -1769,55 +1936,226 @@
       modal.classList.remove('quill-fullscreen-mode');
     }
     editingArticleId = null;
+    pendingArticleCoverFile = null;
+    var coverFileInput = $('articleEditorImageFile');
+    if (coverFileInput) coverFileInput.value = '';
     clearImageSelection();
   }
 
-  function saveArticleFromForm() {
+  async function saveArticleFromForm() {
+    if (!window.PlatformArticles) return;
     var body = $('articleEditorBody');
     clearImageSelection();
-    var imageData = $('articleEditorImageData').value || $('articleEditorImageUrl').value;
+    var existingId = String($('articleEditorId').value || editingArticleId || '').trim();
+    var articleId = existingId || window.PlatformArticles.uid();
     var rawBody = body ? body.innerHTML : '';
-    window.PlatformArticles.upsertArticle({
-      id: $('articleEditorId').value || (window.PlatformArticles.uid && window.PlatformArticles.uid()),
-      title: $('articleEditorTitle').value,
-      category: $('articleEditorCategory').value,
-      tags: $('articleEditorTags').value,
-      excerpt: $('articleEditorExcerpt').value,
-      meta: $('articleEditorMeta').value,
-      image: imageData,
-      body: sanitizeEditorHtml(rawBody),
-      fontFamily: $('articleEditorFontFamily').value,
-      fontSize: $('articleEditorFontSize').value,
-      textColor: $('articleEditorTextColor').value,
-      status: $('articleEditorStatus').value,
-    });
-    toast('تم حفظ المقال');
-    closeArticleModal();
-    renderArticlesTable();
-    reloadSitePreview();
+    var isDraft = String($('articleEditorStatus').value || '').trim() === 'draft';
+    var Firestore = window.PlatformArticlesFirestore;
+
+    try {
+      var image = await resolveArticleImageForSave(articleId);
+      var payload = {
+        title: $('articleEditorTitle').value,
+        category: $('articleEditorCategory').value,
+        tags: $('articleEditorTags').value,
+        excerpt: $('articleEditorExcerpt').value,
+        meta: $('articleEditorMeta').value,
+        image: image,
+        body: sanitizeEditorHtml(rawBody),
+        fontFamily: $('articleEditorFontFamily').value,
+        fontSize: $('articleEditorFontSize').value,
+        textColor: $('articleEditorTextColor').value,
+        status: $('articleEditorStatus').value,
+      };
+
+      if (usesFirestoreArticles() && Firestore) {
+        var known =
+          existingId && typeof Firestore.findArticle === 'function'
+            ? Firestore.findArticle(existingId)
+            : null;
+        if (known) {
+          await Firestore.updateArticle(existingId, payload);
+          toast(
+            isDraft
+              ? 'تم تحديث المقال (مسودة — لن يظهر على الموقع حتى النشر)'
+              : 'تم تحديث المقال في Firestore — سيظهر على الموقع فوراً'
+          );
+        } else {
+          await Firestore.addArticle(Object.assign({}, payload, { id: articleId }));
+          toast(
+            isDraft
+              ? 'تمت إضافة المقال كمسودة — لن يظهر على الموقع حتى النشر'
+              : 'تمت إضافة المقال إلى Firestore — سيظهر على الموقع فوراً'
+          );
+        }
+      } else {
+        window.PlatformArticles.upsertArticle(Object.assign({}, payload, { id: articleId }));
+        toast('تم حفظ المقال');
+      }
+      closeArticleModal();
+      renderArticlesTable();
+      reloadSitePreview();
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر حفظ المقال', true);
+    }
   }
 
-  function toggleArticleStatus(id) {
-    var list = window.PlatformArticles.getArticles();
+  async function toggleArticleStatus(id) {
+    if (!window.PlatformArticles || articleToggleInFlight) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+
     var item = null;
-    list.forEach(function (a) {
-      if (a.id === id) item = a;
+    window.PlatformArticles.getArticles().forEach(function (a) {
+      if (String(a.id) === key) item = a;
     });
-    if (!item) return;
-    item.status = item.status === 'published' ? 'draft' : 'published';
-    window.PlatformArticles.saveArticles(list);
-    renderArticlesTable();
-    reloadSitePreview();
-    toast(item.status === 'published' ? 'تم نشر المقال' : 'تم تحويل المقال إلى مسودة');
+    if (!item) {
+      toast('تعذّر العثور على المقال', true);
+      return;
+    }
+
+    var nextStatus = item.status === 'published' ? 'draft' : 'published';
+    var Firestore = window.PlatformArticlesFirestore;
+
+    articleToggleInFlight = true;
+    try {
+      if (usesFirestoreArticles() && Firestore && typeof Firestore.setArticleStatus === 'function') {
+        await Firestore.setArticleStatus(key, nextStatus);
+      } else if (usesFirestoreArticles() && Firestore) {
+        await Firestore.updateArticle(key, { status: nextStatus });
+      } else {
+        var list = window.PlatformArticles.getAllArticles();
+        list.forEach(function (a) {
+          if (String(a.id) === key) a.status = nextStatus;
+        });
+        window.PlatformArticles.saveArticles(list);
+      }
+      renderArticlesTable();
+      reloadSitePreview();
+      toast(nextStatus === 'published' ? 'تم نشر المقال' : 'تم تحويل المقال إلى مسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر تحديث حالة المقال', true);
+    } finally {
+      articleToggleInFlight = false;
+    }
+  }
+
+  async function deleteArticleById(id) {
+    if (!window.PlatformArticles) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('نقل هذا المقال إلى سلة المهملات؟')) return;
+
+    var Firestore = window.PlatformArticlesFirestore;
+
+    try {
+      if (usesFirestoreArticles() && Firestore) {
+        await Firestore.deleteArticle(key);
+      } else {
+        window.PlatformArticles.deleteArticle(key);
+      }
+      renderArticlesTable();
+      reloadSitePreview();
+      toast('تم نقل المقال إلى سلة المهملات');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر نقل المقال إلى سلة المهملات', true);
+    }
+  }
+
+  async function restoreArticleFromTrash(id) {
+    if (!window.PlatformArticles) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    var Firestore = window.PlatformArticlesFirestore;
+
+    try {
+      if (usesFirestoreArticles() && Firestore && typeof Firestore.restoreArticle === 'function') {
+        await Firestore.restoreArticle(key);
+      } else {
+        var list = window.PlatformArticles.getAllArticles();
+        list.forEach(function (a) {
+          if (String(a.id) === key) a.status = 'draft';
+        });
+        window.PlatformArticles.saveArticles(list);
+      }
+      renderArticlesTable();
+      reloadSitePreview();
+      toast('تمت استعادة المقال كمسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر استعادة المقال', true);
+    }
+  }
+
+  async function purgeArticleById(id) {
+    if (!window.PlatformArticles) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('حذف هذا المقال نهائياً؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+    var Firestore = window.PlatformArticlesFirestore;
+
+    try {
+      if (usesFirestoreArticles() && Firestore && typeof Firestore.purgeArticle === 'function') {
+        await Firestore.purgeArticle(key);
+      } else {
+        window.PlatformArticles.saveArticles(
+          window.PlatformArticles.getAllArticles().filter(function (a) {
+            return String(a.id) !== key;
+          })
+        );
+      }
+      renderArticlesTable();
+      reloadSitePreview();
+      toast('تم الحذف النهائي للمقال');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر الحذف النهائي للمقال', true);
+    }
   }
 
   /* ---------- FAQ ---------- */
+  function usesFirestoreFaqs() {
+    return !!(
+      window.PlatformFaqsFirestore &&
+      typeof window.PlatformFaqsFirestore.isReady === 'function' &&
+      window.PlatformFaqsFirestore.isReady()
+    );
+  }
+
   function renderFaqTable() {
     var body = $('cmsFaqBody');
     if (!body || !window.PlatformFaqs) return;
-    var list = window.PlatformFaqs.getFaqs();
+    updateFaqBinToolbar();
+    var list = faqBinView ? window.PlatformFaqs.getTrashedFaqs() : window.PlatformFaqs.getFaqs();
     if (!list.length) {
-      body.innerHTML = '<tr><td colspan="4" class="admin-empty-cell">لا توجد أسئلة.</td></tr>';
+      body.innerHTML =
+        '<tr><td colspan="4" class="admin-empty-cell">' +
+        (faqBinView ? 'سلة المهملات فارغة.' : 'لا توجد أسئلة.') +
+        '</td></tr>';
+      return;
+    }
+    if (faqBinView) {
+      body.innerHTML = list
+        .map(function (f) {
+          return (
+            '<tr data-faq-row="' +
+            escapeHtml(f.id) +
+            '"><td>' +
+            escapeHtml(f.question) +
+            '</td><td>' +
+            escapeHtml(f.answer).slice(0, 80) +
+            (f.answer.length > 80 ? '…' : '') +
+            '</td><td>' +
+            statusBadge(f.status) +
+            '</td><td class="admin-table__actions">' +
+            '<button class="admin-btn admin-btn--ghost" type="button" data-faq-restore="' +
+            escapeHtml(f.id) +
+            '">استعادة</button>' +
+            '<button class="admin-btn admin-btn--danger" type="button" data-faq-purge="' +
+            escapeHtml(f.id) +
+            '">حذف نهائي</button>' +
+            '</td></tr>'
+          );
+        })
+        .join('');
       return;
     }
     body.innerHTML = list
@@ -1875,57 +2213,297 @@
     editingFaqId = null;
   }
 
-  function saveFaqFromForm() {
-    var list = window.PlatformFaqs.getFaqs();
-    var item = {
-      id: $('faqEditorId').value || window.PlatformFaqs.uid(),
+  async function saveFaqFromForm() {
+    if (!window.PlatformFaqs) return;
+    var existingId = String($('faqEditorId').value || editingFaqId || '').trim();
+    var payload = {
       question: $('faqEditorQuestion').value,
       answer: $('faqEditorAnswer').value,
       status: $('faqEditorStatus').value,
     };
-    var idx = -1;
-    list.forEach(function (f, i) {
-      if (f.id === item.id) idx = i;
-    });
-    if (idx === -1) list.push(item);
-    else list[idx] = item;
-    window.PlatformFaqs.saveFaqs(list);
-    toast('تم حفظ السؤال');
-    closeFaqModal();
-    renderFaqTable();
-    reloadSitePreview();
+    var Firestore = window.PlatformFaqsFirestore;
+    var isDraft = String(payload.status || '').trim() === 'draft';
+
+    try {
+      if (usesFirestoreFaqs() && Firestore) {
+        var known =
+          existingId && typeof Firestore.findFaq === 'function' ? Firestore.findFaq(existingId) : null;
+        if (known) {
+          await Firestore.updateFaq(existingId, payload);
+          toast(
+            isDraft
+              ? 'تم تحديث السؤال (مسودة — لن يظهر على الموقع حتى النشر)'
+              : 'تم تحديث السؤال في Firestore — سيظهر على الموقع فوراً'
+          );
+        } else {
+          await Firestore.addFaq(
+            Object.assign({}, payload, {
+              id: existingId || window.PlatformFaqs.uid(),
+            })
+          );
+          toast(
+            isDraft
+              ? 'تمت إضافة السؤال كمسودة — لن يظهر على الموقع حتى النشر'
+              : 'تمت إضافة السؤال إلى Firestore — سيظهر على الموقع فوراً'
+          );
+        }
+      } else {
+        var list = window.PlatformFaqs.getAllFaqs();
+        var item = Object.assign({}, payload, {
+          id: existingId || window.PlatformFaqs.uid(),
+        });
+        var idx = -1;
+        list.forEach(function (f, i) {
+          if (f.id === item.id) idx = i;
+        });
+        if (idx === -1) list.push(item);
+        else list[idx] = item;
+        window.PlatformFaqs.saveFaqs(list);
+        toast('تم حفظ السؤال');
+      }
+      closeFaqModal();
+      renderFaqTable();
+      reloadSitePreview();
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر حفظ السؤال', true);
+    }
   }
 
-  function toggleFaqStatus(id) {
-    var list = window.PlatformFaqs.getFaqs();
-    list.forEach(function (f) {
-      if (f.id === id) f.status = f.status === 'published' ? 'draft' : 'published';
+  async function toggleFaqStatus(id) {
+    if (!window.PlatformFaqs || faqToggleInFlight) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+
+    var faq = null;
+    window.PlatformFaqs.getFaqs().forEach(function (f) {
+      if (String(f.id) === key) faq = f;
     });
-    window.PlatformFaqs.saveFaqs(list);
-    renderFaqTable();
-    reloadSitePreview();
-    toast('تم تحديث حالة السؤال');
+    if (!faq) {
+      toast('تعذّر العثور على السؤال', true);
+      return;
+    }
+
+    var nextStatus = faq.status === 'published' ? 'draft' : 'published';
+    var Firestore = window.PlatformFaqsFirestore;
+
+    faqToggleInFlight = true;
+    try {
+      if (usesFirestoreFaqs() && Firestore && typeof Firestore.setFaqStatus === 'function') {
+        await Firestore.setFaqStatus(key, nextStatus);
+      } else if (usesFirestoreFaqs() && Firestore) {
+        await Firestore.updateFaq(key, { status: nextStatus });
+      } else {
+        var list = window.PlatformFaqs.getAllFaqs();
+        list.forEach(function (f) {
+          if (String(f.id) === key) f.status = nextStatus;
+        });
+        window.PlatformFaqs.saveFaqs(list);
+      }
+      renderFaqTable();
+      reloadSitePreview();
+      toast(nextStatus === 'published' ? 'تم نشر السؤال' : 'تم تحويل السؤال إلى مسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر تحديث حالة السؤال', true);
+    } finally {
+      faqToggleInFlight = false;
+    }
   }
 
-  function moveFaq(index, dir) {
-    var list = window.PlatformFaqs.getFaqs();
-    var next = index + dir;
-    if (next < 0 || next >= list.length) return;
-    var tmp = list[index];
-    list[index] = list[next];
-    list[next] = tmp;
-    window.PlatformFaqs.saveFaqs(list);
-    renderFaqTable();
-    reloadSitePreview();
+  async function moveFaq(index, dir) {
+    if (!window.PlatformFaqs) return;
+    var Firestore = window.PlatformFaqsFirestore;
+
+    try {
+      if (usesFirestoreFaqs() && Firestore && typeof Firestore.moveFaq === 'function') {
+        await Firestore.moveFaq(index, dir);
+        renderFaqTable();
+        reloadSitePreview();
+      } else {
+        var active = window.PlatformFaqs.getFaqs().slice();
+        var next = index + dir;
+        if (next < 0 || next >= active.length) return;
+        var tmp = active[index];
+        active[index] = active[next];
+        active[next] = tmp;
+        var byId = {};
+        active.forEach(function (f, i) {
+          byId[f.id] = Object.assign({}, f, { sortOrder: i });
+        });
+        window.PlatformFaqs.saveFaqs(
+          window.PlatformFaqs.getAllFaqs().map(function (f) {
+            return byId[f.id] || f;
+          })
+        );
+        renderFaqTable();
+        reloadSitePreview();
+      }
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر تغيير الترتيب', true);
+    }
+  }
+
+  async function deleteFaqById(id) {
+    if (!window.PlatformFaqs) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('نقل هذا السؤال إلى سلة المهملات؟')) return;
+
+    var Firestore = window.PlatformFaqsFirestore;
+
+    try {
+      if (usesFirestoreFaqs() && Firestore) {
+        await Firestore.deleteFaq(key);
+      } else {
+        var list = window.PlatformFaqs.getAllFaqs();
+        list.forEach(function (f) {
+          if (String(f.id) === key) f.status = 'trash';
+        });
+        window.PlatformFaqs.saveFaqs(list);
+      }
+      renderFaqTable();
+      reloadSitePreview();
+      toast('تم نقل السؤال إلى سلة المهملات');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر نقل السؤال إلى سلة المهملات', true);
+    }
+  }
+
+  async function restoreFaqFromTrash(id) {
+    if (!window.PlatformFaqs) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    var Firestore = window.PlatformFaqsFirestore;
+
+    try {
+      if (usesFirestoreFaqs() && Firestore && typeof Firestore.restoreFaq === 'function') {
+        await Firestore.restoreFaq(key);
+      } else {
+        var list = window.PlatformFaqs.getAllFaqs();
+        list.forEach(function (f) {
+          if (String(f.id) === key) f.status = 'draft';
+        });
+        window.PlatformFaqs.saveFaqs(list);
+      }
+      renderFaqTable();
+      reloadSitePreview();
+      toast('تمت استعادة السؤال كمسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر استعادة السؤال', true);
+    }
+  }
+
+  async function purgeFaqById(id) {
+    if (!window.PlatformFaqs) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('حذف هذا السؤال نهائياً؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+    var Firestore = window.PlatformFaqsFirestore;
+
+    try {
+      if (usesFirestoreFaqs() && Firestore && typeof Firestore.purgeFaq === 'function') {
+        await Firestore.purgeFaq(key);
+      } else {
+        window.PlatformFaqs.saveFaqs(
+          window.PlatformFaqs.getAllFaqs().filter(function (f) {
+            return String(f.id) !== key;
+          })
+        );
+      }
+      renderFaqTable();
+      reloadSitePreview();
+      toast('تم الحذف النهائي للسؤال');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر الحذف النهائي للسؤال', true);
+    }
   }
 
   /* ---------- Testimonials ---------- */
+  function usesFirestoreTestimonials() {
+    return !!(
+      window.PlatformTestimonialsFirestore &&
+      typeof window.PlatformTestimonialsFirestore.isReady === 'function' &&
+      window.PlatformTestimonialsFirestore.isReady()
+    );
+  }
+
+  function testimonialAvatarExtension(file) {
+    var name = String((file && file.name) || 'avatar.jpg');
+    var ext = name.indexOf('.') > -1 ? name.split('.').pop() : 'jpg';
+    ext = String(ext).replace(/[^a-z0-9]/gi, '').toLowerCase();
+    return ext || 'jpg';
+  }
+
+  async function uploadTestimonialAvatarFile(testimonialId, file) {
+    var mod = await import('./cms-storage.js');
+    var path =
+      'cms/testimonials/' +
+      String(testimonialId) +
+      '/avatar.' +
+      testimonialAvatarExtension(file);
+    return mod.uploadCmsFile(path, file);
+  }
+
+  async function resolveTestimonialAvatarForSave(testimonialId) {
+    var avatar = String($('tstEditorAvatarData').value || '').trim();
+    if (pendingTestimonialAvatarFile) {
+      avatar = await uploadTestimonialAvatarFile(testimonialId, pendingTestimonialAvatarFile);
+      pendingTestimonialAvatarFile = null;
+      $('tstEditorAvatarData').value = avatar;
+      var preview = $('tstEditorAvatarPreview');
+      if (preview) {
+        preview.src = avatar;
+        preview.hidden = !avatar;
+      }
+      var fileInput = $('tstEditorAvatarFile');
+      if (fileInput) fileInput.value = '';
+      return avatar;
+    }
+    if (usesFirestoreTestimonials()) {
+      var mod = await import('./cms-storage.js');
+      if (avatar && mod.rejectDataUrl(avatar)) {
+        throw new Error('صورة الرأي يجب رفعها إلى التخزين — لا يُسمح بحفظ base64 في Firestore.');
+      }
+    }
+    return avatar;
+  }
+
   function renderTestimonialsTable() {
     var body = $('cmsTestimonialsBody');
     if (!body || !window.PlatformTestimonials) return;
-    var list = window.PlatformTestimonials.getTestimonials();
+    updateTestimonialsBinToolbar();
+    var list = tstBinView
+      ? window.PlatformTestimonials.getTrashedTestimonials()
+      : window.PlatformTestimonials.getTestimonials();
     if (!list.length) {
-      body.innerHTML = '<tr><td colspan="5" class="admin-empty-cell">لا توجد آراء.</td></tr>';
+      body.innerHTML =
+        '<tr><td colspan="5" class="admin-empty-cell">' +
+        (tstBinView ? 'سلة المهملات فارغة.' : 'لا توجد آراء.') +
+        '</td></tr>';
+      return;
+    }
+    if (tstBinView) {
+      body.innerHTML = list
+        .map(function (t) {
+          return (
+            '<tr><td>' +
+            escapeHtml(t.name) +
+            '</td><td>' +
+            escapeHtml(t.role) +
+            '</td><td>' +
+            escapeHtml(window.PlatformTestimonials.stars(t.rating)) +
+            '</td><td>' +
+            statusBadge(t.status) +
+            '</td><td class="admin-table__actions">' +
+            '<button class="admin-btn admin-btn--ghost" type="button" data-tst-restore="' +
+            escapeHtml(t.id) +
+            '">استعادة</button>' +
+            '<button class="admin-btn admin-btn--danger" type="button" data-tst-purge="' +
+            escapeHtml(t.id) +
+            '">حذف نهائي</button>' +
+            '</td></tr>'
+          );
+        })
+        .join('');
       return;
     }
     body.innerHTML = list
@@ -1938,12 +2516,12 @@
           '</td><td>' +
           escapeHtml(window.PlatformTestimonials.stars(t.rating)) +
           '</td><td>' +
-          statusBadge(t.status, 'testimonial') +
+          statusBadge(t.status) +
           '</td><td class="admin-table__actions">' +
           '<button class="admin-btn admin-btn--ghost" type="button" data-tst-toggle="' +
           escapeHtml(t.id) +
           '">' +
-          (t.status === 'published' ? 'إخفاء' : 'نشر') +
+          (t.status === 'published' ? 'مسودة' : 'نشر') +
           '</button>' +
           '<button class="admin-btn admin-btn--ghost" type="button" data-tst-edit="' +
           escapeHtml(t.id) +
@@ -1959,6 +2537,9 @@
 
   function openTestimonialModal(item) {
     editingTestimonialId = item && item.id ? item.id : null;
+    pendingTestimonialAvatarFile = null;
+    var avatarFileInput = $('tstEditorAvatarFile');
+    if (avatarFileInput) avatarFileInput.value = '';
     $('tstEditorId').value = editingTestimonialId || '';
     $('tstEditorName').value = item ? item.name : '';
     $('tstEditorRole').value = item ? item.role : '';
@@ -1978,41 +2559,248 @@
   function closeTestimonialModal() {
     $('tstEditorModal').hidden = true;
     editingTestimonialId = null;
+    pendingTestimonialAvatarFile = null;
+    var fileInput = $('tstEditorAvatarFile');
+    if (fileInput) fileInput.value = '';
   }
 
-  function saveTestimonialFromForm() {
-    var list = window.PlatformTestimonials.getTestimonials();
-    var item = {
-      id: $('tstEditorId').value || window.PlatformTestimonials.uid(),
-      name: $('tstEditorName').value,
-      role: $('tstEditorRole').value,
-      text: $('tstEditorText').value,
-      rating: Number($('tstEditorRating').value) || 5,
-      avatar: $('tstEditorAvatarData').value,
-      status: $('tstEditorStatus').value,
-    };
-    var idx = -1;
-    list.forEach(function (t, i) {
-      if (t.id === item.id) idx = i;
-    });
-    if (idx === -1) list.push(item);
-    else list[idx] = item;
-    window.PlatformTestimonials.saveTestimonials(list);
-    toast('تم حفظ الرأي');
-    closeTestimonialModal();
-    renderTestimonialsTable();
-    reloadSitePreview();
+  async function saveTestimonialFromForm() {
+    if (!window.PlatformTestimonials) return;
+    var existingId = String($('tstEditorId').value || editingTestimonialId || '').trim();
+    var testimonialId = existingId || window.PlatformTestimonials.uid();
+    var isDraft = String($('tstEditorStatus').value || '').trim() === 'draft';
+    var Firestore = window.PlatformTestimonialsFirestore;
+
+    try {
+      var avatar = await resolveTestimonialAvatarForSave(testimonialId);
+      var payload = {
+        name: $('tstEditorName').value,
+        role: $('tstEditorRole').value,
+        text: $('tstEditorText').value,
+        rating: Number($('tstEditorRating').value) || 5,
+        avatar: avatar,
+        status: $('tstEditorStatus').value,
+      };
+
+      if (usesFirestoreTestimonials() && Firestore) {
+        var known =
+          existingId && typeof Firestore.findTestimonial === 'function'
+            ? Firestore.findTestimonial(existingId)
+            : null;
+        if (known) {
+          await Firestore.updateTestimonial(existingId, payload);
+          toast(
+            isDraft
+              ? 'تم تحديث الرأي (مسودة — لن يظهر على الموقع حتى النشر)'
+              : 'تم تحديث الرأي في Firestore — سيظهر على الموقع فوراً'
+          );
+        } else {
+          await Firestore.addTestimonial(Object.assign({}, payload, { id: testimonialId }));
+          toast(
+            isDraft
+              ? 'تمت إضافة الرأي كمسودة — لن يظهر على الموقع حتى النشر'
+              : 'تمت إضافة الرأي إلى Firestore — سيظهر على الموقع فوراً'
+          );
+        }
+      } else {
+        var list = window.PlatformTestimonials.getAllTestimonials();
+        var item = Object.assign({}, payload, { id: testimonialId });
+        var idx = -1;
+        list.forEach(function (t, i) {
+          if (t.id === item.id) idx = i;
+        });
+        if (idx === -1) list.push(item);
+        else list[idx] = item;
+        window.PlatformTestimonials.saveTestimonials(list);
+        toast('تم حفظ الرأي');
+      }
+      closeTestimonialModal();
+      renderTestimonialsTable();
+      reloadSitePreview();
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر حفظ الرأي', true);
+    }
   }
 
-  function toggleTestimonialStatus(id) {
-    var list = window.PlatformTestimonials.getTestimonials();
-    list.forEach(function (t) {
-      if (t.id === id) t.status = t.status === 'published' ? 'hidden' : 'published';
+  async function toggleTestimonialStatus(id) {
+    if (!window.PlatformTestimonials || tstToggleInFlight) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+
+    var item = null;
+    window.PlatformTestimonials.getTestimonials().forEach(function (t) {
+      if (String(t.id) === key) item = t;
     });
-    window.PlatformTestimonials.saveTestimonials(list);
-    renderTestimonialsTable();
-    reloadSitePreview();
-    toast('تم تحديث حالة الرأي');
+    if (!item) {
+      toast('تعذّر العثور على الرأي', true);
+      return;
+    }
+
+    var nextStatus = item.status === 'published' ? 'draft' : 'published';
+    var Firestore = window.PlatformTestimonialsFirestore;
+
+    tstToggleInFlight = true;
+    try {
+      if (usesFirestoreTestimonials() && Firestore && typeof Firestore.setTestimonialStatus === 'function') {
+        await Firestore.setTestimonialStatus(key, nextStatus);
+      } else if (usesFirestoreTestimonials() && Firestore) {
+        await Firestore.updateTestimonial(key, { status: nextStatus });
+      } else {
+        var list = window.PlatformTestimonials.getAllTestimonials();
+        list.forEach(function (t) {
+          if (String(t.id) === key) t.status = nextStatus;
+        });
+        window.PlatformTestimonials.saveTestimonials(list);
+      }
+      renderTestimonialsTable();
+      reloadSitePreview();
+      toast(nextStatus === 'published' ? 'تم نشر الرأي' : 'تم تحويل الرأي إلى مسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر تحديث حالة الرأي', true);
+    } finally {
+      tstToggleInFlight = false;
+    }
+  }
+
+  async function restoreDefaultTestimonials() {
+    var Firestore = window.PlatformTestimonialsFirestore;
+    if (!usesFirestoreTestimonials() || !Firestore || typeof Firestore.restoreDefaultTestimonials !== 'function') {
+      toast('استعادة الافتراضيات متاحة فقط عند تفعيل Firestore.', true);
+      return;
+    }
+    if (!window.confirm('استعادة الآراء الافتراضية المفقودة في Firestore؟')) return;
+
+    try {
+      var result = await Firestore.restoreDefaultTestimonials();
+      renderTestimonialsTable();
+      reloadSitePreview();
+      toast((result && result.message) || 'تمت استعادة الآراء الافتراضية');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر استعادة الآراء الافتراضية', true);
+    }
+  }
+
+  async function deleteTestimonialById(id) {
+    if (!window.PlatformTestimonials) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('نقل هذا الرأي إلى سلة المهملات؟')) return;
+
+    var Firestore = window.PlatformTestimonialsFirestore;
+
+    try {
+      if (usesFirestoreTestimonials() && Firestore) {
+        await Firestore.deleteTestimonial(key);
+      } else {
+        var list = window.PlatformTestimonials.getAllTestimonials();
+        list.forEach(function (t) {
+          if (String(t.id) === key) t.status = 'trash';
+        });
+        window.PlatformTestimonials.saveTestimonials(list);
+      }
+      renderTestimonialsTable();
+      reloadSitePreview();
+      toast('تم نقل الرأي إلى سلة المهملات');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر نقل الرأي إلى سلة المهملات', true);
+    }
+  }
+
+  async function restoreTestimonialFromTrash(id) {
+    if (!window.PlatformTestimonials) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    var Firestore = window.PlatformTestimonialsFirestore;
+
+    try {
+      if (usesFirestoreTestimonials() && Firestore && typeof Firestore.restoreTestimonial === 'function') {
+        await Firestore.restoreTestimonial(key);
+      } else {
+        var list = window.PlatformTestimonials.getAllTestimonials();
+        list.forEach(function (t) {
+          if (String(t.id) === key) t.status = 'draft';
+        });
+        window.PlatformTestimonials.saveTestimonials(list);
+      }
+      renderTestimonialsTable();
+      reloadSitePreview();
+      toast('تمت استعادة الرأي كمسودة');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر استعادة الرأي', true);
+    }
+  }
+
+  async function purgeTestimonialById(id) {
+    if (!window.PlatformTestimonials) return;
+    var key = String(id || '').trim();
+    if (!key) return;
+    if (!window.confirm('حذف هذا الرأي نهائياً؟ لا يمكن التراجع عن هذا الإجراء.')) return;
+    var Firestore = window.PlatformTestimonialsFirestore;
+
+    try {
+      if (usesFirestoreTestimonials() && Firestore && typeof Firestore.purgeTestimonial === 'function') {
+        await Firestore.purgeTestimonial(key);
+      } else {
+        window.PlatformTestimonials.saveTestimonials(
+          window.PlatformTestimonials.getAllTestimonials().filter(function (t) {
+            return String(t.id) !== key;
+          })
+        );
+      }
+      renderTestimonialsTable();
+      reloadSitePreview();
+      toast('تم الحذف النهائي للرأي');
+    } catch (err) {
+      toast((err && err.message) || 'تعذّر الحذف النهائي للرأي', true);
+    }
+  }
+
+  function bindArticlesAdminLive() {
+    if (articlesLiveBound || !$('cmsArticlesBody')) return;
+    articlesLiveBound = true;
+
+    document.addEventListener('ifa:articles-firestore-changed', renderArticlesTable);
+    window.addEventListener('ifa:articles-firestore-changed', renderArticlesTable);
+    document.addEventListener('ifa:platform-articles-changed', renderArticlesTable);
+    window.addEventListener('ifa:platform-articles-changed', renderArticlesTable);
+
+    function attachArticlesFirestoreSubscribe(attempts) {
+      var Firestore = window.PlatformArticlesFirestore;
+      if (Firestore && typeof Firestore.subscribe === 'function') {
+        Firestore.subscribe(function () {
+          renderArticlesTable();
+        });
+        renderArticlesTable();
+        return;
+      }
+      if (attempts > 120) {
+        renderArticlesTable();
+        return;
+      }
+      window.setTimeout(function () {
+        attachArticlesFirestoreSubscribe(attempts + 1);
+      }, 50);
+    }
+
+    attachArticlesFirestoreSubscribe(0);
+
+    (function waitForArticlesSnapshotReady(attempts) {
+      if (isArticlesFirestoreModuleReady()) {
+        renderArticlesTable();
+        return;
+      }
+      if (!window.PlatformArticlesFirestore) {
+        if (attempts > 120) return;
+        window.setTimeout(function () {
+          waitForArticlesSnapshotReady(attempts + 1);
+        }, 50);
+        return;
+      }
+      if (attempts > 240) return;
+      window.setTimeout(function () {
+        waitForArticlesSnapshotReady(attempts + 1);
+      }, 50);
+    })(0);
   }
 
   function bind() {
@@ -2021,7 +2809,10 @@
       !$('cmsShowcaseSettingsForm') &&
       !$('cmsStatsForm') &&
       !$('cmsHeroSlideshowForm') &&
-      !$('cmsFooterForm')
+      !$('cmsFooterForm') &&
+      !$('cmsArticlesBody') &&
+      !$('cmsFaqBody') &&
+      !$('cmsTestimonialsBody')
     )
       return;
 
@@ -2042,8 +2833,23 @@
         if (resetCard) resetSimIcon(resetCard);
         return;
       }
+      if (e.target.closest && e.target.closest('[data-article-bin-toggle]')) {
+        articlesBinView = !articlesBinView;
+        renderArticlesTable();
+        return;
+      }
       if (e.target.closest && e.target.closest('[data-article-add]')) {
         openArticleModal(null);
+        return;
+      }
+      var artRestore = e.target.closest ? e.target.closest('[data-article-restore]') : null;
+      if (artRestore) {
+        restoreArticleFromTrash(artRestore.getAttribute('data-article-restore'));
+        return;
+      }
+      var artPurge = e.target.closest ? e.target.closest('[data-article-purge]') : null;
+      if (artPurge) {
+        purgeArticleById(artPurge.getAttribute('data-article-purge'));
         return;
       }
       var artToggle = e.target.closest ? e.target.closest('[data-article-toggle]') : null;
@@ -2055,28 +2861,39 @@
       if (artEdit) {
         var articles = window.PlatformArticles.getArticles();
         var found = null;
+        var editKey = String(artEdit.getAttribute('data-article-edit') || '');
         articles.forEach(function (a) {
-          if (a.id === artEdit.getAttribute('data-article-edit')) found = a;
+          if (String(a.id) === editKey) found = a;
         });
         if (found) openArticleModal(found);
         return;
       }
       var artDel = e.target.closest ? e.target.closest('[data-article-delete]') : null;
       if (artDel) {
-        if (window.confirm('حذف هذا المقال؟')) {
-          window.PlatformArticles.deleteArticle(artDel.getAttribute('data-article-delete'));
-          renderArticlesTable();
-          reloadSitePreview();
-          toast('تم حذف المقال');
-        }
+        deleteArticleById(artDel.getAttribute('data-article-delete'));
         return;
       }
       if (e.target.closest && e.target.closest('[data-close-article-modal]')) {
         closeArticleModal();
         return;
       }
+      if (e.target.closest && e.target.closest('[data-faq-bin-toggle]')) {
+        faqBinView = !faqBinView;
+        renderFaqTable();
+        return;
+      }
       if (e.target.closest && e.target.closest('[data-faq-add]')) {
         openFaqModal(null);
+        return;
+      }
+      var faqRestore = e.target.closest ? e.target.closest('[data-faq-restore]') : null;
+      if (faqRestore) {
+        restoreFaqFromTrash(faqRestore.getAttribute('data-faq-restore'));
+        return;
+      }
+      var faqPurge = e.target.closest ? e.target.closest('[data-faq-purge]') : null;
+      if (faqPurge) {
+        purgeFaqById(faqPurge.getAttribute('data-faq-purge'));
         return;
       }
       var faqToggle = e.target.closest ? e.target.closest('[data-faq-toggle]') : null;
@@ -2096,16 +2913,7 @@
       }
       var faqDel = e.target.closest ? e.target.closest('[data-faq-delete]') : null;
       if (faqDel) {
-        if (window.confirm('حذف هذا السؤال؟')) {
-          window.PlatformFaqs.saveFaqs(
-            window.PlatformFaqs.getFaqs().filter(function (f) {
-              return f.id !== faqDel.getAttribute('data-faq-delete');
-            })
-          );
-          renderFaqTable();
-          reloadSitePreview();
-          toast('تم حذف السؤال');
-        }
+        deleteFaqById(faqDel.getAttribute('data-faq-delete'));
         return;
       }
       var faqUp = e.target.closest ? e.target.closest('[data-faq-up]') : null;
@@ -2122,8 +2930,27 @@
         closeFaqModal();
         return;
       }
+      if (e.target.closest && e.target.closest('[data-tst-bin-toggle]')) {
+        tstBinView = !tstBinView;
+        renderTestimonialsTable();
+        return;
+      }
+      if (e.target.closest && e.target.closest('[data-tst-restore-defaults]')) {
+        restoreDefaultTestimonials();
+        return;
+      }
       if (e.target.closest && e.target.closest('[data-tst-add]')) {
         openTestimonialModal(null);
+        return;
+      }
+      var tstRestore = e.target.closest ? e.target.closest('[data-tst-restore]') : null;
+      if (tstRestore) {
+        restoreTestimonialFromTrash(tstRestore.getAttribute('data-tst-restore'));
+        return;
+      }
+      var tstPurge = e.target.closest ? e.target.closest('[data-tst-purge]') : null;
+      if (tstPurge) {
+        purgeTestimonialById(tstPurge.getAttribute('data-tst-purge'));
         return;
       }
       var tstToggle = e.target.closest ? e.target.closest('[data-tst-toggle]') : null;
@@ -2143,16 +2970,7 @@
       }
       var tstDel = e.target.closest ? e.target.closest('[data-tst-delete]') : null;
       if (tstDel) {
-        if (window.confirm('حذف هذا الرأي؟')) {
-          window.PlatformTestimonials.saveTestimonials(
-            window.PlatformTestimonials.getTestimonials().filter(function (t) {
-              return t.id !== tstDel.getAttribute('data-tst-delete');
-            })
-          );
-          renderTestimonialsTable();
-          reloadSitePreview();
-          toast('تم حذف الرأي');
-        }
+        deleteTestimonialById(tstDel.getAttribute('data-tst-delete'));
         return;
       }
       if (e.target.closest && e.target.closest('[data-close-tst-modal]')) {
@@ -2183,7 +3001,20 @@
         return;
       }
       if (e.target.id === 'articleEditorImageFile' && e.target.files && e.target.files[0]) {
-        readFileAsDataUrl(e.target.files[0], function (url) {
+        var coverFile = e.target.files[0];
+        if (coverFile.size > MAX_SIM_ICON_BYTES) {
+          toast('حجم الصورة كبير جداً — الحد الأقصى 500 كيلوبايت', true);
+          e.target.value = '';
+          return;
+        }
+        if (usesFirestoreArticles()) {
+          pendingArticleCoverFile = coverFile;
+          var coverObjectUrl = URL.createObjectURL(coverFile);
+          $('articleEditorImagePreview').hidden = false;
+          $('articleEditorImagePreview').src = coverObjectUrl;
+          return;
+        }
+        readFileAsDataUrl(coverFile, function (url) {
           $('articleEditorImageData').value = url;
           $('articleEditorImagePreview').hidden = false;
           $('articleEditorImagePreview').src = url;
@@ -2191,7 +3022,20 @@
         return;
       }
       if (e.target.id === 'tstEditorAvatarFile' && e.target.files && e.target.files[0]) {
-        readFileAsDataUrl(e.target.files[0], function (url) {
+        var avatarFile = e.target.files[0];
+        if (avatarFile.size > MAX_SIM_ICON_BYTES) {
+          toast('حجم الصورة كبير جداً — الحد الأقصى 500 كيلوبايت', true);
+          e.target.value = '';
+          return;
+        }
+        if (usesFirestoreTestimonials()) {
+          pendingTestimonialAvatarFile = avatarFile;
+          var objectUrl = URL.createObjectURL(avatarFile);
+          $('tstEditorAvatarPreview').hidden = false;
+          $('tstEditorAvatarPreview').src = objectUrl;
+          return;
+        }
+        readFileAsDataUrl(avatarFile, function (url) {
           $('tstEditorAvatarData').value = url;
           $('tstEditorAvatarPreview').hidden = false;
           $('tstEditorAvatarPreview').src = url;
@@ -2213,6 +3057,24 @@
         saveFaqFromForm();
       });
     }
+
+    document.addEventListener('ifa:faqs-firestore-changed', renderFaqTable);
+    window.addEventListener('ifa:faqs-firestore-changed', renderFaqTable);
+    document.addEventListener('ifa:platform-faqs-changed', renderFaqTable);
+    window.addEventListener('ifa:platform-faqs-changed', renderFaqTable);
+
+    (function waitForFirestoreFaqs(attempts) {
+      if (window.PlatformFaqsFirestore && typeof window.PlatformFaqsFirestore.subscribe === 'function') {
+        window.PlatformFaqsFirestore.subscribe(function () {
+          renderFaqTable();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForFirestoreFaqs(attempts + 1);
+      }, 50);
+    })(0);
     var tstForm = $('tstEditorForm');
     if (tstForm) {
       tstForm.addEventListener('submit', function (e) {
@@ -2220,6 +3082,27 @@
         saveTestimonialFromForm();
       });
     }
+
+    document.addEventListener('ifa:testimonials-firestore-changed', renderTestimonialsTable);
+    window.addEventListener('ifa:testimonials-firestore-changed', renderTestimonialsTable);
+    document.addEventListener('ifa:platform-testimonials-changed', renderTestimonialsTable);
+    window.addEventListener('ifa:platform-testimonials-changed', renderTestimonialsTable);
+
+    (function waitForFirestoreTestimonials(attempts) {
+      if (
+        window.PlatformTestimonialsFirestore &&
+        typeof window.PlatformTestimonialsFirestore.subscribe === 'function'
+      ) {
+        window.PlatformTestimonialsFirestore.subscribe(function () {
+          renderTestimonialsTable();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForFirestoreTestimonials(attempts + 1);
+      }, 50);
+    })(0);
 
     ['articleEditorFontFamily', 'articleEditorFontSize', 'articleEditorTextColor'].forEach(function (id) {
       var el = $(id);
@@ -2257,9 +3140,15 @@
     };
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bind);
-  } else {
+  function bootAdminSiteCms() {
+    bindArticlesAdminLive();
     bind();
+    renderArticlesTable();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootAdminSiteCms);
+  } else {
+    bootAdminSiteCms();
   }
 })();

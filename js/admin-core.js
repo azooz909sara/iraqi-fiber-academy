@@ -29,9 +29,14 @@
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },
       courses: { title: 'الكورسات', subtitle: 'إنشاء وإدارة ونشر الكورسات التعليمية' },
       plans: { title: 'الباقات والأسعار', subtitle: 'إدارة خطط الاشتراك المعروضة على الموقع' },
+      orders: { title: 'طلبات الشراء', subtitle: 'مراجعة أواصر الدفع اليدوي وقبول أو رفض الطلبات' },
+      'settings-checkout': {
+        title: 'إعدادات الدفع والإشعارات',
+        subtitle: 'بريد الإشعارات وأرقام الدفع اليدوي لصفحة الشراء',
+      },
       'site-simulator-showcase': {
-        title: 'إدارة موقعي',
-        subtitle: 'إدارة المحاكيات — بطاقات الشبكة وعرض الدوران',
+        title: 'إدارة المحاكيات',
+        subtitle: 'بطاقات الشبكة وعرض الدوران على الصفحة الرئيسية',
       },
       simulators: {
         title: 'إدارة موقعي',
@@ -87,6 +92,12 @@
       }
       if (id === 'courses' && typeof window.renderAdminCoursesTable === 'function') {
         window.renderAdminCoursesTable();
+      }
+      if (id === 'orders' && typeof window.renderAdminOrdersTable === 'function') {
+        window.renderAdminOrdersTable();
+      }
+      if (id === 'settings-checkout' && typeof window.loadAdminCheckoutSettings === 'function') {
+        window.loadAdminCheckoutSettings();
       }
       if ((SITE_VIEWS[id] || id.indexOf('site-') === 0) && typeof window.renderAdminSiteCms === 'function') {
         window.renderAdminSiteCms();

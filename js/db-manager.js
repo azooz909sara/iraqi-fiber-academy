@@ -87,6 +87,34 @@ export async function checkSubscriberStatus(uid) {
 
 /**
  * @param {string} uid
+ * @returns {Promise<string[]>}
+ */
+export async function getUserAllowedSimulators(uid) {
+  if (!uid) return [];
+  var snap = await getDoc(doc(db, 'users', uid));
+  if (!snap.exists()) return [];
+  var data = snap.data() || {};
+  if (!Array.isArray(data.allowedSimulators)) return [];
+  return data.allowedSimulators
+    .map(function (id) {
+      return String(id || '').trim();
+    })
+    .filter(Boolean);
+}
+
+/**
+ * @param {string} uid
+ * @param {string} simulatorId
+ * @returns {Promise<boolean>}
+ */
+export async function checkSimulatorAccess(uid, simulatorId) {
+  if (!uid || !simulatorId) return false;
+  var allowed = await getUserAllowedSimulators(uid);
+  return allowed.indexOf(String(simulatorId)) !== -1;
+}
+
+/**
+ * @param {string} uid
  * @returns {Promise<boolean>}
  */
 export async function checkAdminStatus(uid) {

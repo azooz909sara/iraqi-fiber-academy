@@ -9,6 +9,8 @@
   var SETTINGS_KEY = 'ifa_platform_settings';
   var META_KEY = 'ifa_simulators_meta';
   var ADMIN_EMAILS = ['abdulazizyassin909@gmail.com'];
+  var firestorePlanCache = {};
+  var warmEntitlementPromise = null;
 
   var SIMULATOR_CATALOG = [
     {
@@ -275,6 +277,7 @@
       role: String(parsed.role || ''),
       planId: String(parsed.planId || ''),
       enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds : [],
+      allowedSimulators: Array.isArray(parsed.allowedSimulators) ? parsed.allowedSimulators : [],
       trialExpiresAt: Number(parsed.trialExpiresAt) || 0,
     };
   }
@@ -389,11 +392,68 @@
     return Array.isArray(list) ? list : [];
   }
 
+  function cacheFirestorePlan(planId, planData) {
+    var key = String(planId || '');
+    if (!key || !planData) return null;
+    var plan = Object.assign({ id: key }, planData);
+    firestorePlanCache[key] = plan;
+    return plan;
+  }
+
+  function ensurePlanCached(planId) {
+    var key = String(planId || '');
+    if (!key) return Promise.resolve(null);
+    var existing = findPlan(key);
+    if (existing) return Promise.resolve(existing);
+    if (firestorePlanCache[key]) return Promise.resolve(firestorePlanCache[key]);
+
+    return import('./firebase-config.js')
+      .then(function (mod) {
+        return import('https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js').then(function (fs) {
+          return fs.getDoc(fs.doc(mod.db, 'pricing', key)).then(function (snap) {
+            if (!snap.exists()) return null;
+            return cacheFirestorePlan(key, snap.data());
+          });
+        });
+      })
+      .catch(function (err) {
+        console.warn('[PlatformSimulators] ensurePlanCached failed for', key, err);
+        return null;
+      });
+  }
+
+  function resolvePlanIdForUser(authUser, directoryUser) {
+    return String(
+      (directoryUser && (directoryUser.planId || directoryUser.subscribedPlanId)) ||
+        (authUser && authUser.planId) ||
+        ''
+    );
+  }
+
+  function warmEntitlementCaches(authUser, directoryUser) {
+    var planId = resolvePlanIdForUser(authUser, directoryUser);
+    if (!planId) return Promise.resolve(null);
+    if (warmEntitlementPromise) return warmEntitlementPromise;
+    warmEntitlementPromise = ensurePlanCached(planId).finally(function () {
+      warmEntitlementPromise = null;
+    });
+    return warmEntitlementPromise;
+  }
+
   function findPlan(id) {
     var key = String(id || '');
     if (!key) return null;
+    if (firestorePlanCache[key]) return firestorePlanCache[key];
     if (global.PlatformPlans && typeof global.PlatformPlans.findPlan === 'function') {
-      return global.PlatformPlans.findPlan(key);
+      var fromApi = global.PlatformPlans.findPlan(key);
+      if (fromApi) return fromApi;
+    }
+    if (
+      global.PlatformPricingFirestore &&
+      typeof global.PlatformPricingFirestore.findPlan === 'function'
+    ) {
+      var fromFs = global.PlatformPricingFirestore.findPlan(key);
+      if (fromFs) return fromFs;
     }
     var plans = getPlans();
     for (var i = 0; i < plans.length; i++) {
@@ -729,6 +789,32 @@
     return ids;
   }
 
+  function getUserAllowedSimulatorIds(authUser, directoryUser) {
+    var ids = [];
+    var seen = {};
+
+    function add(list) {
+      normalizeSimulatorIds(list).forEach(function (id) {
+        if (seen[id]) return;
+        seen[id] = true;
+        ids.push(id);
+      });
+    }
+
+    if (authUser && Array.isArray(authUser.allowedSimulators)) {
+      add(authUser.allowedSimulators);
+    }
+    if (directoryUser && Array.isArray(directoryUser.allowedSimulators)) {
+      add(directoryUser.allowedSimulators);
+    }
+
+    var planId = resolvePlanIdForUser(authUser, directoryUser);
+    if (planId || !ids.length) {
+      add(collectViewerSimulatorIds(authUser, directoryUser));
+    }
+    return ids;
+  }
+
   function resolveViewerAccess() {
     if (isAdminPreviewContext()) {
       return {
@@ -750,6 +836,7 @@
     }
 
     var directoryUser = findDirectoryUser(authUser.email);
+
     if (isPrivilegedRole(authUser, directoryUser)) {
       return {
         role: String((directoryUser && directoryUser.role) || authUser.role || 'admin').toLowerCase(),
@@ -782,18 +869,7 @@
       };
     }
 
-    var trialUser = Object.assign({}, authUser, directoryUser || {});
-    if (hasActiveTrial(trialUser) || hasActiveTrial(authUser) || hasActiveTrial(directoryUser)) {
-      return {
-        role: 'student',
-        unlocked: true,
-        simulatorIds: SIMULATOR_CATALOG.map(function (s) {
-          return s.id;
-        }),
-      };
-    }
-
-    var ids = collectViewerSimulatorIds(authUser, directoryUser);
+    var ids = getUserAllowedSimulatorIds(authUser, directoryUser);
     getPlatformSettings().freeSimulatorIds.forEach(function (id) {
       if (ids.indexOf(id) === -1) ids.push(id);
     });
@@ -807,9 +883,20 @@
   function viewerCanAccess(simulatorId) {
     var id = String(simulatorId || '');
     if (isGloballyFreeSimulator(id)) return true;
-    var access = resolveViewerAccess();
-    if (access.unlocked) return true;
-    return access.simulatorIds.indexOf(id) !== -1;
+
+    if (isAdminPreviewContext()) return true;
+
+    var authUser = getLocalAuthUser();
+    if (!authUser) return false;
+
+    var directoryUser = findDirectoryUser(authUser.email);
+    if (isPrivilegedRole(authUser, directoryUser)) return true;
+
+    var permitted = getUserAllowedSimulatorIds(authUser, directoryUser);
+    getPlatformSettings().freeSimulatorIds.forEach(function (freeId) {
+      if (permitted.indexOf(freeId) === -1) permitted.push(freeId);
+    });
+    return permitted.indexOf(id) !== -1;
   }
 
   function withPreviewQuery(href) {
@@ -938,11 +1025,14 @@
       });
   }
 
-  function persistAuthSubscription(planId, enrolledCourseIds) {
+  function persistAuthSubscription(planId, enrolledCourseIds, allowedSimulators) {
     var current = readJson(AUTH_KEY, null);
     if (!current || !normalizeEmail(current.email)) return null;
     current.planId = String(planId || '');
     current.enrolledCourseIds = Array.isArray(enrolledCourseIds) ? enrolledCourseIds : [];
+    current.allowedSimulators = Array.isArray(allowedSimulators)
+      ? normalizeSimulatorIds(allowedSimulators)
+      : normalizeSimulatorIds(simulatorsFromPlan(findPlan(planId)));
     current.isSubscriber = true;
     try {
       localStorage.setItem(AUTH_KEY, JSON.stringify(current));
@@ -999,12 +1089,15 @@
     var authUser = getLocalAuthUser();
     if (!authUser) throw new Error('يرجى تسجيل الدخول أولاً للاشتراك');
     var enrolled = enrolledCourseIdsForPlan(plan);
-    persistAuthSubscription(plan.id, enrolled);
+    var simulators = simulatorsFromPlan(plan);
+    persistAuthSubscription(plan.id, enrolled, simulators);
     persistDirectorySubscription(authUser.email, plan.id, enrolled);
     refreshAccessUi();
     try {
       global.dispatchEvent(
-        new CustomEvent('ifa:subscription-changed', { detail: { planId: plan.id } })
+        new CustomEvent('ifa:subscription-changed', {
+          detail: { planId: plan.id, allowedSimulators: simulators, enrolledCourseIds: enrolled },
+        })
       );
     } catch (err) {
       /* ignore */
@@ -1018,14 +1111,43 @@
     highlightTargetPlan();
   }
 
+  function scheduleSimulatorPageAccessCheck() {
+    if (!currentSimulatorIdFromLocation()) return;
+    var authUser = getLocalAuthUser();
+    var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
+    warmEntitlementCaches(authUser, directoryUser).then(function () {
+      enforceSimulatorPageAccess();
+      refreshAccessUi();
+    });
+  }
+
   function bindPublicRefresh() {
     bindLaunchInterceptor();
-    enforceSimulatorPageAccess();
     refreshAccessUi();
-    global.addEventListener('load', refreshAccessUi);
+    scheduleSimulatorPageAccessCheck();
+    global.addEventListener('load', function () {
+      refreshAccessUi();
+      scheduleSimulatorPageAccessCheck();
+    });
     global.addEventListener('hashchange', highlightTargetPlan);
-    global.addEventListener('ifa:local-auth-changed', refreshAccessUi);
-    global.addEventListener('ifa:subscription-changed', refreshAccessUi);
+    global.addEventListener('ifa:local-auth-changed', function (e) {
+      refreshAccessUi();
+      var type = e && e.detail ? e.detail.type : '';
+      if (type === 'profile-sync' || type === 'login' || type === 'local-session') {
+        scheduleSimulatorPageAccessCheck();
+      }
+    });
+    document.addEventListener('ifa:local-auth-changed', function (e) {
+      refreshAccessUi();
+      var type = e && e.detail ? e.detail.type : '';
+      if (type === 'profile-sync' || type === 'login' || type === 'local-session') {
+        scheduleSimulatorPageAccessCheck();
+      }
+    });
+    global.addEventListener('ifa:subscription-changed', function () {
+      refreshAccessUi();
+      scheduleSimulatorPageAccessCheck();
+    });
     global.addEventListener('ifa:platform-courses-changed', refreshAccessUi);
     global.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     document.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
@@ -1063,6 +1185,7 @@
     defaultSimulatorMeta: defaultSimulatorMeta,
     applySimulatorMetaToCards: applySimulatorMetaToCards,
     findSimulator: findSimulator,
+    currentSimulatorIdFromLocation: currentSimulatorIdFromLocation,
     normalizeSimulatorIds: normalizeSimulatorIds,
     simulatorLabels: simulatorLabels,
     getPlatformSettings: getPlatformSettings,
@@ -1084,6 +1207,9 @@
     subscribeCurrentUserToPlan: subscribeCurrentUserToPlan,
     simulatorsFromCourse: simulatorsFromCourse,
     simulatorsFromPlan: simulatorsFromPlan,
+    ensurePlanCached: ensurePlanCached,
+    warmEntitlementCaches: warmEntitlementCaches,
+    scheduleSimulatorPageAccessCheck: scheduleSimulatorPageAccessCheck,
   };
 
   if (document.readyState === 'loading') {

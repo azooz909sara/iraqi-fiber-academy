@@ -1,12 +1,11 @@
 /**
- * Restrict simulator.html to authenticated active subscribers.
+ * Restrict simulator pages to authenticated users with tier-scoped simulator access.
  * Overlay only — never removes canvas / workspace DOM.
  * Local file:// / localhost: full bypass (no gate).
- * Production (irabi-fiber-academy.web.app): strict Firebase + subscription checks.
  */
 import { auth } from './firebase-config.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { syncUserProfile, checkSubscriberStatus } from './db-manager.js';
+import { syncUserProfile, getUserAllowedSimulators } from './db-manager.js';
 import { loginWithGoogle } from './auth-manager.js';
 
 function shouldBypassAccessControl() {
@@ -53,10 +52,40 @@ function setGateVisible(visible, reason) {
       statusEl.textContent = 'يرجى تسجيل الدخول بحساب Google للمتابعة.';
     } else if (reason === 'not-subscriber') {
       statusEl.textContent = 'حسابك مسجّل لكن الاشتراك غير مفعّل بعد.';
+    } else if (reason === 'simulator-locked') {
+      statusEl.textContent = 'هذا المحاكي غير مشمول في باقتك الحالية. راجع الباقات للترقية.';
     } else {
       statusEl.textContent = '';
     }
   }
+}
+
+function currentSimulatorIdFromPage() {
+  if (window.PlatformSimulators && typeof window.PlatformSimulators.currentSimulatorIdFromLocation === 'function') {
+    return window.PlatformSimulators.currentSimulatorIdFromLocation();
+  }
+  var file = '';
+  try {
+    file = decodeURIComponent(String(window.location.pathname || '').split('/').pop() || '').toLowerCase();
+  } catch (err) {
+    file = '';
+  }
+  var catalog =
+    window.PlatformSimulators && typeof window.PlatformSimulators.getCatalog === 'function'
+      ? window.PlatformSimulators.getCatalog()
+      : [];
+  for (var i = 0; i < catalog.length; i++) {
+    var href = String(catalog[i].href || '').toLowerCase();
+    if (href && href === file) return String(catalog[i].id || '');
+  }
+  return '';
+}
+
+function isGloballyFreeSimulator(simulatorId) {
+  if (window.PlatformSimulators && typeof window.PlatformSimulators.isGloballyFreeSimulator === 'function') {
+    return window.PlatformSimulators.isGloballyFreeSimulator(simulatorId);
+  }
+  return false;
 }
 
 async function evaluateAccess(user) {
@@ -72,17 +101,56 @@ async function evaluateAccess(user) {
     return;
   }
 
+  var simulatorId = currentSimulatorIdFromPage();
+  if (!simulatorId) {
+    console.error('[SimulatorAccess] Could not resolve simulator id for page:', window.location.pathname);
+    setGateVisible(true, 'simulator-locked');
+    return;
+  }
+
+  if (isGloballyFreeSimulator(simulatorId)) {
+    setGateVisible(false);
+    return;
+  }
+
   try {
     await syncUserProfile(user);
-    var ok = await checkSubscriberStatus(user.uid);
-    if (ok) {
-      setGateVisible(false);
-    } else {
-      setGateVisible(true, 'not-subscriber');
+
+    var localUser =
+      window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function'
+        ? window.IFAAuth.getLocalAuthUser()
+        : null;
+    if (
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.warmEntitlementCaches === 'function'
+    ) {
+      await window.PlatformSimulators.warmEntitlementCaches(localUser, null);
     }
+
+    if (
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
+      window.PlatformSimulators.viewerCanAccess(simulatorId)
+    ) {
+      setGateVisible(false);
+      return;
+    }
+
+    var allowed = await getUserAllowedSimulators(user.uid);
+    if (allowed.indexOf(simulatorId) !== -1) {
+      setGateVisible(false);
+      return;
+    }
+    console.error(
+      '[SimulatorAccess] Access denied — simulator "' +
+        simulatorId +
+        '" not permitted. Firestore allowedSimulators:',
+      allowed
+    );
+    setGateVisible(true, 'simulator-locked');
   } catch (err) {
-    console.error('[SimulatorAccess] subscriber check failed:', err);
-    setGateVisible(true, 'not-subscriber');
+    console.error('[SimulatorAccess] access check failed:', err);
+    setGateVisible(true, 'simulator-locked');
   }
 }
 

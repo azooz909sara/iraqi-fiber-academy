@@ -1,8 +1,18 @@
 /**
- * Admin helpers — FTTH fusion splicer clamp limits via shared localStorage bridge.
+ * Admin helpers — FTTH fusion splicer clamp limits + orders panel hooks.
  */
 (function () {
   'use strict';
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var hash = window.location.hash.replace('#', '');
+    if (hash === 'orders' && typeof window.renderAdminOrdersTable === 'function') {
+      window.renderAdminOrdersTable();
+    }
+    if (hash === 'settings-checkout' && typeof window.loadAdminCheckoutSettings === 'function') {
+      window.loadAdminCheckoutSettings();
+    }
+  });
 
   var CLAMP_FORWARD_ID = 'config-clamp-forward';
   var CLAMP_BACKWARD_ID = 'config-clamp-backward';

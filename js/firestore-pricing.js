@@ -6,7 +6,7 @@ import { db } from './firebase-config.js';
 import {
   collection,
   onSnapshot,
-  addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   doc,
@@ -17,6 +17,7 @@ var cachedPlans = [];
 var snapshotReady = false;
 var listeners = [];
 var unsubscribeSnapshot = null;
+var writesInFlight = 0;
 
 function normalizePlan(raw, docId) {
   if (window.PlatformPlans && typeof window.PlatformPlans.normalizePlan === 'function') {
@@ -39,6 +40,14 @@ function stripUndefined(obj) {
   return out;
 }
 
+function beginWrite() {
+  writesInFlight += 1;
+}
+
+function endWrite() {
+  writesInFlight = Math.max(0, writesInFlight - 1);
+}
+
 function preparePayload(payload, existing) {
   var base = Object.assign({}, existing || {}, payload || {});
   var normalized = normalizePlan(base, existing && existing.id);
@@ -46,6 +55,33 @@ function preparePayload(payload, existing) {
   if (!normalized.name) throw new Error('اسم الباقة مطلوب');
   delete normalized.id;
   return stripUndefined(normalized);
+}
+
+function setCachedPlans(list) {
+  cachedPlans = sortPlans(list);
+}
+
+function upsertCachedPlan(item) {
+  var normalized = normalizePlan(item, item && item.id);
+  var key = String(normalized.id || '');
+  if (!key) return;
+  var next = cachedPlans.filter(function (entry) {
+    return String(entry.id) !== key;
+  });
+  next.push(normalized);
+  setCachedPlans(next);
+  notifyListeners();
+}
+
+function removeCachedPlan(id) {
+  var key = String(id || '');
+  if (!key) return;
+  setCachedPlans(
+    cachedPlans.filter(function (entry) {
+      return String(entry.id) !== key;
+    })
+  );
+  notifyListeners();
 }
 
 function notifyListeners() {
@@ -72,7 +108,7 @@ function notifyListeners() {
 }
 
 function handleSnapshot(snap) {
-  cachedPlans = sortPlans(
+  setCachedPlans(
     snap.docs.map(function (docSnap) {
       return normalizePlan(docSnap.data(), docSnap.id);
     })
@@ -101,6 +137,10 @@ export function isPricingSnapshotReady() {
   return snapshotReady;
 }
 
+export function isPricingSeeding() {
+  return false;
+}
+
 export function findCachedPricingPlan(id) {
   var key = String(id || '');
   if (!key) return null;
@@ -110,10 +150,46 @@ export function findCachedPricingPlan(id) {
   return null;
 }
 
+function newPlanId() {
+  return 'plan_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+export async function upsertPricingPlan(id, payload) {
+  var key = String(id || '').trim();
+  if (!key) throw new Error('معرّف الباقة غير صالح');
+
+  var existing = findCachedPricingPlan(key);
+  var now = new Date().toISOString();
+  var prepared = preparePayload(Object.assign({}, payload, { updatedAt: now }), existing);
+  prepared.updatedAt = now;
+  if (existing && existing.createdAt) {
+    prepared.createdAt = existing.createdAt;
+  } else {
+    prepared.createdAt = now;
+  }
+  if (prepared.sortOrder == null && !isFinite(Number(prepared.sortOrder))) {
+    prepared.sortOrder = existing ? existing.sortOrder : cachedPlans.length;
+  }
+
+  beginWrite();
+  try {
+    await setDoc(doc(db, COLLECTION, key), prepared, { merge: true });
+    upsertCachedPlan(Object.assign({ id: key }, prepared));
+    return key;
+  } finally {
+    endWrite();
+  }
+}
+
 export async function addPricingPlan(payload) {
+  var key = String((payload && payload.id) || '').trim();
+  if (!key) key = newPlanId();
+  if (findCachedPricingPlan(key)) throw new Error('الباقة موجودة مسبقاً');
+
   var now = new Date().toISOString();
   var prepared = preparePayload(
     Object.assign({}, payload, {
+      planType: (payload && payload.planType) || 'bundle',
       sortOrder: isFinite(Number(payload && payload.sortOrder))
         ? Number(payload.sortOrder)
         : cachedPlans.length,
@@ -121,27 +197,55 @@ export async function addPricingPlan(payload) {
       updatedAt: now,
     })
   );
-  var ref = await addDoc(collection(db, COLLECTION), prepared);
-  return ref.id;
+  prepared.createdAt = now;
+  prepared.updatedAt = now;
+
+  beginWrite();
+  try {
+    await setDoc(doc(db, COLLECTION, key), prepared);
+    upsertCachedPlan(Object.assign({ id: key }, prepared));
+    return key;
+  } finally {
+    endWrite();
+  }
 }
 
 export async function updatePricingPlan(id, payload) {
   var key = String(id || '').trim();
   if (!key) throw new Error('معرّف الباقة غير صالح');
   var existing = findCachedPricingPlan(key);
+  if (!existing) throw new Error('الباقة غير موجودة');
+
+  var now = new Date().toISOString();
   var prepared = preparePayload(
-    Object.assign({}, payload, { updatedAt: new Date().toISOString() }),
+    Object.assign({}, payload, { updatedAt: now }),
     existing
   );
-  await updateDoc(doc(db, COLLECTION, key), prepared);
-  return key;
+  prepared.updatedAt = now;
+  if (existing.createdAt) prepared.createdAt = existing.createdAt;
+
+  beginWrite();
+  try {
+    await updateDoc(doc(db, COLLECTION, key), prepared);
+    upsertCachedPlan(Object.assign({}, existing, prepared, { id: key }));
+    return key;
+  } finally {
+    endWrite();
+  }
 }
 
 export async function deletePricingPlan(id) {
   var key = String(id || '').trim();
   if (!key) throw new Error('معرّف الباقة غير صالح');
-  await deleteDoc(doc(db, COLLECTION, key));
-  return true;
+
+  beginWrite();
+  try {
+    await deleteDoc(doc(db, COLLECTION, key));
+    removeCachedPlan(key);
+    return true;
+  } finally {
+    endWrite();
+  }
 }
 
 export function startPricingFirestoreSync() {
@@ -151,6 +255,11 @@ export function startPricingFirestoreSync() {
     handleSnapshot,
     function (err) {
       console.error('[PricingFirestore] onSnapshot failed', err);
+      if (!writesInFlight) {
+        cachedPlans = [];
+      }
+      snapshotReady = true;
+      notifyListeners();
     }
   );
   return unsubscribeSnapshot;
@@ -160,7 +269,9 @@ var api = {
   subscribe: subscribePricingPlans,
   getCachedPlans: getCachedPricingPlans,
   isReady: isPricingSnapshotReady,
+  isSeeding: isPricingSeeding,
   findPlan: findCachedPricingPlan,
+  upsertPlan: upsertPricingPlan,
   addPlan: addPricingPlan,
   updatePlan: updatePricingPlan,
   deletePlan: deletePricingPlan,

@@ -1,5 +1,5 @@
 /**
- * Public testimonials — localStorage CMS (ifa_platform_testimonials).
+ * Public testimonials — Firestore (testimonials) with localStorage fallback.
  */
 (function (global) {
   'use strict';
@@ -32,7 +32,28 @@
   }
 
   function normalizeStatus(value) {
-    return String(value || '').trim() === 'hidden' ? 'hidden' : 'published';
+    if (global.CmsStatus && typeof global.CmsStatus.normalize === 'function') {
+      return global.CmsStatus.normalize(value);
+    }
+    var s = String(value == null ? '' : value).trim().toLowerCase();
+    if (s === 'trash' || s === 'deleted') return 'trash';
+    if (s === 'draft' || s === 'hidden') return 'draft';
+    return 'published';
+  }
+
+  function isActiveStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isActive === 'function') {
+      return global.CmsStatus.isActive(status);
+    }
+    var s = normalizeStatus(status);
+    return s === 'published' || s === 'draft';
+  }
+
+  function isTrashStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isTrash === 'function') {
+      return global.CmsStatus.isTrash(status);
+    }
+    return normalizeStatus(status) === 'trash';
   }
 
   function defaultTestimonials() {
@@ -89,7 +110,7 @@
     return s ? s.charAt(0) : '؟';
   }
 
-  function normalize(item) {
+  function normalizeTestimonial(item) {
     var t = item && typeof item === 'object' ? item : {};
     return {
       id: String(t.id || uid()),
@@ -99,36 +120,93 @@
       rating: clampRating(t.rating),
       avatar: String(t.avatar || ''),
       status: normalizeStatus(t.status),
+      sortOrder: isFinite(Number(t.sortOrder)) ? Number(t.sortOrder) : 0,
     };
   }
 
-  function getTestimonials() {
+  function usesFirestoreTestimonials() {
+    return !!(
+      global.PlatformTestimonialsFirestore &&
+      typeof global.PlatformTestimonialsFirestore.isReady === 'function' &&
+      global.PlatformTestimonialsFirestore.isReady()
+    );
+  }
+
+  function sortTestimonials(list) {
+    return (list || []).slice().sort(function (a, b) {
+      var orderA = isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+      var orderB = isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+  }
+
+  function readLocalTestimonials() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (!raw) return defaultTestimonials();
+      if (!raw) return null;
       var parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return defaultTestimonials();
-      return parsed.map(normalize);
+      if (!Array.isArray(parsed)) return null;
+      return sortTestimonials(parsed.map(normalizeTestimonial));
     } catch (err) {
-      return defaultTestimonials();
+      return null;
     }
   }
 
-  function isVisibleStatus(status) {
-    var s = String(status == null ? '' : status).trim().toLowerCase();
-    return !s || s === 'published';
+  function isPublishedStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isPublished === 'function') {
+      return global.CmsStatus.isPublished(status);
+    }
+    return normalizeStatus(status) === 'published';
+  }
+
+  function getAllTestimonials() {
+    if (usesFirestoreTestimonials()) {
+      return sortTestimonials(global.PlatformTestimonialsFirestore.getCachedTestimonials());
+    }
+    var local = readLocalTestimonials();
+    if (local && local.length) return local;
+    return defaultTestimonials();
+  }
+
+  function getTestimonials() {
+    return getAllTestimonials().filter(function (t) {
+      return isActiveStatus(t.status);
+    });
+  }
+
+  function getTrashedTestimonials() {
+    return getAllTestimonials().filter(function (t) {
+      return isTrashStatus(t.status);
+    });
   }
 
   function getPublishedTestimonials() {
-    var published = getTestimonials().filter(function (t) {
-      return isVisibleStatus(t.status);
+    if (usesFirestoreTestimonials()) {
+      return sortTestimonials(global.PlatformTestimonialsFirestore.getCachedTestimonials()).filter(function (t) {
+        return isPublishedStatus(t.status);
+      });
+    }
+
+    var published = getAllTestimonials().filter(function (t) {
+      return isPublishedStatus(t.status);
     });
     if (published.length) return published;
+
+    var local = readLocalTestimonials();
+    if (local && local.length) return [];
+
     return defaultTestimonials();
   }
 
   function saveTestimonials(list) {
-    var next = (Array.isArray(list) ? list : []).map(normalize);
+    if (usesFirestoreTestimonials()) {
+      console.warn(
+        '[PlatformTestimonials] saveTestimonials ignored while Firestore sync is active — use PlatformTestimonialsFirestore CRUD'
+      );
+      return sortTestimonials((Array.isArray(list) ? list : []).map(normalizeTestimonial));
+    }
+    var next = sortTestimonials((Array.isArray(list) ? list : []).map(normalizeTestimonial));
     try {
       localStorage.setItem(KEY, JSON.stringify(next));
     } catch (err) {
@@ -196,9 +274,14 @@
       var all = getTestimonials();
       if (all.length) list = all;
     }
-    grid.innerHTML = list.length
-      ? list.map(cardHtml).join('')
-      : defaultTestimonials().map(cardHtml).join('');
+    if (list.length) {
+      grid.innerHTML = list.map(cardHtml).join('');
+    } else if (isAdminPreview()) {
+      grid.innerHTML = '';
+    } else {
+      grid.innerHTML =
+        '<p class="testimonials__empty" role="status">لا توجد آراء منشورة حالياً.</p>';
+    }
     if (typeof global.reobserveAnimations === 'function') {
       global.reobserveAnimations(grid);
     }
@@ -215,16 +298,38 @@
       console.error('[PlatformTestimonials] public render failed', err);
     }
     global.addEventListener('storage', function (e) {
+      if (usesFirestoreTestimonials()) return;
       if (!e.key || e.key === KEY) renderPublic();
     });
     global.addEventListener('ifa:platform-testimonials-changed', renderPublic);
+    global.addEventListener('ifa:testimonials-firestore-changed', renderPublic);
+    document.addEventListener('ifa:testimonials-firestore-changed', renderPublic);
     global.addEventListener('load', renderPublic);
+
+    (function waitForFirestoreTestimonials(attempts) {
+      if (
+        global.PlatformTestimonialsFirestore &&
+        typeof global.PlatformTestimonialsFirestore.subscribe === 'function'
+      ) {
+        global.PlatformTestimonialsFirestore.subscribe(function () {
+          renderPublic();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      global.setTimeout(function () {
+        waitForFirestoreTestimonials(attempts + 1);
+      }, 50);
+    })(0);
   }
 
   global.PlatformTestimonials = {
     KEY: KEY,
     uid: uid,
+    normalizeTestimonial: normalizeTestimonial,
     getTestimonials: getTestimonials,
+    getAllTestimonials: getAllTestimonials,
+    getTrashedTestimonials: getTrashedTestimonials,
     getPublishedTestimonials: getPublishedTestimonials,
     saveTestimonials: saveTestimonials,
     defaultTestimonials: defaultTestimonials,
@@ -232,6 +337,7 @@
     loadPublicTestimonials: loadPublicTestimonials,
     stars: stars,
     isAdminPreview: isAdminPreview,
+    usesFirestore: usesFirestoreTestimonials,
   };
   global.loadPublicTestimonials = loadPublicTestimonials;
 

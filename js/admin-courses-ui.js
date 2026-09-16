@@ -13,6 +13,23 @@
   var dragCourseId = null;
   var dragRowEl = null;
   var dragBound = false;
+  var coursesLiveBound = false;
+
+  function usesFirestoreCourses() {
+    return !!(
+      window.PlatformCoursesFirestore &&
+      typeof window.PlatformCoursesFirestore.isReady === 'function' &&
+      window.PlatformCoursesFirestore.isReady()
+    );
+  }
+
+  function isCoursesAdminDataLoading() {
+    var Firestore = window.PlatformCoursesFirestore;
+    if (!Firestore) return true;
+    if (typeof Firestore.isReady === 'function' && !Firestore.isReady()) return true;
+    if (typeof Firestore.isSeeding === 'function' && Firestore.isSeeding()) return true;
+    return false;
+  }
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -188,23 +205,59 @@
     el.checked = true;
   }
 
-  function syncCoursePricingPlan(course) {
-    if (!course || !window.PlatformPlans || typeof window.PlatformPlans.upsertFromCourse !== 'function') {
-      return course;
+  async function syncCoursePricingPlan(course) {
+    if (window.CoursePlanSync && typeof window.CoursePlanSync.syncPlanForCourse === 'function') {
+      return window.CoursePlanSync.syncPlanForCourse(course);
     }
-    var plan = window.PlatformPlans.upsertFromCourse(course, {
-      generateMatchingPlan: true,
-    });
-    if (!plan) return course;
-    if (String(course.requiredPlanId || '') === String(plan.id) && course.autoPricingPlan) {
-      return course;
+    if (window.PlatformPlans && typeof window.PlatformPlans.upsertFromCourse === 'function') {
+      return window.PlatformPlans.upsertFromCourse(course);
     }
-    return window.PlatformCourses.updateCourse(course.id, {
-      requiredPlanId: plan.id,
-      accessLevel: plan.accessLevel || course.accessLevel,
-      currency: course.currency,
-      autoPricingPlan: true,
-    });
+    return course;
+  }
+
+  async function saveCourseRecord(id, payload) {
+    var Firestore = window.PlatformCoursesFirestore;
+    if (usesFirestoreCourses() && Firestore) {
+      if (id) return Firestore.updateCourse(id, payload);
+      return Firestore.addCourse(payload);
+    }
+    if (id) return window.PlatformCourses.updateCourse(id, payload);
+    return window.PlatformCourses.addCourse(payload);
+  }
+
+  async function applyCourseStatus(id, status) {
+    var Firestore = window.PlatformCoursesFirestore;
+    if (usesFirestoreCourses() && Firestore && Firestore.setCourseStatus) {
+      return Firestore.setCourseStatus(id, status);
+    }
+    return window.PlatformCourses.setCourseStatus(id, status);
+  }
+
+  async function applySoftDeleteCourse(id) {
+    var Firestore = window.PlatformCoursesFirestore;
+    if (usesFirestoreCourses() && Firestore && Firestore.softDeleteCourse) {
+      return Firestore.softDeleteCourse(id);
+    }
+    return window.PlatformCourses.softDeleteCourse(id);
+  }
+
+  async function applyRestoreCourse(id) {
+    var Firestore = window.PlatformCoursesFirestore;
+    if (usesFirestoreCourses() && Firestore && Firestore.restoreCourse) {
+      return Firestore.restoreCourse(id);
+    }
+    return window.PlatformCourses.restoreCourse(id);
+  }
+
+  async function applyPurgeCourse(id) {
+    if (window.CoursePlanSync && typeof window.CoursePlanSync.deletePlanForCourse === 'function') {
+      await window.CoursePlanSync.deletePlanForCourse(id);
+    }
+    var Firestore = window.PlatformCoursesFirestore;
+    if (usesFirestoreCourses() && Firestore && Firestore.purgeCourse) {
+      return Firestore.purgeCourse(id);
+    }
+    return window.PlatformCourses.deleteCourse(id);
   }
 
   function emptyQuiz() {
@@ -627,13 +680,16 @@
     }
   }
 
-  function persistDomCourseOrder() {
+  async function persistDomCourseOrder() {
     if (!window.PlatformCourses || typeof window.PlatformCourses.reorderCourses !== 'function') {
       return false;
     }
     var ids = collectVisibleCourseIds();
     if (ids.length < 1) return false;
-    window.PlatformCourses.reorderCourses(ids);
+    var result = window.PlatformCourses.reorderCourses(ids);
+    if (result && typeof result.then === 'function') {
+      await result;
+    }
     return true;
   }
 
@@ -704,18 +760,20 @@
         moveDraggedRowBeforeTarget(body, targetRow, e.clientY);
       }
 
-      try {
-        var saved = persistDomCourseOrder();
-        clearDragState();
-        if (saved) {
+      (async function () {
+        try {
+          var saved = await persistDomCourseOrder();
+          clearDragState();
+          if (saved) {
+            renderCoursesTable();
+            showToast('تم حفظ ترتيب الكورسات', 'success');
+          }
+        } catch (err) {
+          clearDragState();
+          alert((err && err.message) || 'تعذر حفظ الترتيب');
           renderCoursesTable();
-          showToast('تم حفظ ترتيب الكورسات', 'success');
         }
-      } catch (err) {
-        clearDragState();
-        alert((err && err.message) || 'تعذر حفظ الترتيب');
-        renderCoursesTable();
-      }
+      })();
     });
   }
 
@@ -779,6 +837,9 @@
           : list.length
             ? 'لا نتائج مطابقة للتصفية أو البحث.'
             : 'لا توجد كورسات. أضف كورساً أو اختر من الكتالوج.';
+      if (!list.length && isCoursesAdminDataLoading()) {
+        emptyMsg = 'جاري تحميل الكورسات…';
+      }
       body.innerHTML =
         '<tr><td colspan="9" class="admin-empty-cell">' + emptyMsg + '</td></tr>';
       return;
@@ -982,7 +1043,7 @@
 
     var form = document.getElementById('courseEditorForm');
     if (form) {
-      form.addEventListener('submit', function (e) {
+      form.addEventListener('submit', async function (e) {
         e.preventDefault();
         if (!window.PlatformCourses) return;
         var id = (document.getElementById('courseEditorId') || {}).value || '';
@@ -995,12 +1056,6 @@
           price: parsePriceValue((document.getElementById('courseEditorPrice') || {}).value),
           currency: readCourseCurrency(),
           requiredPlanId: '',
-          accessLevel: (function () {
-            var cat = (document.getElementById('courseEditorCategory') || {}).value || 'individual';
-            if (cat === 'master') return 'professional';
-            if (cat === 'program') return 'standard';
-            return 'free';
-          })(),
           weeklySchedule: (document.getElementById('courseEditorSchedule') || {}).value,
           status: (document.getElementById('courseEditorStatus') || {}).value,
           category: (document.getElementById('courseEditorCategory') || {}).value || 'individual',
@@ -1015,10 +1070,8 @@
         };
         try {
           var wasPublish = payload.status === 'published';
-          var saved = id
-            ? window.PlatformCourses.updateCourse(id, payload)
-            : window.PlatformCourses.addCourse(payload);
-          saved = syncCoursePricingPlan(saved) || saved;
+          var saved = await saveCourseRecord(id, payload);
+          saved = (await syncCoursePricingPlan(saved)) || saved;
           closeCourseModal();
           renderCoursesTable();
           if (wasPublish) showToast('تم النشر بنجاح!', 'success');
@@ -1078,57 +1131,65 @@
       }
 
       if (toggleBtn) {
-        try {
-          var target = window.PlatformCourses.findCourse(
-            toggleBtn.getAttribute('data-toggle-course-status')
-          );
-          if (!target) return;
-          var next =
-            toggleBtn.getAttribute('data-next-status') ||
-            (target.status === 'published' ? 'draft' : 'published');
-          window.PlatformCourses.setCourseStatus(target.id, next);
-          renderCoursesTable();
-          if (next === 'published') showToast('تم النشر بنجاح!', 'success');
-          else if (next === 'suspended') showToast('تم تعليق الكورس', 'info');
-          else showToast('تم نقل الكورس إلى المسودة', 'info');
-        } catch (err) {
-          alert((err && err.message) || 'تعذر تحديث حالة النشر');
-        }
+        (async function () {
+          try {
+            var target = window.PlatformCourses.findCourse(
+              toggleBtn.getAttribute('data-toggle-course-status')
+            );
+            if (!target) return;
+            var next =
+              toggleBtn.getAttribute('data-next-status') ||
+              (target.status === 'published' ? 'draft' : 'published');
+            await applyCourseStatus(target.id, next);
+            renderCoursesTable();
+            if (next === 'published') showToast('تم النشر بنجاح!', 'success');
+            else if (next === 'suspended') showToast('تم تعليق الكورس', 'info');
+            else showToast('تم نقل الكورس إلى المسودة', 'info');
+          } catch (err) {
+            alert((err && err.message) || 'تعذر تحديث حالة النشر');
+          }
+        })();
         return;
       }
 
       if (restoreBtn) {
-        try {
-          window.PlatformCourses.restoreCourse(restoreBtn.getAttribute('data-restore-course'));
-          renderCoursesTable();
-          showToast('تمت استعادة الكورس', 'success');
-        } catch (err) {
-          alert((err && err.message) || 'تعذر استعادة الكورس');
-        }
+        (async function () {
+          try {
+            await applyRestoreCourse(restoreBtn.getAttribute('data-restore-course'));
+            renderCoursesTable();
+            showToast('تمت استعادة الكورس', 'success');
+          } catch (err) {
+            alert((err && err.message) || 'تعذر استعادة الكورس');
+          }
+        })();
         return;
       }
 
       if (purgeBtn) {
         if (!window.confirm('حذف هذا الكورس نهائياً من المنصة؟ لا يمكن التراجع.')) return;
-        try {
-          window.PlatformCourses.deleteCourse(purgeBtn.getAttribute('data-purge-course'));
-          renderCoursesTable();
-          showToast('تم الحذف النهائي من المنصة', 'info');
-        } catch (err) {
-          alert((err && err.message) || 'تعذر الحذف النهائي');
-        }
+        (async function () {
+          try {
+            await applyPurgeCourse(purgeBtn.getAttribute('data-purge-course'));
+            renderCoursesTable();
+            showToast('تم الحذف النهائي من المنصة', 'info');
+          } catch (err) {
+            alert((err && err.message) || 'تعذر الحذف النهائي');
+          }
+        })();
         return;
       }
 
       if (deleteBtn) {
         if (!window.confirm('نقل هذا الكورس إلى المسودات؟ يمكن استعادته لاحقاً.')) return;
-        try {
-          window.PlatformCourses.softDeleteCourse(deleteBtn.getAttribute('data-delete-course'));
-          renderCoursesTable();
-          showToast('تم نقل الكورس إلى المسودة', 'info');
-        } catch (err) {
-          alert((err && err.message) || 'تعذر نقل الكورس للمسودة');
-        }
+        (async function () {
+          try {
+            await applySoftDeleteCourse(deleteBtn.getAttribute('data-delete-course'));
+            renderCoursesTable();
+            showToast('تم نقل الكورس إلى المسودة', 'info');
+          } catch (err) {
+            alert((err && err.message) || 'تعذر نقل الكورس للمسودة');
+          }
+        })();
       }
     });
 
@@ -1157,6 +1218,7 @@
     });
 
     window.addEventListener('storage', function (e) {
+      if (usesFirestoreCourses()) return;
       if (
         e.key === 'platform_courses' ||
         e.key === 'ifa_platform_courses' ||
@@ -1166,9 +1228,26 @@
       }
     });
 
-    document.addEventListener('ifa:platform-courses-changed', function () {
-      renderCoursesTable();
-    });
+    document.addEventListener('ifa:platform-courses-changed', renderCoursesTable);
+    window.addEventListener('ifa:platform-courses-changed', renderCoursesTable);
+    document.addEventListener('ifa:courses-firestore-changed', renderCoursesTable);
+    window.addEventListener('ifa:courses-firestore-changed', renderCoursesTable);
+
+    (function attachCoursesFirestoreSubscribe(attempts) {
+      if (coursesLiveBound) return;
+      var Firestore = window.PlatformCoursesFirestore;
+      if (Firestore && typeof Firestore.subscribe === 'function') {
+        coursesLiveBound = true;
+        Firestore.subscribe(function () {
+          renderCoursesTable();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        attachCoursesFirestoreSubscribe(attempts + 1);
+      }, 50);
+    })(0);
 
     document.addEventListener('ifa:instructor-status-changed', function () {
       var modal = document.getElementById('courseEditorModal');

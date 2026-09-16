@@ -26,71 +26,96 @@
     </a>
 
     <nav class="admin-sidebar__nav">
-      <p class="admin-sidebar__label">القائمة الرئيسية</p>
-      <a href="#overview" class="admin-nav__link active" data-section="overview">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-          <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-        </svg>
-        نظرة عامة
-      </a>
-      <a href="#users" class="admin-nav__link" data-section="users">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-          <circle cx="9" cy="7" r="4"/>
-          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-        </svg>
-        إدارة المستخدمين
-      </a>
-      <a href="#site-stats" class="admin-nav__link" data-section="site-stats">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M18 20V10M12 20V4M6 20v-6"/>
-        </svg>
-        إدارة الإحصائيات
-      </a>
-      <a href="#instructors" class="admin-nav__link" data-section="instructors">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-        </svg>
-        إدارة المدربين
-      </a>
-      <a href="#courses" class="admin-nav__link" data-section="courses">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        الكورسات
-      </a>
-      <a href="#plans" class="admin-nav__link" data-section="plans">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-        </svg>
-        الباقات والأسعار
-      </a>
-      <a href="#site-simulator-showcase" class="admin-nav__link" data-section="site-simulator-showcase" data-site-parent>
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
-        </svg>
-        إدارة موقعي
-      </a>
-      <div class="admin-nav__sub" data-site-subnav>
-        <a href="#site-simulator-showcase" class="admin-nav__sublink" data-section="site-simulator-showcase">إدارة المحاكيات</a>
-        <a href="#site-hero-slideshow" class="admin-nav__sublink" data-section="site-hero-slideshow">الصفحة الرئيسية</a>
-        <a href="#site-articles" class="admin-nav__sublink" data-section="site-articles">المقالات التقنية</a>
-        <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
-        <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
-        <a href="#site-preview" class="admin-nav__sublink" data-section="site-preview">معاينة الموقع</a>
-        <a href="#site-footer" class="admin-nav__sublink" data-section="site-footer">إعدادات التذييل</a>
+      <div class="admin-nav__group">
+        <p class="admin-nav__group-title">الرئيسية</p>
+        <a href="#overview" class="admin-nav__link active" data-section="overview">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+            <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          نظرة عامة
+        </a>
+        <a href="#site-stats" class="admin-nav__link" data-section="site-stats">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M18 20V10M12 20V4M6 20v-6"/>
+          </svg>
+          إدارة الإحصائيات
+        </a>
       </div>
 
-      <p class="admin-sidebar__label" style="margin-top: 1.25rem;">النظام</p>
-      <a href="#settings" class="admin-nav__link" data-section="settings">
-        <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-          <circle cx="12" cy="12" r="3"/>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-        </svg>
-        الإعدادات
-      </a>
+      <div class="admin-nav__group">
+        <p class="admin-nav__group-title">المبيعات والاشتراكات</p>
+        <a href="#orders" class="admin-nav__link" data-section="orders">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+            <path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>
+          </svg>
+          طلبات الشراء
+        </a>
+        <a href="#plans" class="admin-nav__link" data-section="plans">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+          </svg>
+          الباقات والأسعار
+        </a>
+        <a href="#settings-checkout" class="admin-nav__link" data-section="settings-checkout">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="1" y="4" width="22" height="16" rx="2"/><path d="M1 10h22"/>
+          </svg>
+          إعدادات الدفع والإشعارات
+        </a>
+      </div>
+
+      <div class="admin-nav__group">
+        <p class="admin-nav__group-title">المحتوى التعليمي</p>
+        <a href="#courses" class="admin-nav__link" data-section="courses">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+          </svg>
+          الكورسات
+        </a>
+        <a href="#instructors" class="admin-nav__link" data-section="instructors">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
+          </svg>
+          إدارة المدربين
+        </a>
+        <a href="#site-simulator-showcase" class="admin-nav__link" data-section="site-simulator-showcase">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          إدارة المحاكيات
+        </a>
+        <div class="admin-nav__sub" data-site-subnav>
+          <p class="admin-nav__sub-label">محتوى الموقع</p>
+          <a href="#site-hero-slideshow" class="admin-nav__sublink" data-section="site-hero-slideshow">الصفحة الرئيسية</a>
+          <a href="#site-articles" class="admin-nav__sublink" data-section="site-articles">المقالات التقنية</a>
+          <a href="#site-faq" class="admin-nav__sublink" data-section="site-faq">الأسئلة الشائعة</a>
+          <a href="#site-testimonials" class="admin-nav__sublink" data-section="site-testimonials">آراء المستخدمين</a>
+          <a href="#site-preview" class="admin-nav__sublink" data-section="site-preview">معاينة الموقع</a>
+          <a href="#site-footer" class="admin-nav__sublink" data-section="site-footer">إعدادات التذييل</a>
+        </div>
+      </div>
+
+      <div class="admin-nav__group">
+        <p class="admin-nav__group-title">النظام والشبكة</p>
+        <a href="#users" class="admin-nav__link" data-section="users">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+            <circle cx="9" cy="7" r="4"/>
+            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+          إدارة المستخدمين
+        </a>
+        <a href="#settings" class="admin-nav__link" data-section="settings">
+          <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+          الإعدادات
+        </a>
+      </div>
     </nav>
 
     <div class="admin-sidebar__footer">
@@ -635,6 +660,153 @@
 
       <div class="admin-toast" id="adminToast" hidden role="status" aria-live="polite"></div>
 
+      <section class="admin-panel admin-panel--orders admin-view" id="orders" data-admin-view="orders" aria-labelledby="ordersHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="ordersHeading">طلبات الشراء</h2>
+            <p class="admin-panel__desc">مراجعة أواصر الدفع اليدوي (زين كاش / ماستر كارد) وقبول أو رفض الطلبات</p>
+          </div>
+          <div class="admin-panel__tools">
+            <label class="admin-field admin-field--inline">
+              <span class="admin-field__label">الحالة</span>
+              <select class="admin-field__input" id="adminOrdersStatusFilter">
+                <option value="all">كل الطلبات</option>
+                <option value="pending" selected>قيد المراجعة</option>
+                <option value="approved">مقبولة</option>
+                <option value="rejected">مرفوضة</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="admin-table-wrap">
+          <table class="admin-table admin-table--orders">
+            <thead>
+              <tr>
+                <th scope="col">الوصل</th>
+                <th scope="col">الطالب</th>
+                <th scope="col">المنتج</th>
+                <th scope="col">المبلغ</th>
+                <th scope="col">طريقة الدفع</th>
+                <th scope="col">التاريخ</th>
+                <th scope="col">الحالة</th>
+                <th scope="col">إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="adminOrdersBody">
+              <tr><td colspan="8" class="admin-empty-cell">جاري تحميل الطلبات…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta" id="adminOrdersMeta">0 طلب</p>
+        </div>
+      </section>
+
+      <section class="admin-panel admin-view" id="settings-checkout" data-admin-view="settings-checkout" aria-labelledby="checkoutSettingsHeading" hidden>
+        <div class="admin-panel__header">
+          <div>
+            <h2 class="admin-panel__title" id="checkoutSettingsHeading">إعدادات الدفع والإشعارات</h2>
+            <p class="admin-panel__desc">تكوين بريد إشعارات الطلبات وأرقام الدفع اليدوي المعروضة في صفحة إتمام الشراء</p>
+          </div>
+        </div>
+        <form class="admin-settings-form admin-settings-form--checkout" id="checkoutSettingsForm">
+          <div class="admin-form-grid">
+            <label class="admin-field admin-field--full">
+              <span class="admin-field__label">بريد إشعارات الإدارة</span>
+              <input class="admin-field__input" type="email" id="checkoutSettingsAdminEmail" dir="ltr" placeholder="admin@example.com" autocomplete="email" required />
+              <span class="admin-field__hint">يُستخدم لإرسال تنبيهات الطلبات الجديدة (قائمة mail_notifications)</span>
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">رقم زين كاش (ZainCash)</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsZaincash" dir="ltr" placeholder="078XXXXXXXX" required />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">رقم ماستر كارد / كي كارد</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsMastercard" dir="ltr" placeholder="5358-XXXX-XXXX-XXXX" required />
+            </label>
+            <label class="admin-field admin-field--full">
+              <span class="admin-field__label">IBAN / رقم الحساب البنكي</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsIban" dir="ltr" placeholder="IQXX XXXX XXXX XXXX XXXX XXXX XX" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">EmailJS Public Key (اختياري)</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsEmailjsKey" dir="ltr" placeholder="user_xxxxxxxx" autocomplete="off" />
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">EmailJS Service ID (اختياري)</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsEmailjsService" dir="ltr" placeholder="service_xxxxx" autocomplete="off" />
+            </label>
+            <label class="admin-field admin-field--full">
+              <span class="admin-field__label">EmailJS Template ID (اختياري)</span>
+              <input class="admin-field__input" type="text" id="checkoutSettingsEmailjsTemplate" dir="ltr" placeholder="template_xxxxx" autocomplete="off" />
+              <span class="admin-field__hint">يُستخدم كاحتياطي عند عدم تفعيل Firebase Trigger Email — المتغيرات: to_email, subject, message_html</span>
+            </label>
+          </div>
+          <div class="admin-settings-form__actions">
+            <button class="admin-btn admin-btn--primary" type="submit" id="checkoutSettingsSaveBtn">حفظ التغييرات</button>
+            <p class="admin-panel__meta" id="checkoutSettingsSaveStatus" role="status"></p>
+          </div>
+        </form>
+        <div class="admin-panel__footer">
+          <p class="admin-panel__meta">تُحفظ الإعدادات في Firestore: <code>settings/checkout_config</code></p>
+        </div>
+      </section>
+
+      <div class="admin-modal" id="adminOrderReceiptModal" hidden>
+        <div class="admin-modal__backdrop" data-close-receipt-modal></div>
+        <div class="admin-modal__dialog admin-modal__dialog--wide" role="dialog" aria-modal="true" aria-labelledby="adminOrderReceiptTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="adminOrderReceiptTitle">صورة الوصل</h3>
+            <button class="admin-modal__close" type="button" data-close-receipt-modal aria-label="إغلاق">×</button>
+          </div>
+          <div class="admin-modal__scroll admin-order-receipt-view">
+            <p class="admin-panel__meta" id="adminOrderReceiptCaption"></p>
+            <img id="adminOrderReceiptImage" alt="صورة وصل الدفع" />
+          </div>
+        </div>
+      </div>
+
+      <div class="admin-modal" id="adminOrderApproveModal" hidden>
+        <div class="admin-modal__backdrop" data-close-approve-modal></div>
+        <div class="admin-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminOrderApproveTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="adminOrderApproveTitle">قبول الطلب</h3>
+            <button class="admin-modal__close" type="button" data-close-approve-modal aria-label="إغلاق">×</button>
+          </div>
+          <form id="adminOrderApproveForm" class="admin-modal__form">
+            <p class="admin-panel__meta">سيتم تفعيل وصول الطالب للمحتوى المرتبط بالطلب وإرسال إشعار بالبريد.</p>
+            <label class="admin-field admin-field--full">
+              <span class="admin-field__label">رسالة مخصصة للطالب (اختياري)</span>
+              <textarea class="admin-field__input" id="adminOrderApproveNote" rows="3" placeholder="ملاحظة ترحيبية أو تعليمات إضافية"></textarea>
+            </label>
+            <div class="admin-modal__footer">
+              <button type="button" class="admin-btn admin-btn--ghost" data-close-approve-modal>إلغاء</button>
+              <button type="submit" class="admin-btn admin-btn--primary">تأكيد القبول</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div class="admin-modal" id="adminOrderRejectModal" hidden>
+        <div class="admin-modal__backdrop" data-close-reject-modal></div>
+        <div class="admin-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="adminOrderRejectTitle">
+          <div class="admin-modal__header">
+            <h3 class="admin-modal__title" id="adminOrderRejectTitle">رفض الطلب</h3>
+            <button class="admin-modal__close" type="button" data-close-reject-modal aria-label="إغلاق">×</button>
+          </div>
+          <form id="adminOrderRejectForm" class="admin-modal__form">
+            <label class="admin-field admin-field--full">
+              <span class="admin-field__label">ملاحظة (اختياري)</span>
+              <textarea class="admin-field__input" id="adminOrderRejectNote" rows="3" placeholder="سبب الرفض أو ملاحظة للطالب"></textarea>
+            </label>
+            <div class="admin-modal__footer">
+              <button type="button" class="admin-btn admin-btn--ghost" data-close-reject-modal>إلغاء</button>
+              <button type="submit" class="admin-btn admin-btn--danger">تأكيد الرفض</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <section class="admin-panel admin-panel--plans admin-view" id="plans" data-admin-view="plans" aria-labelledby="plansHeading" hidden>
         <div class="admin-panel__header">
           <div>
@@ -854,7 +1026,10 @@
             <h2 class="admin-panel__title" id="siteArticlesHeading">المقالات التقنية</h2>
             <p class="admin-panel__desc">إضافة وتعديل وحذف المقالات المعروضة في الصفحة الرئيسية</p>
           </div>
-          <button class="admin-btn admin-btn--primary" type="button" data-article-add>مقال جديد</button>
+          <div class="admin-panel__actions">
+            <button class="admin-btn admin-btn--ghost" type="button" data-article-bin-toggle aria-pressed="false">سلة المهملات</button>
+            <button class="admin-btn admin-btn--primary" type="button" data-article-add>مقال جديد</button>
+          </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -870,7 +1045,10 @@
             <h2 class="admin-panel__title" id="siteFaqHeading">الأسئلة الشائعة</h2>
             <p class="admin-panel__desc">إدارة الأسئلة والأجوبة وترتيبها في أكورديون الصفحة الرئيسية</p>
           </div>
-          <button class="admin-btn admin-btn--primary" type="button" data-faq-add>سؤال جديد</button>
+          <div class="admin-panel__actions">
+            <button class="admin-btn admin-btn--ghost" type="button" data-faq-bin-toggle aria-pressed="false">سلة المهملات</button>
+            <button class="admin-btn admin-btn--primary" type="button" data-faq-add>سؤال جديد</button>
+          </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -886,7 +1064,11 @@
             <h2 class="admin-panel__title" id="siteTestimonialsHeading">آراء المستخدمين</h2>
             <p class="admin-panel__desc">إدارة تقييمات وآراء الطلاب المعروضة على الصفحة الرئيسية</p>
           </div>
-          <button class="admin-btn admin-btn--primary" type="button" data-tst-add>رأي جديد</button>
+          <div class="admin-panel__actions">
+            <button class="admin-btn admin-btn--ghost" type="button" data-tst-bin-toggle aria-pressed="false">سلة المهملات</button>
+            <button class="admin-btn admin-btn--ghost" type="button" data-tst-restore-defaults>إعادة تعيين الافتراضيات</button>
+            <button class="admin-btn admin-btn--primary" type="button" data-tst-add>رأي جديد</button>
+          </div>
         </div>
         <div class="admin-table-wrap">
           <table class="admin-table">
@@ -1147,7 +1329,7 @@
               <label class="admin-field"><span class="admin-field__label">حالة العرض</span>
                 <select class="admin-field__input" id="tstEditorStatus">
                   <option value="published">نشر</option>
-                  <option value="hidden">إخفاء</option>
+                  <option value="draft">مسودة</option>
                 </select></label>
             </div>
             <div class="admin-modal__actions">
@@ -1214,9 +1396,13 @@
   <script type="module" src="js/admin-profile.js"></script>
   <script src="js/platform-simulators.js"></script>
   <script src="js/platform-simulator-showcase.js"></script>
+  <script type="module" src="js/cms-status.js"></script>
   <script src="js/articles.js"></script>
+  <script type="module" src="js/platform-articles-firestore-sync.js"></script>
   <script src="js/faq.js"></script>
+  <script type="module" src="js/platform-faqs-firestore-sync.js"></script>
   <script src="js/testimonials.js"></script>
+  <script type="module" src="js/platform-testimonials-firestore-sync.js"></script>
   <script src="js/platform-stats.js"></script>
   <script type="module" src="js/platform-stats-firestore-sync.js"></script>
   <script src="js/platform-footer.js"></script>
@@ -1225,9 +1411,11 @@
   <script src="js/admin-users.js"></script>
   <script src="js/instructor-applications.js"></script>
   <script src="js/platform-courses.js"></script>
-  <script src="js/admin-courses-ui.js"></script>
+  <script type="module" src="js/platform-courses-firestore-sync.js"></script>
   <script src="js/platform-plans.js"></script>
   <script type="module" src="js/platform-plans-firestore-sync.js"></script>
+  <script src="js/course-plan-sync.js"></script>
+  <script src="js/admin-courses-ui.js"></script>
   <script src="js/admin-plans-ui.js"></script>
   <script src="js/settings/FtthLabSettings.js"></script>
   <script src="js/ftth-lab-settings-cms.js"></script>
@@ -1235,6 +1423,8 @@
   <script src="js/admin-users-ui.js"></script>
   <script src="js/admin-instructors-ui.js"></script>
   <script src="js/admin-site-cms.js"></script>
+  <script type="module" src="js/admin-orders-ui.js"></script>
+  <script type="module" src="js/admin-checkout-settings-ui.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>

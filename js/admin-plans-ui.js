@@ -6,6 +6,7 @@
 
   var Plans = null;
   var editingId = null;
+  var editingPlan = null;
 
   function $(id) {
     return document.getElementById(id);
@@ -130,11 +131,32 @@
     );
   }
 
+  function isPlansAdminDataLoading() {
+    var Firestore = window.PlatformPricingFirestore;
+    if (!Firestore) return true;
+    return typeof Firestore.isReady === 'function' && !Firestore.isReady();
+  }
+
+  function isCourseManagedPlan(plan) {
+    return !!(plan && String(plan.planType || '').toLowerCase() === 'course');
+  }
+
   function getPlansList() {
-    if (usesFirestorePricing()) {
-      return window.PlatformPricingFirestore.getCachedPlans();
+    if (Plans && typeof Plans.isFirestoreBootstrapping === 'function' && Plans.isFirestoreBootstrapping()) {
+      return [];
     }
-    return Plans ? Plans.getPlans() : [];
+    var plans = [];
+    if (usesFirestorePricing()) {
+      plans = window.PlatformPricingFirestore.getCachedPlans();
+    } else if (Plans) {
+      plans = Plans.getPlans();
+    }
+    if (window.CoursePlanSync && typeof window.CoursePlanSync.isLegacyTierPlan === 'function') {
+      plans = plans.filter(function (plan) {
+        return !window.CoursePlanSync.isLegacyTierPlan(plan);
+      });
+    }
+    return plans;
   }
 
   function renderPlansList() {
@@ -142,8 +164,11 @@
     if (!list || (!Plans && !window.PlatformPricingFirestore)) return;
     var plans = getPlansList();
     if (!plans.length) {
+      var emptyMessage = isPlansAdminDataLoading()
+        ? 'جاري تحميل الباقات…'
+        : 'لا توجد باقات بعد. أضف باقة جديدة.';
       list.innerHTML =
-        '<div class="admin-empty" role="status"><p>لا توجد باقات بعد. أضف باقة جديدة.</p></div>';
+        '<div class="admin-empty" role="status"><p>' + emptyMessage + '</p></div>';
       return;
     }
     list.innerHTML = plans
@@ -175,6 +200,7 @@
           escapeHtml(plan.description || '—') +
           '</p>' +
           '<p class="admin-plan-card__meta">' +
+          (isCourseManagedPlan(plan) ? 'باقة كورس · ' : 'باقة مخصصة · ') +
           linked +
           ' كورس منشور · ' +
           (Array.isArray(plan.allowedSimulators) ? plan.allowedSimulators.length : 0) +
@@ -244,6 +270,7 @@
 
   function openModal(plan) {
     editingId = plan ? String(plan.id) : null;
+    editingPlan = plan || null;
     var modal = $('planEditorModal');
     var title = $('planEditorTitle');
     if (!modal) return;
@@ -269,10 +296,14 @@
     var modal = $('planEditorModal');
     if (modal) modal.hidden = true;
     editingId = null;
+    editingPlan = null;
   }
 
   function collectPayload() {
-    return {
+    var isCoursePlan =
+      editingPlan && String(editingPlan.planType || '').toLowerCase() === 'course';
+    var payload = {
+      planType: isCoursePlan ? 'course' : 'bundle',
       name: $('planEditorName').value.trim(),
       description: $('planEditorDescription').value.trim(),
       price: parsePriceValue($('planEditorPrice') && $('planEditorPrice').value),
@@ -285,7 +316,15 @@
       badge: $('planEditorBadge').value.trim(),
       features: textToFeatures($('planEditorFeatures').value),
       allowedSimulators: readSimulatorChecks(),
+      includedCourseIds:
+        editingPlan && Array.isArray(editingPlan.includedCourseIds)
+          ? editingPlan.includedCourseIds.slice()
+          : [],
     };
+    if (isCoursePlan && editingPlan.sourceCourseId) {
+      payload.sourceCourseId = editingPlan.sourceCourseId;
+    }
+    return payload;
   }
 
   async function onSubmit(e) {
@@ -294,13 +333,13 @@
     var payload = collectPayload();
     var Firestore = window.PlatformPricingFirestore;
     try {
-      if (Firestore && typeof Firestore.addPlan === 'function') {
+      if (usesFirestorePricing() && Firestore && typeof Firestore.addPlan === 'function') {
         if (editingId) {
           await Firestore.updatePlan(editingId, payload);
-          toast('تم تحديث الباقة في Firestore — ستظهر على الموقع فوراً');
+          toast('تم تحديث الباقة — ستظهر على الموقع فوراً');
         } else {
           await Firestore.addPlan(payload);
-          toast('تمت إضافة الباقة إلى Firestore — ستظهر على الموقع فوراً');
+          toast('تمت إضافة الباقة — ستظهر على الموقع فوراً');
         }
       } else if (Plans) {
         if (editingId) {
@@ -321,6 +360,16 @@
   async function handleDeletePlan(id) {
     var key = String(id || '').trim();
     if (!key || (!Plans && !window.PlatformPricingFirestore)) return;
+    var plan =
+      window.PlatformPricingFirestore && window.PlatformPricingFirestore.findPlan
+        ? window.PlatformPricingFirestore.findPlan(key)
+        : Plans && Plans.findPlan
+          ? Plans.findPlan(key)
+          : null;
+    if (isCourseManagedPlan(plan)) {
+      toast('باقات الكورسات تُدار من قسم الكورسات — عدّل السعر هناك أو احذف الكورس', true);
+      return;
+    }
     if (!window.confirm('حذف هذه الباقة من الموقع؟')) return;
 
     document.querySelectorAll('.admin-plan-card[data-plan-id]').forEach(function (card) {

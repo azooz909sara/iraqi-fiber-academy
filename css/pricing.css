@@ -50,6 +50,14 @@
 .pricing-card__btn--primary { background: var(--gradient-accent); color: var(--color-bg-primary); }
 .pricing-card__btn--outline { background: transparent; border: 2px solid var(--color-border); color: var(--color-text-primary); }
 .pricing-card__btn--outline:hover { border-color: var(--color-accent-cyan); color: var(--color-accent-cyan); }
+.pricing-card__btn--pending,
+.pricing-card__btn--pending:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+  border-color: var(--color-border);
+  color: var(--color-text-muted);
+}
+.pricing-card--owned .pricing-card__btn { text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
 
 @media (max-width: 1024px) {
   .pricing__grid { grid-template-columns: 1fr; max-width: 420px; margin-inline: auto; }

@@ -42,6 +42,17 @@
     return list || [];
   }
 
+  function isCoursesDataLoading() {
+    if (window.PlatformCourses && typeof window.PlatformCourses.isFirestoreBootstrapping === 'function') {
+      return window.PlatformCourses.isFirestoreBootstrapping();
+    }
+    var FS = window.PlatformCoursesFirestore;
+    if (!FS) return false;
+    if (typeof FS.isReady === 'function' && !FS.isReady()) return true;
+    if (typeof FS.isSeeding === 'function' && FS.isSeeding()) return true;
+    return false;
+  }
+
   function getPublishedCourses() {
     if (window.PlatformCourses && typeof window.PlatformCourses.getPublished === 'function') {
       return window.PlatformCourses.getPublished().slice();
@@ -88,6 +99,15 @@
         card.classList.add('is-visible');
       }, Math.min(index * 60, 360));
     });
+  }
+
+  function renderLoadingState(grid) {
+    grid.innerHTML =
+      '<div class="public-courses-empty" role="status">' +
+      '<div class="public-courses-empty__icon" aria-hidden="true">⏳</div>' +
+      '<h3 class="public-courses-empty__title">جاري تحميل الكورسات…</h3>' +
+      '<p class="public-courses-empty__text">يتم جلب الكورسات من قاعدة البيانات.</p>' +
+      '</div>';
   }
 
   function renderEmptyState(grid) {
@@ -186,6 +206,12 @@
       document.getElementById(GRID_ID) || document.getElementById('publicCoursesTimeline');
     if (!grid) return;
 
+    if (isCoursesDataLoading()) {
+      lastSignature = '__loading__';
+      renderLoadingState(grid);
+      return;
+    }
+
     var courses = getPublishedCourses();
     courses.sort(function (a, b) {
       if (window.PlatformCourses && typeof window.PlatformCourses.sortByDisplayOrder === 'function') {
@@ -224,8 +250,25 @@
 
     document.addEventListener('ifa:platform-courses-changed', renderPublicCourses);
     window.addEventListener('ifa:platform-courses-changed', renderPublicCourses);
+    document.addEventListener('ifa:courses-firestore-changed', renderPublicCourses);
+    window.addEventListener('ifa:courses-firestore-changed', renderPublicCourses);
     document.addEventListener('ifa:platform-plans-changed', renderPublicCourses);
     window.addEventListener('ifa:platform-plans-changed', renderPublicCourses);
+    document.addEventListener('ifa:pricing-firestore-changed', renderPublicCourses);
+    window.addEventListener('ifa:pricing-firestore-changed', renderPublicCourses);
+
+    (function waitForCoursesFirestoreSubscribe(attempts) {
+      if (window.PlatformCoursesFirestore && typeof window.PlatformCoursesFirestore.subscribe === 'function') {
+        window.PlatformCoursesFirestore.subscribe(function () {
+          renderPublicCourses();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      window.setTimeout(function () {
+        waitForCoursesFirestoreSubscribe(attempts + 1);
+      }, 50);
+    })(0);
 
     /* Lightweight same-origin poll so publish from another tab/window
        still updates even if a browser skips the storage event. */
@@ -252,6 +295,22 @@
     }
   }
 
+  function isFreeTierCourse(course) {
+    if (!course) return false;
+    var price = Number(course.price);
+    if (isFinite(price) && price <= 0) return true;
+    var level = String(course.accessLevel || '').toLowerCase();
+    return level === 'free';
+  }
+
+  function userHasActiveTrial(user) {
+    if (!user) return false;
+    if (window.IFAAuth && typeof window.IFAAuth.hasActiveTrial === 'function' && window.IFAAuth.hasActiveTrial(user)) {
+      return true;
+    }
+    return Number(user.trialExpiresAt) > Date.now();
+  }
+
   function viewerHasCourseAccess(course) {
     if (window.PlatformSimulators && typeof window.PlatformSimulators.isAdminPreviewContext === 'function') {
       /* ignore */
@@ -264,13 +323,20 @@
     var user = readAuthUser();
     if (!user) return false;
     if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
-    if (window.IFAAuth && typeof window.IFAAuth.hasActiveTrial === 'function' && window.IFAAuth.hasActiveTrial(user)) {
-      return true;
-    }
-    if (Number(user.trialExpiresAt) > Date.now()) return true;
-    if (user.isSubscriber) return true;
-    var enrolled = Array.isArray(user.enrolledCourseIds) ? user.enrolledCourseIds : [];
-    if (course && enrolled.indexOf(course.id) !== -1) return true;
+    if (userHasActiveTrial(user) && isFreeTierCourse(course)) return true;
+
+    if (!course) return false;
+
+    var enrolled = Array.isArray(user.enrolledCourseIds)
+      ? user.enrolledCourseIds.map(function (id) {
+          return String(id);
+        })
+      : [];
+    if (enrolled.indexOf(String(course.id)) !== -1) return true;
+
+    var requiredPlanId = String(course.requiredPlanId || '').trim();
+    if (requiredPlanId && String(user.planId || '') === requiredPlanId) return true;
+
     return false;
   }
 

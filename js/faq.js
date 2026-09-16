@@ -32,7 +32,28 @@
   }
 
   function normalizeStatus(value) {
-    return String(value || '').trim() === 'draft' ? 'draft' : 'published';
+    if (global.CmsStatus && typeof global.CmsStatus.normalize === 'function') {
+      return global.CmsStatus.normalize(value);
+    }
+    var s = String(value == null ? '' : value).trim().toLowerCase();
+    if (s === 'trash' || s === 'deleted') return 'trash';
+    if (s === 'draft' || s === 'hidden') return 'draft';
+    return 'published';
+  }
+
+  function isActiveStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isActive === 'function') {
+      return global.CmsStatus.isActive(status);
+    }
+    var s = normalizeStatus(status);
+    return s === 'published' || s === 'draft';
+  }
+
+  function isTrashStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isTrash === 'function') {
+      return global.CmsStatus.isTrash(status);
+    }
+    return normalizeStatus(status) === 'trash';
   }
 
   function defaultFaqs() {
@@ -89,36 +110,91 @@
       question: String(f.question || '').trim(),
       answer: String(f.answer || '').trim(),
       status: normalizeStatus(f.status),
+      sortOrder: isFinite(Number(f.sortOrder)) ? Number(f.sortOrder) : 0,
     };
   }
 
-  function isPublishedStatus(status) {
-    var s = String(status == null ? '' : status).trim().toLowerCase();
-    return !s || s === 'published';
+  function usesFirestoreFaqs() {
+    return !!(
+      global.PlatformFaqsFirestore &&
+      typeof global.PlatformFaqsFirestore.isReady === 'function' &&
+      global.PlatformFaqsFirestore.isReady()
+    );
   }
 
-  function getFaqs() {
+  function sortFaqs(list) {
+    return (list || []).slice().sort(function (a, b) {
+      var orderA = isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+      var orderB = isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+  }
+
+  function readLocalFaqs() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (!raw) return defaultFaqs();
+      if (!raw) return null;
       var parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return defaultFaqs();
-      return parsed.map(normalizeFaq);
+      if (!Array.isArray(parsed)) return null;
+      return sortFaqs(parsed.map(normalizeFaq));
     } catch (err) {
-      return defaultFaqs();
+      return null;
     }
   }
 
+  function isPublishedStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isPublished === 'function') {
+      return global.CmsStatus.isPublished(status);
+    }
+    return normalizeStatus(status) === 'published';
+  }
+
+  function getAllFaqs() {
+    if (usesFirestoreFaqs()) {
+      return sortFaqs(global.PlatformFaqsFirestore.getCachedFaqs());
+    }
+    var local = readLocalFaqs();
+    if (local && local.length) return local;
+    return defaultFaqs();
+  }
+
+  function getFaqs() {
+    return getAllFaqs().filter(function (f) {
+      return isActiveStatus(f.status);
+    });
+  }
+
+  function getTrashedFaqs() {
+    return getAllFaqs().filter(function (f) {
+      return isTrashStatus(f.status);
+    });
+  }
+
   function getPublishedFaqs() {
-    var published = getFaqs().filter(function (f) {
+    if (usesFirestoreFaqs()) {
+      return sortFaqs(global.PlatformFaqsFirestore.getCachedFaqs()).filter(function (f) {
+        return isPublishedStatus(f.status);
+      });
+    }
+
+    var published = getAllFaqs().filter(function (f) {
       return isPublishedStatus(f.status);
     });
     if (published.length) return published;
+
+    var local = readLocalFaqs();
+    if (local && local.length) return [];
+
     return defaultFaqs();
   }
 
   function saveFaqs(list) {
-    var next = (Array.isArray(list) ? list : []).map(normalizeFaq);
+    if (usesFirestoreFaqs()) {
+      console.warn('[PlatformFaqs] saveFaqs ignored while Firestore sync is active — use PlatformFaqsFirestore CRUD');
+      return sortFaqs((Array.isArray(list) ? list : []).map(normalizeFaq));
+    }
+    var next = sortFaqs((Array.isArray(list) ? list : []).map(normalizeFaq));
     try {
       localStorage.setItem(KEY, JSON.stringify(next));
     } catch (err) {
@@ -168,9 +244,14 @@
       var all = getFaqs();
       if (all.length) list = all;
     }
-    listEl.innerHTML = list.length
-      ? list.map(itemHtml).join('')
-      : defaultFaqs().map(itemHtml).join('');
+    if (list.length) {
+      listEl.innerHTML = list.map(itemHtml).join('');
+    } else if (isAdminPreview()) {
+      listEl.innerHTML = '';
+    } else {
+      listEl.innerHTML =
+        '<p class="faq__empty" role="status">لا توجد أسئلة منشورة حالياً.</p>';
+    }
     if (typeof global.reobserveAnimations === 'function') {
       global.reobserveAnimations(listEl);
     }
@@ -187,22 +268,42 @@
       console.error('[PlatformFaqs] public render failed', err);
     }
     global.addEventListener('storage', function (e) {
+      if (usesFirestoreFaqs()) return;
       if (!e.key || e.key === KEY) renderPublic();
     });
     global.addEventListener('ifa:platform-faqs-changed', renderPublic);
+    global.addEventListener('ifa:faqs-firestore-changed', renderPublic);
+    document.addEventListener('ifa:faqs-firestore-changed', renderPublic);
     global.addEventListener('load', renderPublic);
+
+    (function waitForFirestoreFaqs(attempts) {
+      if (global.PlatformFaqsFirestore && typeof global.PlatformFaqsFirestore.subscribe === 'function') {
+        global.PlatformFaqsFirestore.subscribe(function () {
+          renderPublic();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      global.setTimeout(function () {
+        waitForFirestoreFaqs(attempts + 1);
+      }, 50);
+    })(0);
   }
 
   global.PlatformFaqs = {
     KEY: KEY,
     uid: uid,
+    normalizeFaq: normalizeFaq,
     getFaqs: getFaqs,
+    getAllFaqs: getAllFaqs,
+    getTrashedFaqs: getTrashedFaqs,
     getPublishedFaqs: getPublishedFaqs,
     saveFaqs: saveFaqs,
     defaultFaqs: defaultFaqs,
     renderPublic: renderPublic,
     loadPublicFAQs: loadPublicFAQs,
     isAdminPreview: isAdminPreview,
+    usesFirestore: usesFirestoreFaqs,
   };
   global.loadPublicFAQs = loadPublicFAQs;
 

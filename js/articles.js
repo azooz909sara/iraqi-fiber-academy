@@ -1,5 +1,5 @@
 /**
- * Public technical articles — localStorage CMS (ifa_platform_articles).
+ * Public technical articles — Firestore (articles) with localStorage fallback.
  */
 (function (global) {
   'use strict';
@@ -72,14 +72,35 @@
   }
 
   function normalizeStatus(value) {
+    if (global.CmsStatus && typeof global.CmsStatus.normalize === 'function') {
+      return global.CmsStatus.normalize(value);
+    }
     var s = String(value == null ? '' : value).trim().toLowerCase();
-    if (s === 'draft') return 'draft';
+    if (s === 'trash' || s === 'deleted') return 'trash';
+    if (s === 'draft' || s === 'hidden') return 'draft';
     return 'published';
   }
 
+  function isActiveStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isActive === 'function') {
+      return global.CmsStatus.isActive(status);
+    }
+    var s = normalizeStatus(status);
+    return s === 'published' || s === 'draft';
+  }
+
+  function isTrashStatus(status) {
+    if (global.CmsStatus && typeof global.CmsStatus.isTrash === 'function') {
+      return global.CmsStatus.isTrash(status);
+    }
+    return normalizeStatus(status) === 'trash';
+  }
+
   function isPublishedStatus(status) {
-    var s = String(status == null ? '' : status).trim().toLowerCase();
-    return !s || s === 'published';
+    if (global.CmsStatus && typeof global.CmsStatus.isPublished === 'function') {
+      return global.CmsStatus.isPublished(status);
+    }
+    return normalizeStatus(status) === 'published';
   }
 
   function defaultArticles() {
@@ -132,15 +153,41 @@
     ];
   }
 
-  function readJson(fallback) {
+  function sortArticles(list) {
+    return (list || []).slice().sort(function (a, b) {
+      var orderA = isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0;
+      var orderB = isFinite(Number(b.sortOrder)) ? Number(b.sortOrder) : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.id || '').localeCompare(String(b.id || ''));
+    });
+  }
+
+  function readLocalArticles() {
     try {
       var raw = localStorage.getItem(KEY);
-      if (!raw) return fallback;
+      if (!raw) return null;
       var parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : fallback;
+      if (!Array.isArray(parsed)) return null;
+      return sortArticles(parsed.map(normalizeArticle));
     } catch (err) {
-      return fallback;
+      return null;
     }
+  }
+
+  function usesFirestoreArticles() {
+    return !!(
+      global.PlatformArticlesFirestore &&
+      typeof global.PlatformArticlesFirestore.isReady === 'function' &&
+      global.PlatformArticlesFirestore.isReady()
+    );
+  }
+
+  function isFirestoreArticlesBootstrapping() {
+    return !!(
+      global.PlatformArticlesFirestore &&
+      typeof global.PlatformArticlesFirestore.isReady === 'function' &&
+      !global.PlatformArticlesFirestore.isReady()
+    );
   }
 
   function sanitizeAttrValue(name, value) {
@@ -210,18 +257,45 @@
     return out.innerHTML;
   }
 
+  function getAllArticles() {
+    if (isFirestoreArticlesBootstrapping()) {
+      return [];
+    }
+    if (usesFirestoreArticles()) {
+      return sortArticles(global.PlatformArticlesFirestore.getCachedArticles());
+    }
+    var local = readLocalArticles();
+    if (local && local.length) return local;
+    return defaultArticles();
+  }
+
   function getArticles() {
-    var list = readJson(null);
-    if (!list) return defaultArticles();
-    return list.map(normalizeArticle);
+    return getAllArticles().filter(function (a) {
+      return isActiveStatus(a.status);
+    });
+  }
+
+  function getTrashedArticles() {
+    return getAllArticles().filter(function (a) {
+      return isTrashStatus(a.status);
+    });
   }
 
   function getPublishedArticles() {
-    var source = getArticles();
-    var published = source.filter(function (a) {
+    if (usesFirestoreArticles()) {
+      return sortArticles(global.PlatformArticlesFirestore.getCachedArticles()).filter(function (a) {
+        return isPublishedStatus(a.status);
+      });
+    }
+
+    var published = getAllArticles().filter(function (a) {
       return isPublishedStatus(a.status);
     });
     if (published.length) return published;
+
+    var local = readLocalArticles();
+    if (local && local.length) return [];
+
     return defaultArticles().filter(function (a) {
       return isPublishedStatus(a.status);
     });
@@ -242,11 +316,18 @@
       textColor: String(a.textColor || ''),
       meta: String(a.meta || '').trim(),
       status: normalizeStatus(a.status),
+      sortOrder: isFinite(Number(a.sortOrder)) ? Number(a.sortOrder) : 0,
     };
   }
 
   function saveArticles(list) {
-    var next = (Array.isArray(list) ? list : []).map(normalizeArticle);
+    if (usesFirestoreArticles()) {
+      console.warn(
+        '[PlatformArticles] saveArticles ignored while Firestore sync is active — use PlatformArticlesFirestore CRUD'
+      );
+      return sortArticles((Array.isArray(list) ? list : []).map(normalizeArticle));
+    }
+    var next = sortArticles((Array.isArray(list) ? list : []).map(normalizeArticle));
     try {
       localStorage.setItem(KEY, JSON.stringify(next));
     } catch (err) {
@@ -262,7 +343,13 @@
   }
 
   function upsertArticle(article) {
-    var list = getArticles();
+    if (usesFirestoreArticles()) {
+      console.warn(
+        '[PlatformArticles] upsertArticle ignored while Firestore sync is active — use PlatformArticlesFirestore CRUD'
+      );
+      return normalizeArticle(article);
+    }
+    var list = getAllArticles();
     var item = normalizeArticle(article);
     if (!item.id) item.id = uid();
     var idx = -1;
@@ -275,11 +362,23 @@
   }
 
   function deleteArticle(id) {
-    return saveArticles(
-      getArticles().filter(function (a) {
-        return a.id !== String(id);
-      })
-    );
+    if (usesFirestoreArticles()) {
+      console.warn(
+        '[PlatformArticles] deleteArticle ignored while Firestore sync is active — use PlatformArticlesFirestore CRUD'
+      );
+      return getArticles();
+    }
+    var list = getAllArticles();
+    var key = String(id || '');
+    var found = false;
+    list.forEach(function (a) {
+      if (String(a.id) === key) {
+        a.status = 'trash';
+        found = true;
+      }
+    });
+    if (!found) return getArticles();
+    return saveArticles(list);
   }
 
   function excerptFrom(article) {
@@ -403,13 +502,15 @@
   }
 
   function findArticleById(id) {
+    var key = String(id || '');
+    if (!key) return null;
     var found = null;
     getArticles().forEach(function (a) {
-      if (a.id === String(id)) found = a;
+      if (String(a.id) === key) found = a;
     });
-    if (found) return found;
+    if (found || usesFirestoreArticles()) return found;
     defaultArticles().forEach(function (a) {
-      if (a.id === String(id)) found = a;
+      if (String(a.id) === key) found = a;
     });
     return found;
   }
@@ -459,9 +560,14 @@
       var all = getArticles();
       if (all.length) list = all;
     }
-    grid.innerHTML = list.length
-      ? list.map(cardHtml).join('')
-      : defaultArticles().map(cardHtml).join('');
+    if (list.length) {
+      grid.innerHTML = list.map(cardHtml).join('');
+    } else if (isAdminPreview()) {
+      grid.innerHTML = '';
+    } else {
+      grid.innerHTML =
+        '<p class="articles__empty" role="status">لا توجد مقالات منشورة حالياً.</p>';
+    }
     if (typeof global.reobserveAnimations === 'function') {
       global.reobserveAnimations(grid);
     }
@@ -479,16 +585,38 @@
       console.error('[PlatformArticles] public render failed', err);
     }
     global.addEventListener('storage', function (e) {
+      if (usesFirestoreArticles()) return;
       if (!e.key || e.key === KEY) renderPublic();
     });
     global.addEventListener('ifa:platform-articles-changed', renderPublic);
+    global.addEventListener('ifa:articles-firestore-changed', renderPublic);
+    document.addEventListener('ifa:articles-firestore-changed', renderPublic);
     global.addEventListener('load', renderPublic);
+
+    (function waitForFirestoreArticles(attempts) {
+      if (
+        global.PlatformArticlesFirestore &&
+        typeof global.PlatformArticlesFirestore.subscribe === 'function'
+      ) {
+        global.PlatformArticlesFirestore.subscribe(function () {
+          renderPublic();
+        });
+        return;
+      }
+      if (attempts > 40) return;
+      global.setTimeout(function () {
+        waitForFirestoreArticles(attempts + 1);
+      }, 50);
+    })(0);
   }
 
   global.PlatformArticles = {
     KEY: KEY,
     uid: uid,
+    normalizeArticle: normalizeArticle,
     getArticles: getArticles,
+    getAllArticles: getAllArticles,
+    getTrashedArticles: getTrashedArticles,
     getPublishedArticles: getPublishedArticles,
     saveArticles: saveArticles,
     upsertArticle: upsertArticle,
@@ -501,6 +629,7 @@
     bodyStyle: bodyStyle,
     sanitizeArticleHtml: sanitizeArticleHtml,
     isAdminPreview: isAdminPreview,
+    usesFirestore: usesFirestoreArticles,
   };
   global.loadPublicArticles = loadPublicArticles;
 

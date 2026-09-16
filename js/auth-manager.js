@@ -67,6 +67,7 @@ function getLocalAuthUser() {
       role: String(parsed.role || ''),
       planId: String(parsed.planId || ''),
       enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds.slice() : [],
+      allowedSimulators: Array.isArray(parsed.allowedSimulators) ? parsed.allowedSimulators.slice() : [],
       trialExpiresAt: Number(parsed.trialExpiresAt) || 0,
     };
   } catch (err) {
@@ -165,6 +166,12 @@ function setLocalAuthUser(user) {
         : sameEmail && Array.isArray(previous.enrolledCourseIds)
           ? previous.enrolledCourseIds.slice()
           : [],
+    allowedSimulators:
+      Array.isArray(user.allowedSimulators)
+        ? normalizeAllowedSimulators(user.allowedSimulators)
+        : sameEmail && Array.isArray(previous.allowedSimulators)
+          ? normalizeAllowedSimulators(previous.allowedSimulators)
+          : [],
     trialExpiresAt: trialExpiresAt,
     loggedInAt: new Date().toISOString(),
   };
@@ -180,6 +187,75 @@ function setLocalAuthUser(user) {
   try {
     localStorage.setItem('ifa_session_email', payload.email);
   } catch (err2) {
+    /* ignore */
+  }
+  return payload;
+}
+
+function normalizeEnrolledCourseIds(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(function (id) {
+      return String(id || '').trim();
+    })
+    .filter(Boolean);
+}
+
+function normalizeAllowedSimulators(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map(function (id) {
+      return String(id || '').trim();
+    })
+    .filter(Boolean);
+}
+
+function profileToEntitlements(profile, user, previous) {
+  var sameEmail =
+    previous && normalizeEmail(previous.email) === normalizeEmail((profile && profile.email) || (user && user.email));
+  return {
+    isSubscriber: !!(profile && profile.isSubscriber),
+    planId: profile && profile.planId != null
+      ? String(profile.planId || '')
+      : sameEmail && previous
+        ? String(previous.planId || '')
+        : '',
+    enrolledCourseIds:
+      profile && Array.isArray(profile.enrolledCourseIds)
+        ? normalizeEnrolledCourseIds(profile.enrolledCourseIds)
+        : sameEmail && previous
+          ? normalizeEnrolledCourseIds(previous.enrolledCourseIds)
+          : [],
+    allowedSimulators:
+      profile && Array.isArray(profile.allowedSimulators)
+        ? normalizeAllowedSimulators(profile.allowedSimulators)
+        : sameEmail && previous
+          ? normalizeAllowedSimulators(previous.allowedSimulators)
+          : [],
+  };
+}
+
+/** Apply Firestore entitlements to ifa_auth_user and refresh simulator gates. */
+function applyEntitlements(entitlements, email) {
+  var current = getLocalAuthUser();
+  var key = normalizeEmail(email || (current && current.email));
+  if (!key) return null;
+  var payload = Object.assign({}, current || {}, entitlements || {}, { email: key });
+  setLocalAuthUser(payload);
+  refreshSlots();
+  try {
+    var evt = new CustomEvent('ifa:subscription-changed', {
+      detail: {
+        planId: payload.planId,
+        enrolledCourseIds: payload.enrolledCourseIds,
+        allowedSimulators: payload.allowedSimulators,
+        isSubscriber: payload.isSubscriber,
+        email: key,
+      },
+    });
+    window.dispatchEvent(evt);
+    document.dispatchEvent(evt);
+  } catch (err) {
     /* ignore */
   }
   return payload;
@@ -899,8 +975,32 @@ function bindAuthClicks() {
   });
 }
 
+function isSimulatorAccessManagedPage() {
+  return !!document.getElementById('subscriber-gate');
+}
+
+function scheduleEnforceSimulatorPageFromAuth() {
+  if (shouldBypassAccessControl()) return;
+  if (isSimulatorAccessManagedPage()) return;
+
+  var runCheck = function () {
+    enforceSimulatorPageFromAuth();
+  };
+
+  if (
+    window.PlatformSimulators &&
+    typeof window.PlatformSimulators.warmEntitlementCaches === 'function'
+  ) {
+    var localUser = getLocalAuthUser();
+    window.PlatformSimulators.warmEntitlementCaches(localUser, null).then(runCheck).catch(runCheck);
+    return;
+  }
+  runCheck();
+}
+
 function enforceSimulatorPageFromAuth() {
   if (shouldBypassAccessControl()) return;
+  if (isSimulatorAccessManagedPage()) return;
   try {
     if (new URLSearchParams(window.location.search).get('mode') === 'admin-preview') return;
   } catch (err) {
@@ -950,7 +1050,20 @@ function initAuthUI() {
   }
 
   refreshSlots();
-  enforceSimulatorPageFromAuth();
+
+  window.addEventListener('ifa:local-auth-changed', function (e) {
+    var type = e && e.detail ? e.detail.type : '';
+    if (type === 'profile-sync' || type === 'login') {
+      scheduleEnforceSimulatorPageFromAuth();
+    }
+  });
+  document.addEventListener('ifa:local-auth-changed', function (e) {
+    var type = e && e.detail ? e.detail.type : '';
+    if (type === 'profile-sync' || type === 'login') {
+      scheduleEnforceSimulatorPageFromAuth();
+    }
+  });
+  window.addEventListener('ifa:subscription-changed', scheduleEnforceSimulatorPageFromAuth);
 
   onAuthStateChanged(auth, function (user) {
     authInitialized = true;
@@ -988,14 +1101,19 @@ function initAuthUI() {
       .then(function (profile) {
         lastProfile = profile || null;
         var role = String((profile && profile.role) || 'user');
+        var previous = getLocalAuthUser();
+        var entitlements = profileToEntitlements(profile, user, previous);
         setLocalAuthUser({
           name: (profile && profile.name) || user.displayName || '',
           email: (profile && profile.email) || user.email || '',
           photoURL: user.photoURL || (profile && profile.photo) || '',
-          isSubscriber: !!(profile && profile.isSubscriber),
+          isSubscriber: entitlements.isSubscriber,
           isAdmin: role === 'admin',
           isInstructor: !!(profile && profile.isInstructor),
           role: role,
+          planId: entitlements.planId,
+          enrolledCourseIds: entitlements.enrolledCourseIds,
+          allowedSimulators: entitlements.allowedSimulators,
         });
         profileSynced = true;
         refreshSlots();
@@ -1084,4 +1202,26 @@ window.IFAAuth = {
   hasActiveTrial: hasActiveTrial,
   isAdminUser: isAdminUser,
   isInstructorUser: isInstructorUser,
+  applyEntitlements: applyEntitlements,
+  profileToEntitlements: profileToEntitlements,
 };
+
+document.addEventListener('ifa:subscription-changed', function (e) {
+  var detail = (e && e.detail) || {};
+  var current = getLocalAuthUser();
+  if (!current || !lastUser) return;
+  if (detail.userId && detail.userId !== lastUser.uid) return;
+  setLocalAuthUser(
+    Object.assign({}, current, {
+      isSubscriber: detail.isSubscriber !== undefined ? !!detail.isSubscriber : current.isSubscriber,
+      planId: detail.planId != null ? String(detail.planId) : current.planId,
+      enrolledCourseIds: Array.isArray(detail.enrolledCourseIds)
+        ? normalizeEnrolledCourseIds(detail.enrolledCourseIds)
+        : current.enrolledCourseIds,
+      allowedSimulators: Array.isArray(detail.allowedSimulators)
+        ? normalizeAllowedSimulators(detail.allowedSimulators)
+        : current.allowedSimulators,
+    })
+  );
+  refreshSlots();
+});

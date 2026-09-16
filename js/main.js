@@ -189,28 +189,17 @@
     document.addEventListener('click', function (e) {
       var button = e.target && e.target.closest ? e.target.closest('[data-plan]') : null;
       if (!button) return;
-      var planId = button.getAttribute('data-plan') || '';
-      var planName = '';
-      var plan = null;
-      if (window.PlatformPlans && typeof window.PlatformPlans.findPlan === 'function') {
-        plan = window.PlatformPlans.findPlan(planId);
-        if (plan) planName = plan.name;
+
+      if (button.getAttribute('data-plan-state') === 'pending' || button.disabled) {
+        e.preventDefault();
+        return;
       }
-      if (!planName) {
-        var legacy = { free: 'المجانية', standard: 'القياسية', professional: 'الاحترافية' };
-        planName = legacy[planId] || planId;
+
+      if (window.PlatformPlansPublic && typeof window.PlatformPlansPublic.handlePlanClick === 'function') {
+        e.preventDefault();
+        window.PlatformPlansPublic.handlePlanClick(button);
+        return;
       }
-      if (window.PlatformSimulators && typeof window.PlatformSimulators.subscribeCurrentUserToPlan === 'function') {
-        try {
-          window.PlatformSimulators.subscribeCurrentUserToPlan(planId);
-          alert('تم تفعيل اشتراكك في باقة: ' + planName + '\nستظهر المحاكيات المسموحة في قسم المحاكيات.');
-          return;
-        } catch (err) {
-          alert((err && err.message) || 'تعذر تفعيل الاشتراك.\nالباقة المختارة: ' + planName);
-          return;
-        }
-      }
-      alert('سيتم ربط هذه الواجهة بنظام الاشتراكات قريباً.\nالباقة المختارة: ' + planName);
     });
 
     if (window.PlatformSimulatorShowcase && typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function') {

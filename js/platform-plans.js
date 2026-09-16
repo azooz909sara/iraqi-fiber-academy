@@ -11,7 +11,9 @@
   var PLANS_ALIAS_KEY = 'ifa_pricing_plans';
   var SEED_FLAG_KEY = 'platform_plans_initialized';
   var SEED_VERSION_KEY = 'platform_plans_seed_version';
-  var SEED_VERSION = '2';
+  var SEED_VERSION = '3';
+
+  var LEGACY_TIER_IDS = { plan_free: true, plan_standard: true, plan_pro: true };
 
   var DEFAULT_SIMULATOR_IDS = [
     'ftth-simulator',
@@ -185,17 +187,35 @@
     return ['individual', 'program', 'master'];
   }
 
+  function normalizePlanType(raw) {
+    var type = String((raw && raw.planType) || '').trim().toLowerCase();
+    if (type === 'course' || type === 'bundle') return type;
+    if (raw && raw.sourceCourseId) return 'course';
+    return 'bundle';
+  }
+
+  function normalizeIncludedCourseIds(raw) {
+    if (Array.isArray(raw && raw.includedCourseIds)) {
+      return raw.includedCourseIds
+        .map(function (id) {
+          return String(id || '').trim();
+        })
+        .filter(Boolean);
+    }
+    if (raw && raw.sourceCourseId) return [String(raw.sourceCourseId).trim()];
+    return [];
+  }
+
   function normalizePlan(raw) {
     if (!raw || typeof raw !== 'object') return null;
     var price = parsePrice(raw.price);
-    var accessLevel = normalizeAccessLevel(
-      raw.accessLevel || raw.tier || (raw.id === 'plan_free' ? 'free' : raw.id === 'plan_pro' ? 'professional' : '')
-    );
+    var planType = normalizePlanType(raw);
+    var includedCourseIds = normalizeIncludedCourseIds(raw);
     var categories = normalizeCategories(raw.courseCategories);
-    if (!categories.length) categories = defaultCategoriesForLevel(accessLevel);
-    var meta = getAccessMeta(accessLevel);
+    if (!categories.length) categories = ['individual'];
     return {
       id: String(raw.id || uid('plan')),
+      planType: planType,
       name: String(raw.name || '').trim(),
       description: String(raw.description || '').trim(),
       price: price,
@@ -206,94 +226,24 @@
       featured: !!raw.featured,
       badge: String(raw.badge || '').trim(),
       features: normalizeFeatures(raw.features),
-      accessLevel: accessLevel,
-      accessRank: meta.rank,
       courseCategories: categories,
       sortOrder: isFinite(Number(raw.sortOrder)) ? Number(raw.sortOrder) : 0,
       allowedSimulators: normalizeSimulatorIds(raw.allowedSimulators),
       sourceCourseId: String(raw.sourceCourseId || '').trim(),
+      includedCourseIds: includedCourseIds,
       updatedAt: raw.updatedAt || new Date().toISOString(),
       createdAt: raw.createdAt || new Date().toISOString(),
     };
   }
 
   function seedPlans() {
-    return [
-      normalizePlan({
-        id: 'plan_free',
-        name: 'المجانية',
-        description: 'للمبتدئين والتجربة الأولى',
-        price: 0,
-        currency: 'IQD',
-        period: 'مجاناً للأبد',
-        ctaLabel: 'ابدأ مجاناً',
-        ctaStyle: 'outline',
-        featured: false,
-        accessLevel: 'free',
-        courseCategories: ['individual'],
-        sortOrder: 0,
-        allowedSimulators: [],
-        features: [
-          { text: 'الوصول للدروس الأساسية', included: true },
-          { text: '3 سيناريوهات محاكاة', included: true },
-          { text: 'منتدى المجتمع', included: true },
-          { text: 'محاكي OTDR', included: false },
-          { text: 'شهادة معتمدة', included: false },
-        ],
-      }),
-      normalizePlan({
-        id: 'plan_standard',
-        name: 'القياسية',
-        description: 'للفنيين والمهتمين بالتخصص',
-        price: 149,
-        currency: 'IQD',
-        period: 'شهرياً',
-        ctaLabel: 'اشترك الآن',
-        ctaStyle: 'primary',
-        featured: true,
-        badge: 'الأكثر شعبية',
-        accessLevel: 'standard',
-        courseCategories: ['individual', 'program'],
-        sortOrder: 1,
-        allowedSimulators: ['ftth-simulator', 'otdr-simulator', 'power-meter'],
-        features: [
-          { text: 'كل مميزات المجانية', included: true },
-          { text: 'محاكي FTTH كامل', included: true },
-          { text: '20 سيناريو تدريبي', included: true },
-          { text: 'محاكي OTDR أساسي', included: true },
-          { text: 'دعم فني عبر البريد', included: true },
-        ],
-      }),
-      normalizePlan({
-        id: 'plan_pro',
-        name: 'الاحترافية',
-        description: 'للمهندسين ومديري المشاريع',
-        price: 349,
-        currency: 'IQD',
-        period: 'شهرياً',
-        ctaLabel: 'اشترك الآن',
-        ctaStyle: 'outline',
-        featured: false,
-        accessLevel: 'professional',
-        courseCategories: ['individual', 'program', 'master'],
-        sortOrder: 2,
-        allowedSimulators: [
-          'ftth-simulator',
-          'otdr-simulator',
-          'power-meter',
-          'fusion-splicer',
-          'fiber-anatomy',
-          'patch-panel-lab',
-        ],
-        features: [
-          { text: 'كل مميزات القياسية', included: true },
-          { text: 'جميع المحاكيات المتقدمة', included: true },
-          { text: 'سيناريوهات غير محدودة', included: true },
-          { text: 'جلسات مع المدربين', included: true },
-          { text: 'شهادة احتراف معتمدة', included: true },
-        ],
-      }),
-    ];
+    return [];
+  }
+
+  function stripLegacyTierPlans(list) {
+    return (list || []).filter(function (plan) {
+      return plan && !LEGACY_TIER_IDS[plan.id];
+    });
   }
 
   function migratePlanFields(list) {
@@ -347,15 +297,45 @@
     }
   }
 
+  function usesFirestorePlans() {
+    return !!(
+      global.PlatformPricingFirestore &&
+      typeof global.PlatformPricingFirestore.isReady === 'function' &&
+      global.PlatformPricingFirestore.isReady()
+    );
+  }
+
+  function isFirestorePlansBootstrapping() {
+    var FS = global.PlatformPricingFirestore;
+    if (!FS || typeof FS.isReady !== 'function') return false;
+    return !FS.isReady();
+  }
+
   function getPlans() {
+    if (isFirestorePlansBootstrapping()) return [];
+    if (usesFirestorePlans()) {
+      return stripLegacyTierPlans(
+        (global.PlatformPricingFirestore.getCachedPlans() || [])
+          .map(normalizePlan)
+          .filter(Boolean)
+      ).sort(function (a, b) {
+        return (a.sortOrder || 0) - (b.sortOrder || 0);
+      });
+    }
     ensureSeeded();
     var list = readJson(PLANS_KEY, []);
-    return migratePlanFields(Array.isArray(list) ? list : []).sort(function (a, b) {
+    return stripLegacyTierPlans(migratePlanFields(Array.isArray(list) ? list : [])).sort(function (a, b) {
       return (a.sortOrder || 0) - (b.sortOrder || 0);
     });
   }
 
   function savePlans(list, detail) {
+    if (usesFirestorePlans()) {
+      console.warn(
+        '[PlatformPlans] savePlans ignored while Firestore sync is active — use PlatformPricingFirestore CRUD'
+      );
+      return (list || []).map(normalizePlan).filter(Boolean);
+    }
     var normalized = (list || [])
       .map(normalizePlan)
       .filter(Boolean)
@@ -369,6 +349,11 @@
   function findPlan(id) {
     var key = String(id || '');
     if (!key) return null;
+    if (isFirestorePlansBootstrapping()) return null;
+    if (usesFirestorePlans() && global.PlatformPricingFirestore.findPlan) {
+      var cached = global.PlatformPricingFirestore.findPlan(key);
+      return cached ? normalizePlan(cached) : null;
+    }
     var list = getPlans();
     for (var i = 0; i < list.length; i++) {
       if (String(list[i].id) === key) return list[i];
@@ -386,6 +371,12 @@
   }
 
   function updatePlan(id, patch) {
+    if (usesFirestorePlans()) {
+      console.warn(
+        '[PlatformPlans] updatePlan ignored while Firestore sync is active — use PlatformPricingFirestore.updatePlan'
+      );
+      return findPlan(id);
+    }
     var key = String(id || '');
     var list = getPlans();
     var found = null;
@@ -407,6 +398,12 @@
   }
 
   function addPlan(payload) {
+    if (usesFirestorePlans()) {
+      console.warn(
+        '[PlatformPlans] addPlan ignored while Firestore sync is active — use PlatformPricingFirestore.addPlan'
+      );
+      return null;
+    }
     var list = getPlans();
     var plan = normalizePlan(
       Object.assign({}, payload || {}, {
@@ -459,10 +456,14 @@
 
   function courseMatchesPlan(course, plan) {
     if (!course || !plan) return false;
-    if (course.requiredPlanId && String(course.requiredPlanId) === String(plan.id)) return true;
-    var courseLevel = normalizeAccessLevel(course.accessLevel || course.requiredAccessLevel || 'free');
-    var courseRank = getAccessMeta(courseLevel).rank;
-    return plan.accessRank >= courseRank && planUnlocksCategory(plan, course.category);
+    var courseId = String(course.id || '');
+    if (!courseId) return false;
+    if (plan.sourceCourseId && String(plan.sourceCourseId) === courseId) return true;
+    var included = plan.includedCourseIds || [];
+    for (var i = 0; i < included.length; i++) {
+      if (String(included[i]) === courseId) return true;
+    }
+    return false;
   }
 
   function countCoursesForPlan(plan, courses) {
@@ -501,57 +502,27 @@
     return null;
   }
 
-  function upsertFromCourse(course, options) {
-    if (!course || !course.id) return null;
-    options = options || {};
-    var sims = normalizeSimulatorIds(course.allowedSimulators);
-    var generate = options.generateMatchingPlan === true;
-    var existing = findPlanBySourceCourse(course.id);
-    var linked = !existing && course.requiredPlanId ? findPlan(course.requiredPlanId) : existing;
-    var features = [{ text: 'الوصول لكورس ' + (course.title || ''), included: true }].concat(
-      simulatorFeatureLines(sims)
-    );
-
-    if (generate) {
-      if (existing && String(existing.sourceCourseId || '') === String(course.id)) {
-        return updatePlan(existing.id, {
-          name: String(course.title || '').trim() || existing.name,
-          description: String(course.description || '').trim() || existing.description,
-          price: parsePrice(course.price),
-          currency: normalizeCurrency(course.currency || existing.currency),
-          period: existing.period || 'لكامل الكورس',
-          accessLevel: course.accessLevel || existing.accessLevel || 'standard',
-          courseCategories: course.category ? [course.category] : existing.courseCategories || ['individual'],
-          allowedSimulators: sims,
-          sourceCourseId: course.id,
-          features: features,
-        });
-      }
-      return addPlan({
-        name: String(course.title || '').trim() || 'باقة الكورس',
-        description: String(course.description || '').trim() || 'باقة وصول مطابقة للكورس',
-        price: parsePrice(course.price),
-        currency: normalizeCurrency(course.currency),
-        period: 'لكامل الكورس',
-        accessLevel: course.accessLevel || 'standard',
-        courseCategories: course.category ? [course.category] : ['individual'],
-        ctaLabel: 'اشترك الآن',
-        ctaStyle: 'primary',
-        featured: false,
-        features: features,
-        allowedSimulators: sims,
-        sourceCourseId: course.id,
-      });
+  function isCatalogPricingPlan(plan) {
+    if (global.CoursePlanSync && typeof global.CoursePlanSync.isCatalogPricingPlan === 'function') {
+      return global.CoursePlanSync.isCatalogPricingPlan(plan);
     }
+    if (!plan || LEGACY_TIER_IDS[plan.id]) return false;
+    if (parsePrice(plan.price) <= 0) return false;
+    var type = String(plan.planType || '').toLowerCase();
+    if (type === 'course') return !!plan.sourceCourseId;
+    if (type === 'bundle') return true;
+    return !plan.sourceCourseId || !!plan.sourceCourseId;
+  }
 
-    if (linked) {
-      var linkedPatch = { allowedSimulators: sims };
-      if (String(linked.sourceCourseId || '') === String(course.id)) {
-        linkedPatch.sourceCourseId = course.id;
-      }
-      return updatePlan(linked.id, linkedPatch);
+  function getCatalogPricingPlans() {
+    return getPlans().filter(isCatalogPricingPlan);
+  }
+
+  function upsertFromCourse(course) {
+    if (global.CoursePlanSync && typeof global.CoursePlanSync.syncPlanForCourse === 'function') {
+      return global.CoursePlanSync.syncPlanForCourse(course);
     }
-    return null;
+    return Promise.resolve(course);
   }
 
   ensureSeeded();
@@ -559,6 +530,9 @@
   global.PlatformPlans = {
     PLANS_KEY: PLANS_KEY,
     PLANS_ALIAS_KEY: PLANS_ALIAS_KEY,
+    defaultSeedPlans: seedPlans,
+    usesFirestore: usesFirestorePlans,
+    isFirestoreBootstrapping: isFirestorePlansBootstrapping,
     getPlans: getPlans,
     savePlans: savePlans,
     findPlan: findPlan,
@@ -578,8 +552,17 @@
     planUnlocksCategory: planUnlocksCategory,
     courseMatchesPlan: courseMatchesPlan,
     countCoursesForPlan: countCoursesForPlan,
+    isCatalogPricingPlan: isCatalogPricingPlan,
+    getCatalogPricingPlans: getCatalogPricingPlans,
     normalizeSimulatorIds: normalizeSimulatorIds,
+    simulatorFeatureLines: simulatorFeatureLines,
     findPlanBySourceCourse: findPlanBySourceCourse,
     upsertFromCourse: upsertFromCourse,
+    planIdForCourse: function (courseId) {
+      if (global.CoursePlanSync && global.CoursePlanSync.planIdForCourse) {
+        return global.CoursePlanSync.planIdForCourse(courseId);
+      }
+      return 'plan_course_' + String(courseId || '');
+    },
   };
 })(typeof window !== 'undefined' ? window : this);

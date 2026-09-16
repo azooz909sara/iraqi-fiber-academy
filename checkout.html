@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إتمام الدفع | أكاديمية الفايبر العراقية</title>
+  <link rel="icon" type="image/png" href="images/logo.png" />
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/header.css">
+  <link rel="stylesheet" href="css/checkout.css">
+</head>
+<body>
+  <header class="header" id="header">
+    <div class="header__inner">
+      <a href="index.html" class="logo">
+        <img class="logo__img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
+        <div class="logo__text">
+          <span class="logo__text-main">أكاديمية الفايبر العراقية</span>
+          <span class="logo__text-sub">IRAQI FIBER ACADEMY</span>
+        </div>
+      </a>
+      <nav class="nav">
+        <div class="header__actions">
+          <div class="auth-slot" data-auth-slot data-auth-variant="landing"></div>
+          <a href="index.html#pricing" class="header__cta">الباقات</a>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main class="checkout-page">
+    <div class="container" id="checkoutRoot">
+      <div class="checkout-loading" role="status">جاري تحميل صفحة الدفع…</div>
+    </div>
+  </main>
+
+  <div class="checkout-modal" id="checkoutSuccessModal" hidden aria-hidden="true">
+    <div class="checkout-modal__backdrop" data-checkout-success-close></div>
+    <div class="checkout-modal__dialog" role="alertdialog" aria-modal="true" aria-labelledby="checkoutSuccessTitle">
+      <div class="checkout-modal__icon" aria-hidden="true">✓</div>
+      <h2 class="checkout-modal__title" id="checkoutSuccessTitle">تم استلام طلبك</h2>
+      <p class="checkout-modal__message" id="checkoutSuccessMessage">
+        تم استلام طلبك بنجاح، وسيتم تفعيل الكورس فور مراجعة الوصل من الإدارة.
+      </p>
+      <button type="button" class="btn btn--primary" data-checkout-success-close>حسناً</button>
+    </div>
+  </div>
+
+  <script src="js/env-access.js"></script>
+  <script type="module" src="js/checkout.js"></script>
+  <script type="module" src="js/auth-manager.js"></script>
+</body>
+</html>
