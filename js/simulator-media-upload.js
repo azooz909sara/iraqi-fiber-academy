@@ -63,18 +63,45 @@ export async function compressRasterImage(file, maxW, maxH, quality) {
   if (typeof bitmap.close === 'function') bitmap.close();
 
   var blob = await new Promise(function (resolve, reject) {
-    canvas.toBlob(
-      function (result) {
-        if (result) resolve(result);
-        else reject(new Error('فشل ضغط الصورة'));
-      },
-      'image/webp',
-      quality
-    );
+    var timeoutId = setTimeout(function () {
+      reject(new Error('انتهى وقت محاولة ضغط الصورة (Timeout)'));
+    }, 15000);
+
+    var attemptCompression = function (mimeType, currentQuality) {
+      canvas.toBlob(
+        function (result) {
+          clearTimeout(timeoutId);
+          if (result) {
+            resolve(result);
+          } else if (mimeType === 'image/webp') {
+            console.warn('[CMS] WEBP compression failed, trying JPEG...');
+            timeoutId = setTimeout(function () {
+              reject(new Error('انتهى وقت محاولة ضغط الصورة (Timeout)'));
+            }, 15000);
+            attemptCompression('image/jpeg', currentQuality);
+          } else {
+            reject(new Error('فشل ضغط الصورة بجميع التنسيقات'));
+          }
+        },
+        mimeType,
+        currentQuality
+      );
+    };
+
+    attemptCompression('image/webp', quality);
+  }).catch(function (err) {
+    console.error('[CMS] Compression error, using original file:', err);
+    return file;
   });
 
+  if (blob instanceof File) {
+    return blob;
+  }
+
   var baseName = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
-  return new File([blob], baseName + '.webp', { type: 'image/webp' });
+  var mimeType = blob && blob.type ? blob.type : 'image/webp';
+  var ext = mimeType.indexOf('jpeg') !== -1 ? 'jpg' : 'webp';
+  return new File([blob], baseName + '.' + ext, { type: mimeType });
 }
 
 export async function dataUrlToFile(dataUrl, filename) {
@@ -117,7 +144,19 @@ function isEphemeralPreviewUrl(value) {
   return str.indexOf('blob:') === 0;
 }
 
+function isCloudStorageUrl(imageUrl) {
+  return (
+    typeof imageUrl === 'string' &&
+    imageUrl.indexOf('https://firebasestorage.googleapis.com') === 0
+  );
+}
+
 export async function resolveSimulatorIconUrl(simId, value, pendingFile) {
+  var imageUrl = value;
+  if (typeof imageUrl === 'string' && isCloudStorageUrl(imageUrl)) {
+    console.log('[CMS] Image already uploaded, skipping.');
+    return imageUrl;
+  }
   if (pendingFile) {
     return uploadSimulatorIcon(simId, pendingFile);
   }
@@ -136,6 +175,11 @@ export async function resolveSimulatorIconUrl(simId, value, pendingFile) {
 }
 
 export async function resolveShowcaseImageUrl(simId, value, pendingFile) {
+  var imageUrl = value;
+  if (typeof imageUrl === 'string' && isCloudStorageUrl(imageUrl)) {
+    console.log('[CMS] Image already uploaded, skipping.');
+    return imageUrl;
+  }
   if (pendingFile) {
     return uploadShowcaseImage(simId, pendingFile);
   }
@@ -174,24 +218,31 @@ function catalogIdsFromPayload(payload) {
 /**
  * Upload pending / base64 media and replace with Storage URLs before Firestore write.
  */
-export async function prepareSimulatorsPayloadForFirestore(payload, pendingIcons, pendingShowcase) {
+export async function prepareSimulatorsPayloadForFirestore(payload, pendingIcons, pendingShowcase, onProgress) {
   var src = payload && typeof payload === 'object' ? payload : {};
   var meta = Object.assign({}, src.simulatorsMeta || {});
   var showcase = Object.assign({}, src.showcaseMeta || src.showcaseStore || {});
   var pendingIconMap = pendingIcons && typeof pendingIcons === 'object' ? pendingIcons : {};
   var pendingShowcaseMap = pendingShowcase && typeof pendingShowcase === 'object' ? pendingShowcase : {};
+  var reportProgress = typeof onProgress === 'function' ? onProgress : function () {};
 
   var ids = catalogIdsFromPayload(src);
   for (var i = 0; i < ids.length; i++) {
     var id = ids[i];
+    var stepBase = 30 + Math.round((i / Math.max(ids.length, 1)) * 45);
+    reportProgress(stepBase);
+    console.log('[CMS] Processing simulator media:', id, '(' + (i + 1) + '/' + ids.length + ')');
+
     var metaEntry = meta[id];
     if (metaEntry && metaEntry.iconType === 'image') {
+      console.log('[CMS] Resolving icon for', id);
       meta[id] = Object.assign({}, metaEntry, {
         icon: await resolveSimulatorIconUrl(id, metaEntry.icon, pendingIconMap[id]),
       });
     }
     var showcaseEntry = showcase[id];
     if (showcaseEntry && showcaseEntry.showcaseImage) {
+      console.log('[CMS] Resolving showcase image for', id);
       showcase[id] = Object.assign({}, showcaseEntry, {
         showcaseImage: await resolveShowcaseImageUrl(
           id,
@@ -201,6 +252,8 @@ export async function prepareSimulatorsPayloadForFirestore(payload, pendingIcons
       });
     }
   }
+
+  reportProgress(78);
 
   return Object.assign({}, src, {
     simulatorsMeta: meta,

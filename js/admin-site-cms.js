@@ -594,7 +594,26 @@
     };
   }
 
+  var isSimulatorsSaveInFlight = false;
+
+  function withTimeout(promise, ms, errorMessage) {
+    var timeoutId;
+    var timeoutPromise = new Promise(function (_, reject) {
+      timeoutId = setTimeout(function () {
+        reject(new Error(errorMessage));
+      }, ms);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(function () {
+      clearTimeout(timeoutId);
+    });
+  }
+
   async function saveAllSimulatorShowcaseCards() {
+    if (isSimulatorsSaveInFlight) {
+      console.warn('[CMS] Save already in progress.');
+      return false;
+    }
+
     var collected = collectAllSimulatorShowcasePayload();
     if (!collected) {
       toast('لا توجد بطاقات محاكيات للنشر — أعد تحميل الصفحة', true);
@@ -620,15 +639,21 @@
       toast(missingMessage, true);
       return false;
     }
+
+    isSimulatorsSaveInFlight = true;
     try {
       await runWithCmsPublishProgress('جاري نشر المحاكيات...', async function (setPct) {
         setPct(10);
-        setPct(25);
-        await Firestore.saveSimulatorsBundle(collected.payload, {
-          pendingIcons: pendingSimulatorIconFiles,
-          pendingShowcase: pendingShowcaseImageFiles,
-        });
-        setPct(85);
+        await withTimeout(
+          Firestore.saveSimulatorsBundle(collected.payload, {
+            pendingIcons: pendingSimulatorIconFiles,
+            pendingShowcase: pendingShowcaseImageFiles,
+            onProgress: setPct,
+          }),
+          120000,
+          'انتهى وقت الحفظ (Timeout). تحقق من اتصالك بالإنترنت.'
+        );
+        setPct(90);
       });
 
       clearAllPendingSimulatorMedia();
@@ -640,17 +665,21 @@
           ' محاكيات · قيد التطوير: ' +
           collected.comingSoonIds.length;
       }
-      toast('تم حفظ ونشر المحاكيات بنجاح!');
+      toast('تم حفظ ونشر المحاكيات بنجاح!', false);
       renderSimulatorShowcaseManager();
       return true;
-    } catch (err) {
-      console.error('[CMS simulators] publish failed', err);
-      var errorMessage = formatSimulatorsPublishError(err);
+    } catch (error) {
+      console.error('[CMS] Publish failed:', error);
+      var errorMessage =
+        error && error.message ? String(error.message) : formatSimulatorsPublishError(error);
       if (status) {
         status.textContent = errorMessage;
       }
-      toast(errorMessage, true);
+      toast('فشل الحفظ: ' + errorMessage, true);
       return false;
+    } finally {
+      isSimulatorsSaveInFlight = false;
+      setCmsSaveProgress(false, 0, '');
     }
   }
 

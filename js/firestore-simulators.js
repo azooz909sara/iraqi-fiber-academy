@@ -517,7 +517,8 @@ async function maybeUploadSimulatorMedia(bundle, options) {
       showcaseMeta: bundle.showcaseStore,
     },
     pendingIcons,
-    pendingShowcase
+    pendingShowcase,
+    opts.onProgress
   );
   mod.assertNoDataUrlsInSimulatorsPayload(prepared);
 
@@ -547,7 +548,15 @@ export async function saveSimulatorsBundle(payload, options) {
       : current.platformSettings,
   });
   try {
+    if (options && typeof options.onProgress === 'function') {
+      options.onProgress(28);
+    }
+    console.log('[PlatformSimulatorsFirestore] saveSimulatorsBundle: uploading media…');
     next = await maybeUploadSimulatorMedia(next, options);
+    if (options && typeof options.onProgress === 'function') {
+      options.onProgress(82);
+    }
+    console.log('[PlatformSimulatorsFirestore] saveSimulatorsBundle: writing Firestore…');
     await writeBundleToFirestore(next);
   } catch (err) {
     var message =
