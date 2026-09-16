@@ -16,6 +16,9 @@ var listeners = [];
 var unsubscribeSnapshot = null;
 var seedInFlight = false;
 var needsSeed = false;
+var hasAttemptedMigration = false;
+var migrationPermissionDenied = false;
+var migrationErrorLogged = false;
 
 function catalogIds() {
   if (window.PlatformSimulators && Array.isArray(window.PlatformSimulators.CATALOG)) {
@@ -303,7 +306,35 @@ function canAutoSeedFirestore() {
   var Auth = window.IFAAuth;
   if (!Auth || typeof Auth.isLoggedIn !== 'function' || !Auth.isLoggedIn()) return false;
   if (typeof Auth.isAdminUser !== 'function') return false;
-  return Auth.isAdminUser(Auth.getAuthState().profile);
+  var state = Auth.getAuthState();
+  if (!state || !state.profileSynced) return false;
+  return Auth.isAdminUser(state.profile);
+}
+
+function isPermissionDeniedError(err) {
+  var code = err && err.code ? String(err.code) : '';
+  if (code === 'permission-denied') return true;
+  var message = err && err.message ? String(err.message) : '';
+  return message.indexOf('Missing or insufficient permissions') !== -1;
+}
+
+function shouldAttemptAutoMigration() {
+  if (migrationPermissionDenied) return false;
+  if (hasAttemptedMigration) return false;
+  if (!canAutoSeedFirestore()) return false;
+  return true;
+}
+
+function markMigrationPermissionDenied(err) {
+  migrationPermissionDenied = true;
+  needsSeed = false;
+  if (!migrationErrorLogged) {
+    migrationErrorLogged = true;
+    console.error(
+      '[PlatformSimulatorsFirestore] migration blocked: permission-denied (no further auto-retries)',
+      err
+    );
+  }
 }
 
 function formatFirestoreWriteError(err) {
@@ -349,6 +380,14 @@ async function writeBundleToFirestore(bundle) {
  */
 export async function migrateLocalCacheToFirestore(options) {
   var opts = options && typeof options === 'object' ? options : {};
+  var isAutoMigration = !opts.force;
+
+  if (isAutoMigration && migrationPermissionDenied) {
+    return { ok: false, reason: 'permission-denied' };
+  }
+  if (isAutoMigration && hasAttemptedMigration) {
+    return { ok: false, reason: 'already-attempted' };
+  }
   if (seedInFlight) {
     return { ok: false, reason: 'in-flight' };
   }
@@ -362,6 +401,10 @@ export async function migrateLocalCacheToFirestore(options) {
     return { ok: false, reason: 'no-local-data' };
   }
 
+  if (isAutoMigration) {
+    hasAttemptedMigration = true;
+  }
+
   seedInFlight = true;
   try {
     var payload = hasRichLocal || localBundleHasRichContent(local) ? local : emptyBundle();
@@ -369,12 +412,25 @@ export async function migrateLocalCacheToFirestore(options) {
     var saved = await writeBundleToFirestore(payload);
     applyBundleToPlatform(saved);
     notifyListeners();
+    migrationPermissionDenied = false;
     if (!opts.silent) {
       console.info('[PlatformSimulatorsFirestore] migrated local cache to Firestore', saved);
     }
     return { ok: true, bundle: saved, migratedRichContent: hasRichLocal };
   } catch (err) {
-    console.error('[PlatformSimulatorsFirestore] migration failed', err);
+    if (isPermissionDeniedError(err)) {
+      markMigrationPermissionDenied(err);
+      return {
+        ok: false,
+        reason: 'permission-denied',
+        error: err,
+        message: formatFirestoreWriteError(err),
+      };
+    }
+    if (!migrationErrorLogged) {
+      migrationErrorLogged = true;
+      console.error('[PlatformSimulatorsFirestore] migration failed', err);
+    }
     return { ok: false, reason: 'write-failed', error: err, message: formatFirestoreWriteError(err) };
   } finally {
     seedInFlight = false;
@@ -382,23 +438,21 @@ export async function migrateLocalCacheToFirestore(options) {
 }
 
 async function seedFromLocalOrDefaults() {
-  if (!canAutoSeedFirestore()) return { ok: false, reason: 'not-admin' };
-  var local = readLocalBundle();
-  if (localBundleHasRichContent(local)) {
-    return migrateLocalCacheToFirestore({ silent: true });
-  }
-  return migrateLocalCacheToFirestore({ silent: true, force: true });
+  if (!shouldAttemptAutoMigration()) return { ok: false, reason: 'skipped' };
+  return migrateLocalCacheToFirestore({ silent: true, auto: true });
 }
 
 function handleSnapshot(snap) {
   if (!snap.exists() || isDocumentEmpty(snap.data())) {
-    needsSeed = true;
+    if (!migrationPermissionDenied) {
+      needsSeed = true;
+    }
     var local = readLocalBundle();
     cachedBundle = local;
     snapshotReady = true;
     applyBundleToPlatform(local);
     notifyListeners();
-    if (canAutoSeedFirestore()) {
+    if (shouldAttemptAutoMigration()) {
       seedFromLocalOrDefaults();
     }
     return;
@@ -591,7 +645,7 @@ export function startSimulatorsFirestoreSync() {
 
 window.addEventListener('ifa:auth-changed', function (e) {
   var detail = (e && e.detail) || {};
-  if (detail.profileSynced && needsSeed) {
+  if (detail.profileSynced && needsSeed && shouldAttemptAutoMigration()) {
     seedFromLocalOrDefaults();
   }
 });

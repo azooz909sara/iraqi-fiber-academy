@@ -779,7 +779,6 @@
 
     function onSimulatorsFirestoreReady() {
       updateSimulatorsSaveButtonState();
-      runSimulatorsLocalToFirestoreMigration(true);
 
       var Firestore = getSimulatorsFirestoreApi();
       if (Firestore && typeof Firestore.subscribe === 'function' && !window.__ifaSimulatorsCmsSubscribed) {

@@ -7,9 +7,14 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
     function isAdmin() {
       return isSignedIn()
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && userDoc().data.role == 'admin';
     }
 
     function isOwner(userId) {
@@ -46,8 +51,13 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // CMS singleton settings (stats, footer, hero, simulators, platform, etc.)
-    // settings/simulators — public read; admin write (simulator icons, showcase CMS).
+    // Simulator CMS bundle — public read; admin write.
+    match /settings/simulators {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // CMS singleton settings (stats, footer, hero, platform, etc.)
     match /settings/{document} {
       allow read: if document != 'checkout_config';
       allow create, update, delete: if isAdmin();
