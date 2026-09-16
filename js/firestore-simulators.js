@@ -315,7 +315,10 @@ function formatFirestoreWriteError(err) {
     return 'Firestore غير متاح حالياً — تحقق من الاتصال بالإنترنت';
   }
   if (code === 'invalid-argument' || code === 'failed-precondition') {
-    return 'بيانات المحاكيات غير صالحة أو كبيرة جداً لـ Firestore (الحد ~1MB للمستند)';
+    return 'بيانات المحاكيات غير صالحة أو كبيرة جداً لـ Firestore — تأكد من رفع الصور إلى التخزين (Storage)';
+  }
+  if (err && err.message && String(err.message).indexOf('base64') !== -1) {
+    return String(err.message);
   }
   var message = err && err.message ? String(err.message) : 'خطأ غير معروف';
   return 'فشل نشر المحاكيات إلى Firestore: ' + message;
@@ -362,6 +365,7 @@ export async function migrateLocalCacheToFirestore(options) {
   seedInFlight = true;
   try {
     var payload = hasRichLocal || localBundleHasRichContent(local) ? local : emptyBundle();
+    payload = await maybeUploadSimulatorMedia(normalizeBundle(payload), { uploadMedia: true });
     var saved = await writeBundleToFirestore(payload);
     applyBundleToPlatform(saved);
     notifyListeners();
@@ -480,7 +484,51 @@ export async function saveShowcaseMetaToFirestore(patch, intervalSeconds) {
   return next.showcaseStore;
 }
 
-export async function saveSimulatorsBundle(payload) {
+async function maybeUploadSimulatorMedia(bundle, options) {
+  var opts = options && typeof options === 'object' ? options : {};
+  var mod = await import('./simulator-media-upload.js');
+  var pendingIcons = opts.pendingIcons || {};
+  var pendingShowcase = opts.pendingShowcase || {};
+  var hasPending =
+    Object.keys(pendingIcons).some(function (k) {
+      return pendingIcons[k];
+    }) ||
+    Object.keys(pendingShowcase).some(function (k) {
+      return pendingShowcase[k];
+    });
+
+  var hasDataUrl = false;
+  try {
+    mod.assertNoDataUrlsInSimulatorsPayload({
+      simulatorsMeta: bundle.simulatorsMeta,
+      showcaseMeta: bundle.showcaseStore,
+    });
+  } catch (err) {
+    hasDataUrl = true;
+  }
+
+  if (!hasPending && !hasDataUrl) {
+    return bundle;
+  }
+
+  var prepared = await mod.prepareSimulatorsPayloadForFirestore(
+    {
+      simulatorsMeta: bundle.simulatorsMeta,
+      showcaseMeta: bundle.showcaseStore,
+    },
+    pendingIcons,
+    pendingShowcase
+  );
+  mod.assertNoDataUrlsInSimulatorsPayload(prepared);
+
+  return normalizeBundle({
+    simulatorsMeta: prepared.simulatorsMeta,
+    showcaseStore: prepared.showcaseMeta,
+    platformSettings: bundle.platformSettings,
+  });
+}
+
+export async function saveSimulatorsBundle(payload, options) {
   var current = getCachedSimulatorsBundle();
   var incoming = payload && typeof payload === 'object' ? payload : {};
   var next = normalizeBundle({
@@ -499,9 +547,14 @@ export async function saveSimulatorsBundle(payload) {
       : current.platformSettings,
   });
   try {
+    next = await maybeUploadSimulatorMedia(next, options);
     await writeBundleToFirestore(next);
   } catch (err) {
-    var wrapped = new Error(formatFirestoreWriteError(err));
+    var message =
+      err && err.message && String(err.message).indexOf('base64') !== -1
+        ? String(err.message)
+        : formatFirestoreWriteError(err);
+    var wrapped = new Error(message);
     wrapped.code = err && err.code;
     wrapped.cause = err;
     throw wrapped;

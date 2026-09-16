@@ -242,6 +242,23 @@
   }
 
   var MAX_SIM_ICON_BYTES = 512000;
+  var pendingSimulatorIconFiles = {};
+  var pendingShowcaseImageFiles = {};
+
+  function clearPendingSimulatorMedia(simId) {
+    if (!simId) return;
+    delete pendingSimulatorIconFiles[simId];
+    delete pendingShowcaseImageFiles[simId];
+  }
+
+  function clearAllPendingSimulatorMedia() {
+    pendingSimulatorIconFiles = {};
+    pendingShowcaseImageFiles = {};
+  }
+
+  function getShowcaseCardSimId(card) {
+    return card ? card.getAttribute('data-showcase-editor') || '' : '';
+  }
 
   function simIconPreviewHtml(meta) {
     if (meta && meta.iconType === 'image' && meta.icon) {
@@ -270,6 +287,7 @@
 
   function resetSimIcon(card) {
     if (!card) return;
+    clearPendingSimulatorMedia(getShowcaseCardSimId(card));
     var iconValue = card.querySelector('[data-sim-icon-value]');
     var iconType = card.querySelector('[data-sim-icon-type]');
     var iconDefault = card.querySelector('[data-sim-icon-default]');
@@ -604,10 +622,16 @@
     }
     try {
       await runWithCmsPublishProgress('جاري نشر المحاكيات...', async function (setPct) {
-        setPct(15);
-        await Firestore.saveSimulatorsBundle(collected.payload);
+        setPct(10);
+        setPct(25);
+        await Firestore.saveSimulatorsBundle(collected.payload, {
+          pendingIcons: pendingSimulatorIconFiles,
+          pendingShowcase: pendingShowcaseImageFiles,
+        });
         setPct(85);
       });
+
+      clearAllPendingSimulatorMedia();
 
       if (status) {
         status.textContent =
@@ -784,6 +808,7 @@
       if (clearBtn) {
         var clearCard = clearBtn.closest('[data-showcase-editor]');
         if (!clearCard) return;
+        clearPendingSimulatorMedia(getShowcaseCardSimId(clearCard));
         var hidden = clearCard.querySelector('[data-showcase-image]');
         if (hidden) hidden.value = '';
         var fileInput = clearCard.querySelector('[data-showcase-image-file]');
@@ -806,20 +831,20 @@
         return;
       }
       var simId = fileInput.getAttribute('data-showcase-image-file');
-      readFileAsDataUrl(file, function (url) {
-        var card = host.querySelector('[data-showcase-editor="' + simId + '"]');
-        if (!card) return;
-        var hidden = card.querySelector('[data-showcase-image]');
-        if (hidden) hidden.value = url;
-        var previewBox = card.querySelector('.cms-showcase-card__preview');
-        if (previewBox) {
-          previewBox.innerHTML =
-            '<img class="cms-showcase-card__preview-img" src="' +
-            String(url).replace(/"/g, '&quot;') +
-            '" alt="" />';
-        }
-        fileInput.value = '';
-      });
+      var card = host.querySelector('[data-showcase-editor="' + simId + '"]');
+      if (!card) return;
+      pendingShowcaseImageFiles[simId] = file;
+      var previewUrl = URL.createObjectURL(file);
+      var hidden = card.querySelector('[data-showcase-image]');
+      if (hidden) hidden.value = previewUrl;
+      var previewBox = card.querySelector('.cms-showcase-card__preview');
+      if (previewBox) {
+        previewBox.innerHTML =
+          '<img class="cms-showcase-card__preview-img" src="' +
+          String(previewUrl).replace(/"/g, '&quot;') +
+          '" alt="" />';
+      }
+      fileInput.value = '';
     });
   }
 
@@ -3163,13 +3188,15 @@
           simIconFile.value = '';
           return;
         }
-        readFileAsDataUrl(file, function (url) {
-          var iconValue = card.querySelector('[data-sim-icon-value]');
-          var iconType = card.querySelector('[data-sim-icon-type]');
-          if (iconValue) iconValue.value = url;
-          if (iconType) iconType.value = 'image';
-          updateSimIconPreview(card);
-        });
+        var simId = getShowcaseCardSimId(card);
+        if (simId) pendingSimulatorIconFiles[simId] = file;
+        var previewUrl = URL.createObjectURL(file);
+        var iconValue = card.querySelector('[data-sim-icon-value]');
+        var iconType = card.querySelector('[data-sim-icon-type]');
+        if (iconValue) iconValue.value = previewUrl;
+        if (iconType) iconType.value = 'image';
+        updateSimIconPreview(card);
+        simIconFile.value = '';
         return;
       }
       if (e.target.id === 'articleEditorImageFile' && e.target.files && e.target.files[0]) {
