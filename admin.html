@@ -658,6 +658,13 @@
         </div>
       </div>
 
+      <div class="admin-upload-status admin-upload-status--cms" id="cmsSaveProgress" hidden role="status">
+        <div class="admin-upload-status__label" id="cmsSaveLabel">جاري الحفظ…</div>
+        <div class="admin-upload-status__track">
+          <div class="admin-upload-status__bar admin-upload-status__bar--publish" id="cmsSaveBar"></div>
+        </div>
+      </div>
+
       <div class="admin-toast" id="adminToast" hidden role="status" aria-live="polite"></div>
 
       <section class="admin-panel admin-panel--orders admin-view" id="orders" data-admin-view="orders" aria-labelledby="ordersHeading" hidden>
@@ -1396,6 +1403,7 @@
   <script type="module" src="js/admin-profile.js"></script>
   <script src="js/platform-simulators.js"></script>
   <script src="js/platform-simulator-showcase.js"></script>
+  <script type="module" src="js/platform-simulators-firestore-sync.js"></script>
   <script type="module" src="js/cms-status.js"></script>
   <script src="js/articles.js"></script>
   <script type="module" src="js/platform-articles-firestore-sync.js"></script>

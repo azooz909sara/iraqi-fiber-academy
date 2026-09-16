@@ -9,6 +9,7 @@
   var LEGACY_KEY = 'ifa_platform_courses';
   var GRID_ID = 'publicCoursesGrid';
   var lastSignature = '';
+  var detailsRenderSeq = 0;
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -245,6 +246,7 @@
         e.key === 'platform_plans'
       ) {
         renderPublicCourses();
+        renderCourseDetailsPage();
       }
     });
 
@@ -257,10 +259,16 @@
     document.addEventListener('ifa:pricing-firestore-changed', renderPublicCourses);
     window.addEventListener('ifa:pricing-firestore-changed', renderPublicCourses);
 
+    document.addEventListener('ifa:platform-courses-changed', renderCourseDetailsPage);
+    window.addEventListener('ifa:platform-courses-changed', renderCourseDetailsPage);
+    document.addEventListener('ifa:courses-firestore-changed', renderCourseDetailsPage);
+    window.addEventListener('ifa:courses-firestore-changed', renderCourseDetailsPage);
+
     (function waitForCoursesFirestoreSubscribe(attempts) {
       if (window.PlatformCoursesFirestore && typeof window.PlatformCoursesFirestore.subscribe === 'function') {
         window.PlatformCoursesFirestore.subscribe(function () {
           renderPublicCourses();
+          renderCourseDetailsPage();
         });
         return;
       }
@@ -311,15 +319,34 @@
     return Number(user.trialExpiresAt) > Date.now();
   }
 
-  function viewerHasCourseAccess(course) {
-    if (window.PlatformSimulators && typeof window.PlatformSimulators.isAdminPreviewContext === 'function') {
-      /* ignore */
-    }
+  function isCoursePreviewMode() {
     try {
-      if (new URLSearchParams(window.location.search).get('mode') === 'admin-preview') return true;
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('preview') === '1') return true;
+      if (params.get('mode') === 'admin-preview') return true;
     } catch (err) {
       /* ignore */
     }
+    var user = readAuthUser();
+    if (!user) return false;
+    if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
+    return false;
+  }
+
+  function isCoursePublished(course) {
+    if (!course) return false;
+    if (course.softDeleted) return false;
+    return String(course.status || '').toLowerCase() === 'published';
+  }
+
+  function canViewCourseDetails(course) {
+    if (!course) return false;
+    if (isCoursePublished(course)) return true;
+    return isCoursePreviewMode();
+  }
+
+  function viewerHasCourseAccess(course) {
+    if (isCoursePreviewMode()) return true;
     var user = readAuthUser();
     if (!user) return false;
     if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
@@ -340,11 +367,37 @@
     return false;
   }
 
-  function youtubeEmbed(url) {
-    var m = String(url || '').match(
-      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/
+  function extractYouTubeId(url) {
+    var raw = String(url || '').trim();
+    if (!raw) return '';
+
+    var patterns = [
+      /(?:youtube\.com\/watch\?.*v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i,
+      /youtu\.be\/([A-Za-z0-9_-]{11})/i,
+      /youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/i,
+      /m\.youtube\.com\/watch\?.*v=([A-Za-z0-9_-]{11})/i,
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = raw.match(patterns[i]);
+      if (match && match[1]) return match[1];
+    }
+    return '';
+  }
+
+  function youtubeEmbedUrl(url) {
+    var id = extractYouTubeId(url);
+    return id ? 'https://www.youtube.com/embed/' + id : '';
+  }
+
+  function isDirectVideoUrl(url) {
+    var raw = String(url || '').trim().toLowerCase();
+    if (!raw || extractYouTubeId(url)) return false;
+    return (
+      /\.(mp4|webm|mov|m4v)(\?|#|$)/i.test(raw) ||
+      raw.indexOf('firebasestorage.googleapis.com') !== -1 ||
+      raw.indexOf('storage.googleapis.com') !== -1
     );
-    return m ? 'https://www.youtube.com/embed/' + m[1] : '';
   }
 
   function lessonCanPlay(lesson, course) {
@@ -353,23 +406,24 @@
   }
 
   function renderLessonPlayer(lesson) {
-    var yt = youtubeEmbed(lesson.videoUrl);
-    if (yt) {
+    var videoUrl = lesson && lesson.videoUrl ? String(lesson.videoUrl).trim() : '';
+    var youtubeId = extractYouTubeId(videoUrl);
+    if (youtubeId) {
       return (
         '<div class="course-details__player">' +
-        '<iframe src="' +
-        escapeHtml(yt) +
+        '<iframe src="https://www.youtube.com/embed/' +
+        escapeHtml(youtubeId) +
         '" title="' +
         escapeHtml(lesson.title || 'فيديو') +
-        '" allowfullscreen></iframe>' +
+        '" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>' +
         '</div>'
       );
     }
-    if (lesson.videoUrl) {
+    if (videoUrl && (isDirectVideoUrl(videoUrl) || /^https?:\/\//i.test(videoUrl))) {
       return (
         '<div class="course-details__player">' +
-        '<video controls src="' +
-        escapeHtml(lesson.videoUrl) +
+        '<video controls playsinline src="' +
+        escapeHtml(videoUrl) +
         '"></video>' +
         '</div>'
       );
@@ -377,26 +431,86 @@
     return '<p class="course-details__no-video">لا يوجد فيديو مرفوع لهذه الحلقة بعد.</p>';
   }
 
-  function renderCourseDetailsPage() {
-    var root = document.getElementById('courseDetailsRoot');
-    if (!root) return;
-    var courseId = '';
+  function getCourseIdFromUrl() {
     try {
-      courseId = String(new URLSearchParams(window.location.search).get('id') || '');
+      return String(new URLSearchParams(window.location.search).get('id') || '').trim();
     } catch (err) {
-      courseId = '';
+      return '';
+    }
+  }
+
+  function findCourseInCache(courseId) {
+    if (!courseId) return null;
+    if (window.PlatformCourses && typeof window.PlatformCourses.findCourse === 'function') {
+      return window.PlatformCourses.findCourse(courseId);
     }
     var courses = fetchCoursesFromLocalStorage();
-    var course = null;
     for (var i = 0; i < courses.length; i++) {
-      if (String(courses[i].id) === courseId) {
-        course = courses[i];
-        break;
-      }
+      if (String(courses[i].id) === courseId) return courses[i];
     }
+    return null;
+  }
+
+  async function fetchCourseByIdFallback(courseId) {
+    var FS = window.PlatformCoursesFirestore;
+    if (FS && typeof FS.fetchCourseById === 'function') {
+      return FS.fetchCourseById(courseId);
+    }
+    if (FS && typeof FS.findCourse === 'function') {
+      return FS.findCourse(courseId);
+    }
+    return null;
+  }
+
+  function renderCourseDetailsLoading(root) {
+    root.innerHTML =
+      '<div class="public-courses-empty" role="status">' +
+      '<div class="public-courses-empty__icon" aria-hidden="true">⏳</div>' +
+      '<h3 class="public-courses-empty__title">جاري تحميل الكورس…</h3>' +
+      '<p class="public-courses-empty__text">يتم جلب بيانات الكورس من قاعدة البيانات.</p>' +
+      '</div>';
+  }
+
+  function renderCourseDetailsNotFound(root) {
+    root.innerHTML =
+      '<p class="course-details__empty">الكورس غير موجود. <a href="index.html#courses">العودة للكورسات</a></p>';
+  }
+
+  function renderCourseDetailsUnpublished(root) {
+    root.innerHTML =
+      '<p class="course-details__empty">هذا الكورس غير منشور حالياً. <a href="index.html#courses">العودة للكورسات</a></p>';
+  }
+
+  async function renderCourseDetailsPage() {
+    var root = document.getElementById('courseDetailsRoot');
+    if (!root) return;
+
+    var seq = ++detailsRenderSeq;
+    var courseId = getCourseIdFromUrl();
+    if (!courseId) {
+      renderCourseDetailsNotFound(root);
+      return;
+    }
+
+    if (isCoursesDataLoading()) {
+      renderCourseDetailsLoading(root);
+      return;
+    }
+
+    var course = findCourseInCache(courseId);
     if (!course) {
-      root.innerHTML =
-        '<p class="course-details__empty">الكورس غير موجود. <a href="index.html#courses">العودة للكورسات</a></p>';
+      renderCourseDetailsLoading(root);
+      course = await fetchCourseByIdFallback(courseId);
+      if (seq !== detailsRenderSeq) return;
+    }
+
+    if (!course) {
+      renderCourseDetailsNotFound(root);
+      return;
+    }
+
+    if (!canViewCourseDetails(course)) {
+      renderCourseDetailsUnpublished(root);
       return;
     }
 
@@ -498,6 +612,9 @@
       escapeHtml(course.description || '') +
       '</p>' +
       (subscribed ? '' : '<p class="course-details__hint">يمكنك مشاهدة الحلقات المحددة كمعاينة مجانية. بقية المحتوى يتطلب الاشتراك.</p>') +
+      (!isCoursePublished(course) && isCoursePreviewMode()
+        ? '<p class="course-details__hint">معاينة إدارية — الكورس غير منشور للجمهور.</p>'
+        : '') +
       '</header>' +
       '<div class="course-details__layout">' +
       '<aside class="course-details__curriculum">' +
@@ -519,4 +636,5 @@
   window.renderPublicCourses = renderPublicCourses;
   window.fetchCoursesFromLocalStorage = fetchCoursesFromLocalStorage;
   window.renderCourseDetailsPage = renderCourseDetailsPage;
+  window.extractYouTubeId = extractYouTubeId;
 })();

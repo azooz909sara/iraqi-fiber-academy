@@ -46,7 +46,8 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
-    // CMS singleton settings (stats, footer, hero, platform, etc.)
+    // CMS singleton settings (stats, footer, hero, simulators, platform, etc.)
+    // settings/simulators — public read; admin write (simulator icons, showcase CMS).
     match /settings/{document} {
       allow read: if document != 'checkout_config';
       allow create, update, delete: if isAdmin();
@@ -106,6 +107,11 @@ service cloud.firestore {
         && request.resource.data.message.html is string;
     }
 
+    function validMailDeliveryPatch() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly(['deliveryChannel', 'deliveryStatus', 'deliveredAt', 'deliveryError']);
+    }
+
     // Outbound email queue (Firebase Trigger Email Extension format).
     match /mail_notifications/{notificationId} {
       allow read: if isAdmin();
@@ -120,7 +126,13 @@ service cloud.firestore {
         )
         && (request.resource.data.createdAt is timestamp
           || request.resource.data.createdAt == request.time);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && validMailDeliveryPatch()
+        );
+      allow delete: if isAdmin();
     }
 
     // Deny everything else by default.

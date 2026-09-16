@@ -511,6 +511,13 @@
   global.addEventListener('ifa:simulator-showcase-changed', mountSimulatorShowcase);
   global.addEventListener('ifa:simulators-meta-changed', mountSimulatorShowcase);
   global.addEventListener('ifa:platform-settings-changed', mountSimulatorShowcase);
+  global.addEventListener('ifa:simulators-firestore-changed', mountSimulatorShowcase);
+  document.addEventListener('ifa:simulators-firestore-changed', mountSimulatorShowcase);
+  if (global.PlatformSimulatorsFirestore && typeof global.PlatformSimulatorsFirestore.subscribe === 'function') {
+    global.PlatformSimulatorsFirestore.subscribe(function () {
+      mountSimulatorShowcase();
+    });
+  }
   global.addEventListener('storage', function (e) {
     if (
       !e.key ||

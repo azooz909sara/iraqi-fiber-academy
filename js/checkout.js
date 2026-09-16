@@ -466,7 +466,7 @@ async function handleSubmit() {
     await setDoc(doc(db, 'orders', orderId), orderData);
 
     var adminEmail = (state.paymentConfig && state.paymentConfig.adminEmail) || '';
-    await queueAdminNotification(orderId, {
+    var mailResult = await queueAdminNotification(orderId, {
       userId: user.uid,
       userEmail: orderData.userEmail,
       userName: userName,
@@ -474,6 +474,22 @@ async function handleSubmit() {
       amount: product.amount,
       paymentMethod: paymentMethod,
     }, adminEmail);
+
+    if (!mailResult || mailResult.sent !== true) {
+      console.warn(
+        '[Checkout] Admin notification email was not sent.',
+        'Order was saved successfully, but email delivery failed.',
+        'Configure EmailJS in Admin → إعدادات الدفع والإشعارات',
+        'or install Firebase Trigger Email Extension.',
+        {
+          orderId: orderId,
+          queued: mailResult && mailResult.queued,
+          sent: mailResult && mailResult.sent,
+          notificationId: mailResult && mailResult.notificationId,
+          error: mailResult && mailResult.error,
+        }
+      );
+    }
 
     showSuccessModal();
     var form = document.getElementById('checkoutForm');

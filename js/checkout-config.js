@@ -31,13 +31,27 @@ export function normalizeCheckoutConfig(raw) {
   };
 }
 
-export function isEmailJsConfigured(config) {
+var EMAILJS_REQUIRED_KEYS = ['emailjsPublicKey', 'emailjsServiceId', 'emailjsTemplateId'];
+
+export function getMissingEmailJsKeys(config) {
   var normalized = normalizeCheckoutConfig(config);
-  return !!(
-    normalized.emailjsPublicKey &&
-    normalized.emailjsServiceId &&
-    normalized.emailjsTemplateId
+  return EMAILJS_REQUIRED_KEYS.filter(function (key) {
+    return !String(normalized[key] || '').trim();
+  });
+}
+
+export function logEmailJsConfigStatus(config) {
+  var missing = getMissingEmailJsKeys(config);
+  if (!missing.length) return;
+  console.warn(
+    '[CheckoutConfig] EmailJS incomplete — missing keys: ' +
+      missing.join(', ') +
+      '. Fill them in Admin → إعدادات الدفع والإشعارات or install Firebase Trigger Email Extension.'
   );
+}
+
+export function isEmailJsConfigured(config) {
+  return getMissingEmailJsKeys(config).length === 0;
 }
 
 export function getEmailDeliveryWarning(config) {

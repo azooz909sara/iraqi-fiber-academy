@@ -63,14 +63,37 @@
     }, 3200);
   }
 
-  function setUploadProgress(visible, percent, label) {
+  function waitMs(ms) {
+    return new Promise(function (resolve) {
+      window.setTimeout(resolve, ms);
+    });
+  }
+
+  function setUploadProgress(visible, percent, label, mode) {
     var status = document.getElementById('courseUploadStatus');
     var bar = document.getElementById('courseUploadBar');
     var labelEl = document.getElementById('courseUploadLabel');
     if (!status) return;
     status.hidden = !visible;
     if (labelEl && label) labelEl.textContent = label;
-    if (bar) bar.style.width = Math.max(0, Math.min(100, percent || 0)) + '%';
+    if (bar) {
+      bar.classList.toggle('admin-upload-status__bar--publish', mode === 'publish');
+      bar.style.width = Math.max(0, Math.min(100, percent || 0)) + '%';
+    }
+  }
+
+  async function runWithPublishProgress(label, stepsAsyncFn) {
+    setUploadProgress(true, 0, label, 'publish');
+    try {
+      var result = await stepsAsyncFn(function (pct) {
+        setUploadProgress(true, pct, label, 'publish');
+      });
+      setUploadProgress(true, 100, 'اكتمل الحفظ', 'publish');
+      await waitMs(400);
+      return result;
+    } finally {
+      setUploadProgress(false, 0, 'جاري تحميل الفيديو...', 'publish');
+    }
   }
 
   function simulateVideoUpload(fileName, onDone) {
@@ -1070,8 +1093,15 @@
         };
         try {
           var wasPublish = payload.status === 'published';
-          var saved = await saveCourseRecord(id, payload);
-          saved = (await syncCoursePricingPlan(saved)) || saved;
+          var progressLabel = wasPublish ? 'جاري النشر...' : 'جاري الحفظ...';
+          await runWithPublishProgress(progressLabel, async function (setPct) {
+            setPct(15);
+            var saved = await saveCourseRecord(id, payload);
+            setPct(65);
+            saved = (await syncCoursePricingPlan(saved)) || saved;
+            setPct(95);
+            return { saved: saved, wasPublish: wasPublish };
+          });
           closeCourseModal();
           renderCoursesTable();
           if (wasPublish) showToast('تم النشر بنجاح!', 'success');
@@ -1140,7 +1170,14 @@
             var next =
               toggleBtn.getAttribute('data-next-status') ||
               (target.status === 'published' ? 'draft' : 'published');
-            await applyCourseStatus(target.id, next);
+            var toggleLabel =
+              next === 'published' ? 'جاري النشر...' : 'جاري تحديث الحالة...';
+            await runWithPublishProgress(toggleLabel, async function (setPct) {
+              setPct(30);
+              await applyCourseStatus(target.id, next);
+              setPct(95);
+              return { next: next };
+            });
             renderCoursesTable();
             if (next === 'published') showToast('تم النشر بنجاح!', 'success');
             else if (next === 'suspended') showToast('تم تعليق الكورس', 'info');

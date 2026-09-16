@@ -13,6 +13,7 @@ import {
   doc,
   writeBatch,
   getDocs,
+  getDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var COLLECTION = 'courses';
@@ -381,6 +382,25 @@ export function findCachedCourse(id) {
   return null;
 }
 
+export async function fetchCourseById(id) {
+  var key = String(id || '').trim();
+  if (!key) return null;
+
+  var cached = findCachedCourse(key);
+  if (cached) return cached;
+
+  try {
+    var snap = await getDoc(doc(db, COLLECTION, key));
+    if (!snap.exists()) return null;
+    var course = normalizeCourse(snap.data(), snap.id);
+    if (course) upsertCachedCourse(course);
+    return course;
+  } catch (err) {
+    console.error('[PlatformCoursesFirestore] fetchCourseById failed', err);
+    return null;
+  }
+}
+
 function newCourseId() {
   if (window.PlatformCourses && typeof window.PlatformCourses.uid === 'function') {
     return window.PlatformCourses.uid('course');
@@ -605,6 +625,7 @@ var api = {
   isReady: isCoursesSnapshotReady,
   isSeeding: isCoursesSeeding,
   findCourse: findCachedCourse,
+  fetchCourseById: fetchCourseById,
   addCourse: addCourse,
   updateCourse: updateCourse,
   setCourseStatus: setCourseStatus,

@@ -492,6 +492,22 @@ function showToast(message) {
   }, 3200);
 }
 
+function warnIfMailNotSent(result, context) {
+  if (result && result.sent === true) return;
+  console.warn(
+    '[AdminOrders] Student notification email was not sent (' + (context || 'unknown') + ').',
+    'Order status was updated, but email delivery failed.',
+    'Configure EmailJS in Admin → إعدادات الدفع والإشعارات',
+    'or install Firebase Trigger Email Extension.',
+    {
+      queued: result && result.queued,
+      sent: result && result.sent,
+      notificationId: result && result.notificationId,
+      error: result && result.error,
+    }
+  );
+}
+
 function handleApprove(orderId) {
   var order = cachedOrders.find(function (o) {
     return o.id === orderId;
@@ -528,11 +544,12 @@ async function submitApprove() {
       reviewedAt: serverTimestamp(),
       reviewedBy: auth.currentUser ? auth.currentUser.uid : '',
     });
-    await notifyStudentOrderStatus(
+    var mailResult = await notifyStudentOrderStatus(
       Object.assign({}, order, { amountLabel: formatIqd(order.amount) }),
       'approved',
       note
     );
+    warnIfMailNotSent(mailResult, 'approve');
     closeApproveModal();
     showToast('تم قبول الطلب وتفعيل وصول الطالب.');
   } catch (err) {
@@ -560,11 +577,12 @@ async function submitReject() {
       reviewedAt: serverTimestamp(),
       reviewedBy: auth.currentUser ? auth.currentUser.uid : '',
     });
-    await notifyStudentOrderStatus(
+    var mailResult = await notifyStudentOrderStatus(
       Object.assign({}, order, { amountLabel: formatIqd(order.amount) }),
       'rejected',
       note
     );
+    warnIfMailNotSent(mailResult, 'reject');
     closeRejectModal();
     showToast('تم رفض الطلب.');
   } catch (err) {
