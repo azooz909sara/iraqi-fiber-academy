@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-i18n-document-title="page.title.home">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -13,6 +13,9 @@
   <link rel="stylesheet" href="css/pricing.css">
   <link rel="stylesheet" href="css/footer.css">
   <link rel="stylesheet" href="css/instructor-apply.css">
+  <link rel="stylesheet" href="css/notifications.css">
+  <script src="js/i18n.js"></script>
+  <script src="js/settings-manager.js"></script>
 </head>
 <body>
 
@@ -21,27 +24,27 @@
       <a href="#" class="logo">
         <img class="logo__img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
         <div class="logo__text">
-          <span class="logo__text-main">أكاديمية الفايبر العراقية</span>
+          <span class="logo__text-main" data-i18n="logo.main">أكاديمية الفايبر العراقية</span>
           <span class="logo__text-sub">IRAQI FIBER ACADEMY</span>
         </div>
       </a>
-      <nav class="nav" id="nav">
+      <nav class="nav" id="nav" aria-label="Main navigation">
         <ul class="nav__list">
-          <li><a href="#hero" class="nav__link active">الرئيسية</a></li>
-          <li><a href="#courses" class="nav__link">الكورسات التعليمية</a></li>
-          <li><a href="#simulators" class="nav__link">المحاكيات</a></li>
-          <li><a href="#pricing" class="nav__link">الباقات</a></li>
-          <li><a href="#articles" class="nav__link">المقالات التقنية</a></li>
-          <li><a href="#faq" class="nav__link">الأسئلة الشائعة</a></li>
+          <li><a href="#hero" class="nav__link active" data-i18n="nav.home">الرئيسية</a></li>
+          <li><a href="#courses" class="nav__link" data-i18n="nav.courses">الكورسات التعليمية</a></li>
+          <li><a href="#simulators" class="nav__link" data-i18n="nav.simulators">المحاكيات</a></li>
+          <li><a href="#pricing" class="nav__link" data-i18n="nav.plans">الباقات</a></li>
+          <li><a href="#articles" class="nav__link" data-i18n="nav.articles">المقالات التقنية</a></li>
+          <li><a href="#faq" class="nav__link" data-i18n="nav.faq">الأسئلة الشائعة</a></li>
         </ul>
-        <div class="header__actions">
-          <div class="auth-slot" data-auth-slot data-auth-variant="landing">
-            <button type="button" class="auth-login-btn" data-auth-login>تسجيل الدخول</button>
-          </div>
-          <a href="#pricing" class="header__cta">ابدأ مجاناً</a>
-        </div>
       </nav>
-      <button class="nav__toggle" id="navToggle" aria-label="فتح القائمة">
+      <div class="header__actions">
+        <div class="auth-slot" data-auth-slot data-auth-variant="landing">
+          <button type="button" class="auth-login-btn" data-auth-login data-i18n="header.login">تسجيل الدخول</button>
+        </div>
+        <a href="#pricing" class="header__cta" data-i18n="header.cta">ابدأ مجاناً</a>
+      </div>
+      <button class="nav__toggle" id="navToggle" data-i18n-aria="header.navToggle" aria-label="فتح القائمة">
         <span class="nav__toggle-bar"></span>
         <span class="nav__toggle-bar"></span>
         <span class="nav__toggle-bar"></span>
@@ -241,13 +244,13 @@
       </template>
     </section>
 
-    <section class="stats" id="stats">
+    <section class="stats stats--loading" id="stats">
       <div class="container">
         <div class="stats__grid">
-          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="enrolledStudents" data-target="2500">0</div><div class="stat-card__label">طالب مسجّل</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="simulatedKilometers" data-target="15000">0</div><div class="stat-card__label">كيلومتر محاكى</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="trainingProjects" data-target="48">0</div><div class="stat-card__label">مشروع تدريبي</div></div>
-          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="satisfactionRate" data-target="98" data-stat-suffix="%">0</div><div class="stat-card__label">% رضا الطلاب</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">👨‍🎓</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="enrolledStudents" data-target="0">0</div><div class="stat-card__label" data-i18n="stats.enrolled">طالب مسجّل</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">📏</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="simulatedKilometers" data-target="0">0</div><div class="stat-card__label" data-i18n="stats.kilometers">كيلومتر محاكى</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">🎯</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="trainingProjects" data-target="0">0</div><div class="stat-card__label" data-i18n="stats.projects">مشروع تدريبي</div></div>
+          <div class="stat-card fade-in"><div class="stat-card__icon">⭐</div><div class="stat-card__number" lang="en" dir="ltr" data-stat-key="satisfactionRate" data-target="0" data-stat-suffix="%">0</div><div class="stat-card__label" data-i18n="stats.satisfaction">% رضا الطلاب</div></div>
         </div>
       </div>
     </section>
@@ -255,69 +258,20 @@
     <section class="section" id="simulators">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">بيئة التدريب العملي</span>
-          <h2 class="section__title">المحاكيات</h2>
-          <p class="section__subtitle">أدوات محاكاة متقدمة مصممة خصيصاً لفنيي ومهندسي الألياف الضوئية</p>
+          <span class="section__badge" data-i18n="section.simulators.badge">بيئة التدريب العملي</span>
+          <h2 class="section__title" data-i18n="section.simulators.title">المحاكيات</h2>
+          <p class="section__subtitle" data-i18n="section.simulators.subtitle">أدوات محاكاة متقدمة مصممة خصيصاً لفنيي ومهندسي الألياف الضوئية</p>
         </div>
-        <div class="features__grid" id="publicSimulatorsGrid">
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="ftth-simulator" data-simulator-href="simulator.html">
-            <div class="feature-card__icon">🌐</div>
-            <h3 class="feature-card__title">محاكي FTTH متكامل</h3>
-            <p class="feature-card__desc">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="simulator.html" data-simulator-launch="ftth-simulator">افتح المحاكي</a>
-            </div>
-          </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="otdr-simulator" data-simulator-href="otdr-lab.html">
-            <div class="feature-card__icon">📊</div>
-            <h3 class="feature-card__title">مختبر OTDR (OTDR Lab)</h3>
-            <p class="feature-card__desc">ورشة OTDR كاملة بنفس بيئة مختبر اللحام: بناء المسارات، اللحام، القطع، ثم اختبار الانعكاس وتحليل المنحنيات.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="otdr-lab.html" data-simulator-launch="otdr-simulator">افتح المحاكي</a>
-            </div>
-          </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="power-meter" data-simulator-href="power-meter.html">
-            <div class="feature-card__icon">⚡</div>
-            <h3 class="feature-card__title">قياس القدرة البصرية</h3>
-            <p class="feature-card__desc">مدرّب OPM احترافي: أطوال موجية 1310/1490/1550، تحويل dBm↔mW، مرجع الخسارة، ومؤشرات Pass/Warning/Fail وفق GPON و EPON — مع ورشة ربط مصغّرة (Patch Cord · Pigtail · Splitter) لاختبار المسارات مباشرة بجانب جهاز القياس.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="power-meter.html" data-simulator-launch="power-meter">افتح المحاكي</a>
-            </div>
-          </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fusion-splicer" data-simulator-href="fusion-splicer.html" data-fusion-splicer-card>
-            <div class="feature-card__icon">🔬</div>
-            <h3 class="feature-card__title">مختبر Fusion Splicer</h3>
-            <p class="feature-card__desc">تعلّم عمليات اللحام البصري (Fusion Splicing) وإدارة الكابلات والموصلات بطريقة تفاعلية خطوة بخطوة.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="fusion-splicer.html" data-simulator-launch="fusion-splicer">افتح المحاكي</a>
-            </div>
-          </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="fiber-anatomy" data-simulator-href="fiber-3d-simulator.html" data-anatomy-simulator-card>
-            <div class="feature-card__icon">🧬</div>
-            <h3 class="feature-card__title">Fiber Optics 3D / 2D Interactive Anatomy</h3>
-            <p class="feature-card__desc">شرّح كابلات Last Mile وFTTH حتى 288F: الغلاف → الأنابيب → 6 أو 12 ليف لكل أنبوب، مع تمييز 48F Last Mile و48F Feeder، وعلامات الشريط الأوسط لأنابيب T13–T24 في كابل 288F.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="fiber-3d-simulator.html" data-simulator-launch="fiber-anatomy">افتح المحاكي</a>
-            </div>
-          </article>
-          <article class="feature-card fade-in" data-simulator-card data-simulator-id="patch-panel-lab" data-simulator-href="ftth-lab.html" data-ftth-lab-card>
-            <div class="feature-card__icon">🔌</div>
-            <h3 class="feature-card__title">FTTH Network &amp; Patch Panel Lab</h3>
-            <p class="feature-card__desc">مختبر FTTH: مقسمات PLC، أسلاك Patch Cord بطرفي A وB بنفس منطق السحب اليدوي (بدون تتبع تلقائي)، يُحفظ المسار عند الإطباق (SC/APC أخضر · SC/PC أزرق)، مع تنبيه عدم التوافق وخصم خسارة إضافي دون حظر التوصيل.</p>
-            <div class="feature-card__access" data-simulator-access>
-              <a class="feature-card__open-btn" href="ftth-lab.html" data-simulator-launch="patch-panel-lab">افتح المحاكي</a>
-            </div>
-          </article>
-        </div>
+        <div class="features__grid" id="publicSimulatorsGrid" aria-live="polite"></div>
       </div>
     </section>
 
     <section class="section section--alt" id="courses">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">رحلتك التعليمية</span>
-          <h2 class="section__title">المسار من الصفر للاحتراف</h2>
-          <p class="section__subtitle">كورسات منظمة تأخذك من المفاهيم الأساسية إلى إدارة مشاريع FTTH كاملة</p>
+          <span class="section__badge" data-i18n="section.courses.badge">رحلتك التعليمية</span>
+          <h2 class="section__title" data-i18n="section.courses.title">المسار من الصفر للاحتراف</h2>
+          <p class="section__subtitle" data-i18n="section.courses.subtitle">كورسات منظمة تأخذك من المفاهيم الأساسية إلى إدارة مشاريع FTTH كاملة</p>
         </div>
         <div class="public-courses-grid" id="publicCoursesGrid" aria-live="polite">
           <!-- Filled on load by js/platform-courses-public.js from localStorage key platform_courses -->
@@ -329,11 +283,11 @@
       <div class="container">
         <div class="demo__wrapper" id="simulatorShowcase" data-sim-showcase>
           <div class="demo__content sim-showcase__content">
-            <span class="section__badge">معاينة المحاكيات</span>
+            <span class="section__badge" data-i18n="section.demo.badge">معاينة المحاكيات</span>
             <div class="sim-showcase__copy" id="simShowcaseCopy" aria-live="polite">
-              <h2 class="section__title sim-showcase__title" id="simShowcaseTitle" style="text-align:right">محاكي FTTH متكامل</h2>
-              <p class="section__subtitle sim-showcase__desc" id="simShowcaseDesc" style="text-align:right;margin-inline:0">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
-              <a href="simulator.html" class="btn btn--primary sim-showcase__cta" id="simShowcaseCta" style="margin-top:1.5rem" data-simulator-launch="ftth-simulator">Try Simulator</a>
+              <h2 class="section__title sim-showcase__title" id="simShowcaseTitle" style="text-align:right" data-i18n="section.demo.title">محاكي FTTH متكامل</h2>
+              <p class="section__subtitle sim-showcase__desc" id="simShowcaseDesc" style="text-align:right;margin-inline:0" data-i18n="section.demo.subtitle">صمّم واربط شبكات الألياف الضوئية من OLT حتى منزل المشترك مع محاكاة واقعية لكل مكوّن في الشبكة.</p>
+              <a href="simulator.html" class="btn btn--primary sim-showcase__cta" id="simShowcaseCta" style="margin-top:1.5rem" data-simulator-launch="ftth-simulator" data-i18n="section.demo.cta">Try Simulator</a>
             </div>
           </div>
           <div class="demo__screen sim-showcase__screen" id="simShowcaseScreen">
@@ -348,7 +302,7 @@
               <div class="demo__mock-canvas sim-showcase__canvas" id="simShowcaseCanvas">
                 <div class="sim-showcase__visual" id="simShowcaseVisual" aria-hidden="true"></div>
                 <div class="demo__coming-soon sim-showcase__soon" id="simShowcaseSoon" hidden>
-                  <span>قريباً — قيد التطوير</span>
+                  <span data-i18n="section.demo.soon">قريباً — قيد التطوير</span>
                 </div>
               </div>
               <div class="demo__mock-stats" id="simShowcaseStats"></div>
@@ -361,9 +315,9 @@
     <section class="section section--alt" id="articles">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">معرفة تقنية</span>
-          <h2 class="section__title">المقالات التقنية</h2>
-          <p class="section__subtitle">أدلة عملية ومحتوى من المدربين لمساعدتك على إتقان شبكات FTTH والألياف الضوئية</p>
+          <span class="section__badge" data-i18n="section.articles.badge">معرفة تقنية</span>
+          <h2 class="section__title" data-i18n="section.articles.title">المقالات التقنية</h2>
+          <p class="section__subtitle" data-i18n="section.articles.subtitle">أدلة عملية ومحتوى من المدربين لمساعدتك على إتقان شبكات FTTH والألياف الضوئية</p>
         </div>
         <div class="articles__grid articles-container" id="articles-grid"></div>
       </div>
@@ -373,9 +327,9 @@
     <section class="section" id="pricing">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">خطط الاشتراك</span>
-          <h2 class="section__title">اختر الباقة المناسبة لك</h2>
-          <p class="section__subtitle">ابدأ مجاناً وطوّر مهاراتك مع باقات تناسب كل المستويات</p>
+          <span class="section__badge" data-i18n="section.pricing.badge">خطط الاشتراك</span>
+          <h2 class="section__title" data-i18n="section.pricing.title">اختر الباقة المناسبة لك</h2>
+          <p class="section__subtitle" data-i18n="section.pricing.subtitle">ابدأ مجاناً وطوّر مهاراتك مع باقات تناسب كل المستويات</p>
         </div>
         <div class="pricing__grid" id="publicPricingGrid" aria-live="polite">
           <!-- تُملأ ديناميكياً من platform_plans -->
@@ -386,9 +340,9 @@
     <section class="section section--alt testimonials-section" id="testimonials">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">آراء المستخدمين</span>
-          <h2 class="section__title">ماذا يقول طلابنا؟</h2>
-          <p class="section__subtitle">تجارب حقيقية من فنيين ومهندسين استفادوا من منصتنا</p>
+          <span class="section__badge" data-i18n="section.testimonials.badge">آراء المستخدمين</span>
+          <h2 class="section__title" data-i18n="section.testimonials.title">ماذا يقول طلابنا؟</h2>
+          <p class="section__subtitle" data-i18n="section.testimonials.subtitle">تجارب حقيقية من فنيين ومهندسين استفادوا من منصتنا</p>
         </div>
         <div class="testimonials__grid" id="testimonials-grid"></div>
       </div>
@@ -397,9 +351,9 @@
     <section class="section" id="faq">
       <div class="container">
         <div class="section__header fade-in">
-          <span class="section__badge">أسئلة شائعة</span>
-          <h2 class="section__title">كل ما تحتاج معرفته</h2>
-          <p class="section__subtitle">إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات</p>
+          <span class="section__badge" data-i18n="section.faq.badge">أسئلة شائعة</span>
+          <h2 class="section__title" data-i18n="section.faq.title">كل ما تحتاج معرفته</h2>
+          <p class="section__subtitle" data-i18n="section.faq.subtitle">إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات</p>
         </div>
         <div class="faq__list" id="faq-accordion"></div>
       </div>
@@ -412,38 +366,38 @@
         <div class="footer__brand">
           <div class="footer__logo">
             <img class="footer__logo-img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
-            <span class="footer__logo-text">أكاديمية الفايبر العراقية</span>
+            <span class="footer__logo-text" data-i18n="logo.main">أكاديمية الفايبر العراقية</span>
           </div>
-          <p class="footer__desc" id="footerDesc" data-footer-desc>منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
-          <div class="footer__social" id="footerSocial" data-footer-social aria-label="روابط التواصل"></div>
+          <p class="footer__desc" id="footerDesc" data-footer-desc data-i18n="footer.desc">منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.</p>
+          <div class="footer__social" id="footerSocial" data-footer-social data-i18n-aria="footer.social" aria-label="روابط التواصل"></div>
         </div>
         <div class="footer__column">
-          <h4 class="footer__column-title">المنصة</h4>
+          <h4 class="footer__column-title" data-i18n="footer.platform">المنصة</h4>
           <ul class="footer__links">
-            <li><a href="#stats">المميزات</a></li>
-            <li><a href="#courses">المسار التعليمي</a></li>
-            <li><a href="#demo">المحاكي</a></li>
-            <li><a href="#pricing">الباقات</a></li>
+            <li><a href="#stats" data-i18n="footer.features">المميزات</a></li>
+            <li><a href="#courses" data-i18n="footer.learningPath">المسار التعليمي</a></li>
+            <li><a href="#demo" data-i18n="footer.simulator">المحاكي</a></li>
+            <li><a href="#pricing" data-i18n="nav.plans">الباقات</a></li>
           </ul>
         </div>
         <div class="footer__column">
-          <h4 class="footer__column-title">الدعم</h4>
+          <h4 class="footer__column-title" data-i18n="footer.support">الدعم</h4>
           <ul class="footer__links">
-            <li><a href="#faq">الأسئلة الشائعة</a></li>
-            <li><a href="#">مركز المساعدة</a></li>
-            <li><a href="#">تواصل معنا</a></li>
+            <li><a href="#faq" data-i18n="nav.faq">الأسئلة الشائعة</a></li>
+            <li><a href="#" data-i18n="footer.helpCenter">مركز المساعدة</a></li>
+            <li><a href="#" data-i18n="footer.contact">تواصل معنا</a></li>
           </ul>
         </div>
         <div class="footer__column">
-          <h4 class="footer__column-title">لوحات التحكم</h4>
+          <h4 class="footer__column-title" data-i18n="footer.dashboards">لوحات التحكم</h4>
           <ul class="footer__links">
-            <li><a href="#" data-join-instructor>انضم إلينا كمدرب</a></li>
+            <li><a href="#" data-join-instructor data-i18n="footer.joinInstructor">انضم إلينا كمدرب</a></li>
           </ul>
         </div>
       </div>
       <div class="footer__bottom">
-        <p class="footer__copyright">© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.</p>
-        <div class="footer__legal"><a href="#">سياسة الخصوصية</a><a href="#">شروط الاستخدام</a></div>
+        <p class="footer__copyright" data-i18n="footer.copyright">© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.</p>
+        <div class="footer__legal"><a href="#" data-i18n="footer.privacy">سياسة الخصوصية</a><a href="#" data-i18n="footer.terms">شروط الاستخدام</a></div>
       </div>
     </div>
   </footer>
@@ -453,10 +407,10 @@
     <div class="instructor-modal__dialog" role="dialog" aria-modal="true" aria-labelledby="instructorModalTitle">
       <div class="instructor-modal__header">
         <div>
-          <h2 class="instructor-modal__title" id="instructorModalTitle">انضم إلينا كمدرب</h2>
-          <p class="instructor-modal__subtitle">قدّم طلبك للانضمام إلى فريق المدربين في أكاديمية الفايبر العراقية. ستتم مراجعة الطلب من لوحة الإدارة.</p>
+          <h2 class="instructor-modal__title" id="instructorModalTitle" data-i18n="instructor.modalTitle">انضم إلينا كمدرب</h2>
+          <p class="instructor-modal__subtitle" data-i18n="instructor.modalSubtitle">قدّم طلبك للانضمام إلى فريق المدربين في أكاديمية الفايبر العراقية. ستتم مراجعة الطلب من لوحة الإدارة.</p>
         </div>
-        <button type="button" class="instructor-modal__close" data-instructor-modal-close aria-label="إغلاق">×</button>
+        <button type="button" class="instructor-modal__close" data-instructor-modal-close data-i18n-aria="auth.close" aria-label="إغلاق">×</button>
       </div>
 
       <form class="instructor-form" id="instructorApplyForm" novalidate>
@@ -535,6 +489,7 @@
   <script src="js/env-access.js"></script>
   <script src="js/platform-simulators.js"></script>
   <script src="js/platform-simulator-showcase.js"></script>
+  <script src="js/platform-simulators-public.js"></script>
   <script type="module" src="js/platform-simulators-firestore-sync.js"></script>
   <script type="module" src="js/cms-status.js"></script>
   <script src="js/articles.js"></script>
@@ -550,8 +505,30 @@
   <script src="js/platform-hero-slideshow.js"></script>
   <script>
     (function bootPublicCms() {
+      function refreshPublicSimulators() {
+        if (typeof window.refreshPublicSimulators === 'function') {
+          window.refreshPublicSimulators();
+          return;
+        }
+        if (window.PlatformSimulators) {
+          if (typeof window.PlatformSimulators.applySimulatorMetaToCards === 'function') {
+            window.PlatformSimulators.applySimulatorMetaToCards();
+          }
+          if (typeof window.PlatformSimulators.applyPublicSimulatorGates === 'function') {
+            window.PlatformSimulators.applyPublicSimulatorGates();
+          }
+        }
+        if (
+          window.PlatformSimulatorShowcase &&
+          typeof window.PlatformSimulatorShowcase.mountSimulatorShowcase === 'function'
+        ) {
+          window.PlatformSimulatorShowcase.mountSimulatorShowcase();
+        }
+      }
+
       function run() {
         try {
+          refreshPublicSimulators();
           if (typeof loadPublicArticles === 'function') loadPublicArticles();
           if (typeof loadPublicFAQs === 'function') loadPublicFAQs();
           if (typeof loadPublicTestimonials === 'function') loadPublicTestimonials();
@@ -565,6 +542,16 @@
           console.error('[CMS public boot]', err);
         }
       }
+
+      window.addEventListener('ifa:simulators-firestore-ready', refreshPublicSimulators);
+      window.addEventListener('ifa:simulators-firestore-changed', refreshPublicSimulators);
+      window.addEventListener('ifa:simulators-meta-changed', refreshPublicSimulators);
+      if (window.__ifaSimulatorsFirestoreReady) {
+        window.__ifaSimulatorsFirestoreReady.then(refreshPublicSimulators).catch(function (err) {
+          console.error('[CMS public boot] simulators Firestore init failed', err);
+        });
+      }
+
       if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', run);
       } else {
@@ -858,6 +845,8 @@
   <script src="js/navigation.js"></script>
   <script src="js/animations.js"></script>
   <script src="js/main.js"></script>
+  <script src="js/platform-notifications.js"></script>
+  <script type="module" src="js/platform-notifications-firestore-sync.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>

@@ -132,6 +132,14 @@
     };
   }
 
+  function isIconImageSrc(icon) {
+    var s = String(icon || '').trim();
+    return (
+      /^https?:\/\//i.test(s) ||
+      s.indexOf('firebasestorage.googleapis.com') !== -1
+    );
+  }
+
   function getSimulatorMeta() {
     var stored = readJson(META_KEY, {});
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) stored = {};
@@ -140,11 +148,13 @@
     SIMULATOR_CATALOG.forEach(function (s) {
       var d = defaults[s.id] || {};
       var m = stored[s.id] || {};
-      var iconType = m.iconType === 'image' ? 'image' : 'emoji';
+      var icon = String(m.icon != null ? m.icon : d.icon || '◆');
+      var iconType =
+        m.iconType === 'image' || isIconImageSrc(icon) ? 'image' : 'emoji';
       out[s.id] = {
         title: String(m.title != null ? m.title : d.title || s.label).trim() || s.label,
         description: String(m.description != null ? m.description : d.description || '').trim(),
-        icon: String(m.icon != null ? m.icon : d.icon || '◆'),
+        icon: icon,
         iconType: iconType,
       };
     });
@@ -161,7 +171,10 @@
         title: String(m.title != null ? m.title : current[s.id].title).trim() || current[s.id].title,
         description: String(m.description != null ? m.description : current[s.id].description),
         icon: String(m.icon != null ? m.icon : current[s.id].icon),
-        iconType: m.iconType === 'image' ? 'image' : 'emoji',
+        iconType:
+          m.iconType === 'image' || isIconImageSrc(m.icon != null ? m.icon : current[s.id].icon)
+            ? 'image'
+            : 'emoji',
       };
     });
     try {
@@ -180,10 +193,12 @@
 
   function iconHtml(meta) {
     if (!meta) return '◆';
-    if (meta.iconType === 'image' && meta.icon) {
-      return '<img class="feature-card__icon-img" src="' + escapeHtml(meta.icon) + '" alt="" />';
+    var icon = meta.icon || '';
+    var useImage = (meta.iconType === 'image' || isIconImageSrc(icon)) && icon;
+    if (useImage) {
+      return '<img class="feature-card__icon-img" src="' + escapeHtml(icon) + '" alt="" />';
     }
-    return escapeHtml(meta.icon || '◆');
+    return escapeHtml(icon || '◆');
   }
 
   function applySimulatorMetaToCards() {
@@ -1191,6 +1206,8 @@
     saveSimulatorMeta: saveSimulatorMeta,
     defaultSimulatorMeta: defaultSimulatorMeta,
     applySimulatorMetaToCards: applySimulatorMetaToCards,
+    isIconImageSrc: isIconImageSrc,
+    iconHtml: iconHtml,
     findSimulator: findSimulator,
     currentSimulatorIdFromLocation: currentSimulatorIdFromLocation,
     normalizeSimulatorIds: normalizeSimulatorIds,

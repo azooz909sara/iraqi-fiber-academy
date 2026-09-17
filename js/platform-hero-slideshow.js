@@ -131,9 +131,32 @@
     return normalizeConfig(readJson());
   }
 
+  function translate(key) {
+    if (global.PlatformI18n && typeof global.PlatformI18n.t === 'function') {
+      return global.PlatformI18n.t(key);
+    }
+    return key;
+  }
+
+  function localizeSlide(slide) {
+    if (!slide) return slide;
+    if (global.PlatformI18n && global.PlatformI18n.getLang() !== 'en') return slide;
+    if (slide.id === 'default-ftth') {
+      return Object.assign({}, slide, {
+        title: translate('hero.default.title'),
+        description: translate('hero.default.description'),
+        buttonText: translate('hero.default.cta'),
+        secondaryButtonText: translate('hero.default.secondaryCta'),
+        badge: translate('hero.default.badge'),
+      });
+    }
+    return slide;
+  }
+
   function getSlidesForDisplay() {
     var slides = getConfig().slides;
-    return slides.length ? slides : defaultSlides();
+    var list = slides.length ? slides : defaultSlides();
+    return list.map(localizeSlide);
   }
 
   function saveConfig(patch) {
@@ -212,9 +235,15 @@
   function buildTrustHtml() {
     return (
       '<div class="hero__trust">' +
-      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>محاكاة واقعية 100%</span></div>' +
-      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>شهادات معتمدة</span></div>' +
-      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>دعم فني متواصل</span></div>' +
+      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>' +
+      translate('hero.trust.realistic') +
+      '</span></div>' +
+      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>' +
+      translate('hero.trust.certificates') +
+      '</span></div>' +
+      '<div class="hero__trust-item"><span class="hero__trust-icon">✓</span><span>' +
+      translate('hero.trust.support') +
+      '</span></div>' +
       '</div>'
     );
   }
@@ -337,6 +366,7 @@
   }
 
   global.addEventListener('ifa:hero-slideshow-changed', mountHeroSlideshow);
+  global.addEventListener('ifa:settings-lang-changed', mountHeroSlideshow);
   global.addEventListener('storage', function (e) {
     if (e.key === KEY) mountHeroSlideshow();
   });

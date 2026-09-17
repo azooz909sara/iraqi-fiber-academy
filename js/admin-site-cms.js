@@ -285,6 +285,65 @@
     preview.innerHTML = simIconPreviewHtml(meta);
   }
 
+  function applyCompressedSimulatorIcon(card, file) {
+    if (!card || !file) return;
+    var simId = getShowcaseCardSimId(card);
+    import('./simulator-media-upload.js?v=' + Date.now())
+      .then(function (mod) {
+        var compressFn = mod.compressIconForFirestore || mod.compressImageFile;
+        if (typeof compressFn !== 'function') {
+          throw new Error('Compression function missing in simulator-media-upload.js');
+        }
+        if (compressFn === mod.compressIconForFirestore) {
+          return compressFn(file);
+        }
+        return compressFn(file, 256, 256, 0.88);
+      })
+      .then(function (dataUri) {
+        if (simId) delete pendingSimulatorIconFiles[simId];
+        var iconValue = card.querySelector('[data-sim-icon-value]');
+        var iconType = card.querySelector('[data-sim-icon-type]');
+        if (iconValue) iconValue.value = dataUri;
+        if (iconType) iconType.value = 'image';
+        updateSimIconPreview(card);
+      })
+      .catch(function (err) {
+        console.error('[CMS] icon compression failed', err);
+        toast(err && err.message ? err.message : 'فشل ضغط الأيقونة', true);
+      });
+  }
+
+  function applyCompressedShowcaseImage(card, simId, file) {
+    if (!card || !file) return;
+    import('./simulator-media-upload.js?v=' + Date.now())
+      .then(function (mod) {
+        var compressFn = mod.compressShowcaseForFirestore || mod.compressImageFile;
+        if (typeof compressFn !== 'function') {
+          throw new Error('Compression function missing in simulator-media-upload.js');
+        }
+        if (compressFn === mod.compressShowcaseForFirestore) {
+          return compressFn(file);
+        }
+        return compressFn(file, 400, 1200, 0.5);
+      })
+      .then(function (dataUri) {
+        if (simId) delete pendingShowcaseImageFiles[simId];
+        var hidden = card.querySelector('[data-showcase-image]');
+        if (hidden) hidden.value = dataUri;
+        var previewBox = card.querySelector('.cms-showcase-card__preview');
+        if (previewBox) {
+          previewBox.innerHTML =
+            '<img class="cms-showcase-card__preview-img" src="' +
+            String(dataUri).replace(/"/g, '&quot;') +
+            '" alt="" />';
+        }
+      })
+      .catch(function (err) {
+        console.error('[CMS] showcase compression failed', err);
+        toast(err && err.message ? err.message : 'فشل ضغط صورة العرض', true);
+      });
+  }
+
   function resetSimIcon(card) {
     if (!card) return;
     clearPendingSimulatorMedia(getShowcaseCardSimId(card));
@@ -537,6 +596,12 @@
       type = 'emoji';
     } else if (type === 'image' && icon.indexOf('data:') !== 0 && current && current.iconType === 'image') {
       icon = current.icon || icon;
+    }
+    if (
+      type !== 'image' &&
+      (/^https?:\/\//i.test(icon) || icon.indexOf('firebasestorage.googleapis.com') !== -1)
+    ) {
+      type = 'image';
     }
     return { icon: icon, iconType: type };
   }
@@ -862,16 +927,7 @@
       var card = host.querySelector('[data-showcase-editor="' + simId + '"]');
       if (!card) return;
       pendingShowcaseImageFiles[simId] = file;
-      var previewUrl = URL.createObjectURL(file);
-      var hidden = card.querySelector('[data-showcase-image]');
-      if (hidden) hidden.value = previewUrl;
-      var previewBox = card.querySelector('.cms-showcase-card__preview');
-      if (previewBox) {
-        previewBox.innerHTML =
-          '<img class="cms-showcase-card__preview-img" src="' +
-          String(previewUrl).replace(/"/g, '&quot;') +
-          '" alt="" />';
-      }
+      applyCompressedShowcaseImage(card, simId, file);
       fileInput.value = '';
     });
   }
@@ -3218,12 +3274,7 @@
         }
         var simId = getShowcaseCardSimId(card);
         if (simId) pendingSimulatorIconFiles[simId] = file;
-        var previewUrl = URL.createObjectURL(file);
-        var iconValue = card.querySelector('[data-sim-icon-value]');
-        var iconType = card.querySelector('[data-sim-icon-type]');
-        if (iconValue) iconValue.value = previewUrl;
-        if (iconType) iconType.value = 'image';
-        updateSimIconPreview(card);
+        applyCompressedSimulatorIcon(card, file);
         simIconFile.value = '';
         return;
       }

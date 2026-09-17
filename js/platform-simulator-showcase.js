@@ -279,6 +279,14 @@
       .join('');
   }
 
+  function isIconImageSrc(icon) {
+    var s = String(icon || '').trim();
+    return (
+      /^https?:\/\//i.test(s) ||
+      s.indexOf('firebasestorage.googleapis.com') !== -1
+    );
+  }
+
   function buildVisualHtml(item) {
     if (item.showcaseImage) {
       return (
@@ -291,10 +299,10 @@
         '</div>'
       );
     }
-    var icon =
-      item.iconType === 'image' && item.icon
-        ? '<img class="sim-showcase__visual-icon-img" src="' + escapeHtml(item.icon) + '" alt="" />'
-        : '<span class="sim-showcase__visual-icon">' + escapeHtml(item.icon) + '</span>';
+    var useImageIcon = (item.iconType === 'image' || isIconImageSrc(item.icon)) && item.icon;
+    var icon = useImageIcon
+      ? '<img class="sim-showcase__visual-icon-img" src="' + escapeHtml(item.icon) + '" alt="" />'
+      : '<span class="sim-showcase__visual-icon">' + escapeHtml(item.icon) + '</span>';
     return (
       '<div class="sim-showcase__visual-inner sim-showcase__visual-inner--' +
       escapeHtml(item.theme) +

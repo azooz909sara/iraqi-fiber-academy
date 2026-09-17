@@ -283,6 +283,33 @@
     return window.PlatformCourses.deleteCourse(id);
   }
 
+  function shouldNotifySubscribersOnPublish() {
+    var el = document.getElementById('courseEditorNotifySubscribers');
+    return !!(el && el.checked);
+  }
+
+  async function maybeNotifyCoursePublished(course, wasAlreadyPublished) {
+    if (!course || course.status !== 'published') return;
+    if (wasAlreadyPublished) return;
+    if (!shouldNotifySubscribersOnPublish()) return;
+    try {
+      var mod = await import('./firestore-notifications.js');
+      var uid = '';
+      if (window.IFAAuth && typeof window.IFAAuth.getCurrentUser === 'function') {
+        var user = window.IFAAuth.getCurrentUser();
+        uid = user && user.uid ? user.uid : '';
+      }
+      await mod.createCourseAnnouncement(course, {
+        targetAudience: 'subscribers',
+        createdBy: uid,
+      });
+      showToast('تم إرسال إشعار المشتركين', 'success');
+    } catch (err) {
+      console.error('[AdminCourses] course notification failed', err);
+      showToast((err && err.message) || 'تعذّر إرسال إشعار المشتركين', 'error');
+    }
+  }
+
   function emptyQuiz() {
     return { questions: [] };
   }
@@ -541,6 +568,10 @@
         ? 'draft'
         : course.status || 'draft'
       : 'draft';
+    var notifyEl = document.getElementById('courseEditorNotifySubscribers');
+    if (notifyEl) {
+      notifyEl.checked = !course || course.status !== 'published';
+    }
     document.getElementById('courseEditorCategory').value = course
       ? course.category || 'individual'
       : 'individual';
@@ -1093,8 +1124,10 @@
         };
         try {
           var wasPublish = payload.status === 'published';
+          var previousCourse = id && window.PlatformCourses.findCourse(id);
+          var wasAlreadyPublished = !!(previousCourse && previousCourse.status === 'published');
           var progressLabel = wasPublish ? 'جاري النشر...' : 'جاري الحفظ...';
-          await runWithPublishProgress(progressLabel, async function (setPct) {
+          var publishResult = await runWithPublishProgress(progressLabel, async function (setPct) {
             setPct(15);
             var saved = await saveCourseRecord(id, payload);
             setPct(65);
@@ -1102,6 +1135,9 @@
             setPct(95);
             return { saved: saved, wasPublish: wasPublish };
           });
+          if (wasPublish && publishResult && publishResult.saved) {
+            await maybeNotifyCoursePublished(publishResult.saved, wasAlreadyPublished);
+          }
           closeCourseModal();
           renderCoursesTable();
           if (wasPublish) showToast('تم النشر بنجاح!', 'success');

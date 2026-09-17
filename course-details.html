@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-i18n-document-title="page.title.courseDetails">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/header.css">
   <link rel="stylesheet" href="css/footer.css">
+  <link rel="stylesheet" href="css/notifications.css">
+  <script src="js/i18n.js"></script>
+  <script src="js/settings-manager.js"></script>
 </head>
 <body>
   <header class="header" id="header">
@@ -15,16 +18,14 @@
       <a href="index.html" class="logo">
         <img class="logo__img" src="images/logo.png" alt="Iraqi Fiber Academy Logo" width="42" height="42" />
         <div class="logo__text">
-          <span class="logo__text-main">أكاديمية الفايبر العراقية</span>
+          <span class="logo__text-main" data-i18n="logo.main">أكاديمية الفايبر العراقية</span>
           <span class="logo__text-sub">IRAQI FIBER ACADEMY</span>
         </div>
       </a>
-      <nav class="nav">
-        <div class="header__actions">
-          <div class="auth-slot" data-auth-slot data-auth-variant="landing"></div>
-          <a href="index.html#plans" class="header__cta">الباقات</a>
-        </div>
-      </nav>
+      <div class="header__actions">
+        <div class="auth-slot" data-auth-slot data-auth-variant="landing"></div>
+        <a href="index.html#plans" class="header__cta" data-i18n="nav.plans">الباقات</a>
+      </div>
     </div>
   </header>
 
@@ -37,6 +38,8 @@
   <script src="js/platform-courses.js"></script>
   <script type="module" src="js/platform-courses-firestore-sync.js"></script>
   <script src="js/platform-courses-public.js"></script>
+  <script src="js/platform-notifications.js"></script>
+  <script type="module" src="js/platform-notifications-firestore-sync.js"></script>
   <script type="module" src="js/auth-manager.js"></script>
 </body>
 </html>

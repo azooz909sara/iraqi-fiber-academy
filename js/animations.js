@@ -28,7 +28,9 @@
   reobserveAnimations(document);
 
   var statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
-  var countersAnimated = false;
+  var statsHydrated = false;
+  var statsSectionVisible = false;
+  var statsSection = document.getElementById('stats');
 
   function formatCounterValue(value, suffix) {
     if (window.PlatformStats && typeof window.PlatformStats.formatStatNumber === 'function') {
@@ -39,66 +41,114 @@
     return formatted + (suffix || '');
   }
 
-  function animateCounter(element) {
+  function parseDisplayedValue(element) {
+    var raw = (element.textContent || '').replace(/[^\d]/g, '');
+    var n = parseInt(raw, 10);
+    return isFinite(n) ? n : 0;
+  }
+
+  function getCounterSuffix(element) {
+    var suffix = element.getAttribute('data-stat-suffix') || '';
+    if (
+      suffix === '%' ||
+      element.getAttribute('data-stat-key') === 'satisfactionRate'
+    ) {
+      return '%';
+    }
+    return '';
+  }
+
+  function animateCounter(element, fromValue) {
     var target = parseInt(element.getAttribute('data-target'), 10);
     if (!isFinite(target)) return;
-    var duration = 2000;
+
+    var suffix = getCounterSuffix(element);
+    var start = fromValue != null ? fromValue : 0;
+    if (start === target) {
+      element.textContent = formatCounterValue(target, suffix);
+      element.setAttribute('data-counter-done', '1');
+      return;
+    }
+
+    var duration = start === 0 ? 2000 : 1200;
     var startTime = performance.now();
-    var suffix = element.getAttribute('data-stat-suffix') || '';
-    var isPercentage =
-      suffix === '%' ||
-      element.getAttribute('data-stat-key') === 'satisfactionRate';
 
     function updateCounter(currentTime) {
       var progress = Math.min((currentTime - startTime) / duration, 1);
-      var current = Math.floor((1 - Math.pow(1 - progress, 3)) * target);
-      element.textContent = formatCounterValue(current, isPercentage ? '%' : '');
-      if (progress < 1) requestAnimationFrame(updateCounter);
-      else element.textContent = formatCounterValue(target, isPercentage ? '%' : '');
+      var eased = 1 - Math.pow(1 - progress, 3);
+      var current = Math.floor(start + (target - start) * eased);
+      element.textContent = formatCounterValue(current, suffix);
+      if (progress < 1) {
+        requestAnimationFrame(updateCounter);
+      } else {
+        element.textContent = formatCounterValue(target, suffix);
+        element.setAttribute('data-counter-done', '1');
+      }
     }
 
+    element.removeAttribute('data-counter-done');
     requestAnimationFrame(updateCounter);
   }
 
-  function startStatCounters() {
+  function refreshStatNodeList() {
     statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
-    if (!statNumbers.length || countersAnimated) return;
-    countersAnimated = true;
-    Array.prototype.forEach.call(statNumbers, animateCounter);
   }
 
-  function resetStatCounters() {
-    countersAnimated = false;
-    statNumbers = document.querySelectorAll('.stat-card__number[data-target]');
+  function startStatCounters() {
+    if (!statsHydrated) return;
+    refreshStatNodeList();
+    if (!statNumbers.length) return;
+
     Array.prototype.forEach.call(statNumbers, function (el) {
-      el.textContent = '0';
+      if (el.getAttribute('data-counter-done') === '1') return;
+      animateCounter(el, 0);
     });
   }
 
-  window.addEventListener('ifa:platform-stats-changed', function () {
+  function updateStatCountersFromChange() {
+    if (!statsHydrated) return;
+    refreshStatNodeList();
+    Array.prototype.forEach.call(statNumbers, function (el) {
+      var target = parseInt(el.getAttribute('data-target'), 10);
+      if (!isFinite(target)) return;
+      var current = parseDisplayedValue(el);
+      if (current === target && el.getAttribute('data-counter-done') === '1') return;
+      animateCounter(el, current);
+    });
+  }
+
+  function onStatsHydrated() {
+    statsHydrated = true;
+    if (statsSection) statsSection.classList.remove('stats--loading');
     if (window.PlatformStats && typeof window.PlatformStats.applyLandingStats === 'function') {
       window.PlatformStats.applyLandingStats(document);
     }
-    resetStatCounters();
-    if (statsSection) {
-      var rect = statsSection.getBoundingClientRect();
-      if (rect.top < window.innerHeight && rect.bottom > 0) {
-        startStatCounters();
-      }
+    if (statsSectionVisible) {
+      startStatCounters();
     }
+  }
+
+  window.addEventListener('ifa:platform-stats-hydrated', onStatsHydrated);
+
+  window.addEventListener('ifa:platform-stats-changed', function () {
+    if (!statsHydrated) return;
+    updateStatCountersFromChange();
   });
 
-  var statsSection = document.getElementById('stats');
   if (statsSection) {
     var statsObserver = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
-        if (entry.isIntersecting && !countersAnimated) {
-          startStatCounters();
-          statsObserver.unobserve(entry.target);
+        if (entry.isIntersecting) {
+          statsSectionVisible = true;
+          if (statsHydrated) startStatCounters();
         }
       });
     }, { threshold: 0.3 });
     statsObserver.observe(statsSection);
+  }
+
+  if (window.PlatformStats && typeof window.PlatformStats.isHydrated === 'function' && window.PlatformStats.isHydrated()) {
+    onStatsHydrated();
   }
 
   function staggerChildren(parentSelector, childSelector, delay) {
@@ -116,8 +166,14 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     reobserveAnimations(document);
+    if (window.PlatformStats && typeof window.PlatformStats.isHydrated === 'function' && window.PlatformStats.isHydrated()) {
+      onStatsHydrated();
+    }
   });
   window.addEventListener('load', function () {
     reobserveAnimations(document);
+    if (window.PlatformStats && typeof window.PlatformStats.isHydrated === 'function' && window.PlatformStats.isHydrated()) {
+      onStatsHydrated();
+    }
   });
 })();

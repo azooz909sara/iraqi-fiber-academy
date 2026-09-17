@@ -8,24 +8,30 @@
   const navLinks = document.querySelectorAll('.nav__link');
 
   function closeMenu() {
+    if (!nav) return;
     nav.classList.remove('open');
-    navToggle.classList.remove('active');
-    navOverlay.classList.remove('active');
+    if (navToggle) navToggle.classList.remove('active');
+    if (navOverlay) navOverlay.classList.remove('active');
     document.body.style.overflow = '';
   }
 
   function openMenu() {
+    if (!nav) return;
     nav.classList.add('open');
-    navToggle.classList.add('active');
-    navOverlay.classList.add('active');
+    if (navToggle) navToggle.classList.add('active');
+    if (navOverlay) navOverlay.classList.add('active');
     document.body.style.overflow = 'hidden';
   }
 
-  navToggle.addEventListener('click', function () {
-    nav.classList.contains('open') ? closeMenu() : openMenu();
-  });
+  if (navToggle) {
+    navToggle.addEventListener('click', function () {
+      nav.classList.contains('open') ? closeMenu() : openMenu();
+    });
+  }
 
-  navOverlay.addEventListener('click', closeMenu);
+  if (navOverlay) {
+    navOverlay.addEventListener('click', closeMenu);
+  }
 
   navLinks.forEach(function (link) {
     link.addEventListener('click', function (e) {
@@ -64,7 +70,7 @@
   }, { passive: true });
 
   window.addEventListener('resize', function () {
-    if (window.innerWidth > 992) closeMenu();
+    if (window.innerWidth > 1024) closeMenu();
   });
 
   /* User profile dropdown */

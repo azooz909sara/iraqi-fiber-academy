@@ -65,6 +65,14 @@ function defaultSimulatorsMeta() {
   return {};
 }
 
+function isIconImageSrc(icon) {
+  var s = String(icon || '').trim();
+  return (
+    /^https?:\/\//i.test(s) ||
+    s.indexOf('firebasestorage.googleapis.com') !== -1
+  );
+}
+
 function normalizeSimulatorsMeta(raw) {
   var stored = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   var defaults = defaultSimulatorsMeta();
@@ -72,11 +80,13 @@ function normalizeSimulatorsMeta(raw) {
   catalogIds().forEach(function (id) {
     var d = defaults[id] || {};
     var m = stored[id] || {};
-    var iconType = m.iconType === 'image' ? 'image' : 'emoji';
+    var icon = String(m.icon != null ? m.icon : d.icon || '◆');
+    var iconType =
+      m.iconType === 'image' || isIconImageSrc(icon) ? 'image' : 'emoji';
     out[id] = {
       title: String(m.title != null ? m.title : d.title || '').trim(),
       description: String(m.description != null ? m.description : d.description || '').trim(),
-      icon: String(m.icon != null ? m.icon : d.icon || '◆'),
+      icon: icon,
       iconType: iconType,
     };
   });
@@ -236,11 +246,12 @@ function mergeSimulatorsMetaPatch(current, patch) {
   Object.keys(incoming).forEach(function (id) {
     if (catalogIds().indexOf(id) === -1) return;
     var m = incoming[id] || {};
+    var icon = String(m.icon != null ? m.icon : base[id].icon);
     base[id] = {
       title: String(m.title != null ? m.title : base[id].title).trim() || base[id].title,
       description: String(m.description != null ? m.description : base[id].description),
-      icon: String(m.icon != null ? m.icon : base[id].icon),
-      iconType: m.iconType === 'image' ? 'image' : 'emoji',
+      icon: icon,
+      iconType: m.iconType === 'image' || isIconImageSrc(icon) ? 'image' : 'emoji',
     };
   });
   return base;
@@ -346,7 +357,7 @@ function formatFirestoreWriteError(err) {
     return 'Firestore غير متاح حالياً — تحقق من الاتصال بالإنترنت';
   }
   if (code === 'invalid-argument' || code === 'failed-precondition') {
-    return 'بيانات المحاكيات غير صالحة أو كبيرة جداً لـ Firestore — تأكد من رفع الصور إلى التخزين (Storage)';
+    return 'بيانات المحاكيات غير صالحة أو كبيرة جداً لـ Firestore — استخدم صوراً أصغر أو أعد رفع الأيقونات';
   }
   if (err && err.message && String(err.message).indexOf('base64') !== -1) {
     return String(err.message);
@@ -540,28 +551,11 @@ export async function saveShowcaseMetaToFirestore(patch, intervalSeconds) {
 
 async function maybeUploadSimulatorMedia(bundle, options) {
   var opts = options && typeof options === 'object' ? options : {};
-  var mod = await import('./simulator-media-upload.js');
   var pendingIcons = opts.pendingIcons || {};
   var pendingShowcase = opts.pendingShowcase || {};
-  var hasPending =
-    Object.keys(pendingIcons).some(function (k) {
-      return pendingIcons[k];
-    }) ||
-    Object.keys(pendingShowcase).some(function (k) {
-      return pendingShowcase[k];
-    });
 
-  var hasDataUrl = false;
-  try {
-    mod.assertNoDataUrlsInSimulatorsPayload({
-      simulatorsMeta: bundle.simulatorsMeta,
-      showcaseMeta: bundle.showcaseStore,
-    });
-  } catch (err) {
-    hasDataUrl = true;
-  }
-
-  if (!hasPending && !hasDataUrl) {
+  var mod = await import('./simulator-media-upload.js?v=' + Date.now());
+  if (typeof mod.prepareSimulatorsPayloadForFirestore !== 'function') {
     return bundle;
   }
 
@@ -569,12 +563,12 @@ async function maybeUploadSimulatorMedia(bundle, options) {
     {
       simulatorsMeta: bundle.simulatorsMeta,
       showcaseMeta: bundle.showcaseStore,
+      platformSettings: bundle.platformSettings,
     },
     pendingIcons,
     pendingShowcase,
     opts.onProgress
   );
-  mod.assertNoDataUrlsInSimulatorsPayload(prepared);
 
   return normalizeBundle({
     simulatorsMeta: prepared.simulatorsMeta,
@@ -605,7 +599,7 @@ export async function saveSimulatorsBundle(payload, options) {
     if (options && typeof options.onProgress === 'function') {
       options.onProgress(28);
     }
-    console.log('[PlatformSimulatorsFirestore] saveSimulatorsBundle: uploading media…');
+    console.log('[PlatformSimulatorsFirestore] saveSimulatorsBundle: compressing media…');
     next = await maybeUploadSimulatorMedia(next, options);
     if (options && typeof options.onProgress === 'function') {
       options.onProgress(82);

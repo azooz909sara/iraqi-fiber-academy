@@ -1,28 +1,20 @@
 /**
- * Upload simulator icons / showcase images to Firebase Storage (cms/simulators/*).
- * Raster images are compressed before upload to keep payloads small.
+ * Simulator icons / showcase images — client-side Canvas resize + WebP/JPEG compression.
+ * Compressed data URIs are stored directly in Firestore (no Firebase Storage).
  */
-import { uploadCmsFile, rejectDataUrl } from './cms-storage.js';
 
-export { rejectDataUrl };
+export const MAX_ICON_KB = 28;
+export const ICON_TARGET_KB = 22;
+export const ICON_MAX_PX = 256;
+export const ICON_FALLBACK_MAX_PX = 300;
+export const ICON_QUALITY = 0.88;
+export const SHOWCASE_MAX_WIDTH_PX = 400;
+export const SHOWCASE_MAX_KB = 72;
+export const SHOWCASE_QUALITY = 0.5;
+export const MAX_FIRESTORE_PAYLOAD_BYTES = 768000;
 
-function safeSimId(simId) {
-  return String(simId || 'sim')
-    .trim()
-    .replace(/[^a-z0-9_-]/gi, '-')
-    .slice(0, 80);
-}
-
-function extensionFromFile(file, fallback) {
-  var name = String((file && file.name) || '').trim();
-  var ext = name.indexOf('.') > -1 ? name.split('.').pop() : '';
-  ext = String(ext).replace(/[^a-z0-9]/gi, '').toLowerCase();
-  if (ext) return ext;
-  var type = String((file && file.type) || '').toLowerCase();
-  if (type.indexOf('svg') !== -1) return 'svg';
-  if (type.indexOf('png') !== -1) return 'png';
-  if (type.indexOf('jpeg') !== -1 || type.indexOf('jpg') !== -1) return 'jpg';
-  return fallback || 'webp';
+export function rejectDataUrl(url) {
+  return /^data:/i.test(String(url == null ? '' : url).trim());
 }
 
 function isSvgFile(file) {
@@ -35,73 +27,188 @@ function isDataUrlSvg(dataUrl) {
   return /^data:image\/svg\+xml/i.test(String(dataUrl || '').trim());
 }
 
-export async function compressRasterImage(file, maxW, maxH, quality) {
-  if (!file || isSvgFile(file)) return file;
+function isEphemeralPreviewUrl(value) {
+  return String(value || '').trim().indexOf('blob:') === 0;
+}
 
-  var bitmap;
-  try {
-    bitmap = await createImageBitmap(file);
-  } catch (err) {
-    console.warn('[simulator-media] createImageBitmap failed, uploading original', err);
-    return file;
-  }
+function isCloudStorageUrl(value) {
+  return String(value || '').trim().indexOf('https://firebasestorage.googleapis.com') === 0;
+}
 
-  var w = bitmap.width || 1;
-  var h = bitmap.height || 1;
-  var scale = Math.min(1, maxW / w, maxH / h);
-  var cw = Math.max(1, Math.round(w * scale));
-  var ch = Math.max(1, Math.round(h * scale));
-  var canvas = document.createElement('canvas');
-  canvas.width = cw;
-  canvas.height = ch;
-  var ctx = canvas.getContext('2d');
-  if (!ctx) {
-    if (typeof bitmap.close === 'function') bitmap.close();
-    return file;
-  }
-  ctx.drawImage(bitmap, 0, 0, cw, ch);
-  if (typeof bitmap.close === 'function') bitmap.close();
+function isIconImageSrc(value) {
+  var str = String(value || '').trim();
+  return (
+    /^https?:\/\//i.test(str) ||
+    str.indexOf('firebasestorage.googleapis.com') !== -1 ||
+    rejectDataUrl(str)
+  );
+}
 
-  var blob = await new Promise(function (resolve, reject) {
-    var timeoutId = setTimeout(function () {
-      reject(new Error('انتهى وقت محاولة ضغط الصورة (Timeout)'));
-    }, 15000);
+export function dataUrlByteLength(dataUrl) {
+  var base64 = String(dataUrl || '').split(',')[1] || '';
+  return Math.ceil((base64.length * 3) / 4);
+}
 
-    var attemptCompression = function (mimeType, currentQuality) {
-      canvas.toBlob(
-        function (result) {
-          clearTimeout(timeoutId);
-          if (result) {
-            resolve(result);
-          } else if (mimeType === 'image/webp') {
-            console.warn('[CMS] WEBP compression failed, trying JPEG...');
-            timeoutId = setTimeout(function () {
-              reject(new Error('انتهى وقت محاولة ضغط الصورة (Timeout)'));
-            }, 15000);
-            attemptCompression('image/jpeg', currentQuality);
-          } else {
-            reject(new Error('فشل ضغط الصورة بجميع التنسيقات'));
-          }
-        },
-        mimeType,
-        currentQuality
-      );
+export function dataUrlSizeKb(dataUrl) {
+  return dataUrlByteLength(dataUrl) / 1024;
+}
+
+function logCompressedSize(fileName, dataUrl) {
+  var kbSize = dataUrlSizeKb(dataUrl);
+  console.log(`[CMS Media] Compressed ${fileName}: ${kbSize.toFixed(2)} KB`);
+  return kbSize;
+}
+
+function loadFileOnCanvas(file, maxWidth, maxHeight) {
+  return new Promise(function (resolve, reject) {
+    if (!file) {
+      reject(new Error('لم يتم اختيار ملف.'));
+      return;
+    }
+
+    var objectUrl = URL.createObjectURL(file);
+    var img = new Image();
+
+    img.onload = function () {
+      URL.revokeObjectURL(objectUrl);
+      var w = img.naturalWidth || img.width || 1;
+      var h = img.naturalHeight || img.height || 1;
+      var scale = Math.min(1, maxWidth / w, maxHeight / h);
+      var cw = Math.max(1, Math.round(w * scale));
+      var ch = Math.max(1, Math.round(h * scale));
+      var canvas = document.createElement('canvas');
+      canvas.width = cw;
+      canvas.height = ch;
+      var ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('تعذّر تهيئة Canvas لضغط الصورة.'));
+        return;
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, cw, ch);
+      resolve({ canvas: canvas, fileName: file.name || 'image' });
     };
 
-    attemptCompression('image/webp', quality);
-  }).catch(function (err) {
-    console.error('[CMS] Compression error, using original file:', err);
-    return file;
-  });
+    img.onerror = function () {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('تعذّر قراءة الصورة «' + (file.name || 'image') + '».'));
+    };
 
-  if (blob instanceof File) {
-    return blob;
+    img.src = objectUrl;
+  });
+}
+
+function canvasToDataUrl(canvas, quality) {
+  var q = typeof quality === 'number' ? quality : ICON_QUALITY;
+  try {
+    var webp = canvas.toDataURL('image/webp', q);
+    if (webp && webp.indexOf('data:image/webp') === 0) {
+      return webp;
+    }
+  } catch (err) {
+    console.warn('[CMS Media] WebP toDataURL failed, falling back to JPEG', err);
+  }
+  return canvas.toDataURL('image/jpeg', q);
+}
+
+/**
+ * Resize + compress a raster image to a data URI (WebP preferred, JPEG fallback).
+ */
+export async function compressImageFile(file, maxWidth, maxHeight, quality) {
+  if (!file) {
+    throw new Error('لم يتم اختيار ملف للضغط.');
   }
 
-  var baseName = String(file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
-  var mimeType = blob && blob.type ? blob.type : 'image/webp';
-  var ext = mimeType.indexOf('jpeg') !== -1 ? 'jpg' : 'webp';
-  return new File([blob], baseName + '.' + ext, { type: mimeType });
+  if (isSvgFile(file)) {
+    var svgText = await file.text();
+    var encoded = encodeURIComponent(svgText).replace(/'/g, '%27').replace(/"/g, '%22');
+    var svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encoded;
+    logCompressedSize(file.name || 'icon.svg', svgDataUrl);
+    return svgDataUrl;
+  }
+
+  var q = typeof quality === 'number' ? quality : ICON_QUALITY;
+  var loaded = await loadFileOnCanvas(file, maxWidth, maxHeight);
+  var dataUrl = canvasToDataUrl(loaded.canvas, q);
+  logCompressedSize(loaded.fileName, dataUrl);
+  return dataUrl;
+}
+
+/**
+ * HD icon compression for Firestore (256px @ 0.88 — target ~15–25 KB each).
+ */
+export async function compressIconForFirestore(file) {
+  var qualities = [ICON_QUALITY, 0.84, 0.8, 0.76, 0.72];
+  var sizes = [
+    { w: ICON_MAX_PX, h: ICON_MAX_PX },
+    { w: ICON_FALLBACK_MAX_PX, h: ICON_FALLBACK_MAX_PX },
+    { w: 224, h: 224 },
+    { w: 192, h: 192 },
+  ];
+
+  var lastDataUrl = '';
+  var lastKb = Infinity;
+
+  for (var s = 0; s < sizes.length; s++) {
+    for (var q = 0; q < qualities.length; q++) {
+      var dataUrl = await compressImageFile(file, sizes[s].w, sizes[s].h, qualities[q]);
+      var kbSize = dataUrlSizeKb(dataUrl);
+      lastDataUrl = dataUrl;
+      lastKb = kbSize;
+      if (kbSize <= MAX_ICON_KB) {
+        return dataUrl;
+      }
+    }
+  }
+
+  if (lastDataUrl && lastKb <= MAX_ICON_KB * 1.15) {
+    console.warn(
+      '[CMS Media] Icon slightly above target but keeping HD quality:',
+      lastKb.toFixed(2),
+      'KB'
+    );
+    return lastDataUrl;
+  }
+
+  throw new Error(
+    'تعذّر ضغط الأيقونة «' +
+      (file.name || 'image') +
+      '» إلى أقل من ' +
+      MAX_ICON_KB +
+      ' كيلوبايت (الحجم الحالي: ' +
+      lastKb.toFixed(2) +
+      ' KB).'
+  );
+}
+
+/**
+ * Aggressive showcase compression (400px max width, quality 0.5).
+ */
+export async function compressShowcaseForFirestore(file) {
+  var qualities = [SHOWCASE_QUALITY, 0.42, 0.35, 0.28];
+  var widths = [SHOWCASE_MAX_WIDTH_PX, 360, 320];
+
+  var lastDataUrl = '';
+  var lastKb = Infinity;
+
+  for (var w = 0; w < widths.length; w++) {
+    for (var q = 0; q < qualities.length; q++) {
+      var dataUrl = await compressImageFile(file, widths[w], 1200, qualities[q]);
+      lastDataUrl = dataUrl;
+      lastKb = dataUrlSizeKb(dataUrl);
+      if (lastKb <= SHOWCASE_MAX_KB) {
+        return dataUrl;
+      }
+    }
+  }
+
+  if (lastDataUrl && lastKb <= SHOWCASE_MAX_KB * 1.5) {
+    return lastDataUrl;
+  }
+
+  console.warn('[CMS Media] Showcase image still large after compression, clearing:', lastKb.toFixed(2), 'KB');
+  return '';
 }
 
 export async function dataUrlToFile(dataUrl, filename) {
@@ -115,86 +222,76 @@ export async function dataUrlToFile(dataUrl, filename) {
   return new File([blob], name, { type: blob.type || 'image/webp' });
 }
 
-async function prepareFileForKind(file, kind) {
-  if (!file) return null;
-  if (kind === 'icon') {
-    return compressRasterImage(file, 128, 128, 0.7);
-  }
-  return compressRasterImage(file, 800, 450, 0.6);
+function shouldResolveSimulatorIcon(entry) {
+  if (!entry || !entry.icon) return false;
+  if (entry.iconType === 'image') return true;
+  if (isIconImageSrc(entry.icon)) return true;
+  return rejectDataUrl(entry.icon);
 }
 
-export async function uploadSimulatorIcon(simId, file) {
-  var prepared = await prepareFileForKind(file, 'icon');
-  var ext = extensionFromFile(prepared, 'webp');
-  var path =
-    'cms/simulators/icons/' + safeSimId(simId) + '/' + Date.now() + '.' + ext;
-  return uploadCmsFile(path, prepared);
-}
-
-export async function uploadShowcaseImage(simId, file) {
-  var prepared = await prepareFileForKind(file, 'showcase');
-  var ext = extensionFromFile(prepared, 'webp');
-  var path =
-    'cms/simulators/showcase/' + safeSimId(simId) + '/' + Date.now() + '.' + ext;
-  return uploadCmsFile(path, prepared);
-}
-
-function isEphemeralPreviewUrl(value) {
-  var str = String(value || '').trim();
-  return str.indexOf('blob:') === 0;
-}
-
-function isCloudStorageUrl(imageUrl) {
-  return (
-    typeof imageUrl === 'string' &&
-    imageUrl.indexOf('https://firebasestorage.googleapis.com') === 0
-  );
-}
-
-export async function resolveSimulatorIconUrl(simId, value, pendingFile) {
-  var imageUrl = value;
-  if (typeof imageUrl === 'string' && isCloudStorageUrl(imageUrl)) {
-    console.log('[CMS] Image already uploaded, skipping.');
-    return imageUrl;
-  }
+async function resolveSimulatorIconValue(simId, value, pendingFile) {
   if (pendingFile) {
-    return uploadSimulatorIcon(simId, pendingFile);
+    return compressIconForFirestore(pendingFile);
   }
+
   var str = String(value || '').trim();
   if (!str) return '';
+
+  if (isCloudStorageUrl(str)) {
+    return str;
+  }
+
   if (isEphemeralPreviewUrl(str)) {
     throw new Error('أعد رفع أيقونة المحاكي «' + simId + '» قبل النشر.');
   }
-  if (!rejectDataUrl(str)) return str;
-  if (isDataUrlSvg(str)) {
-    var svgFile = await dataUrlToFile(str, safeSimId(simId) + '-icon.svg');
-    return uploadSimulatorIcon(simId, svgFile);
+
+  if (rejectDataUrl(str)) {
+    if (isDataUrlSvg(str)) {
+      return str;
+    }
+    if (dataUrlSizeKb(str) <= MAX_ICON_KB) {
+      return str;
+    }
+    var rasterFile = await dataUrlToFile(str, simId + '-icon.webp');
+    return compressIconForFirestore(rasterFile);
   }
-  var rasterFile = await dataUrlToFile(str, safeSimId(simId) + '-icon.webp');
-  return uploadSimulatorIcon(simId, rasterFile);
+
+  return str;
 }
 
-export async function resolveShowcaseImageUrl(simId, value, pendingFile) {
-  var imageUrl = value;
-  if (typeof imageUrl === 'string' && isCloudStorageUrl(imageUrl)) {
-    console.log('[CMS] Image already uploaded, skipping.');
-    return imageUrl;
-  }
+async function resolveShowcaseImageValue(simId, value, pendingFile) {
   if (pendingFile) {
-    return uploadShowcaseImage(simId, pendingFile);
+    return compressShowcaseForFirestore(pendingFile);
   }
+
   var str = String(value || '').trim();
   if (!str) return '';
+
+  if (isCloudStorageUrl(str)) {
+    return str;
+  }
+
   if (isEphemeralPreviewUrl(str)) {
     throw new Error('أعد رفع صورة عرض المحاكي «' + simId + '» قبل النشر.');
   }
-  if (!rejectDataUrl(str)) return str;
-  if (isDataUrlSvg(str)) {
-    var svgFile = await dataUrlToFile(str, safeSimId(simId) + '-showcase.svg');
-    return uploadShowcaseImage(simId, svgFile);
+
+  if (rejectDataUrl(str)) {
+    if (isDataUrlSvg(str)) {
+      return str;
+    }
+    if (dataUrlSizeKb(str) <= SHOWCASE_MAX_KB) {
+      return str;
+    }
+    try {
+      var rasterFile = await dataUrlToFile(str, simId + '-showcase.webp');
+      return compressShowcaseForFirestore(rasterFile);
+    } catch (err) {
+      console.warn('[CMS Media] Failed to recompress showcase for', simId, err);
+      return '';
+    }
   }
-  var rasterFile = await dataUrlToFile(str, safeSimId(simId) + '-showcase.webp');
-  return uploadShowcaseImage(simId, rasterFile);
+
+  return str;
 }
 
 function catalogIdsFromPayload(payload) {
@@ -215,8 +312,115 @@ function catalogIdsFromPayload(payload) {
   return Object.keys(ids);
 }
 
+export function hasUnresolvedSimulatorMedia(payload) {
+  var meta = (payload && payload.simulatorsMeta) || {};
+  var showcase = (payload && (payload.showcaseMeta || payload.showcaseStore)) || {};
+
+  var unresolvedIcon = Object.keys(meta).some(function (id) {
+    var entry = meta[id];
+    if (!entry || !entry.icon) return false;
+    if (isEphemeralPreviewUrl(entry.icon)) return true;
+    if (entry.iconType === 'image' && rejectDataUrl(entry.icon) && !isDataUrlSvg(entry.icon)) {
+      if (dataUrlSizeKb(entry.icon) > MAX_ICON_KB) return true;
+    }
+    return false;
+  });
+
+  if (unresolvedIcon) return true;
+
+  return Object.keys(showcase).some(function (id) {
+    if (id.charAt(0) === '_') return false;
+    var entry = showcase[id];
+    return !!(entry && entry.showcaseImage && isEphemeralPreviewUrl(entry.showcaseImage));
+  });
+}
+
+function payloadHasBlobMedia(payload) {
+  var meta = (payload && payload.simulatorsMeta) || {};
+  var showcase = (payload && (payload.showcaseMeta || payload.showcaseStore)) || {};
+  var iconBlob = Object.keys(meta).some(function (id) {
+    var entry = meta[id];
+    return !!(entry && entry.icon && isEphemeralPreviewUrl(entry.icon));
+  });
+  if (iconBlob) return true;
+  return Object.keys(showcase).some(function (id) {
+    if (id.charAt(0) === '_') return false;
+    var entry = showcase[id];
+    return !!(entry && entry.showcaseImage && isEphemeralPreviewUrl(entry.showcaseImage));
+  });
+}
+
+function hasPendingSimulatorFiles(pendingIcons, pendingShowcase) {
+  var pendingIconMap = pendingIcons && typeof pendingIcons === 'object' ? pendingIcons : {};
+  var pendingShowcaseMap = pendingShowcase && typeof pendingShowcase === 'object' ? pendingShowcase : {};
+  return (
+    Object.keys(pendingIconMap).some(function (k) {
+      return pendingIconMap[k];
+    }) ||
+    Object.keys(pendingShowcaseMap).some(function (k) {
+      return pendingShowcaseMap[k];
+    })
+  );
+}
+
+function buildFirestorePayloadShape(payload) {
+  var src = payload && typeof payload === 'object' ? payload : {};
+  return {
+    simulatorsMeta: src.simulatorsMeta || {},
+    showcaseStore: src.showcaseMeta || src.showcaseStore || {},
+    platformSettings: src.platformSettings || {},
+  };
+}
+
+export function measureSimulatorsPayloadBytes(payload) {
+  return new Blob([JSON.stringify(buildFirestorePayloadShape(payload))]).size;
+}
+
+export function assertSimulatorsPayloadWithinFirestoreLimit(payload) {
+  var bytes = measureSimulatorsPayloadBytes(payload);
+  console.log('[CMS Media] Firestore payload size:', (bytes / 1024).toFixed(2), 'KB');
+  if (bytes > MAX_FIRESTORE_PAYLOAD_BYTES) {
+    throw new Error(
+      'بيانات المحاكيات غير صالحة أو كبيرة جداً لـ Firestore — استخدم صوراً أصغر أو أعد رفع الأيقونات'
+    );
+  }
+  return bytes;
+}
+
+async function ensureLeanIconDataUri(simId, iconValue) {
+  var str = String(iconValue || '').trim();
+  if (!str || isCloudStorageUrl(str) || isDataUrlSvg(str)) {
+    return str;
+  }
+  if (!rejectDataUrl(str)) {
+    return str;
+  }
+  var rasterFile = await dataUrlToFile(str, simId + '-icon.webp');
+  return compressIconForFirestore(rasterFile);
+}
+
+async function ensureLeanShowcaseDataUri(simId, imageValue) {
+  var str = String(imageValue || '').trim();
+  if (!str || isCloudStorageUrl(str) || isDataUrlSvg(str)) {
+    return str;
+  }
+  if (!rejectDataUrl(str)) {
+    return str;
+  }
+  if (dataUrlSizeKb(str) <= SHOWCASE_MAX_KB) {
+    return str;
+  }
+  try {
+    var rasterFile = await dataUrlToFile(str, simId + '-showcase.webp');
+    return compressShowcaseForFirestore(rasterFile);
+  } catch (err) {
+    console.warn('[CMS Media] Clearing oversized showcase image for', simId, err);
+    return '';
+  }
+}
+
 /**
- * Upload pending / base64 media and replace with Storage URLs before Firestore write.
+ * Compress media to lean data URIs and validate total Firestore payload size.
  */
 export async function prepareSimulatorsPayloadForFirestore(payload, pendingIcons, pendingShowcase, onProgress) {
   var src = payload && typeof payload === 'object' ? payload : {};
@@ -231,54 +435,59 @@ export async function prepareSimulatorsPayloadForFirestore(payload, pendingIcons
     var id = ids[i];
     var stepBase = 30 + Math.round((i / Math.max(ids.length, 1)) * 45);
     reportProgress(stepBase);
-    console.log('[CMS] Processing simulator media:', id, '(' + (i + 1) + '/' + ids.length + ')');
 
     var metaEntry = meta[id];
-    if (metaEntry && metaEntry.iconType === 'image') {
-      console.log('[CMS] Resolving icon for', id);
+    if (metaEntry && (pendingIconMap[id] || isEphemeralPreviewUrl(metaEntry.icon))) {
+      console.log('[CMS] Compressing icon for', id, '(' + (i + 1) + '/' + ids.length + ')');
       meta[id] = Object.assign({}, metaEntry, {
-        icon: await resolveSimulatorIconUrl(id, metaEntry.icon, pendingIconMap[id]),
+        iconType: 'image',
+        icon: await resolveSimulatorIconValue(id, metaEntry.icon, pendingIconMap[id]),
       });
+      metaEntry = meta[id];
+    } else if (metaEntry && metaEntry.icon && shouldResolveSimulatorIcon(metaEntry)) {
+      meta[id] = Object.assign({}, metaEntry, {
+        iconType: 'image',
+        icon: await ensureLeanIconDataUri(id, metaEntry.icon),
+      });
+      metaEntry = meta[id];
     }
+
     var showcaseEntry = showcase[id];
-    if (showcaseEntry && showcaseEntry.showcaseImage) {
-      console.log('[CMS] Resolving showcase image for', id);
+    if (showcaseEntry && (pendingShowcaseMap[id] || isEphemeralPreviewUrl(showcaseEntry.showcaseImage))) {
+      console.log('[CMS] Compressing showcase image for', id, '(' + (i + 1) + '/' + ids.length + ')');
       showcase[id] = Object.assign({}, showcaseEntry, {
-        showcaseImage: await resolveShowcaseImageUrl(
+        showcaseImage: await resolveShowcaseImageValue(
           id,
           showcaseEntry.showcaseImage,
           pendingShowcaseMap[id]
         ),
+      });
+    } else if (showcaseEntry && showcaseEntry.showcaseImage) {
+      showcase[id] = Object.assign({}, showcaseEntry, {
+        showcaseImage: await ensureLeanShowcaseDataUri(id, showcaseEntry.showcaseImage),
       });
     }
   }
 
   reportProgress(78);
 
-  return Object.assign({}, src, {
+  var prepared = Object.assign({}, src, {
     simulatorsMeta: meta,
     showcaseMeta: showcase,
   });
+
+  assertSimulatorsPayloadWithinFirestoreLimit(prepared);
+  return prepared;
 }
 
+export function assertSimulatorsMediaReady(payload) {
+  if (payloadHasBlobMedia(payload)) {
+    throw new Error('ما زالت هناك صور محاكيات غير جاهزة للنشر — أعد رفع الصور ثم احفظ مرة أخرى.');
+  }
+  assertSimulatorsPayloadWithinFirestoreLimit(payload);
+}
+
+/** @deprecated Use assertSimulatorsMediaReady */
 export function assertNoDataUrlsInSimulatorsPayload(payload) {
-  var meta = (payload && payload.simulatorsMeta) || {};
-  var showcase = (payload && (payload.showcaseMeta || payload.showcaseStore)) || {};
-  Object.keys(meta).forEach(function (id) {
-    var entry = meta[id];
-    if (entry && entry.iconType === 'image' && rejectDataUrl(entry.icon)) {
-      throw new Error(
-        'أيقونة المحاكي «' + id + '» ما زالت base64 — أعد رفع الصورة أو احفظ مرة أخرى.'
-      );
-    }
-  });
-  Object.keys(showcase).forEach(function (id) {
-    if (id.charAt(0) === '_') return;
-    var entry = showcase[id];
-    if (entry && entry.showcaseImage && rejectDataUrl(entry.showcaseImage)) {
-      throw new Error(
-        'صورة عرض المحاكي «' + id + '» ما زالت base64 — أعد رفع الصورة أو احفظ مرة أخرى.'
-      );
-    }
-  });
+  assertSimulatorsMediaReady(payload);
 }

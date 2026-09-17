@@ -5,6 +5,7 @@
   'use strict';
 
   var KEY = 'ifa_platform_stats';
+  var hydrated = false;
 
   var DEFAULTS = {
     enrolledStudents: 2500,
@@ -12,14 +13,6 @@
     trainingProjects: 48,
     satisfactionRate: 98,
   };
-
-  function usesFirestoreStats() {
-    return !!(
-      global.PlatformStatsFirestore &&
-      typeof global.PlatformStatsFirestore.isReady === 'function' &&
-      global.PlatformStatsFirestore.isReady()
-    );
-  }
 
   function readJson() {
     try {
@@ -60,10 +53,42 @@
   }
 
   function getStats() {
-    if (usesFirestoreStats()) {
-      return global.PlatformStatsFirestore.getCachedStats();
+    var local = readJson();
+    if (local) return normalizeStats(local);
+    if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.getCachedStats === 'function') {
+      return normalizeStats(global.PlatformStatsFirestore.getCachedStats());
     }
-    return normalizeStats(readJson() || DEFAULTS);
+    return normalizeStats(DEFAULTS);
+  }
+
+  function isHydrated() {
+    if (hydrated) return true;
+    if (readJson()) return true;
+    if (
+      global.PlatformStatsFirestore &&
+      typeof global.PlatformStatsFirestore.isHydrated === 'function' &&
+      global.PlatformStatsFirestore.isHydrated()
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function setStatsLoading(loading) {
+    var section = document.getElementById('stats');
+    if (!section) return;
+    section.classList.toggle('stats--loading', !!loading);
+  }
+
+  function dispatchHydrated(stats) {
+    if (hydrated) return;
+    hydrated = true;
+    setStatsLoading(false);
+    try {
+      global.dispatchEvent(new CustomEvent('ifa:platform-stats-hydrated', { detail: stats }));
+    } catch (err) {
+      /* ignore */
+    }
   }
 
   function saveStats(patch) {
@@ -81,6 +106,7 @@
     } catch (err2) {
       /* ignore */
     }
+    dispatchHydrated(next);
     return Promise.resolve(next);
   }
 
@@ -90,14 +116,17 @@
     scope.querySelectorAll('[data-stat-key]').forEach(function (el) {
       var key = el.getAttribute('data-stat-key');
       if (!stats.hasOwnProperty(key)) return;
-      var value = stats[key];
-      el.setAttribute('data-target', String(value));
-      el.textContent = '0';
+      el.setAttribute('data-target', String(stats[key]));
     });
   }
 
   function loadPublicStats() {
     applyLandingStats(document);
+    if (isHydrated()) {
+      dispatchHydrated(getStats());
+    } else {
+      setStatsLoading(true);
+    }
   }
 
   function bindFirestoreSubscription() {
@@ -106,6 +135,9 @@
         global.PlatformStatsFirestore.subscribe(function () {
           loadPublicStats();
         });
+        if (global.PlatformStatsFirestore.isHydrated && global.PlatformStatsFirestore.isHydrated()) {
+          loadPublicStats();
+        }
         return;
       }
       if (attempts > 40) return;
@@ -124,8 +156,24 @@
     formatStatNumber: formatStatNumber,
     applyLandingStats: applyLandingStats,
     loadPublicStats: loadPublicStats,
-    usesFirestore: usesFirestoreStats,
+    isHydrated: isHydrated,
+    usesFirestore: function () {
+      return !!(
+        global.PlatformStatsFirestore &&
+        typeof global.PlatformStatsFirestore.isReady === 'function' &&
+        global.PlatformStatsFirestore.isReady()
+      );
+    },
   };
+
+  if (readJson()) {
+    if (document.body) {
+      applyLandingStats(document);
+      dispatchHydrated(getStats());
+    }
+  } else {
+    if (document.body) setStatsLoading(true);
+  }
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', function () {
@@ -137,12 +185,18 @@
     bindFirestoreSubscription();
   }
 
+  global.addEventListener('ifa:platform-stats-hydrated', function () {
+    hydrated = true;
+    setStatsLoading(false);
+  });
+
   global.addEventListener('ifa:platform-stats-changed', function () {
     loadPublicStats();
   });
 
   global.addEventListener('storage', function (e) {
-    if (usesFirestoreStats()) return;
-    if (e.key === KEY) loadPublicStats();
+    if (e.key !== KEY) return;
+    loadPublicStats();
+    dispatchHydrated(getStats());
   });
 })(typeof window !== 'undefined' ? window : this);

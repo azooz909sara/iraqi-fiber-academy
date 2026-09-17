@@ -282,6 +282,19 @@ function notifyLocalAuthChanged(detail) {
   }
 }
 
+function startPlatformNotifications(user, profile) {
+  if (!user || !user.uid) return;
+  if (window.PlatformNotifications && typeof window.PlatformNotifications.start === 'function') {
+    window.PlatformNotifications.start(user.uid, profile || lastProfile);
+  }
+}
+
+function stopPlatformNotifications() {
+  if (window.PlatformNotifications && typeof window.PlatformNotifications.stop === 'function') {
+    window.PlatformNotifications.stop();
+  }
+}
+
 function notifyAuthChange(user, meta) {
   meta = meta || {};
   var identity = resolveActiveIdentity();
@@ -333,6 +346,13 @@ function setAuthModalError(message) {
   el.textContent = message;
 }
 
+function authText(key, fallback) {
+  if (window.PlatformI18n && typeof window.PlatformI18n.t === 'function') {
+    return window.PlatformI18n.t(key);
+  }
+  return fallback;
+}
+
 function setAuthModalMode(mode) {
   authModalMode = mode === 'signup' ? 'signup' : 'login';
   var modal = document.getElementById('authModal');
@@ -342,14 +362,17 @@ function setAuthModalMode(mode) {
   var submit = modal.querySelector('[data-auth-submit]');
   var switchLogin = modal.querySelector('[data-auth-switch-login]');
   var switchSignup = modal.querySelector('[data-auth-switch-signup]');
-  if (title) {
-    title.textContent = authModalMode === 'signup' ? 'إنشاء حساب' : 'تسجيل الدخول';
+  var label = authModalMode === 'signup' ? authText('auth.signup', 'إنشاء حساب') : authText('auth.login', 'تسجيل الدخول');
+  if (title) title.textContent = label;
+  if (submit) submit.textContent = label;
+  if (switchLogin) {
+    switchLogin.hidden = authModalMode === 'login';
+    switchLogin.textContent = authText('auth.switchLogin', 'لديك حساب؟ تسجيل الدخول');
   }
-  if (submit) {
-    submit.textContent = authModalMode === 'signup' ? 'إنشاء حساب' : 'تسجيل الدخول';
+  if (switchSignup) {
+    switchSignup.hidden = authModalMode === 'signup';
+    switchSignup.textContent = authText('auth.switchSignup', 'ليس لديك حساب؟ إنشاء حساب');
   }
-  if (switchLogin) switchLogin.hidden = authModalMode === 'login';
-  if (switchSignup) switchSignup.hidden = authModalMode === 'signup';
   setAuthModalError('');
 }
 
@@ -702,7 +725,9 @@ function userMenuHtml(options) {
     '<div class="user-menu__divider" role="separator"></div>' +
     midItems +
     '<div class="user-menu__divider" role="separator"></div>' +
-    '<a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout>تسجيل خروج</a>' +
+    '<a href="#" class="user-menu__item user-menu__item--logout" role="menuitem" data-auth-logout data-i18n="auth.logout">' +
+    authText('auth.logout', 'تسجيل خروج') +
+    '</a>' +
     '</div>' +
     '</div>'
   );
@@ -713,7 +738,9 @@ function loggedOutHtml(variant) {
   return (
     '<button type="button" class="' +
     btnClass +
-    '" data-auth-login>تسجيل الدخول</button>'
+    '" data-auth-login data-i18n="auth.login">' +
+    authText('auth.login', 'تسجيل الدخول') +
+    '</button>'
   );
 }
 
@@ -727,7 +754,9 @@ function loggedInHtml(user, variant, profile) {
       '<span class="auth-user__name">' +
       escapeHtml(firstName) +
       '</span>' +
-      '<button type="button" class="auth-logout-btn auth-logout-btn--sim" data-auth-logout>تسجيل الخروج</button>' +
+      '<button type="button" class="auth-logout-btn auth-logout-btn--sim" data-auth-logout data-i18n="auth.logoutSim">' +
+      authText('auth.logoutSim', 'تسجيل الخروج') +
+      '</button>' +
       '</div>'
     );
   }
@@ -937,6 +966,7 @@ export async function loginWithGoogle() {
 export async function logoutUser() {
   closeUserMenuDropdown();
   closeAuthModal();
+  stopPlatformNotifications();
   try {
     if (auth.currentUser) {
       await signOut(auth);
@@ -1051,6 +1081,14 @@ function initAuthUI() {
 
   refreshSlots();
 
+  window.addEventListener('ifa:settings-lang-changed', function () {
+    refreshSlots();
+    setAuthModalMode(authModalMode);
+    if (window.PlatformI18n && typeof window.PlatformI18n.apply === 'function') {
+      window.PlatformI18n.apply();
+    }
+  });
+
   window.addEventListener('ifa:local-auth-changed', function (e) {
     var type = e && e.detail ? e.detail.type : '';
     if (type === 'profile-sync' || type === 'login') {
@@ -1071,6 +1109,7 @@ function initAuthUI() {
     if (!user) {
       lastProfile = null;
       profileSynced = true;
+      stopPlatformNotifications();
       if (shouldBypassAccessControl()) {
         ensureLocalDevSession();
       } else {
@@ -1117,12 +1156,14 @@ function initAuthUI() {
         });
         profileSynced = true;
         refreshSlots();
+        startPlatformNotifications(user, profile);
         notifyLocalAuthChanged({ type: 'profile-sync', email: email });
         notifyAuthChange(user, { profileSynced: true });
       })
       .catch(function (err) {
         profileSynced = true;
         console.error('[Auth] syncUserProfile failed:', err);
+        startPlatformNotifications(user, lastProfile);
         notifyAuthChange(user, { profileSynced: true });
       });
   });

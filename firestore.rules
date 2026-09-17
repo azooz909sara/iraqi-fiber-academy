@@ -122,6 +122,13 @@ service cloud.firestore {
         .hasOnly(['deliveryChannel', 'deliveryStatus', 'deliveredAt', 'deliveryError']);
     }
 
+    // Platform announcements (course publish, etc.) — signed-in read; admin write.
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn()
+        && resource.data.active == true;
+      allow create, update, delete: if isAdmin();
+    }
+
     // Outbound email queue (Firebase Trigger Email Extension format).
     match /mail_notifications/{notificationId} {
       allow read: if isAdmin();

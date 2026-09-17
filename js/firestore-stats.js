@@ -5,8 +5,10 @@ import { db } from './firebase-config.js';
 import { doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var DOC_PATH = ['settings', 'stats'];
+var STORAGE_KEY = 'ifa_platform_stats';
 var cachedStats = null;
 var snapshotReady = false;
+var hydrated = false;
 var listeners = [];
 var unsubscribeSnapshot = null;
 
@@ -35,6 +37,42 @@ function normalizeStats(raw) {
   };
 }
 
+function readLocalStats() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return normalizeStats(JSON.parse(raw));
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeLocalStats(stats) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalizeStats(stats)));
+  } catch (err) {
+    /* ignore quota / private mode */
+  }
+}
+
+function dispatchHydrated(stats) {
+  try {
+    window.dispatchEvent(
+      new CustomEvent('ifa:platform-stats-hydrated', { detail: stats })
+    );
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function markHydrated(stats) {
+  if (hydrated) return;
+  hydrated = true;
+  dispatchHydrated(stats);
+}
+
+cachedStats = readLocalStats();
+
 function notifyListeners() {
   var stats = getCachedPlatformStats();
   listeners.forEach(function (fn) {
@@ -50,9 +88,6 @@ function notifyListeners() {
   } catch (err) {
     /* ignore */
   }
-  if (window.PlatformStats && typeof window.PlatformStats.applyLandingStats === 'function') {
-    window.PlatformStats.applyLandingStats(document);
-  }
 }
 
 function handleSnapshot(snap) {
@@ -61,16 +96,22 @@ function handleSnapshot(snap) {
   } else {
     cachedStats = normalizeStats(snap.data());
   }
+  writeLocalStats(cachedStats);
   snapshotReady = true;
+  markHydrated(cachedStats);
   notifyListeners();
 }
 
 export function getCachedPlatformStats() {
-  return normalizeStats(cachedStats || DEFAULTS);
+  return normalizeStats(cachedStats || readLocalStats() || DEFAULTS);
 }
 
 export function isStatsSnapshotReady() {
   return snapshotReady;
+}
+
+export function isStatsHydrated() {
+  return hydrated || snapshotReady || !!readLocalStats();
 }
 
 export function subscribePlatformStats(callback) {
@@ -90,7 +131,9 @@ export async function savePlatformStats(patch) {
   next.updatedAt = new Date().toISOString();
   await setDoc(doc(db, DOC_PATH[0], DOC_PATH[1]), next, { merge: true });
   cachedStats = next;
+  writeLocalStats(cachedStats);
   snapshotReady = true;
+  markHydrated(cachedStats);
   notifyListeners();
   return next;
 }
@@ -102,12 +145,17 @@ export function startPlatformStatsSync() {
     handleSnapshot,
     function (err) {
       console.error('[PlatformStatsFirestore] onSnapshot failed', err);
-      cachedStats = normalizeStats(DEFAULTS);
+      cachedStats = normalizeStats(readLocalStats() || DEFAULTS);
       snapshotReady = true;
+      markHydrated(cachedStats);
       notifyListeners();
     }
   );
   return unsubscribeSnapshot;
+}
+
+if (cachedStats) {
+  markHydrated(cachedStats);
 }
 
 var api = {
@@ -116,6 +164,7 @@ var api = {
   subscribe: subscribePlatformStats,
   getCachedStats: getCachedPlatformStats,
   isReady: isStatsSnapshotReady,
+  isHydrated: isStatsHydrated,
   saveStats: savePlatformStats,
   start: startPlatformStatsSync,
 };
