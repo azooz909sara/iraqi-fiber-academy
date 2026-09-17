@@ -165,12 +165,20 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
     return DEFAULT_CLAMP_BACKWARD;
   }
 
-  function readClampLimitsFromSettings() {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getSplicerClampLimits === 'function') {
-      return FtthLabSettings.getSplicerClampLimits();
+  function resolveLabSettingsStore() {
+    if (global.FtthLab && typeof global.FtthLab.getLabSettings === 'function') {
+      return global.FtthLab.getLabSettings();
     }
-    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
-      var item = FtthLabSettings.getItem('fusion-splicer-machine');
+    return global.FusionSplicerSettings || global.FtthLabSettings || null;
+  }
+
+  function readClampLimitsFromSettings() {
+    var settings = resolveLabSettingsStore();
+    if (settings && typeof settings.getSplicerClampLimits === 'function') {
+      return settings.getSplicerClampLimits();
+    }
+    if (settings && typeof settings.getItem === 'function') {
+      var item = settings.getItem('fusion-splicer-machine');
       var specs = item && item.specs ? item.specs : {};
       var forward = specs.splicerClampForwardPx != null
         ? specs.splicerClampForwardPx
@@ -272,8 +280,9 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         applyClampLimitsMessage(JSON.parse(ev.newValue));
       } catch (err) { /* ignore */ }
     });
-    if (global.FtthLabSettings && FtthLabSettings.EVENTS && FtthLabSettings.EVENTS.saved) {
-      document.addEventListener(FtthLabSettings.EVENTS.saved, syncClampLimitsFromSettings);
+    var settings = resolveLabSettingsStore();
+    if (settings && settings.EVENTS && settings.EVENTS.saved) {
+      document.addEventListener(settings.EVENTS.saved, syncClampLimitsFromSettings);
     }
   }
 

@@ -588,7 +588,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-cleaver-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-cleaver-tree', 'fiber-cleaver')
+      : document.getElementById('lab-cleaver-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -604,6 +606,9 @@
       '</div>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {

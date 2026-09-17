@@ -228,6 +228,30 @@
     window.refreshAdminOverviewStats();
     bindPlatformSettingsForm();
     bindAdminFtthLabConfigPanel();
+    bindLabConfigPreviewForwarder();
+  }
+
+  function bindLabConfigPreviewForwarder() {
+    if (window.__ifaLabConfigPreviewForwarderBound) return;
+    window.__ifaLabConfigPreviewForwarderBound = true;
+
+    function forwardLabConfigMessage(data) {
+      if (!data || data.type !== 'ifa:lab-config-apply' || data._ifaRouted) return;
+      var payload = Object.assign({}, data, { _ifaRouted: true });
+      document.querySelectorAll('iframe').forEach(function (frame) {
+        if (!frame.contentWindow) return;
+        try {
+          frame.contentWindow.postMessage(payload, '*');
+        } catch (err) { /* ignore */ }
+      });
+    }
+
+    window.addEventListener('message', function (ev) {
+      forwardLabConfigMessage(ev.data);
+    });
+    window.addEventListener('ifa:lab-config-apply-local', function (ev) {
+      forwardLabConfigMessage((ev && ev.detail) || null);
+    });
   }
 
   function bindAdminFtthLabConfigPanel() {

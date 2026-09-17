@@ -365,7 +365,9 @@
   /* ─── Toolbox ─── */
 
   function renderToolbox() {
-    var host = document.getElementById('lab-spool-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-spool-tree', 'spool')
+      : document.getElementById('lab-spool-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -380,6 +382,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -798,8 +803,12 @@
     onToolboxClaim: onToolboxClaim,
     placeSpool: placeSpool,
     updateInspector: updateInspector,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('spool', 'lab-spool-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: snapshot,

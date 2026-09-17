@@ -51,6 +51,42 @@
     };
   }
 
+  function useOtdrCms() {
+    cms = {
+      storeName: 'OtdrSettings',
+      buttonId: 'otdr-admin-settings-btn',
+      modalId: 'otdr-settings-modal',
+      titleId: 'otdr-settings-title',
+      bodyId: 'otdr-settings-body',
+      statusId: 'otdr-settings-status',
+      undoId: 'otdr-settings-undo',
+      redoId: 'otdr-settings-redo',
+      resetId: 'otdr-settings-reset',
+      saveId: 'otdr-settings-save',
+      title: 'إعدادات مختبر OTDR',
+      subtitle: 'Device names, specs, toolbox icons · <code>ifa_otdr_config</code>',
+      resetConfirm: 'Reset all OTDR Lab device settings to factory defaults?',
+    };
+  }
+
+  function useSplicerCms() {
+    cms = {
+      storeName: 'FusionSplicerSettings',
+      buttonId: 'splicer-admin-settings-btn',
+      modalId: 'splicer-settings-modal',
+      titleId: 'splicer-settings-title',
+      bodyId: 'splicer-settings-body',
+      statusId: 'splicer-settings-status',
+      undoId: 'splicer-settings-undo',
+      redoId: 'splicer-settings-redo',
+      resetId: 'splicer-settings-reset',
+      saveId: 'splicer-settings-save',
+      title: 'إعدادات لحام الألياف',
+      subtitle: 'Device names, specs, toolbox icons · <code>ifa_splicer_config</code>',
+      resetConfirm: 'Reset all Fusion Splicer device settings to factory defaults?',
+    };
+  }
+
   function $(id) { return document.getElementById(id); }
 
   function escapeHtml(value) {
@@ -167,22 +203,57 @@
     return null;
   }
 
+  function broadcastLabConfigMessage(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    try {
+      window.dispatchEvent(new CustomEvent('ifa:lab-config-apply-local', { detail: payload }));
+    } catch (err) { /* ignore */ }
+    try {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage(payload, '*');
+      }
+    } catch (err) { /* ignore */ }
+    try {
+      document.querySelectorAll('iframe').forEach(function (frame) {
+        if (!frame.contentWindow) return;
+        frame.contentWindow.postMessage(payload, '*');
+      });
+    } catch (err) { /* ignore */ }
+  }
+
+  function buildLabConfigPayload(config, preview) {
+    return {
+      type: 'ifa:lab-config-apply',
+      store: cms.storeName,
+      config: config,
+      preview: !!preview,
+    };
+  }
+
   function pushLivePreview() {
     var s = store();
     if (!s) return;
-    if (typeof s.applyToolboxPresentation === 'function') {
-      s.applyToolboxPresentation(s.getDraft());
-    }
-    try {
-      if (window.parent && window.parent !== window) {
-        window.parent.postMessage({
-          type: 'ifa:ftth-lab-draft-live',
-          draft: s.getDraft(),
-        }, '*');
-      }
-    } catch (err) { /* ignore */ }
+    var draft = s.getDraft();
+    broadcastLabConfigMessage(buildLabConfigPayload(draft, true));
     if (window.FtthLab && typeof FtthLab.notifyLabConfigPreview === 'function') {
-      FtthLab.notifyLabConfigPreview();
+      FtthLab.notifyLabConfigPreview(draft);
+    } else if (typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation(draft);
+    }
+  }
+
+  function pushSavedPreview() {
+    var s = store();
+    if (!s) return;
+    var config = s.getActiveConfig();
+    if (window.FtthLab && typeof FtthLab.clearToolboxPreviewConfig === 'function') {
+      FtthLab.clearToolboxPreviewConfig();
+    }
+    broadcastLabConfigMessage(buildLabConfigPayload(config, false));
+    if (window.FtthLab && typeof FtthLab.applyFtthLabConfig === 'function') {
+      FtthLab.applyFtthLabConfig(config, { preview: false });
+    } else if (typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation(config);
     }
   }
 
@@ -591,6 +662,12 @@
     }
   }
 
+  function readFieldInputValue(input) {
+    if (!input) return '';
+    if (input.type === 'checkbox') return input.checked;
+    return input.value;
+  }
+
   function handleLiveFieldEvent(input) {
     if (!input || !input.getAttribute) return false;
     var toolKey = input.getAttribute('data-tool-key');
@@ -614,7 +691,8 @@
     }
     if (input.getAttribute('data-lab-field')) {
       var fieldName = input.getAttribute('data-lab-field');
-      commitField(toolKey, fieldName, fieldName === 'visible' ? input.checked : input.value);
+      var fieldValue = readFieldInputValue(input);
+      commitField(toolKey, fieldName, fieldName === 'visible' ? fieldValue === true : fieldValue);
       syncDeviceCardUi(toolKey);
       pushLivePreview();
       setStatus('Live preview · Save Changes to persist.');
@@ -680,7 +758,11 @@
   function commitField(toolKey, field, value) {
     if (!store() || !toolKey || !field) return;
     var patch = {};
-    patch[field] = field === 'visible' ? !!value : value;
+    if (field === 'visible') {
+      patch.visible = value === true;
+    } else {
+      patch[field] = value;
+    }
     store().updateItem(toolKey, patch, true);
   }
 
@@ -855,6 +937,8 @@
       var ok = store().saveChanges();
       setStatus(ok ? 'Saved · toolbox and properties updated.' : 'Save failed (storage quota).', !ok);
       syncToolbar();
+      refresh();
+      if (ok) pushSavedPreview();
     });
   }
 
@@ -894,9 +978,16 @@
     return true;
   }
 
+  function canShowSimulatorAdminSettingsUI() {
+    if (window.IFAAuth && typeof window.IFAAuth.canShowSimulatorAdminSettingsUI === 'function') {
+      return window.IFAAuth.canShowSimulatorAdminSettingsUI();
+    }
+    return false;
+  }
+
   function openModal() {
     restoreLabCmsIds();
-    if (!isAdminPreviewContext() || !store()) return;
+    if (!canShowSimulatorAdminSettingsUI() || !store()) return;
     ensureModal();
     modalOpen = true;
     var modal = $(cms.modalId);
@@ -953,6 +1044,8 @@
 
   function bind() {
     if ($('opm-admin-settings-btn')) useOpmCms();
+    else if ($('otdr-admin-settings-btn')) useOtdrCms();
+    else if ($('splicer-admin-settings-btn')) useSplicerCms();
     var btn = $(cms.buttonId);
     if (btn) {
       btn.addEventListener('click', function (e) {

@@ -29,8 +29,12 @@
     if (global.FtthLab && typeof FtthLab.getToolMeta === 'function') {
       return FtthLab.getToolMeta('ols');
     }
-    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
-      return FtthLabSettings.getItem('ols');
+    var settings =
+      global.FtthLab && typeof global.FtthLab.getLabSettings === 'function'
+        ? global.FtthLab.getLabSettings()
+        : global.FtthLabSettings;
+    if (settings && typeof settings.getItem === 'function') {
+      return settings.getItem('ols');
     }
     return null;
   }
@@ -821,7 +825,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-ols-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-ols-tree', 'ols')
+      : document.getElementById('lab-ols-tree');
     if (!host) return;
     var meta = getToolMeta() || {};
     var title = meta.label || 'OLS-35';
@@ -1094,8 +1100,12 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     placeOls: placeOls,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('ols', 'lab-ols-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: exportProjectState,

@@ -1330,6 +1330,7 @@
       });
     }
     syncAnatomyAdminSettingsButton();
+    bindAdminSettingsUiAuthListener();
     syncCableUiChrome();
   }
 
@@ -1346,13 +1347,32 @@
     }
   }
 
+  function canShowSimulatorAdminSettingsUI() {
+    if (window.IFAAuth && typeof window.IFAAuth.canShowSimulatorAdminSettingsUI === 'function') {
+      return window.IFAAuth.canShowSimulatorAdminSettingsUI();
+    }
+    return false;
+  }
+
   function syncAnatomyAdminSettingsButton() {
     var btn = document.getElementById('anatomy-admin-settings-btn');
     if (!btn) return;
-    var show = isAdminPreviewContext();
+    var show = canShowSimulatorAdminSettingsUI();
     btn.hidden = !show;
     btn.style.display = show ? 'inline-flex' : 'none';
     btn.classList.toggle('is-admin-visible', show);
+  }
+
+  function bindAdminSettingsUiAuthListener() {
+    if (window.__ifaAnatomyAdminSettingsAuthListenerBound) return;
+    if (!window.IFAAuth || typeof window.IFAAuth.onAuthChange !== 'function') {
+      window.setTimeout(bindAdminSettingsUiAuthListener, 50);
+      return;
+    }
+    window.__ifaAnatomyAdminSettingsAuthListenerBound = true;
+    window.IFAAuth.onAuthChange(function () {
+      syncAnatomyAdminSettingsButton();
+    });
   }
 
   function boot() {

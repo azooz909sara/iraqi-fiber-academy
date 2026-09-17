@@ -20,7 +20,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-cable-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-cable-tree', 'cable')
+      : document.getElementById('lab-cable-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -35,6 +37,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -121,8 +126,12 @@
     category: 'FIBER JUMPERS',
     mount: mount,
     onToolboxClaim: onToolboxClaim,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('cable', 'lab-cable-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
     },
   };
 

@@ -1118,7 +1118,9 @@
   /* ─── Toolbox ─── */
 
   function renderToolbox() {
-    var host = document.getElementById('lab-patchcord-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-patchcord-tree', 'patchcord')
+      : document.getElementById('lab-patchcord-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -1133,6 +1135,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -6074,8 +6079,12 @@
     applyLaserGlow: applyLaserGlow,
     translateForVfl: translateForVfl,
     detachPcordsFromOltPort: detachPcordsFromOltPort,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('patchcord', 'lab-patchcord-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: captureSnapshot,

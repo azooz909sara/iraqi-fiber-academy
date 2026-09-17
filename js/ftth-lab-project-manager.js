@@ -623,7 +623,31 @@
           recentMenu: 'lab-file-menu-recent-list',
           saveStatus: 'lab-save-status',
           projectName: 'lab-menu-project-name',
-          settingsModal: 'ftth-lab-settings-modal',
+          settingsModal: 'otdr-settings-modal',
+          toast: 'lab-file-menu-toast',
+        },
+      });
+    } else if (
+      document.getElementById('lab-startup-view') &&
+      document.body.classList.contains('splicer-lab-page')
+    ) {
+      global.FtthLabProjectManager = createWorkspaceProjectManager({
+        storageKey: 'ifa_ftth_lab_projects',
+        kind: 'ifa-ftth-lab-project',
+        idPrefix: 'lab',
+        pageClass: 'splicer-lab-page',
+        templateDesc: 'Blank canvas · Fusion splicer · Cleaver · Stripper · Sleeve',
+        ids: {
+          startup: 'lab-startup-view',
+          back: 'lab-startup-back',
+          recentList: 'lab-startup-recent-list',
+          templates: 'lab-startup-templates-grid',
+          workspace: 'lab-app',
+          menuBar: 'lab-app-menu-bar',
+          recentMenu: 'lab-file-menu-recent-list',
+          saveStatus: 'lab-save-status',
+          projectName: 'lab-menu-project-name',
+          settingsModal: 'splicer-settings-modal',
           toast: 'lab-file-menu-toast',
         },
       });

@@ -762,7 +762,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-opm-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-opm-tree', 'opm')
+      : document.getElementById('lab-opm-tree');
     if (!host) return;
     var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('opm')) || {};
     host.innerHTML =
@@ -1185,8 +1187,12 @@
     onToolboxClaim: onToolboxClaim,
     placeOpm: placeOpm,
     refreshDockReadings: refreshDockReadings,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('opm', 'lab-opm-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: exportProjectState,

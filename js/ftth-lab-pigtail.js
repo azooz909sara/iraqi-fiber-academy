@@ -2223,8 +2223,12 @@
    * Admin-configurable via FtthLabSettings (`bareGlassLengthAfterCutPx`, default 16).
    */
   function getBareGlassLengthAfterCutPx() {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
-      var item = FtthLabSettings.getItem('fiber-cleaver');
+    var settings =
+      global.FtthLab && typeof global.FtthLab.getLabSettings === 'function'
+        ? global.FtthLab.getLabSettings()
+        : global.FtthLabSettings;
+    if (settings && typeof settings.getItem === 'function') {
+      var item = settings.getItem('fiber-cleaver');
       if (item && item.specs) {
         var n = Number(item.specs.bareGlassLengthAfterCutPx);
         if (isFinite(n) && n >= 1) return Math.round(n);
@@ -10061,7 +10065,9 @@
   /* ─── Toolbox ─── */
 
   function renderToolbox() {
-    var host = document.getElementById('lab-pigtail-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-pigtail-tree', 'pigtail')
+      : document.getElementById('lab-pigtail-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -10076,6 +10082,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -11191,8 +11200,12 @@
     hitTestPigtailAtClient: hitTestPigtailAtClient,
     hitTestPigtailBareEnd: hitTestPigtailBareEnd,
     translateForVfl: translateForVfl,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('pigtail', 'lab-pigtail-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: captureSnapshot,

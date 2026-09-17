@@ -578,6 +578,17 @@ function isAdminUser(profile) {
   return !!(profile && String(profile.role || '') === 'admin');
 }
 
+/** Show in-simulator CMS settings UI (الإعدادات) — admins only; does not gate read/sync listeners. */
+function canShowSimulatorAdminSettingsUI() {
+  var identity = resolveActiveIdentity();
+  if (isAdminUser(identity.profile)) return true;
+  if (shouldBypassAccessControl()) {
+    var local = getLocalAuthUser();
+    if (local && String(local.role || '').toLowerCase() === 'admin') return true;
+  }
+  return false;
+}
+
 function isInstructorUser(profile, email) {
   if (shouldBypassAccessControl()) return true;
   var Apps = typeof window !== 'undefined' ? window.InstructorApps : null;
@@ -1242,6 +1253,7 @@ window.IFAAuth = {
   loginLocalSession: loginLocalSession,
   hasActiveTrial: hasActiveTrial,
   isAdminUser: isAdminUser,
+  canShowSimulatorAdminSettingsUI: canShowSimulatorAdminSettingsUI,
   isInstructorUser: isInstructorUser,
   applyEntitlements: applyEntitlements,
   profileToEntitlements: profileToEntitlements,

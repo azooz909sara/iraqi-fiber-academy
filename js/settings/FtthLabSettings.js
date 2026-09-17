@@ -138,6 +138,11 @@
         },
       },
       {
+        id: 'otdr-machine', toolKey: 'otdr-machine', categoryId: 'test',
+        label: 'OTDR Machine', sublabel: 'VIAVI SmartOTDR', markClass: 'otdr', icon: '',
+        guideText: 'Drag onto the workspace to place the OTDR test set.',
+      },
+      {
         id: 'vfl', toolKey: 'vfl', categoryId: 'test',
         label: 'Visual Fault Locator', sublabel: '10 mW · 650 nm laser', markClass: 'vfl', icon: '',
         guideText: 'Dock SC fiber and enable the red fault locator laser.',
@@ -160,9 +165,29 @@
         specs: { splicerClampForwardPx: 95, splicerClampBackwardPx: 0 },
       },
       {
+        id: 'stripper', toolKey: 'stripper', categoryId: 'splicing',
+        label: 'CFS-3 Stripper', sublabel: 'Fiber buffer stripper', markClass: 'stripper', icon: '',
+        guideText: 'Drag onto the workspace · strip buffer and coating from fiber.',
+      },
+      {
+        id: 'sleeve', toolKey: 'sleeve', categoryId: 'splicing',
+        label: 'Protection Sleeve', sublabel: '60 mm splice sleeve', markClass: 'sleeve', icon: '',
+        guideText: 'Drag onto the workspace · heat-shrink splice protection sleeve.',
+      },
+      {
+        id: 'cleaning-wipe', toolKey: 'cleaning-wipe', categoryId: 'splicing',
+        label: 'Cleaning Wipes', sublabel: 'IPA fiber cleaning', markClass: 'cleaning-wipe', icon: '',
+        guideText: 'Drag onto the workspace · clean ferrule and bare fiber ends.',
+      },
+      {
         id: 'patchcord', toolKey: 'patchcord', categoryId: 'termination',
         label: 'Patch Cord', sublabel: 'A ↔ B same click-drag rules', markClass: 'pcord', icon: '',
         guideText: 'Drag both ends · SC/UPC or SC/APC · meter mode in properties.',
+      },
+      {
+        id: 'cable', toolKey: 'cable', categoryId: 'termination',
+        label: 'Bare Fiber Cable', sublabel: 'Dual bare-end drop cable', markClass: 'cable', icon: '',
+        guideText: 'Drag onto the workspace to place bare fiber cable.',
       },
       {
         id: 'pigtail', toolKey: 'pigtail', categoryId: 'termination',
@@ -325,10 +350,41 @@
     })[0] || {};
   }
 
+  function normalizeVisible(value, fallback) {
+    if (fallback === undefined) fallback = true;
+    if (typeof value === 'boolean') return value;
+    if (value === 'false' || value === 0 || value === '0') return false;
+    if (value === 'true' || value === 1 || value === '1') return true;
+    return fallback;
+  }
+
+  function mergeLocalVisibilityIntoRemoteConfig(remote, local) {
+    var remoteSrc = remote && typeof remote === 'object' ? clone(remote) : { items: [] };
+    var localSrc = local && typeof local === 'object' ? local : { items: [] };
+    if (!Array.isArray(remoteSrc.items)) remoteSrc.items = [];
+    var localVis = {};
+    (localSrc.items || []).forEach(function (it) {
+      if (it && it.toolKey && it.visible === false) {
+        localVis[it.toolKey] = false;
+      }
+    });
+    remoteSrc.items = remoteSrc.items.map(function (it) {
+      if (!it || !it.toolKey) return it;
+      if (Object.prototype.hasOwnProperty.call(it, 'visible')) return it;
+      if (localVis[it.toolKey] === false) {
+        return Object.assign({}, it, { visible: false });
+      }
+      return it;
+    });
+    return remoteSrc;
+  }
+
   function normalizeItem(raw) {
     var item = raw && typeof raw === 'object' ? raw : {};
     var factory = factoryItemFor(item);
     var toolKey = String(item.toolKey || factory.toolKey || '');
+    var hasVisibleKey = Object.prototype.hasOwnProperty.call(item, 'visible');
+    var visibleFallback = hasVisibleKey ? true : normalizeVisible(factory.visible, true);
     var out = {
       id: String(item.id || factory.id || ('tool_' + Date.now())),
       toolKey: toolKey,
@@ -338,7 +394,7 @@
       guideText: String(item.guideText || factory.guideText || item.sublabel || factory.sublabel || ''),
       markClass: String(item.markClass || factory.markClass || ''),
       icon: clipIcon(item.icon || ''),
-      visible: item.visible !== false,
+      visible: normalizeVisible(item.visible, visibleFallback),
       specs: normalizeSpecs(toolKey, item.specs, factory.specs),
     };
     if (PERFORMANCE_TOOL_KEYS.indexOf(toolKey) >= 0) {
@@ -369,7 +425,12 @@
       else {
         var idx = items.findIndex(function (it) { return it.toolKey === fi.toolKey; });
         if (idx >= 0) {
-          items[idx] = normalizeItem(Object.assign({}, fi, items[idx]));
+          var savedItem = items[idx];
+          var merged = Object.assign({}, fi, savedItem);
+          if (Object.prototype.hasOwnProperty.call(savedItem, 'visible')) {
+            merged.visible = normalizeVisible(savedItem.visible, true);
+          }
+          items[idx] = normalizeItem(merged);
         }
       }
     });
@@ -420,6 +481,37 @@
     } catch (err) {
       return false;
     }
+  }
+
+  function resolveFirestorePublisher(apiKey) {
+    if (apiKey === 'opm') return global.PlatformOpmConfigFirestore;
+    if (apiKey === 'otdr') return global.PlatformOtdrConfigFirestore;
+    if (apiKey === 'splicer') return global.PlatformSplicerConfigFirestore;
+    return global.PlatformFtthLabConfigFirestore;
+  }
+
+  function publishConfigToFirestore(config, apiKey) {
+    var payload = clone(config);
+    var publisherKey = apiKey || 'ftth';
+    function attempt(remaining) {
+      var fs = resolveFirestorePublisher(publisherKey);
+      if (fs && typeof fs.saveConfig === 'function') {
+        try {
+          var result = fs.saveConfig(payload);
+          if (result && typeof result.catch === 'function') {
+            result.catch(function (err) {
+              console.error('[FtthLabSettings] Firestore publish failed', err);
+            });
+          }
+        } catch (err) {
+          console.error('[FtthLabSettings] Firestore publish failed', err);
+        }
+        return;
+      }
+      if (remaining <= 0) return;
+      setTimeout(function () { attempt(remaining - 1); }, 250);
+    }
+    attempt(12);
   }
 
   function clearCustomIconStyles(mark) {
@@ -498,6 +590,31 @@
       var show = !item || item.visible !== false;
       btn.hidden = !show;
       btn.style.display = show ? '' : 'none';
+      btn.setAttribute('aria-hidden', show ? 'false' : 'true');
+      btn.classList.toggle('is-lab-tool-hidden', !show);
+      if (show) {
+        if (btn.classList.contains('is-used')) {
+          btn.draggable = false;
+        } else if (btn.getAttribute('data-lab-tool-drag-disabled') !== '1') {
+          btn.draggable = true;
+        }
+      } else {
+        btn.draggable = false;
+      }
+    });
+    document.querySelectorAll('.lab-rail .lab-hw-tree').forEach(function (tree) {
+      var tools = tree.querySelectorAll('.lab-tool[data-lab-tool]');
+      if (!tools.length) {
+        tree.hidden = true;
+        tree.style.display = 'none';
+        return;
+      }
+      var any = false;
+      tools.forEach(function (btn) {
+        if (!btn.hidden && btn.style.display !== 'none') any = true;
+      });
+      tree.hidden = !any;
+      tree.style.display = any ? '' : 'none';
     });
     document.querySelectorAll('.lab-rail .lab-rail__group').forEach(function (group) {
       var tools = group.querySelectorAll('.lab-tool[data-lab-tool]');
@@ -521,6 +638,7 @@
     options = options || {};
     var storageKey = options.storageKey || 'ifa_ftth_lab_config';
     var eventPrefix = options.eventPrefix || 'ifa:ftth-lab';
+    var firestoreApi = options.firestoreApi || 'ftth';
     var factoryConfig = options.factoryConfig
       ? clone(options.factoryConfig)
       : clone(FACTORY_DEFAULT_FTTH_LAB_CONFIG);
@@ -534,7 +652,10 @@
 
   var Store = {
     STORAGE_KEY: storageKey,
+    FIRESTORE_API: firestoreApi,
     EVENTS: { saved: savedEvt, draft: draftEvt },
+    TOOL_KEY_DOM_ALIASES: TOOL_KEY_DOM_ALIASES,
+    resolveToolKeyFromDom: resolveToolKeyFromDom,
     FACTORY_DEFAULT_FTTH_LAB_CONFIG: factoryConfig,
     DEFAULT_SPLITTER_LOSSES: DEFAULT_SPLITTER_LOSSES,
     MAX_ICON_CHARS: MAX_ICON_CHARS,
@@ -678,6 +799,9 @@
         if (it.toolKey !== toolKey) return it;
         found = true;
         var merged = Object.assign({}, it, patch);
+        if (Object.prototype.hasOwnProperty.call(patch, 'visible')) {
+          merged.visible = normalizeVisible(patch.visible, true);
+        }
         if (patch.specs) {
           merged.specs = normalizeSpecs(toolKey, Object.assign({}, it.specs, patch.specs), factoryItemFor(it).specs);
         }
@@ -725,10 +849,28 @@
 
     saveChanges: function () {
       saved = clone(draft);
+      console.log('[FtthLabSettings] Saved Config:', saved);
       var ok = persistSaved(storageKey, saved);
       applyToolboxPresentation(saved);
+      publishConfigToFirestore(saved, firestoreApi);
       emit(savedEvt, { config: clone(saved), ok: ok });
       return ok;
+    },
+
+    importRemoteConfig: function (remote) {
+      var mergedRemote = mergeLocalVisibilityIntoRemoteConfig(remote, saved);
+      var next = normalizeConfig(mergedRemote);
+      var currentJson = JSON.stringify(normalizeConfig(saved));
+      var nextJson = JSON.stringify(next);
+      if (currentJson === nextJson) return false;
+      saved = clone(next);
+      draft = clone(next);
+      historyStack = [clone(draft)];
+      historyPointer = 0;
+      persistSaved(storageKey, saved);
+      applyToolboxPresentation(saved);
+      emit(savedEvt, { config: clone(saved), ok: true, source: 'firestore' });
+      return true;
     },
 
     discardDraft: function () {
@@ -757,7 +899,9 @@
       return clone(draft);
     },
     normalizeConfig: normalizeConfig,
+    sanitizeConfig: normalizeConfig,
     normalizeItem: normalizeItem,
+    normalizeVisible: normalizeVisible,
   };
 
     return Store;

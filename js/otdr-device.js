@@ -6215,7 +6215,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-otdr-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-otdr-tree', TOOL_ID)
+      : document.getElementById('lab-otdr-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -6231,6 +6233,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -6507,6 +6512,13 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     placeOTDR: placeOTDR,
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange(TOOL_ID, 'lab-otdr-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
+    },
     exportProjectState: function () {
       return JSON.parse(JSON.stringify({ devices: devices, seq: seq, selection: selection }));
     },

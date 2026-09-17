@@ -682,6 +682,14 @@
     return !!(document.body && document.body.classList.contains('otdr-lab-page'));
   }
 
+  function isSplicerOnlyWorkspacePage() {
+    return !!(
+      document.body &&
+      document.body.classList.contains('splicer-lab-page') &&
+      !document.body.classList.contains('otdr-lab-page')
+    );
+  }
+
   function projectWorkspaceKind() {
     if (isOpmWorkspacePage()) return 'ifa-opm-project';
     if (isOtdrWorkspacePage()) return 'ifa-otdr-lab-project';
@@ -690,12 +698,26 @@
 
   function activeLabSettings() {
     if (isOpmWorkspacePage() && global.OpmSettings) return global.OpmSettings;
+    if (isOtdrWorkspacePage() && global.OtdrSettings) return global.OtdrSettings;
+    if (isSplicerOnlyWorkspacePage() && global.FusionSplicerSettings) return global.FusionSplicerSettings;
     return global.FtthLabSettings || null;
   }
 
+  function canShowSimulatorAdminSettingsUI() {
+    if (global.IFAAuth && typeof global.IFAAuth.canShowSimulatorAdminSettingsUI === 'function') {
+      return global.IFAAuth.canShowSimulatorAdminSettingsUI();
+    }
+    return false;
+  }
+
   function syncFtthLabAdminSettingsButton() {
-    var show = isAdminPreviewContext();
-    ['ftth-lab-admin-settings-btn', 'opm-admin-settings-btn'].forEach(function (id) {
+    var show = canShowSimulatorAdminSettingsUI();
+    [
+      'ftth-lab-admin-settings-btn',
+      'opm-admin-settings-btn',
+      'otdr-admin-settings-btn',
+      'splicer-admin-settings-btn',
+    ].forEach(function (id) {
       var btn = $(id);
       if (!btn) return;
       btn.hidden = !show;
@@ -704,9 +726,149 @@
     });
   }
 
+  function bindAdminSettingsUiAuthListener() {
+    if (global.__ifaFtthLabAdminSettingsAuthListenerBound) return;
+    if (!global.IFAAuth || typeof global.IFAAuth.onAuthChange !== 'function') {
+      global.setTimeout(bindAdminSettingsUiAuthListener, 50);
+      return;
+    }
+    global.__ifaFtthLabAdminSettingsAuthListenerBound = true;
+    global.IFAAuth.onAuthChange(function () {
+      syncFtthLabAdminSettingsButton();
+    });
+  }
+
+  var toolboxPreviewConfig = null;
+
+  function setToolboxPreviewConfig(config) {
+    toolboxPreviewConfig = config && typeof config === 'object' ? config : null;
+  }
+
+  function clearToolboxPreviewConfig() {
+    toolboxPreviewConfig = null;
+  }
+
+  function resolveToolboxConfig(explicit) {
+    if (explicit && typeof explicit === 'object') return explicit;
+    if (toolboxPreviewConfig) return toolboxPreviewConfig;
+    var s = activeLabSettings();
+    if (s && typeof s.getActiveConfig === 'function') return s.getActiveConfig();
+    return null;
+  }
+
+  function getItemFromToolboxConfig(config, toolKey) {
+    if (!config || !toolKey || !Array.isArray(config.items)) return null;
+    var key = resolveToolboxToolKey(toolKey);
+    var i;
+    for (i = 0; i < config.items.length; i++) {
+      if (config.items[i] && config.items[i].toolKey === key) return config.items[i];
+    }
+    return null;
+  }
+
+  function resolveToolboxToolKey(domKey) {
+    var s = activeLabSettings();
+    if (s && typeof s.resolveToolKeyFromDom === 'function') {
+      return s.resolveToolKeyFromDom(domKey);
+    }
+    return domKey || '';
+  }
+
+  function isToolboxToolVisible(toolId, config) {
+    if (!toolId) return true;
+    var key = resolveToolboxToolKey(toolId);
+    var cfg = config || resolveToolboxConfig();
+    if (cfg && Array.isArray(cfg.items)) {
+      var fromCfg = getItemFromToolboxConfig(cfg, key);
+      if (!fromCfg) return true;
+      return fromCfg.visible !== false;
+    }
+    var s = activeLabSettings();
+    if (!s || typeof s.getItem !== 'function') return true;
+    var item = s.getItem(key);
+    if (!item) return true;
+    return item.visible !== false;
+  }
+
+  function shouldRenderToolboxTool(toolKey, config) {
+    return isToolboxToolVisible(toolKey, config);
+  }
+
+  function anyToolboxToolVisible(toolKeys, config) {
+    if (!toolKeys || !toolKeys.length) return true;
+    var cfg = config || resolveToolboxConfig();
+    var i;
+    for (i = 0; i < toolKeys.length; i++) {
+      if (shouldRenderToolboxTool(toolKeys[i], cfg)) return true;
+    }
+    return false;
+  }
+
+  function gateToolboxRender(hostId, toolKey, config) {
+    var host = document.getElementById(hostId);
+    if (!host) return null;
+    if (!shouldRenderToolboxTool(toolKey, config)) {
+      host.innerHTML = '';
+      return null;
+    }
+    return host;
+  }
+
+  function enforceToolboxVisibility(config) {
+    var cfg = resolveToolboxConfig(config);
+    var s = activeLabSettings();
+    if (s && typeof s.applyToolboxVisibility === 'function') {
+      s.applyToolboxVisibility(cfg);
+      return;
+    }
+    if (s && typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation(cfg);
+    }
+  }
+
+  function applyFtthLabToolboxPresentation(config) {
+    var cfg = resolveToolboxConfig(config);
+    var s = activeLabSettings();
+    if (s && typeof s.applyToolboxPresentation === 'function') {
+      s.applyToolboxPresentation(cfg);
+      return;
+    }
+    if (s && typeof s.applyToolboxIcons === 'function') {
+      s.applyToolboxIcons(cfg);
+    }
+  }
+
+  function handleToolboxConfigChange(toolKey, hostId, renderFn, config) {
+    handleToolboxConfigChangeMulti([toolKey], hostId, renderFn, config);
+  }
+
+  function handleToolboxConfigChangeMulti(toolKeys, hostId, renderFn, config) {
+    var cfg = config || resolveToolboxConfig();
+    var host = typeof hostId === 'string' ? document.getElementById(hostId) : hostId;
+    if (!host) return;
+    if (!anyToolboxToolVisible(toolKeys, cfg)) {
+      host.innerHTML = '';
+      enforceToolboxVisibility(cfg);
+      return;
+    }
+    var hasButtons = host.querySelector('.lab-tool[data-lab-tool]');
+    if (!hasButtons && typeof renderFn === 'function') {
+      renderFn();
+      enforceToolboxVisibility(cfg);
+      return;
+    }
+    applyFtthLabToolboxPresentation(cfg);
+    enforceToolboxVisibility(cfg);
+  }
+
   function armDragOnlyToolboxTool(toolId, message) {
+    if (!isToolboxToolVisible(toolId)) {
+      setStatus('This tool is hidden by the lab administrator.');
+      return false;
+    }
     claimToolboxTool(toolId);
     setStatus(message || 'Drag onto workspace to place equipment.');
+    return true;
   }
 
   function getPerformanceSpecs(toolKey) {
@@ -725,18 +887,57 @@
     return [];
   }
 
-  function applyFtthLabToolboxIcons() {
-    var s = activeLabSettings();
-    if (s && typeof s.applyToolboxPresentation === 'function') {
-      s.applyToolboxPresentation();
-      return;
+  function applyFtthLabToolboxIcons(config) {
+    applyFtthLabToolboxPresentation(config);
+    enforceToolboxVisibility(config);
+  }
+
+  function resolveLabSettingsStore(storeName) {
+    if (storeName === 'OpmSettings' && global.OpmSettings) return global.OpmSettings;
+    if (storeName === 'OtdrSettings' && global.OtdrSettings) return global.OtdrSettings;
+    if (storeName === 'FusionSplicerSettings' && global.FusionSplicerSettings) {
+      return global.FusionSplicerSettings;
     }
-    if (s && typeof s.applyToolboxIcons === 'function') {
-      s.applyToolboxIcons();
+    if (storeName === 'FtthLabSettings' && global.FtthLabSettings) return global.FtthLabSettings;
+    return activeLabSettings();
+  }
+
+  function shouldApplyLabConfigStore(storeName) {
+    if (!storeName) return true;
+    if (isOpmWorkspacePage()) return storeName === 'OpmSettings';
+    if (isOtdrWorkspacePage()) return storeName === 'OtdrSettings';
+    if (isSplicerOnlyWorkspacePage()) return storeName === 'FusionSplicerSettings';
+    return storeName === 'FtthLabSettings';
+  }
+
+  function applyLabConfigPayload(data) {
+    if (!data || !data.config) return false;
+    if (!shouldApplyLabConfigStore(data.store)) return false;
+    var s = resolveLabSettingsStore(data.store);
+    if (!s) return false;
+    if (data.preview) {
+      setToolboxPreviewConfig(data.config);
+      if (typeof s.importPreviewDraft === 'function') {
+        s.importPreviewDraft(data.config, false);
+      }
+    } else {
+      clearToolboxPreviewConfig();
+      if (typeof s.importRemoteConfig === 'function') {
+        s.importRemoteConfig(data.config);
+      }
     }
+    applyFtthLabToolboxPresentation(data.config);
+    enforceToolboxVisibility(data.config);
+    notifyTools('onLabConfigChanged', { config: data.config, preview: !!data.preview });
+    return true;
   }
 
   function getToolMeta(toolKey) {
+    var cfg = resolveToolboxConfig();
+    if (cfg) {
+      var fromCfg = getItemFromToolboxConfig(cfg, toolKey);
+      if (fromCfg) return fromCfg;
+    }
     var s = activeLabSettings();
     if (s && typeof s.getItem === 'function') {
       return s.getItem(toolKey);
@@ -744,31 +945,63 @@
     return null;
   }
 
-  function applyFtthLabConfig() {
-    applyFtthLabToolboxIcons();
-    notifyTools('onLabConfigChanged');
-  }
-
-  function notifyLabConfigPreview() {
-    applyFtthLabConfig();
-  }
-
-  function bindAdminPreviewBridge() {
-    if (!isAdminPreviewContext()) return;
-    var draftEvt = 'ifa:ftth-lab-draft-changed';
-    if (activeLabSettings() && activeLabSettings().EVENTS && activeLabSettings().EVENTS.draft) {
-      draftEvt = activeLabSettings().EVENTS.draft;
+  function applyFtthLabConfig(config, options) {
+    options = options || {};
+    var cfg = config || resolveToolboxConfig();
+    if (options.preview && cfg) {
+      setToolboxPreviewConfig(cfg);
+    } else if (!options.preview) {
+      clearToolboxPreviewConfig();
     }
-    window.addEventListener(draftEvt, function () {
-      applyFtthLabConfig();
-    });
+    applyFtthLabToolboxPresentation(cfg);
+    enforceToolboxVisibility(cfg);
+    if (!options.skipNotify) {
+      notifyTools('onLabConfigChanged', { config: cfg, preview: !!options.preview });
+    }
+  }
+
+  function notifyLabConfigPreview(previewConfig) {
+    var s = activeLabSettings();
+    var cfg = previewConfig || (s && typeof s.getDraft === 'function' ? s.getDraft() : null);
+    applyFtthLabConfig(cfg, { preview: true });
+  }
+
+  function bindLabConfigBroadcastBridge() {
+    if (bindLabConfigBroadcastBridge._bound) return;
+    bindLabConfigBroadcastBridge._bound = true;
+
     window.addEventListener('message', function (ev) {
-      if (!ev.data || ev.data.type !== 'ifa:ftth-lab-apply-draft') return;
-      var s = activeLabSettings();
-      if (!s || typeof s.importPreviewDraft !== 'function') return;
-      s.importPreviewDraft(ev.data.draft, false);
-      applyFtthLabConfig();
+      var data = ev.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type === 'ifa:lab-config-apply') {
+        applyLabConfigPayload(data);
+        return;
+      }
+      if (data.type === 'ifa:ftth-lab-apply-draft' || data.type === 'ifa:ftth-lab-draft-live') {
+        applyLabConfigPayload({
+          type: 'ifa:lab-config-apply',
+          store: data.store || 'FtthLabSettings',
+          config: data.draft || data.config,
+          preview: true,
+        });
+      }
     });
+
+    window.addEventListener('ifa:lab-config-apply-local', function (ev) {
+      applyLabConfigPayload((ev && ev.detail) || null);
+    });
+
+    if (canShowSimulatorAdminSettingsUI()) {
+      var draftEvt = 'ifa:ftth-lab-draft-changed';
+      if (activeLabSettings() && activeLabSettings().EVENTS && activeLabSettings().EVENTS.draft) {
+        draftEvt = activeLabSettings().EVENTS.draft;
+      }
+      window.addEventListener(draftEvt, function () {
+        var s = activeLabSettings();
+        var draft = s && typeof s.getDraft === 'function' ? s.getDraft() : null;
+        applyFtthLabConfig(draft, { preview: true });
+      });
+    }
   }
 
   function watchToolboxForIconRefresh() {
@@ -778,7 +1011,10 @@
     var debounceTimer;
     var obs = new MutationObserver(function () {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(applyFtthLabToolboxIcons, 0);
+      debounceTimer = setTimeout(function () {
+        applyFtthLabToolboxIcons();
+        enforceToolboxVisibility();
+      }, 0);
     });
     obs.observe(panel, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   }
@@ -797,7 +1033,11 @@
     if (!bindUi._keysBound) {
       bindUi._keysBound = true;
       window.addEventListener('keydown', function (e) {
-        var settingsModal = $('ftth-lab-settings-modal') || $('opm-settings-modal');
+        var settingsModal =
+          $('ftth-lab-settings-modal') ||
+          $('opm-settings-modal') ||
+          $('otdr-settings-modal') ||
+          $('splicer-settings-modal');
         if (settingsModal && !settingsModal.hidden) return;
 
         var ctrl = e.ctrlKey || e.metaKey;
@@ -838,7 +1078,29 @@
 
     bindZoom2d();
     bindWorkspaceDnD();
+    bindToolboxVisibilityGuards();
     updateHistoryUi();
+  }
+
+  function bindToolboxVisibilityGuards() {
+    if (bindToolboxVisibilityGuards._bound) return;
+    bindToolboxVisibilityGuards._bound = true;
+    document.addEventListener('dragstart', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.lab-tool[data-lab-tool]') : null;
+      if (!btn) return;
+      if (!isToolboxToolVisible(btn.getAttribute('data-lab-tool'))) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
+    document.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest ? e.target.closest('.lab-tool[data-lab-tool]') : null;
+      if (!btn) return;
+      if (!isToolboxToolVisible(btn.getAttribute('data-lab-tool'))) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }, true);
   }
 
   function boot() {
@@ -848,6 +1110,7 @@
     flushPendingTools();
     setViewMode('2d');
     syncFtthLabAdminSettingsButton();
+    bindAdminSettingsUiAuthListener();
     handleLaunchQuery();
     if (api._launchTool === 'opm') {
       setTimeout(function () {
@@ -856,10 +1119,20 @@
     }
     setTimeout(applyFtthLabToolboxIcons, 0);
     watchToolboxForIconRefresh();
-    bindAdminPreviewBridge();
-    ['ifa:ftth-lab-config-saved', 'ifa:opm-config-saved'].forEach(function (evt) {
-      global.addEventListener(evt, function () {
-        applyFtthLabConfig();
+    bindLabConfigBroadcastBridge();
+    [
+      'ifa:ftth-lab-config-saved',
+      'ifa:opm-config-saved',
+      'ifa:otdr-config-saved',
+      'ifa:splicer-config-saved',
+    ].forEach(function (evt) {
+      global.addEventListener(evt, function (ev) {
+        var detail = (ev && ev.detail) || {};
+        clearToolboxPreviewConfig();
+        var cfg = detail.config || resolveToolboxConfig();
+        applyFtthLabToolboxPresentation(cfg);
+        enforceToolboxVisibility(cfg);
+        notifyTools('onLabConfigChanged', { config: cfg, preview: false });
         setStatus('Lab device settings updated');
       });
     });
@@ -950,7 +1223,12 @@
   var activeDrag = null;
 
   function beginDrag(payload) {
+    if (payload && payload.kind && !isToolboxToolVisible(payload.kind)) {
+      activeDrag = null;
+      return false;
+    }
     activeDrag = payload && typeof payload === 'object' ? payload : null;
+    return true;
   }
 
   function endDrag() {
@@ -2221,9 +2499,22 @@
     getToolboxCategory: getToolboxCategory,
     TOOLBOX_CATEGORIES: TOOLBOX_CATEGORIES,
     applyFtthLabToolboxIcons: applyFtthLabToolboxIcons,
+    applyFtthLabToolboxPresentation: applyFtthLabToolboxPresentation,
+    enforceToolboxVisibility: enforceToolboxVisibility,
+    applyLabConfigPayload: applyLabConfigPayload,
+    isToolboxToolVisible: isToolboxToolVisible,
+    shouldRenderToolboxTool: shouldRenderToolboxTool,
+    anyToolboxToolVisible: anyToolboxToolVisible,
+    gateToolboxRender: gateToolboxRender,
+    handleToolboxConfigChange: handleToolboxConfigChange,
+    handleToolboxConfigChangeMulti: handleToolboxConfigChangeMulti,
+    resolveToolboxConfig: resolveToolboxConfig,
+    setToolboxPreviewConfig: setToolboxPreviewConfig,
+    clearToolboxPreviewConfig: clearToolboxPreviewConfig,
     applyFtthLabConfig: applyFtthLabConfig,
     notifyLabConfigPreview: notifyLabConfigPreview,
     getToolMeta: getToolMeta,
+    getLabSettings: activeLabSettings,
     serializeProjectState: serializeProjectState,
     restoreProjectState: restoreProjectState,
     clearWorkspace: clearWorkspace,

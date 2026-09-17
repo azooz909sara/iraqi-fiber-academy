@@ -280,8 +280,12 @@
 
   function getSfpProfileMap() {
     var map = JSON.parse(JSON.stringify(SFP_PROFILES));
-    if (global.FtthLabSettings && typeof FtthLabSettings.getSfpVariants === 'function') {
-      FtthLabSettings.getSfpVariants().forEach(function (v) {
+    var settings =
+      global.FtthLab && typeof global.FtthLab.getLabSettings === 'function'
+        ? global.FtthLab.getLabSettings()
+        : global.FtthLabSettings;
+    if (settings && typeof settings.getSfpVariants === 'function') {
+      settings.getSfpVariants().forEach(function (v) {
         var ps = v.performanceSpecs || {};
         var range = ps.powerRangeDbm || {};
         var txMin = isFinite(range.min) ? range.min : 0;
@@ -833,6 +837,11 @@
   function renderToolbox() {
     var host = document.getElementById('lab-hw-tree');
     if (!host) return;
+    if (global.FtthLab && typeof FtthLab.anyToolboxToolVisible === 'function' &&
+        !FtthLab.anyToolboxToolVisible(['chassis', 'card', 'sfp'])) {
+      host.innerHTML = '';
+      return;
+    }
 
     var chassisSel = armedToolbox === 'chassis';
     var cardSel = armedToolbox === 'card';
@@ -860,6 +869,9 @@
       '</div>';
 
     bindToolboxEvents(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function occupiedSlots() {
@@ -1977,8 +1989,17 @@
     getSfpProfiles: function () { return getSfpProfileMap(); },
     selectPort: selectPort,
     selectCard: selectCard,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChangeMulti === 'function') {
+        FtthLab.handleToolboxConfigChangeMulti(
+          ['chassis', 'card', 'sfp'],
+          'lab-hw-tree',
+          renderToolbox,
+          payload && payload.config
+        );
+      } else {
+        renderToolbox();
+      }
       updateInspector();
       rebuildViews();
     },

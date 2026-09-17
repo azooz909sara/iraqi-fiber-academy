@@ -681,7 +681,9 @@
   var DEFAULT_SPLITTER = '1x8';
 
   function renderToolbox() {
-    var host = document.getElementById('lab-splitter-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-splitter-tree', 'splitter')
+      : document.getElementById('lab-splitter-tree');
     if (!host) return;
     var meta = (global.FtthLab && FtthLab.getToolMeta && FtthLab.getToolMeta('splitter')) || {};
     var title = meta.label || 'Splitter';
@@ -1367,8 +1369,12 @@
     getNetworkLossDb: getNetworkLossDb,
     getLaserModels: getLaserModels,
     applySplitterLaserGlow: applySplitterLaserGlow,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('splitter', 'lab-splitter-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
       updateBudgetHud();
     },

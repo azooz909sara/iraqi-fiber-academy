@@ -527,8 +527,24 @@
     });
   }
 
+  function canShowSimulatorAdminSettingsUI() {
+    if (window.IFAAuth && typeof window.IFAAuth.canShowSimulatorAdminSettingsUI === 'function') {
+      return window.IFAAuth.canShowSimulatorAdminSettingsUI();
+    }
+    return false;
+  }
+
+  function syncAdminSettingsButton() {
+    var btn = document.getElementById('anatomy-admin-settings-btn');
+    if (!btn) return;
+    var show = canShowSimulatorAdminSettingsUI();
+    btn.hidden = !show;
+    btn.style.display = show ? 'inline-flex' : 'none';
+    btn.classList.toggle('is-admin-visible', show);
+  }
+
   function openModal() {
-    if (!isAdminPreviewContext() || !store()) return;
+    if (!canShowSimulatorAdminSettingsUI() || !store()) return;
     ensureModal();
     modalOpen = true;
     var modal = $('anatomy-cms-modal');
@@ -571,7 +587,21 @@
     }
   }
 
+  function bindAdminSettingsUiAuthListener() {
+    if (window.__ifaAnatomyCmsAdminSettingsAuthListenerBound) return;
+    if (!window.IFAAuth || typeof window.IFAAuth.onAuthChange !== 'function') {
+      window.setTimeout(bindAdminSettingsUiAuthListener, 50);
+      return;
+    }
+    window.__ifaAnatomyCmsAdminSettingsAuthListenerBound = true;
+    window.IFAAuth.onAuthChange(function () {
+      syncAdminSettingsButton();
+    });
+  }
+
   function bind() {
+    syncAdminSettingsButton();
+    bindAdminSettingsUiAuthListener();
     var btn = document.getElementById('anatomy-admin-settings-btn');
     if (btn) {
       btn.addEventListener('click', function (e) {

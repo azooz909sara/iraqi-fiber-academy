@@ -223,7 +223,9 @@
   /* ─── Toolbox — single SC Coupler ─── */
 
   function renderToolbox() {
-    var host = document.getElementById('lab-coupler-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-coupler-tree', 'coupler')
+      : document.getElementById('lab-coupler-tree');
     if (!host) return;
 
     host.innerHTML =
@@ -240,6 +242,9 @@
       '</div>';
 
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -703,8 +708,12 @@
     clearSelection: clearSelection,
     onToolboxClaim: onToolboxClaim,
     getNetworkLossDb: getCouplerLossDb,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('coupler', 'lab-coupler-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: snapshot,

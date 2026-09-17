@@ -6,6 +6,10 @@ import { db } from './firebase-config.js';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var SIMULATORS_REF = doc(db, 'settings', 'simulators');
+var FTTH_LAB_CONFIG_REF = doc(db, 'settings', 'ftth_lab_config');
+var OPM_CONFIG_REF = doc(db, 'settings', 'ifa_opm_config');
+var OTDR_CONFIG_REF = doc(db, 'settings', 'ifa_otdr_config');
+var SPLICER_CONFIG_REF = doc(db, 'settings', 'ifa_splicer_config');
 var META_KEY = 'ifa_simulators_meta';
 var SHOWCASE_KEY = 'ifa_simulator_showcase';
 var SETTINGS_KEY = 'ifa_platform_settings';
@@ -637,6 +641,163 @@ export function startSimulatorsFirestoreSync() {
   return unsubscribeSnapshot;
 }
 
+var ftthLabConfigUnsubscribe = null;
+var ftthLabConfigReady = false;
+var lastPublishedFtthLabConfigJson = '';
+var lastPublishedClientUpdatedAt = 0;
+var lastPublishedServerUpdatedAtMs = 0;
+var ftthLabConfigWriteInFlight = 0;
+
+function firestoreTimestampToMs(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  var sec = Number(value.seconds != null ? value.seconds : value._seconds);
+  if (isFinite(sec) && sec > 0) return Math.round(sec * 1000);
+  var n = Number(value);
+  return isFinite(n) && n > 0 ? n : 0;
+}
+
+function isStaleFtthLabConfigSnapshot(data) {
+  if (!data || typeof data !== 'object') return false;
+  var remoteClientAt = Number(data.clientUpdatedAt);
+  if (lastPublishedClientUpdatedAt > 0) {
+    if (!isFinite(remoteClientAt) || remoteClientAt <= 0) {
+      if (Date.now() - lastPublishedClientUpdatedAt < 3000) return true;
+    } else if (remoteClientAt < lastPublishedClientUpdatedAt) {
+      return true;
+    }
+  }
+  var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+  if (
+    remoteServerAt > 0 &&
+    lastPublishedServerUpdatedAtMs > 0 &&
+    remoteServerAt < lastPublishedServerUpdatedAtMs
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function preserveFtthLabVisibilityFields(config) {
+  if (!config || typeof config !== 'object' || !Array.isArray(config.items)) return config;
+  var out = Object.assign({}, config);
+  out.items = config.items.map(function (item) {
+    if (!item || typeof item !== 'object') return item;
+    var nextItem = Object.assign({}, item);
+    if (Object.prototype.hasOwnProperty.call(item, 'visible')) {
+      nextItem.visible = typeof item.visible === 'boolean' ? item.visible : item.visible !== false;
+    }
+    return nextItem;
+  });
+  return out;
+}
+
+function normalizeFtthLabConfigPayload(data) {
+  if (!data || typeof data !== 'object') return null;
+  var config = data.config != null ? data.config : data;
+  if (!config || typeof config !== 'object') return null;
+  var withVisibility = preserveFtthLabVisibilityFields(config);
+  if (
+    window.FtthLabSettings &&
+    typeof window.FtthLabSettings.getActiveConfig === 'function' &&
+    typeof window.FtthLabSettings.normalizeConfig === 'function'
+  ) {
+    var local = window.FtthLabSettings.getActiveConfig();
+    if (local && Array.isArray(local.items)) {
+      var localVis = {};
+      local.items.forEach(function (it) {
+        if (it && it.toolKey && it.visible === false) localVis[it.toolKey] = false;
+      });
+      withVisibility.items = (withVisibility.items || []).map(function (it) {
+        if (!it || !it.toolKey) return it;
+        if (Object.prototype.hasOwnProperty.call(it, 'visible')) return it;
+        if (localVis[it.toolKey] === false) return Object.assign({}, it, { visible: false });
+        return it;
+      });
+    }
+  }
+  if (window.FtthLabSettings && typeof window.FtthLabSettings.normalizeConfig === 'function') {
+    return window.FtthLabSettings.normalizeConfig(withVisibility);
+  }
+  return withVisibility;
+}
+
+function applyFtthLabConfigFromFirestore(data) {
+  if (ftthLabConfigWriteInFlight > 0) return false;
+  if (!data || typeof data !== 'object') return false;
+  if (isStaleFtthLabConfigSnapshot(data)) return false;
+  if (!window.FtthLabSettings || typeof window.FtthLabSettings.importRemoteConfig !== 'function') {
+    return false;
+  }
+  var normalized = normalizeFtthLabConfigPayload(data);
+  if (!normalized) return false;
+  var nextJson = JSON.stringify(normalized);
+  if (nextJson === lastPublishedFtthLabConfigJson) return false;
+  var applied = window.FtthLabSettings.importRemoteConfig(normalized);
+  if (applied) {
+    lastPublishedFtthLabConfigJson = nextJson;
+    var remoteClientAt = Number(data.clientUpdatedAt);
+    if (isFinite(remoteClientAt) && remoteClientAt > 0) {
+      lastPublishedClientUpdatedAt = Math.max(lastPublishedClientUpdatedAt, remoteClientAt);
+    }
+    var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+    if (remoteServerAt > 0) {
+      lastPublishedServerUpdatedAtMs = Math.max(lastPublishedServerUpdatedAtMs, remoteServerAt);
+    }
+  }
+  return applied;
+}
+
+function handleFtthLabConfigSnapshot(snap) {
+  ftthLabConfigReady = true;
+  if (ftthLabConfigWriteInFlight > 0) return;
+  if (!snap.exists()) return;
+  applyFtthLabConfigFromFirestore(snap.data());
+}
+
+export function startFtthLabConfigFirestoreSync() {
+  if (ftthLabConfigUnsubscribe) return ftthLabConfigUnsubscribe;
+  ftthLabConfigUnsubscribe = onSnapshot(
+    FTTH_LAB_CONFIG_REF,
+    handleFtthLabConfigSnapshot,
+    function (err) {
+      console.error('[PlatformFtthLabConfigFirestore] onSnapshot failed', err);
+      ftthLabConfigReady = true;
+    }
+  );
+  return ftthLabConfigUnsubscribe;
+}
+
+export async function saveFtthLabConfigToFirestore(config) {
+  var source =
+    window.FtthLabSettings && typeof window.FtthLabSettings.normalizeConfig === 'function'
+      ? window.FtthLabSettings.normalizeConfig(config)
+      : config;
+  var normalized = preserveFtthLabVisibilityFields(source);
+  if (window.FtthLabSettings && typeof window.FtthLabSettings.normalizeConfig === 'function') {
+    normalized = window.FtthLabSettings.normalizeConfig(normalized);
+  }
+  var clientUpdatedAt = Date.now();
+  ftthLabConfigWriteInFlight += 1;
+  try {
+    await setDoc(
+      FTTH_LAB_CONFIG_REF,
+      {
+        config: normalized,
+        updatedAt: serverTimestamp(),
+        clientUpdatedAt: clientUpdatedAt,
+      },
+      { merge: true }
+    );
+    lastPublishedFtthLabConfigJson = JSON.stringify(normalized);
+    lastPublishedClientUpdatedAt = clientUpdatedAt;
+    return normalized;
+  } finally {
+    ftthLabConfigWriteInFlight -= 1;
+  }
+}
+
 window.addEventListener('ifa:auth-changed', function (e) {
   var detail = (e && e.detail) || {};
   if (detail.profileSynced && needsSeed && shouldAttemptAutoMigration()) {
@@ -659,6 +820,361 @@ var api = {
 };
 
 window.PlatformSimulatorsFirestore = api;
+
+var ftthLabConfigApi = {
+  start: startFtthLabConfigFirestoreSync,
+  saveConfig: saveFtthLabConfigToFirestore,
+  isReady: function () {
+    return ftthLabConfigReady;
+  },
+};
+
+window.PlatformFtthLabConfigFirestore = ftthLabConfigApi;
+
+var opmConfigUnsubscribe = null;
+var opmConfigReady = false;
+var lastPublishedOpmConfigJson = '';
+var lastPublishedOpmClientUpdatedAt = 0;
+var lastPublishedOpmServerUpdatedAtMs = 0;
+var opmConfigWriteInFlight = 0;
+
+function isStaleOpmConfigSnapshot(data) {
+  if (!data || typeof data !== 'object') return false;
+  var remoteClientAt = Number(data.clientUpdatedAt);
+  if (lastPublishedOpmClientUpdatedAt > 0) {
+    if (!isFinite(remoteClientAt) || remoteClientAt <= 0) {
+      if (Date.now() - lastPublishedOpmClientUpdatedAt < 3000) return true;
+    } else if (remoteClientAt < lastPublishedOpmClientUpdatedAt) {
+      return true;
+    }
+  }
+  var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+  if (
+    remoteServerAt > 0 &&
+    lastPublishedOpmServerUpdatedAtMs > 0 &&
+    remoteServerAt < lastPublishedOpmServerUpdatedAtMs
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeOpmConfigPayload(data) {
+  if (!data || typeof data !== 'object') return null;
+  var config = data.config != null ? data.config : data;
+  if (!config || typeof config !== 'object') return null;
+  var withVisibility = preserveFtthLabVisibilityFields(config);
+  if (
+    window.OpmSettings &&
+    typeof window.OpmSettings.getActiveConfig === 'function' &&
+    typeof window.OpmSettings.normalizeConfig === 'function'
+  ) {
+    var local = window.OpmSettings.getActiveConfig();
+    if (local && Array.isArray(local.items)) {
+      var localVis = {};
+      local.items.forEach(function (it) {
+        if (it && it.toolKey && it.visible === false) localVis[it.toolKey] = false;
+      });
+      withVisibility.items = (withVisibility.items || []).map(function (it) {
+        if (!it || !it.toolKey) return it;
+        if (Object.prototype.hasOwnProperty.call(it, 'visible')) return it;
+        if (localVis[it.toolKey] === false) return Object.assign({}, it, { visible: false });
+        return it;
+      });
+    }
+    return window.OpmSettings.normalizeConfig(withVisibility);
+  }
+  return withVisibility;
+}
+
+function applyOpmConfigFromFirestore(data) {
+  if (opmConfigWriteInFlight > 0) return false;
+  if (!data || typeof data !== 'object') return false;
+  if (isStaleOpmConfigSnapshot(data)) return false;
+  if (!window.OpmSettings || typeof window.OpmSettings.importRemoteConfig !== 'function') {
+    return false;
+  }
+  var normalized = normalizeOpmConfigPayload(data);
+  if (!normalized) return false;
+  var nextJson = JSON.stringify(normalized);
+  if (nextJson === lastPublishedOpmConfigJson) return false;
+  var applied = window.OpmSettings.importRemoteConfig(normalized);
+  if (applied) {
+    lastPublishedOpmConfigJson = nextJson;
+    var remoteClientAt = Number(data.clientUpdatedAt);
+    if (isFinite(remoteClientAt) && remoteClientAt > 0) {
+      lastPublishedOpmClientUpdatedAt = Math.max(lastPublishedOpmClientUpdatedAt, remoteClientAt);
+    }
+    var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+    if (remoteServerAt > 0) {
+      lastPublishedOpmServerUpdatedAtMs = Math.max(lastPublishedOpmServerUpdatedAtMs, remoteServerAt);
+    }
+    if (window.FtthLab && typeof window.FtthLab.applyLabConfigPayload === 'function') {
+      window.FtthLab.applyLabConfigPayload({
+        type: 'ifa:lab-config-apply',
+        store: 'OpmSettings',
+        config: normalized,
+        preview: false,
+      });
+    }
+  }
+  return applied;
+}
+
+function handleOpmConfigSnapshot(snap) {
+  opmConfigReady = true;
+  if (opmConfigWriteInFlight > 0) return;
+  if (!snap.exists()) return;
+  applyOpmConfigFromFirestore(snap.data());
+}
+
+export function startOpmConfigFirestoreSync() {
+  if (opmConfigUnsubscribe) return opmConfigUnsubscribe;
+  opmConfigUnsubscribe = onSnapshot(
+    OPM_CONFIG_REF,
+    handleOpmConfigSnapshot,
+    function (err) {
+      console.error('[PlatformOpmConfigFirestore] onSnapshot failed', err);
+      opmConfigReady = true;
+    }
+  );
+  return opmConfigUnsubscribe;
+}
+
+export async function saveOpmConfigToFirestore(config) {
+  var source =
+    window.OpmSettings && typeof window.OpmSettings.normalizeConfig === 'function'
+      ? window.OpmSettings.normalizeConfig(config)
+      : config;
+  var normalized = preserveFtthLabVisibilityFields(source);
+  if (window.OpmSettings && typeof window.OpmSettings.normalizeConfig === 'function') {
+    normalized = window.OpmSettings.normalizeConfig(normalized);
+  }
+  var clientUpdatedAt = Date.now();
+  opmConfigWriteInFlight += 1;
+  try {
+    await setDoc(
+      OPM_CONFIG_REF,
+      {
+        config: normalized,
+        updatedAt: serverTimestamp(),
+        clientUpdatedAt: clientUpdatedAt,
+      },
+      { merge: true }
+    );
+    lastPublishedOpmConfigJson = JSON.stringify(normalized);
+    lastPublishedOpmClientUpdatedAt = clientUpdatedAt;
+    return normalized;
+  } finally {
+    opmConfigWriteInFlight -= 1;
+  }
+}
+
+var opmConfigApi = {
+  start: startOpmConfigFirestoreSync,
+  saveConfig: saveOpmConfigToFirestore,
+  isReady: function () {
+    return opmConfigReady;
+  },
+};
+
+window.PlatformOpmConfigFirestore = opmConfigApi;
+
+function createLabDeviceConfigFirestoreSync(options) {
+  var ref = options.ref;
+  var settingsGlobal = options.settingsGlobal;
+  var storeName = options.storeName;
+  var logTag = options.logTag || storeName;
+
+  var configUnsubscribe = null;
+  var configReady = false;
+  var lastPublishedConfigJson = '';
+  var lastPublishedClientUpdatedAt = 0;
+  var lastPublishedServerUpdatedAtMs = 0;
+  var configWriteInFlight = 0;
+
+  function getSettingsStore() {
+    return window[settingsGlobal];
+  }
+
+  function isStaleConfigSnapshot(data) {
+    if (!data || typeof data !== 'object') return false;
+    var remoteClientAt = Number(data.clientUpdatedAt);
+    if (lastPublishedClientUpdatedAt > 0) {
+      if (!isFinite(remoteClientAt) || remoteClientAt <= 0) {
+        if (Date.now() - lastPublishedClientUpdatedAt < 3000) return true;
+      } else if (remoteClientAt < lastPublishedClientUpdatedAt) {
+        return true;
+      }
+    }
+    var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+    if (
+      remoteServerAt > 0 &&
+      lastPublishedServerUpdatedAtMs > 0 &&
+      remoteServerAt < lastPublishedServerUpdatedAtMs
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  function normalizeConfigPayload(data) {
+    if (!data || typeof data !== 'object') return null;
+    var config = data.config != null ? data.config : data;
+    if (!config || typeof config !== 'object') return null;
+    var withVisibility = preserveFtthLabVisibilityFields(config);
+    var settingsStore = getSettingsStore();
+    if (
+      settingsStore &&
+      typeof settingsStore.getActiveConfig === 'function' &&
+      typeof settingsStore.normalizeConfig === 'function'
+    ) {
+      var local = settingsStore.getActiveConfig();
+      if (local && Array.isArray(local.items)) {
+        var localVis = {};
+        local.items.forEach(function (it) {
+          if (it && it.toolKey && it.visible === false) localVis[it.toolKey] = false;
+        });
+        withVisibility.items = (withVisibility.items || []).map(function (it) {
+          if (!it || !it.toolKey) return it;
+          if (Object.prototype.hasOwnProperty.call(it, 'visible')) return it;
+          if (localVis[it.toolKey] === false) return Object.assign({}, it, { visible: false });
+          return it;
+        });
+      }
+      return settingsStore.normalizeConfig(withVisibility);
+    }
+    return withVisibility;
+  }
+
+  function applyConfigFromFirestore(data) {
+    if (configWriteInFlight > 0) return false;
+    if (!data || typeof data !== 'object') return false;
+    if (isStaleConfigSnapshot(data)) return false;
+    var settingsStore = getSettingsStore();
+    if (!settingsStore || typeof settingsStore.importRemoteConfig !== 'function') {
+      return false;
+    }
+    var normalized = normalizeConfigPayload(data);
+    if (!normalized) return false;
+    var nextJson = JSON.stringify(normalized);
+    if (nextJson === lastPublishedConfigJson) return false;
+    var applied = settingsStore.importRemoteConfig(normalized);
+    if (applied) {
+      lastPublishedConfigJson = nextJson;
+      var remoteClientAt = Number(data.clientUpdatedAt);
+      if (isFinite(remoteClientAt) && remoteClientAt > 0) {
+        lastPublishedClientUpdatedAt = Math.max(lastPublishedClientUpdatedAt, remoteClientAt);
+      }
+      var remoteServerAt = firestoreTimestampToMs(data.updatedAt);
+      if (remoteServerAt > 0) {
+        lastPublishedServerUpdatedAtMs = Math.max(lastPublishedServerUpdatedAtMs, remoteServerAt);
+      }
+      if (window.FtthLab && typeof window.FtthLab.applyLabConfigPayload === 'function') {
+        window.FtthLab.applyLabConfigPayload({
+          type: 'ifa:lab-config-apply',
+          store: storeName,
+          config: normalized,
+          preview: false,
+        });
+      }
+    }
+    return applied;
+  }
+
+  function handleConfigSnapshot(snap) {
+    configReady = true;
+    if (configWriteInFlight > 0) return;
+    if (!snap.exists()) return;
+    applyConfigFromFirestore(snap.data());
+  }
+
+  function start() {
+    if (configUnsubscribe) return configUnsubscribe;
+    configUnsubscribe = onSnapshot(
+      ref,
+      handleConfigSnapshot,
+      function (err) {
+        console.error('[' + logTag + '] onSnapshot failed', err);
+        configReady = true;
+      }
+    );
+    return configUnsubscribe;
+  }
+
+  async function saveConfig(config) {
+    var settingsStore = getSettingsStore();
+    var source =
+      settingsStore && typeof settingsStore.normalizeConfig === 'function'
+        ? settingsStore.normalizeConfig(config)
+        : config;
+    var normalized = preserveFtthLabVisibilityFields(source);
+    if (settingsStore && typeof settingsStore.normalizeConfig === 'function') {
+      normalized = settingsStore.normalizeConfig(normalized);
+    }
+    var clientUpdatedAt = Date.now();
+    configWriteInFlight += 1;
+    try {
+      await setDoc(
+        ref,
+        {
+          config: normalized,
+          updatedAt: serverTimestamp(),
+          clientUpdatedAt: clientUpdatedAt,
+        },
+        { merge: true }
+      );
+      lastPublishedConfigJson = JSON.stringify(normalized);
+      lastPublishedClientUpdatedAt = clientUpdatedAt;
+      return normalized;
+    } finally {
+      configWriteInFlight -= 1;
+    }
+  }
+
+  return {
+    start: start,
+    saveConfig: saveConfig,
+    isReady: function () {
+      return configReady;
+    },
+  };
+}
+
+var otdrConfigApi = createLabDeviceConfigFirestoreSync({
+  ref: OTDR_CONFIG_REF,
+  settingsGlobal: 'OtdrSettings',
+  storeName: 'OtdrSettings',
+  logTag: 'PlatformOtdrConfigFirestore',
+});
+
+export function startOtdrConfigFirestoreSync() {
+  return otdrConfigApi.start();
+}
+
+export async function saveOtdrConfigToFirestore(config) {
+  return otdrConfigApi.saveConfig(config);
+}
+
+window.PlatformOtdrConfigFirestore = otdrConfigApi;
+
+var splicerConfigApi = createLabDeviceConfigFirestoreSync({
+  ref: SPLICER_CONFIG_REF,
+  settingsGlobal: 'FusionSplicerSettings',
+  storeName: 'FusionSplicerSettings',
+  logTag: 'PlatformSplicerConfigFirestore',
+});
+
+export function startSplicerConfigFirestoreSync() {
+  return splicerConfigApi.start();
+}
+
+export async function saveSplicerConfigToFirestore(config) {
+  return splicerConfigApi.saveConfig(config);
+}
+
+window.PlatformSplicerConfigFirestore = splicerConfigApi;
+
 startSimulatorsFirestoreSync();
 
 if (typeof window.__ifaSimulatorsFirestoreReadyResolve === 'function') {

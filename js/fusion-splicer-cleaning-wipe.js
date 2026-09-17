@@ -340,7 +340,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-cleaning-wipe-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-cleaning-wipe-tree', 'cleaning-wipe')
+      : document.getElementById('lab-cleaning-wipe-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -356,6 +358,9 @@
       '</div>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {

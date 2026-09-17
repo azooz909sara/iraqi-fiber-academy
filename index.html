@@ -806,6 +806,24 @@
         window.PlatformSimulators.applyPublicSimulatorGates();
       }
 
+      function forwardLabConfigToFrames(data) {
+        if (!data || data.type !== 'ifa:lab-config-apply' || data._ifaRouted) return;
+        var payload = Object.assign({}, data, { _ifaRouted: true });
+        document.querySelectorAll('iframe').forEach(function (frameEl) {
+          if (!frameEl.contentWindow) return;
+          try {
+            frameEl.contentWindow.postMessage(payload, '*');
+          } catch (errFrame) { /* ignore */ }
+        });
+      }
+
+      window.addEventListener('message', function (ev) {
+        forwardLabConfigToFrames(ev.data);
+      });
+      window.addEventListener('ifa:lab-config-apply-local', function (ev) {
+        forwardLabConfigToFrames((ev && ev.detail) || null);
+      });
+
       window.addEventListener('message', function (ev) {
         var data = ev.data;
         if (!data || data.type !== 'UPDATE_CLAMP_LIMITS') return;

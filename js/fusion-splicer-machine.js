@@ -847,8 +847,12 @@
   }
 
   function getClampAlignmentTravelPx() {
-    if (global.FtthLabSettings && typeof FtthLabSettings.getItem === 'function') {
-      var item = FtthLabSettings.getItem('fusion-splicer-machine');
+    var settings =
+      global.FtthLab && typeof global.FtthLab.getLabSettings === 'function'
+        ? global.FtthLab.getLabSettings()
+        : (global.FusionSplicerSettings || global.FtthLabSettings);
+    if (settings && typeof settings.getItem === 'function') {
+      var item = settings.getItem('fusion-splicer-machine');
       if (item && item.specs) {
         var n = Number(
           item.specs.splicerClampTravelPx != null
@@ -1552,7 +1556,9 @@
   }
 
   function renderToolbox() {
-    var host = document.getElementById('lab-machine-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-machine-tree', 'fusion-splicer-machine')
+      : document.getElementById('lab-machine-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -1568,6 +1574,9 @@
       '</div>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {

@@ -1199,7 +1199,9 @@
   /* ─── Toolbox ─── */
 
   function renderToolbox() {
-    var host = document.getElementById('lab-vfl-tree');
+    var host = global.FtthLab && typeof FtthLab.gateToolboxRender === 'function'
+      ? FtthLab.gateToolboxRender('lab-vfl-tree', 'vfl')
+      : document.getElementById('lab-vfl-tree');
     if (!host) return;
     host.innerHTML =
       '<div class="lab-toolbox" role="list">' +
@@ -1214,6 +1216,9 @@
       '</button>' +
       '</div>';
     bindToolbox(host);
+    if (global.FtthLab && typeof FtthLab.applyFtthLabToolboxIcons === 'function') {
+      FtthLab.applyFtthLabToolboxIcons();
+    }
   }
 
   function bindToolbox(host) {
@@ -1436,8 +1441,12 @@
     clearSelection: clearSelection,
     cancelPatch: cancelPatch,
     onToolboxClaim: onToolboxClaim,
-    onLabConfigChanged: function () {
-      renderToolbox();
+    onLabConfigChanged: function (payload) {
+      if (global.FtthLab && typeof FtthLab.handleToolboxConfigChange === 'function') {
+        FtthLab.handleToolboxConfigChange('vfl', 'lab-vfl-tree', renderToolbox, payload && payload.config);
+      } else {
+        renderToolbox();
+      }
       updateInspector();
     },
     exportProjectState: captureSnapshot,
