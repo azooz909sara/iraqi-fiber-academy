@@ -457,12 +457,38 @@
     };
   }
 
+  function storageMetaKey(storageKey) {
+    return storageKey + '_meta';
+  }
+
+  function readStorageMeta(storageKey) {
+    try {
+      var raw = global.localStorage.getItem(storageMetaKey(storageKey));
+      if (!raw) return 0;
+      var meta = JSON.parse(raw);
+      var n = Number(meta && meta.clientUpdatedAt);
+      return isFinite(n) && n > 0 ? n : 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  function isRemoteConfigOlderThanLocal(storageKey, remoteData) {
+    var localAt = readStorageMeta(storageKey);
+    if (localAt <= 0) return false;
+    if (!remoteData || typeof remoteData !== 'object') return true;
+    var remoteAt = Number(remoteData.clientUpdatedAt);
+    if (!isFinite(remoteAt) || remoteAt <= 0) return true;
+    return remoteAt < localAt;
+  }
+
   function loadSaved(storageKey, factoryConfig) {
     try {
       var raw = global.localStorage.getItem(storageKey);
       if (!raw) return clone(factoryConfig);
       return normalizeConfig(JSON.parse(raw));
     } catch (err) {
+      console.warn('[FtthLabSettings] Failed to parse local config; using factory defaults.', storageKey);
       return clone(factoryConfig);
     }
   }
@@ -473,12 +499,15 @@
     } catch (err) { /* ignore */ }
   }
 
-  function persistSaved(storageKey, data) {
+  function persistSaved(storageKey, data, clientUpdatedAt) {
+    var at = Number(clientUpdatedAt);
+    if (!isFinite(at) || at <= 0) at = Date.now();
     try {
-      global.localStorage.removeItem(storageKey);
       global.localStorage.setItem(storageKey, JSON.stringify(data));
+      global.localStorage.setItem(storageMetaKey(storageKey), JSON.stringify({ clientUpdatedAt: at }));
       return true;
     } catch (err) {
+      console.warn('[FtthLabSettings] localStorage persist failed', storageKey, err);
       return false;
     }
   }
@@ -652,6 +681,7 @@
 
   var Store = {
     STORAGE_KEY: storageKey,
+    STORAGE_META_KEY: storageMetaKey(storageKey),
     FIRESTORE_API: firestoreApi,
     EVENTS: { saved: savedEvt, draft: draftEvt },
     TOOL_KEY_DOM_ALIASES: TOOL_KEY_DOM_ALIASES,
@@ -663,6 +693,10 @@
 
     getActiveConfig: function () {
       return clone(saved);
+    },
+
+    getLocalClientUpdatedAt: function () {
+      return readStorageMeta(storageKey);
     },
 
     getDraft: function () {
@@ -850,14 +884,16 @@
     saveChanges: function () {
       saved = clone(draft);
       console.log('[FtthLabSettings] Saved Config:', saved);
-      var ok = persistSaved(storageKey, saved);
+      var clientUpdatedAt = Date.now();
+      var ok = persistSaved(storageKey, saved, clientUpdatedAt);
       applyToolboxPresentation(saved);
       publishConfigToFirestore(saved, firestoreApi);
-      emit(savedEvt, { config: clone(saved), ok: ok });
+      emit(savedEvt, { config: clone(saved), ok: ok, clientUpdatedAt: clientUpdatedAt });
       return ok;
     },
 
-    importRemoteConfig: function (remote) {
+    importRemoteConfig: function (remote, importOptions) {
+      importOptions = importOptions || {};
       var mergedRemote = mergeLocalVisibilityIntoRemoteConfig(remote, saved);
       var next = normalizeConfig(mergedRemote);
       var currentJson = JSON.stringify(normalizeConfig(saved));
@@ -867,9 +903,11 @@
       draft = clone(next);
       historyStack = [clone(draft)];
       historyPointer = 0;
-      persistSaved(storageKey, saved);
+      var metaAt = Number(importOptions.clientUpdatedAt);
+      if (!isFinite(metaAt) || metaAt <= 0) metaAt = Date.now();
+      persistSaved(storageKey, saved, metaAt);
       applyToolboxPresentation(saved);
-      emit(savedEvt, { config: clone(saved), ok: true, source: 'firestore' });
+      emit(savedEvt, { config: clone(saved), ok: true, source: 'firestore', clientUpdatedAt: metaAt });
       return true;
     },
 
@@ -909,6 +947,8 @@
 
   global.FACTORY_DEFAULT_FTTH_LAB_CONFIG = FACTORY_DEFAULT_FTTH_LAB_CONFIG;
   global.createLabDeviceConfigStore = createLabDeviceConfigStore;
+  global.readLabDeviceStorageMeta = readStorageMeta;
+  global.isRemoteLabConfigOlderThanLocal = isRemoteConfigOlderThanLocal;
   global.FtthLabSettings = createLabDeviceConfigStore({
     storageKey: 'ifa_ftth_lab_config',
     eventPrefix: 'ifa:ftth-lab',

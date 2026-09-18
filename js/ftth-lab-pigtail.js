@@ -78,6 +78,75 @@
   /** 250µm buffer/coating (fiber #1 blue) — sync with .lab-pigtail-fiber--buffer in ftth-lab.css */
   var PIGTAIL_BUFFER_STROKE_COLOR = '#7FB5F5';
 
+  /** TIA-598 12-color sequence — sync with fiber-3d-simulator.js COLOR / COLOR_ORDER_12 */
+  var FIBER_COLORS = {
+    Blue: '#2563eb',
+    Orange: '#f97316',
+    Green: '#16a34a',
+    Brown: '#854d0e',
+    Slate: '#64748b',
+    White: '#ffffff',
+    Red: '#dc2626',
+    Black: '#000000',
+    Yellow: '#facc15',
+    Violet: '#7c3aed',
+    Rose: '#f43f5e',
+    Aqua: '#06b6d4',
+  };
+  var FIBER_COLOR_ORDER = [
+    'Blue', 'Orange', 'Green', 'Brown', 'Slate', 'White',
+    'Red', 'Black', 'Yellow', 'Violet', 'Rose', 'Aqua',
+  ];
+
+  function normalizeJacketColorName(name) {
+    if (!name) return 'Yellow';
+    var key = String(name);
+    if (FIBER_COLORS[key]) return key;
+    var lower = key.toLowerCase();
+    for (var ci = 0; ci < FIBER_COLOR_ORDER.length; ci++) {
+      if (FIBER_COLOR_ORDER[ci].toLowerCase() === lower) return FIBER_COLOR_ORDER[ci];
+    }
+    return 'Yellow';
+  }
+
+  function getJacketColorName(p) {
+    return normalizeJacketColorName(p && p.jacketColor);
+  }
+
+  function getJacketColorHex(p) {
+    return FIBER_COLORS[getJacketColorName(p)] || FIBER_COLORS.Yellow;
+  }
+
+  function jacketStrokeStyleAttr(p) {
+    return ' style="stroke:' + getJacketColorHex(p) + '"';
+  }
+
+  function jacketPathStyleAttr(p, layerName, peel, peelLayer) {
+    var parts = ['stroke:' + getJacketColorHex(p)];
+    if (peel > 0.02 && peelLayer === layerName) {
+      parts.push('--strip-peel:' + peel.toFixed(3));
+    }
+    return ' style="' + parts.join(';') + '"';
+  }
+
+  function buildJacketColorPaletteHtml(p) {
+    var active = getJacketColorName(p);
+    var html =
+      '<p class="lab-inspector__label">Jacket Color</p>' +
+      '<div class="lab-jacket-color-palette" role="group" aria-label="Jacket color">';
+    FIBER_COLOR_ORDER.forEach(function (name) {
+      var hex = FIBER_COLORS[name];
+      var isActive = name === active;
+      html +=
+        '<button type="button" class="lab-jacket-color-swatch' + (isActive ? ' is-active' : '') +
+        '" data-jacket-color="' + name + '" title="' + name + '" aria-label="' + name +
+        '" aria-pressed="' + (isActive ? 'true' : 'false') +
+        '" style="--swatch-color:' + hex + '"><span aria-hidden="true"></span></button>';
+    });
+    html += '</div>';
+    return html;
+  }
+
   function isCable(p) {
     return !!(p && p.type === 'cable');
   }
@@ -1648,6 +1717,7 @@
         }
         if (!p.startHasSleeve) p.startSleeveAlong = null;
       }
+      p.jacketColor = normalizeJacketColorName(p.jacketColor);
       if (typeof p.stripStage !== 'number') p.stripStage = 0;
       if (typeof p.stripPeel !== 'number') p.stripPeel = 0;
       if (p.stripStage < 0) p.stripStage = 0;
@@ -3108,11 +3178,12 @@
     if (!startFused) {
       html += startSeg.html;
     }
+    var jacketStrokeStyle = jacketStrokeStyleAttr(p);
     function appendCableMidJacketPath(pathD) {
       if (!pathD) return;
       html += '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' + sel +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="cable-mid-jacket" d="' + pathD +
-        '" fill="none" />';
+        '" fill="none"' + jacketStrokeStyle + ' />';
     }
     if (midEnd <= midStart) {
       midEnd = Math.min(total, midStart + 0.1);
@@ -3187,6 +3258,10 @@
       return peel > 0.02 && peelLayer === layerName ? ' is-strip-peeling' : '';
     }
 
+    function jacketStyleAttr(layerName) {
+      return jacketPathStyleAttr(p, layerName, peel, peelLayer);
+    }
+
     function segPathFromDenseSlice(d0, d1) {
       var segPts = slicePolylineByDistance(densePts, d0, d1);
       if (usesOrthoRoute(p) && segPts.length >= 2) {
@@ -3232,7 +3307,7 @@
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' +
-        fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' + peelStyle('jacket') + ' />' +
+        fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' + jacketStyleAttr('jacket') + ' />' +
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip' +
         (p.cleaved || p.isCleaved ? ' lab-pigtail-fiber--cleaved' : '') +
         (bad ? ' is-mismatch' : '') + peelClass('bare') + splicerCls + cleanedBareClass(p) +
@@ -3250,7 +3325,7 @@
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + jacketD +
-        '" fill="none"' + peelStyle('jacket') + ' />';
+        '" fill="none"' + jacketStyleAttr('jacket') + ' />';
 
       var bufferGap = jacketRender - bareRender;
       var bufferSplit = !fullyStripped && !bareComplete &&
@@ -3298,7 +3373,7 @@
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
         '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' + fullPath +
-        '" fill="none"' + peelStyle('jacket') + ' />';
+        '" fill="none"' + jacketStyleAttr('jacket') + ' />';
     }
     }
 
@@ -5070,11 +5145,11 @@
       '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (badL ? ' is-mismatch' : '') + selL + splicerCls +
         '" data-fused-asm-part="left-jacket" data-fused-asm-id="' + machineId + '" d="' +
-        jacketLPath + '" fill="none" />' +
+        jacketLPath + '" fill="none"' + jacketStrokeStyleAttr(left) + ' />' +
       '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
         (badR ? ' is-mismatch' : '') + selR + splicerCls +
         '" data-fused-asm-part="right-jacket" data-fused-asm-id="' + machineId + '" d="' +
-        jacketRPath + '" fill="none" />' +
+        jacketRPath + '" fill="none"' + jacketStrokeStyleAttr(right) + ' />' +
       channelJacketPath +
       '<path class="lab-pigtail-fiber lab-pigtail-fiber--bare lab-pigtail-fiber--bare-tip lab-pigtail-fiber--cleaved lab-splicer-fusion-bridge__glass" ' +
         'data-fusion-bridge="' + machineId + '" d="' + glassPath + '" fill="none" />' +
@@ -5184,7 +5259,8 @@
       '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket' +
       (bad ? ' is-mismatch' : '') + sel + peelClass('jacket') + splicerCls +
       '" data-pt-fiber="' + p.id + '" data-pt-fiber-seg="jacket" d="' +
-      fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' + peelStyle('jacket') + ' />'
+      fiberSvgPathFromRenderPoints(p, jacketPts) + '" fill="none"' +
+      jacketPathStyleAttr(p, 'jacket', peel, peelLayer) + ' />'
     );
   }
 
@@ -7653,6 +7729,7 @@
     var horizRot = endRotationDeg(pos.x, pos.y, tipX, tipY);
     var item = {
       id: 'pt-' + seq,
+      jacketColor: 'Yellow',
       ax: pos.x,
       ay: pos.y,
       bx: tipX,
@@ -7726,6 +7803,7 @@
     var item = {
       id: 'cb-' + seq,
       type: 'cable',
+      jacketColor: 'Yellow',
       ax: pos.x,
       ay: pos.y,
       bx: tipX,
@@ -8453,6 +8531,18 @@
     p.route = p.pathHistory;
   }
 
+  function setJacketColor(id, colorName) {
+    var p = findPigtail(id);
+    if (!p) return;
+    var next = normalizeJacketColorName(colorName);
+    if (!FIBER_COLORS[next] || p.jacketColor === next) return;
+    p.jacketColor = next;
+    rebuildLayer();
+    updateInspector();
+    pushHistory();
+    setStatus((isCable(p) ? 'Cable' : 'Pigtail') + ' jacket · ' + next);
+  }
+
   function setRouteMode(id, mode) {
     var p = findPigtail(id);
     if (!p) return;
@@ -9042,6 +9132,7 @@
     var snappedCleaver = end === 'start' ? p.startIsSnappedToCleaver : p.isSnappedToCleaver;
     var snappedSplicer = cableEndSnappedToSplicer(p, end);
     var label = end === 'start' ? 'A' : 'B';
+    var jacketCapStyle = 'background:' + getJacketColorHex(p) + ';';
     return (
       '<button type="button" class="lab-pigtail__tail lab-cable__end' +
       (snappedCleaver ? ' is-cleaver-docked' : '') +
@@ -9054,7 +9145,8 @@
       '" style="' + cableEndStyle(p, end) + ';--strip-peel:' + peel.toFixed(3) + ';" ' +
       'title="Bare fiber · ' + stripStageLabel(stripStage) + '" aria-label="Bare fiber ' + label + '">' +
       '<span class="lab-pigtail__jacket' + (jacketStripped ? ' is-strip-removed' : '') +
-      (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') + '" aria-hidden="true"></span>' +
+      (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') +
+      '" style="' + jacketCapStyle + '" aria-hidden="true"></span>' +
       '<span class="lab-pigtail__buffer' +
       (fullyStripped ? ' is-strip-removed' : (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed')) +
       (bareComplete ? ' is-strip-removed' : '') +
@@ -9157,6 +9249,7 @@
       var stripStage = p.stripStage || 0;
       var peel = fs.peel || 0;
       var peelLayer = fs.peelLayer;
+      var jacketCapStyle = 'background:' + getJacketColorHex(p) + ';';
       html +=
         '<div class="lab-pigtail' + selected + '" data-pt-node="' + p.id + '">' +
         '<button type="button" class="lab-pigtail__conn lab-pcord__end ' +
@@ -9190,7 +9283,7 @@
         '<span class="lab-pigtail__jacket' +
         (jacketStripped ? ' is-strip-removed' : '') +
         (peel > 0.02 && peelLayer === 'jacket' ? ' is-strip-peeling' : '') +
-        '" aria-hidden="true"></span>' +
+        '" style="' + jacketCapStyle + '" aria-hidden="true"></span>' +
         '<span class="lab-pigtail__buffer' +
         (fullyStripped ? ' is-strip-removed' : (jacketStripped && !bareComplete ? ' is-strip-exposed' : ' is-strip-jacketed')) +
         (bareComplete ? ' is-strip-removed' : '') +
@@ -10585,6 +10678,7 @@
         (getRouteMode(p) === 'gravity' ? ' is-active' : '') +
         '" data-pt-route-mode="' + p.id + ':gravity">Gravity Physics Mode</button>' +
         '</div>' +
+        buildJacketColorPaletteHtml(p) +
         '<div class="property-group lab-pigtail-otdr-len-group">' +
         '<label class="lab-inspector__label" for="pigtailCordLengthInput-' + p.id + '">Cable Length</label>' +
         '<div class="lab-cable-len-row">' +
@@ -10606,6 +10700,11 @@
         '<button type="button" class="lab-eject-btn" data-remove-pt="' + p.id + '">Remove Cable</button>' +
         '</div>';
       wireInspectorCommonHandlers(detail, p);
+      detail.querySelectorAll('[data-jacket-color]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          setJacketColor(p.id, btn.getAttribute('data-jacket-color'));
+        });
+      });
       return;
     }
 
@@ -10635,6 +10734,7 @@
       '<button type="button" class="lab-polish-btn is-apc' + (isApc ? ' is-active' : '') +
       '" data-pt-polish="' + p.id + ':APC">SC/APC · Green</button>' +
       '</div>' +
+      buildJacketColorPaletteHtml(p) +
       '<p class="lab-pcord-attach' + (p.connector.mismatch ? ' is-warn' : '') + '">' +
       (p.connector.attached
         ? 'A → ' + p.connector.attached.label +
@@ -10689,6 +10789,11 @@
       btn.addEventListener('click', function () {
         var parts = btn.getAttribute('data-pt-polish').split(':');
         setConnectorPolish(parts[0], parts[1]);
+      });
+    });
+    detail.querySelectorAll('[data-jacket-color]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        setJacketColor(p.id, btn.getAttribute('data-jacket-color'));
       });
     });
   }

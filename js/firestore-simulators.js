@@ -658,6 +658,33 @@ function firestoreTimestampToMs(value) {
   return isFinite(n) && n > 0 ? n : 0;
 }
 
+function shouldRejectStaleRemoteLabConfig(storageKey, remoteData) {
+  if (!storageKey) return false;
+  if (typeof window.isRemoteLabConfigOlderThanLocal === 'function') {
+    return window.isRemoteLabConfigOlderThanLocal(storageKey, remoteData);
+  }
+  try {
+    var raw = window.localStorage.getItem(storageKey + '_meta');
+    if (!raw) return false;
+    var meta = JSON.parse(raw);
+    var localAt = Number(meta && meta.clientUpdatedAt);
+    if (!isFinite(localAt) || localAt <= 0) return false;
+    if (!remoteData || typeof remoteData !== 'object') return true;
+    var remoteAt = Number(remoteData.clientUpdatedAt);
+    if (!isFinite(remoteAt) || remoteAt <= 0) return true;
+    return remoteAt < localAt;
+  } catch (err) {
+    return false;
+  }
+}
+
+function resolveLabConfigStorageKey(settingsGlobal, fallbackKey) {
+  if (settingsGlobal && window[settingsGlobal] && window[settingsGlobal].STORAGE_KEY) {
+    return window[settingsGlobal].STORAGE_KEY;
+  }
+  return fallbackKey || '';
+}
+
 function isStaleFtthLabConfigSnapshot(data) {
   if (!data || typeof data !== 'object') return false;
   var remoteClientAt = Number(data.clientUpdatedAt);
@@ -727,6 +754,12 @@ function applyFtthLabConfigFromFirestore(data) {
   if (ftthLabConfigWriteInFlight > 0) return false;
   if (!data || typeof data !== 'object') return false;
   if (isStaleFtthLabConfigSnapshot(data)) return false;
+  if (shouldRejectStaleRemoteLabConfig(
+    resolveLabConfigStorageKey('FtthLabSettings', 'ifa_ftth_lab_config'),
+    data
+  )) {
+    return false;
+  }
   if (!window.FtthLabSettings || typeof window.FtthLabSettings.importRemoteConfig !== 'function') {
     return false;
   }
@@ -734,7 +767,9 @@ function applyFtthLabConfigFromFirestore(data) {
   if (!normalized) return false;
   var nextJson = JSON.stringify(normalized);
   if (nextJson === lastPublishedFtthLabConfigJson) return false;
-  var applied = window.FtthLabSettings.importRemoteConfig(normalized);
+  var applied = window.FtthLabSettings.importRemoteConfig(normalized, {
+    clientUpdatedAt: Number(data.clientUpdatedAt),
+  });
   if (applied) {
     lastPublishedFtthLabConfigJson = nextJson;
     var remoteClientAt = Number(data.clientUpdatedAt);
@@ -891,6 +926,12 @@ function applyOpmConfigFromFirestore(data) {
   if (opmConfigWriteInFlight > 0) return false;
   if (!data || typeof data !== 'object') return false;
   if (isStaleOpmConfigSnapshot(data)) return false;
+  if (shouldRejectStaleRemoteLabConfig(
+    resolveLabConfigStorageKey('OpmSettings', 'ifa_opm_config'),
+    data
+  )) {
+    return false;
+  }
   if (!window.OpmSettings || typeof window.OpmSettings.importRemoteConfig !== 'function') {
     return false;
   }
@@ -898,7 +939,9 @@ function applyOpmConfigFromFirestore(data) {
   if (!normalized) return false;
   var nextJson = JSON.stringify(normalized);
   if (nextJson === lastPublishedOpmConfigJson) return false;
-  var applied = window.OpmSettings.importRemoteConfig(normalized);
+  var applied = window.OpmSettings.importRemoteConfig(normalized, {
+    clientUpdatedAt: Number(data.clientUpdatedAt),
+  });
   if (applied) {
     lastPublishedOpmConfigJson = nextJson;
     var remoteClientAt = Number(data.clientUpdatedAt);
@@ -984,6 +1027,7 @@ function createLabDeviceConfigFirestoreSync(options) {
   var ref = options.ref;
   var settingsGlobal = options.settingsGlobal;
   var storeName = options.storeName;
+  var storageKey = options.storageKey || '';
   var logTag = options.logTag || storeName;
 
   var configUnsubscribe = null;
@@ -1052,6 +1096,10 @@ function createLabDeviceConfigFirestoreSync(options) {
     if (!data || typeof data !== 'object') return false;
     if (isStaleConfigSnapshot(data)) return false;
     var settingsStore = getSettingsStore();
+    var resolvedStorageKey = resolveLabConfigStorageKey(settingsGlobal, storageKey);
+    if (shouldRejectStaleRemoteLabConfig(resolvedStorageKey, data)) {
+      return false;
+    }
     if (!settingsStore || typeof settingsStore.importRemoteConfig !== 'function') {
       return false;
     }
@@ -1059,7 +1107,9 @@ function createLabDeviceConfigFirestoreSync(options) {
     if (!normalized) return false;
     var nextJson = JSON.stringify(normalized);
     if (nextJson === lastPublishedConfigJson) return false;
-    var applied = settingsStore.importRemoteConfig(normalized);
+    var applied = settingsStore.importRemoteConfig(normalized, {
+      clientUpdatedAt: Number(data.clientUpdatedAt),
+    });
     if (applied) {
       lastPublishedConfigJson = nextJson;
       var remoteClientAt = Number(data.clientUpdatedAt);
@@ -1145,6 +1195,7 @@ var otdrConfigApi = createLabDeviceConfigFirestoreSync({
   ref: OTDR_CONFIG_REF,
   settingsGlobal: 'OtdrSettings',
   storeName: 'OtdrSettings',
+  storageKey: 'ifa_otdr_config',
   logTag: 'PlatformOtdrConfigFirestore',
 });
 
@@ -1162,6 +1213,7 @@ var splicerConfigApi = createLabDeviceConfigFirestoreSync({
   ref: SPLICER_CONFIG_REF,
   settingsGlobal: 'FusionSplicerSettings',
   storeName: 'FusionSplicerSettings',
+  storageKey: 'ifa_splicer_config',
   logTag: 'PlatformSplicerConfigFirestore',
 });
 

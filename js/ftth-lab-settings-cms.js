@@ -103,6 +103,28 @@
 
   function store() { return window[cms.storeName]; }
 
+  function hasUnsavedChanges() {
+    var s = store();
+    if (!s || typeof s.getDraft !== 'function' || typeof s.getActiveConfig !== 'function') {
+      return false;
+    }
+    try {
+      return JSON.stringify(s.getDraft()) !== JSON.stringify(s.getActiveConfig());
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function bindBeforeUnloadGuard() {
+    if (bindBeforeUnloadGuard._bound) return;
+    bindBeforeUnloadGuard._bound = true;
+    window.addEventListener('beforeunload', function (e) {
+      if (!modalOpen || !hasUnsavedChanges()) return;
+      e.preventDefault();
+      e.returnValue = '';
+    });
+  }
+
   function isEmbeddedAdminPanel() {
     return !!document.getElementById('admin-ftth-lab-config-root');
   }
@@ -1046,6 +1068,7 @@
     if ($('opm-admin-settings-btn')) useOpmCms();
     else if ($('otdr-admin-settings-btn')) useOtdrCms();
     else if ($('splicer-admin-settings-btn')) useSplicerCms();
+    bindBeforeUnloadGuard();
     var btn = $(cms.buttonId);
     if (btn) {
       btn.addEventListener('click', function (e) {
