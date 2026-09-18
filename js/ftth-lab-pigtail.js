@@ -2844,6 +2844,7 @@
       along: proj.dist,
       jacketTo: fs.jacketTo || 0,
       bareTo: fs.bareTo || 0,
+      jacketColorHex: getJacketColorHex(p),
     };
   }
 
@@ -5090,7 +5091,13 @@
       var ch = asm.ovenChannel;
       channelJacketPath =
         '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket lab-fused-oven-channel-jacket" ' +
-        'data-fused-asm-id="' + machineId + '" d="M' + ch.x1 + ' ' + ch.cy + ' L' + ch.x2 + ' ' + ch.cy + '" fill="none" />';
+        'data-fused-asm-part="left-channel-jacket" data-fused-asm-id="' + machineId + '" ' +
+        'd="M' + ch.x1 + ' ' + ch.cy + ' L' + ch.cx + ' ' + ch.cy + '" fill="none"' +
+        jacketStrokeStyleAttr(left) + ' />' +
+        '<path class="lab-pigtail-fiber lab-pigtail-fiber--jacket lab-fused-oven-channel-jacket" ' +
+        'data-fused-asm-part="right-channel-jacket" data-fused-asm-id="' + machineId + '" ' +
+        'd="M' + ch.cx + ' ' + ch.cy + ' L' + ch.x2 + ' ' + ch.cy + '" fill="none"' +
+        jacketStrokeStyleAttr(right) + ' />';
       channelLaserPath =
         '<path class="lab-pigtail-laser-core lab-pigtail-laser-core--fused-channel" data-fused-laser="' + machineId + '" ' +
         'data-fused-laser-part="channel" d="M' + ch.x1 + ' ' + ch.cy + ' L' + ch.x2 + ' ' + ch.cy + '" fill="none" />';
@@ -11131,6 +11138,7 @@
       FtthLab.getBareGlassLengthAfterCutPx = getBareGlassLengthAfterCutPx;
       FtthLab.getSplicerExposedBareLengthPx = getSplicerExposedBareLengthPx;
       FtthLab.getPigtailFiberRenderStrokeWidths = getPigtailFiberRenderStrokeWidths;
+      FtthLab.getJacketColorHex = getJacketColorHex;
       FtthLab.DEFAULT_CLEAVED_GLASS_LENGTH_PX = DEFAULT_CLEAVED_GLASS_LENGTH_PX;
       FtthLab.bladeHitRadiusPx = function () { return BLADE_HIT_RADIUS_PX; };
       FtthLab.findPigtailBareTipNearWorld = findBareTipNearWorld;

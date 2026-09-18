@@ -357,7 +357,24 @@
     return layer;
   }
 
-  function spawnDebris(x, y, stage, peelUx, peelUy) {
+  var DEFAULT_JACKET_RGB = '250, 204, 21';
+
+  /** Returns "r, g, b" for rgba(); falls back to default jacket yellow. */
+  function hexToRgb(hex) {
+    if (!hex || typeof hex !== 'string') return DEFAULT_JACKET_RGB;
+    var h = hex.replace('#', '').trim();
+    if (h.length === 3) {
+      h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    }
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return DEFAULT_JACKET_RGB;
+    var r = parseInt(h.slice(0, 2), 16);
+    var g = parseInt(h.slice(2, 4), 16);
+    var b = parseInt(h.slice(4, 6), 16);
+    if (!isFinite(r) || !isFinite(g) || !isFinite(b)) return DEFAULT_JACKET_RGB;
+    return r + ', ' + g + ', ' + b;
+  }
+
+  function spawnDebris(x, y, stage, peelUx, peelUy, jacketColorHex) {
     var host = ensureDebrisLayer();
     if (!host) return;
     var count = stage === 0 ? 7 : 5;
@@ -377,13 +394,14 @@
         h: h,
         life: 1,
         stage: stage,
+        jacketColorHex: jacketColorHex || '#facc15',
         el: null,
       });
     }
     startParticleLoop();
   }
 
-  function spawnPeelFragment(x, y, stage, peelUx, peelUy, peelProgress) {
+  function spawnPeelFragment(x, y, stage, peelUx, peelUy, peelProgress, jacketColorHex) {
     var host = ensureDebrisLayer();
     if (!host) return;
     var len = stage === 0 ? 14 + peelProgress * 10 : 8 + peelProgress * 6;
@@ -399,6 +417,7 @@
       life: 1,
       stage: stage,
       isFragment: true,
+      jacketColorHex: jacketColorHex || '#facc15',
       el: null,
     });
     startParticleLoop();
@@ -431,12 +450,16 @@
         if (p.life <= 0 || p.y > 22000) continue;
         alive.push(p);
         var alpha = Math.min(1, p.life * 1.4);
-        var color = p.stage === 0
-          ? 'rgba(250, 204, 21, ' + alpha + ')'
-          : 'rgba(96, 165, 250, ' + alpha + ')';
-        var border = p.stage === 0
-          ? 'rgba(161, 98, 7, ' + alpha + ')'
-          : 'rgba(29, 78, 216, ' + alpha + ')';
+        var color;
+        var border;
+        if (p.stage === 0) {
+          var jacketRgb = hexToRgb(p.jacketColorHex);
+          color = 'rgba(' + jacketRgb + ', ' + alpha + ')';
+          border = 'rgba(' + jacketRgb + ', ' + alpha + ')';
+        } else {
+          color = 'rgba(96, 165, 250, ' + alpha + ')';
+          border = 'rgba(29, 78, 216, ' + alpha + ')';
+        }
         html +=
           '<span class="lab-stripper-debris' + (p.isFragment ? ' is-fragment' : '') + '" ' +
           'style="left:' + Math.round(p.x) + 'px;top:' + Math.round(p.y) + 'px;' +
@@ -834,6 +857,7 @@
     var lastFragmentPx = 0;
     var moved = false;
     var peelCompleted = false;
+    var jacketColorHex = target.jacketColorHex || '#facc15';
 
     function endPeel(ev) {
       window.removeEventListener('pointermove', onMove);
@@ -848,7 +872,7 @@
       clearStripPeel(target.id);
       clearStripGuide();
       if (maxPeeled > 4) {
-        spawnDebris(s.x, s.y - notchOff, stage, target.peelUx, target.peelUy);
+        spawnDebris(s.x, s.y - notchOff, stage, target.peelUx, target.peelUy, jacketColorHex);
         pushHistory();
         if (layerKind === 'jacket') {
           setStatus('CFS-3 · jacket stripped ' + Math.round(maxPeeled) + 'px · clamp buffer notch to peel coating');
@@ -895,7 +919,8 @@
             stage,
             peelUx,
             peelUy,
-            Math.min(1, maxPeeled / 80)
+            Math.min(1, maxPeeled / 80),
+            jacketColorHex
           );
         }
       } else {

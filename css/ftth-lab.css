@@ -3788,7 +3788,7 @@ body.lab-pigtail-dragging .lab-splicer-fusion-bridge__joint-glow {
 }
 
 .lab-fused-oven-channel-jacket {
-  stroke: #facc15;
+  /* stroke set inline per left/right jacketColor */
   stroke-width: 2.15;
   stroke-linecap: butt;
 }

@@ -1258,17 +1258,19 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       }
     }
 
-    function drawCoatingSegment(ctx, xStart, xEnd, yCenter, coatingWidth) {
+    function drawCoatingSegment(ctx, xStart, xEnd, yCenter, coatingWidth, jacketColor) {
       if (xEnd <= xStart) return;
+      var strokeColor = jacketColor || '#FFD700';
       ctx.save();
       ctx.lineCap = 'round';
-      ctx.strokeStyle = '#FFD700';
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = coatingWidth;
       ctx.beginPath();
       ctx.moveTo(xStart, yCenter);
       ctx.lineTo(xEnd, yCenter);
       ctx.stroke();
-      ctx.strokeStyle = 'rgba(160, 120, 0, 0.4)';
+      ctx.globalAlpha = 0.4;
+      ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(xStart, yCenter);
@@ -1296,14 +1298,17 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       ctx.restore();
     }
 
-    function drawCompositeFiber(ctx, side, edgeX, tipX, stripBoundaryX, yCenter, fiberWidths) {
+    function drawCompositeFiber(ctx, side, edgeX, tipX, stripBoundaryX, yCenter, fiberWidths, fiber) {
+      var jacketColor = typeof global.FtthLab !== 'undefined' && FtthLab.getJacketColorHex
+        ? FtthLab.getJacketColorHex(fiber)
+        : '#FFD700';
       if (side === 'L') {
         if (tipX <= edgeX) return;
         if (tipX <= stripBoundaryX) {
-          drawCoatingSegment(ctx, edgeX, tipX, yCenter, fiberWidths.coating);
+          drawCoatingSegment(ctx, edgeX, tipX, yCenter, fiberWidths.coating, jacketColor);
           return;
         }
-        drawCoatingSegment(ctx, edgeX, stripBoundaryX, yCenter, fiberWidths.coating);
+        drawCoatingSegment(ctx, edgeX, stripBoundaryX, yCenter, fiberWidths.coating, jacketColor);
         drawBareGlassFiber(
           ctx,
           stripBoundaryX,
@@ -1316,7 +1321,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
       }
       if (tipX >= edgeX) return;
       if (tipX >= stripBoundaryX) {
-        drawCoatingSegment(ctx, tipX, edgeX, yCenter, fiberWidths.coating);
+        drawCoatingSegment(ctx, tipX, edgeX, yCenter, fiberWidths.coating, jacketColor);
         return;
       }
       drawBareGlassFiber(
@@ -1327,7 +1332,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         fiberWidths.cladding,
         fiberWidths.core
       );
-      drawCoatingSegment(ctx, stripBoundaryX, edgeX, yCenter, fiberWidths.coating);
+      drawCoatingSegment(ctx, stripBoundaryX, edgeX, yCenter, fiberWidths.coating, jacketColor);
     }
 
     function drawCamera(ctx, w, h, dpr, t) {
@@ -1421,6 +1426,7 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
         var offRY = state.clampOffset.R.y * 0.3;
 
         if (state.fiberPlaced.L) {
+          var leftFiber = getDockedFiberForSide('L');
           var leftTip = cx - gap + offLX;
           var leftStrip = cx - stripDist;
           drawCompositeFiber(
@@ -1430,13 +1436,15 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
             leftTip,
             leftStrip,
             cy + offLY,
-            fiberWidths
+            fiberWidths,
+            leftFiber
           );
           drawBareResidueForSide(
-            ctx, 'L', edgePad, leftTip, leftStrip, cy + offLY, fiberWidths, getDockedFiberForSide('L')
+            ctx, 'L', edgePad, leftTip, leftStrip, cy + offLY, fiberWidths, leftFiber
           );
         }
         if (state.fiberPlaced.R) {
+          var rightFiber = getDockedFiberForSide('R');
           var rightTip = cx + gap - offRX;
           var rightStrip = cx + stripDist;
           drawCompositeFiber(
@@ -1446,10 +1454,11 @@ window.clampBackwardLimit = typeof window.clampBackwardLimit === 'number' ? wind
             rightTip,
             rightStrip,
             cy + offRY,
-            fiberWidths
+            fiberWidths,
+            rightFiber
           );
           drawBareResidueForSide(
-            ctx, 'R', w - edgePad, rightTip, rightStrip, cy + offRY, fiberWidths, getDockedFiberForSide('R')
+            ctx, 'R', w - edgePad, rightTip, rightStrip, cy + offRY, fiberWidths, rightFiber
           );
         }
       }

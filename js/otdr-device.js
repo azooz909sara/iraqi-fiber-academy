@@ -310,11 +310,54 @@
     return val.toFixed(d);
   }
 
-  function formatTraceAxisDistance(meters) {
+  function resolveTraceAxisDistanceDecimals(meterStep) {
+    var unit = currentOtdrTestState.distanceUnit || 'meter';
+    var scale = getDistanceDisplayScale();
+    var stepDisplay = meterStep != null && isFinite(meterStep)
+      ? meterStep * scale.factor
+      : null;
+
+    if (stepDisplay == null || stepDisplay <= 0) {
+      if (unit === 'km') return 1;
+      if (unit === 'kfeet' || unit === 'miles') return 3;
+      return 0;
+    }
+
+    if (unit === 'km') {
+      if (stepDisplay >= 1) return 0;
+      if (stepDisplay >= 0.1) return 1;
+      if (stepDisplay >= 0.01) return 2;
+      return 3;
+    }
+    if (unit === 'kfeet' || unit === 'miles') {
+      if (stepDisplay >= 1) return 1;
+      if (stepDisplay >= 0.1) return 2;
+      return 3;
+    }
+    if (unit === 'feet') {
+      if (stepDisplay >= 100) return 0;
+      if (stepDisplay >= 10) return 0;
+      if (stepDisplay >= 1) return 1;
+      return 2;
+    }
+    if (stepDisplay >= 100) return 0;
+    if (stepDisplay >= 10) return 0;
+    if (stepDisplay >= 1) return 1;
+    return 2;
+  }
+
+  function formatTraceAxisDistance(meters, meterStep) {
     if (meters == null || !isFinite(meters)) return '';
     var unit = currentOtdrTestState.distanceUnit || 'meter';
     var scale = getDistanceDisplayScale();
     var val = meters * scale.factor;
+
+    if (meterStep != null && isFinite(meterStep)) {
+      var tickDecimals = resolveTraceAxisDistanceDecimals(meterStep);
+      if (Math.abs(val) < Math.pow(10, -(tickDecimals + 1))) return '0';
+      return val.toFixed(tickDecimals);
+    }
+
     if (unit === 'km') {
       if (Math.abs(val) < 0.0005) return '0';
       if (val >= 10) return String(Math.round(val));
@@ -2866,10 +2909,10 @@
   var TRACE_GRAPH_COLLAPSE_THRESHOLD = 60;
   var TRACE_DEFAULT_GRAPH_HEIGHT = '65%';
   var TRACE_PLOT_MARGIN_LEFT = 36;
-  var TRACE_OPTICAL_BASELINE_DB = 5;
+  var TRACE_OPTICAL_BASELINE_DB = 0;
   var TRACE_RAYLEIGH_AMP_DB = 2.75;
 
-  var traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
+  var traceCamera = { x: -100, y: 0, scaleX: 1.5, scaleY: 8 };
   var currentTraceEventIndex = -1;
   var isTraceDragging = false;
   var lastTracePan = { x: 0, y: 0 };
@@ -2895,6 +2938,30 @@
       return TRACE_OPTICAL_BASELINE_DB - tLoss;
     }
     return TRACE_OPTICAL_BASELINE_DB;
+  }
+
+  function formatTraceAxisDbLabel(dbVal) {
+    if (!isFinite(dbVal)) return '0';
+    var rounded = Math.round(dbVal * 10) / 10;
+    if (Math.abs(rounded) < 0.05) return '0';
+    return rounded.toFixed(1);
+  }
+
+  function resolveTraceEventTLossDb(ev) {
+    if (!ev) return null;
+    var tLoss = ev.tLoss != null ? ev.tLoss : ev.totalLoss;
+    return typeof tLoss === 'number' && isFinite(tLoss) ? tLoss : null;
+  }
+
+  function resolveTraceSegmentEndDb(ev, currentDb, lastEventDist, eventDist, defaultSlope) {
+    var tLoss = resolveTraceEventTLossDb(ev);
+    if (tLoss != null) return TRACE_OPTICAL_BASELINE_DB - tLoss;
+    var sectionKm = resolveTraceEventSectionKm(ev);
+    if (sectionKm == null || !isFinite(sectionKm)) {
+      sectionKm = Math.max(0, (eventDist - lastEventDist) / 1000);
+    }
+    var slopeDbKm = resolveTraceEventSlopeDbKm(ev, defaultSlope);
+    return currentDb - sectionKm * slopeDbKm;
   }
 
   function focusTraceCameraOnEvent(targetEvent, canvas) {
@@ -3161,7 +3228,7 @@
 
   function resetTraceViewport(deviceId) {
     var d = findDevice(deviceId);
-    traceCamera = { x: -100, y: -20, scaleX: 1.5, scaleY: 8 };
+    traceCamera = { x: -100, y: 0, scaleX: 1.5, scaleY: 8 };
     isTraceDragging = false;
     lastTracePan = { x: 0, y: 0 };
     if (!d) return;
@@ -3830,9 +3897,8 @@
   }
 
   function getReflectiveSpikeHeightDb(reflectVal) {
-    if (reflectVal == null || !isFinite(reflectVal)) return 5;
-    var severity = Math.max(0, Math.min(1, (reflectVal + 70) / 56));
-    return 3 + severity * 14;
+    if (reflectVal == null || !isFinite(reflectVal)) return 0.2;
+    return Math.max(0.2, (75 + reflectVal) / 10);
   }
 
   function resolveTraceEventSlopeDbKm(ev, defaultSlope) {
@@ -3897,15 +3963,10 @@
       var isEnd = isTraceEndEvent(ev, i, drawEvents.length);
 
       if (!isStart) {
-        var sectionKm = resolveTraceEventSectionKm(ev);
-        if (sectionKm == null || !isFinite(sectionKm)) {
-          sectionKm = Math.max(0, (eventDist - lastEventDist) / 1000);
-        }
-        var slopeDbKm = resolveTraceEventSlopeDbKm(ev, defaultSlope);
-        var dbDrop = sectionKm * slopeDbKm;
         var segStartDb = currentDb;
-        traceNoisySegmentTo(ctx, w, h, lastEventDist, eventDist, segStartDb, segStartDb - dbDrop);
-        currentDb -= dbDrop;
+        var segEndDb = resolveTraceSegmentEndDb(ev, currentDb, lastEventDist, eventDist, defaultSlope);
+        traceNoisySegmentTo(ctx, w, h, lastEventDist, eventDist, segStartDb, segEndDb);
+        currentDb = segEndDb;
       }
 
       if (isStart) {
@@ -3935,7 +3996,7 @@
           currentDb -= eventLoss;
           ctx.lineTo(eventX, toCanvasY(currentDb, h));
         }
-        currentDb = -35;
+        currentDb = Math.min(currentDb - 10, -15);
         ctx.lineTo(eventX, toCanvasY(currentDb, h));
         var plotWidth = Math.max(1, w - TRACE_PLOT_MARGIN_LEFT);
         var noiseEndDist = eventDist + Math.max(80, plotWidth / Math.max(traceCamera.scaleX, 0.01) * 0.12);
@@ -4039,7 +4100,7 @@
       if (dbVal > 50 || dbVal < -50) continue;
       var ly = toCanvasY(dbVal, h);
       if (ly < labelSize || ly > h - labelSize) continue;
-      ctx.fillText(String(Math.round(dbVal * 10) / 10), 28, ly);
+      ctx.fillText(formatTraceAxisDbLabel(dbVal), 28, ly);
     }
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
@@ -4047,7 +4108,7 @@
       if (dist < 0) continue;
       var lx = toCanvasX(dist, w);
       if (lx < 0 || lx > w - 24) continue;
-      ctx.fillText(formatTraceAxisDistance(dist), lx - 8, h - labelSize - 2);
+      ctx.fillText(formatTraceAxisDistance(dist, distStep), lx - 8, h - labelSize - 2);
     }
 
     ctx.fillStyle = '#ffffff';
