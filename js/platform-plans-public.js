@@ -7,6 +7,8 @@
 
   var GRID_SELECTOR = '#publicPricingGrid, .pricing__grid';
   var AUTH_KEY = 'ifa_auth_user';
+  var PLANS_KEY = 'platform_plans';
+  var PLANS_LEGACY_KEY = 'ifa_pricing_plans';
   var lastSignature = '';
   var pendingPlanIds = {};
   var pendingOrdersUnsub = null;
@@ -33,6 +35,28 @@
     }
   }
 
+  function readRawPlansList(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function hasCachedPlansInStorage() {
+    var list = readRawPlansList(PLANS_KEY) || readRawPlansList(PLANS_LEGACY_KEY);
+    return !!(list && list.length);
+  }
+
+  function getPlansFromStorageOnly() {
+    var list = readRawPlansList(PLANS_KEY);
+    if (!list) list = readRawPlansList(PLANS_LEGACY_KEY);
+    return list || [];
+  }
+
   function usesFirestorePricing() {
     return !!(
       window.PlatformPricingFirestore &&
@@ -42,6 +66,8 @@
   }
 
   function isPlansDataLoading() {
+    if (hasCachedPlansInStorage()) return false;
+
     if (window.PlatformPlans && typeof window.PlatformPlans.isFirestoreBootstrapping === 'function') {
       return window.PlatformPlans.isFirestoreBootstrapping();
     }
@@ -51,26 +77,20 @@
   }
 
   function getAllPlans() {
-    if (isPlansDataLoading()) return [];
     if (usesFirestorePricing()) {
       return window.PlatformPricingFirestore.getCachedPlans();
     }
     if (window.PlatformPlans && typeof window.PlatformPlans.getPlans === 'function') {
-      return window.PlatformPlans.getPlans();
+      var plans = window.PlatformPlans.getPlans();
+      if (plans.length) return plans;
     }
-    try {
-      var raw = localStorage.getItem('platform_plans');
-      var parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (err) {
-      return [];
-    }
+    return getPlansFromStorageOnly();
   }
 
   function getPlans() {
     if (window.PlatformPlans && typeof window.PlatformPlans.getCatalogPricingPlans === 'function') {
-      if (isPlansDataLoading()) return [];
-      return window.PlatformPlans.getCatalogPricingPlans();
+      var catalog = window.PlatformPlans.getCatalogPricingPlans();
+      if (catalog.length) return catalog;
     }
     var all = getAllPlans();
     if (window.CoursePlanSync && typeof window.CoursePlanSync.isCatalogPricingPlan === 'function') {
@@ -309,17 +329,17 @@
           '</span>';
     var count = courseCountForPlan(plan);
     var simCount = Array.isArray(plan.allowedSimulators) ? plan.allowedSimulators.length : 0;
-    var accessNote =
-      '<li><span class="pricing-card__check">✓</span> ' +
-      (plan.planType === 'course'
-        ? 'كورس واحد — شراء لمرة واحدة'
-        : count
-          ? 'يشمل ' + count + ' كورساً منشوراً'
-          : 'باقة مخصصة') +
-      '</li>' +
-      (simCount
-        ? '<li><span class="pricing-card__check">✓</span> ' + simCount + ' محاكيات مضمّنة</li>'
-        : '');
+    var isCoursePlan = String(plan.planType || '').toLowerCase() === 'course';
+    var accessNote = '';
+    if (!isCoursePlan) {
+      accessNote =
+        '<li><span class="pricing-card__check">✓</span> ' +
+        (count ? 'يشمل ' + count + ' كورساً منشوراً' : 'باقة مخصصة') +
+        '</li>' +
+        (simCount
+          ? '<li><span class="pricing-card__check">✓</span> ' + simCount + ' محاكيات مضمّنة</li>'
+          : '');
+    }
     var features = (plan.features || [])
       .map(function (f) {
         var ok = f.included !== false;

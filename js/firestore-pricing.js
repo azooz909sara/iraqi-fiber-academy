@@ -13,8 +13,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var COLLECTION = 'pricing';
+var PLANS_STORAGE_KEY = 'platform_plans';
+var PLANS_LEGACY_KEY = 'ifa_pricing_plans';
 var cachedPlans = [];
 var snapshotReady = false;
+var lastPersistedSignature = '';
 var listeners = [];
 var unsubscribeSnapshot = null;
 var writesInFlight = 0;
@@ -55,6 +58,53 @@ function preparePayload(payload, existing) {
   if (!normalized.name) throw new Error('اسم الباقة مطلوب');
   delete normalized.id;
   return stripUndefined(normalized);
+}
+
+function readStoredPlans() {
+  try {
+    var raw = localStorage.getItem(PLANS_STORAGE_KEY) || localStorage.getItem(PLANS_LEGACY_KEY);
+    if (!raw) return [];
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function plansSignature(list) {
+  return (list || [])
+    .map(function (p) {
+      return [p.id, p.updatedAt || '', p.name || '', p.price || 0, p.sortOrder || 0].join(':');
+    })
+    .join('|');
+}
+
+function persistPlansToLocalStorage(list) {
+  try {
+    var json = JSON.stringify(list);
+    localStorage.setItem(PLANS_STORAGE_KEY, json);
+    localStorage.setItem(PLANS_LEGACY_KEY, json);
+    lastPersistedSignature = plansSignature(list);
+  } catch (err) {
+    console.warn('[PricingFirestore] localStorage persist failed', err);
+  }
+}
+
+function maybePersistPlansFromCache() {
+  var nextSig = plansSignature(cachedPlans);
+  if (nextSig === lastPersistedSignature) return;
+  persistPlansToLocalStorage(cachedPlans);
+}
+
+function hydratePlansFromLocalStorage() {
+  var stored = readStoredPlans();
+  if (!stored.length) return;
+  setCachedPlans(
+    stored.map(function (item) {
+      return normalizePlan(item, item.id);
+    })
+  );
+  lastPersistedSignature = plansSignature(cachedPlans);
 }
 
 function setCachedPlans(list) {
@@ -113,6 +163,7 @@ function handleSnapshot(snap) {
       return normalizePlan(docSnap.data(), docSnap.id);
     })
   );
+  maybePersistPlansFromCache();
   snapshotReady = true;
   notifyListeners();
 }
@@ -279,6 +330,7 @@ var api = {
 };
 
 window.PlatformPricingFirestore = api;
+hydratePlansFromLocalStorage();
 startPricingFirestoreSync();
 
 export default api;

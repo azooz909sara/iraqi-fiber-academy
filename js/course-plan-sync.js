@@ -57,7 +57,7 @@
     var lessonCount = Array.isArray(course.lessons) ? course.lessons.length : 0;
     var features = [{ text: 'وصول كامل للكورس: ' + (course.title || ''), included: true }];
     if (lessonCount) {
-      features.push({ text: lessonCount + ' درساً', included: true });
+      features.push({ text: 'عدد الدروس: ' + lessonCount, included: true });
     }
     features = features.concat(simulatorFeatureLines(sims));
 
@@ -189,12 +189,89 @@
     return !type;
   }
 
+  var LESSON_FEATURE_MIGRATION_KEY = 'ifa_course_plan_lesson_feature_v2';
+
+  async function resyncAllCoursePlans() {
+    if (!global.PlatformCourses || typeof global.PlatformCourses.getCourses !== 'function') {
+      return { ok: false, reason: 'courses-unavailable' };
+    }
+    var FS = global.PlatformPricingFirestore;
+    if (!FS || typeof FS.isReady !== 'function' || !FS.isReady()) {
+      return { ok: false, reason: 'pricing-not-ready' };
+    }
+
+    var courses = global.PlatformCourses.getCourses();
+    var synced = 0;
+    var i;
+    for (i = 0; i < courses.length; i++) {
+      var course = courses[i];
+      if (!course || !course.id || parseCoursePrice(course) <= 0) continue;
+      try {
+        await syncPlanForCourse(course);
+        synced += 1;
+      } catch (err) {
+        console.warn('[CoursePlanSync] resync failed for', course.id, err);
+      }
+    }
+    return { ok: true, count: synced };
+  }
+
+  function tryRunLessonFeatureMigration(attempts) {
+    try {
+      if (localStorage.getItem(LESSON_FEATURE_MIGRATION_KEY) === '1') return;
+    } catch (err) {
+      return;
+    }
+
+    var coursesReady =
+      global.PlatformCoursesFirestore &&
+      typeof global.PlatformCoursesFirestore.isReady === 'function' &&
+      global.PlatformCoursesFirestore.isReady();
+    var pricingReady =
+      global.PlatformPricingFirestore &&
+      typeof global.PlatformPricingFirestore.isReady === 'function' &&
+      global.PlatformPricingFirestore.isReady();
+
+    if (!coursesReady || !pricingReady) {
+      if (attempts > 80) return;
+      setTimeout(function () {
+        tryRunLessonFeatureMigration((attempts || 0) + 1);
+      }, 100);
+      return;
+    }
+
+    resyncAllCoursePlans()
+      .then(function (result) {
+        if (result && result.ok) {
+          try {
+            localStorage.setItem(LESSON_FEATURE_MIGRATION_KEY, '1');
+          } catch (storeErr) {
+            /* ignore */
+          }
+        }
+      })
+      .catch(function (err) {
+        console.warn('[CoursePlanSync] lesson feature migration failed', err);
+      });
+  }
+
   global.CoursePlanSync = {
     planIdForCourse: planIdForCourse,
     buildPlanFromCourse: buildPlanFromCourse,
     syncPlanForCourse: syncPlanForCourse,
+    resyncAllCoursePlans: resyncAllCoursePlans,
     deletePlanForCourse: deletePlanForCourse,
     isCatalogPricingPlan: isCatalogPricingPlan,
     isLegacyTierPlan: isLegacyTierPlan,
   };
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', function () {
+        tryRunLessonFeatureMigration(0);
+      });
+    } else {
+      tryRunLessonFeatureMigration(0);
+    }
+  }
 })(typeof window !== 'undefined' ? window : this);

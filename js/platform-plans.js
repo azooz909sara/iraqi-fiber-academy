@@ -311,8 +311,19 @@
     return !FS.isReady();
   }
 
+  function readLocalPlansCache() {
+    ensureSeeded();
+    var list = readJson(PLANS_KEY, null);
+    if (!list) list = readJson(PLANS_ALIAS_KEY, []);
+    return stripLegacyTierPlans(migratePlanFields(Array.isArray(list) ? list : [])).sort(function (a, b) {
+      return (a.sortOrder || 0) - (b.sortOrder || 0);
+    });
+  }
+
   function getPlans() {
-    if (isFirestorePlansBootstrapping()) return [];
+    if (isFirestorePlansBootstrapping()) {
+      return readLocalPlansCache();
+    }
     if (usesFirestorePlans()) {
       return stripLegacyTierPlans(
         (global.PlatformPricingFirestore.getCachedPlans() || [])
@@ -322,11 +333,7 @@
         return (a.sortOrder || 0) - (b.sortOrder || 0);
       });
     }
-    ensureSeeded();
-    var list = readJson(PLANS_KEY, []);
-    return stripLegacyTierPlans(migratePlanFields(Array.isArray(list) ? list : [])).sort(function (a, b) {
-      return (a.sortOrder || 0) - (b.sortOrder || 0);
-    });
+    return readLocalPlansCache();
   }
 
   function savePlans(list, detail) {
@@ -349,7 +356,13 @@
   function findPlan(id) {
     var key = String(id || '');
     if (!key) return null;
-    if (isFirestorePlansBootstrapping()) return null;
+    if (isFirestorePlansBootstrapping()) {
+      var localList = readLocalPlansCache();
+      for (var li = 0; li < localList.length; li++) {
+        if (String(localList[li].id) === key) return localList[li];
+      }
+      return null;
+    }
     if (usesFirestorePlans() && global.PlatformPricingFirestore.findPlan) {
       var cached = global.PlatformPricingFirestore.findPlan(key);
       return cached ? normalizePlan(cached) : null;
