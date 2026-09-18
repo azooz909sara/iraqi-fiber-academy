@@ -17,8 +17,11 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var COLLECTION = 'courses';
+var COURSES_STORAGE_KEY = 'platform_courses';
+var COURSES_LEGACY_KEY = 'ifa_platform_courses';
 var cachedCourses = [];
 var snapshotReady = false;
+var lastPersistedSignature = '';
 var listeners = [];
 var unsubscribeSnapshot = null;
 var seedInFlight = false;
@@ -141,6 +144,53 @@ function preparePayload(payload, existing) {
   if (payload && payload.createdAt && !out.createdAt) out.createdAt = payload.createdAt;
   if (payload && payload.updatedAt) out.updatedAt = payload.updatedAt;
   return stripUndefined(out);
+}
+
+function readStoredCourses() {
+  try {
+    var raw = localStorage.getItem(COURSES_STORAGE_KEY) || localStorage.getItem(COURSES_LEGACY_KEY);
+    if (!raw) return [];
+    var parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+function coursesSignature(list) {
+  return (list || [])
+    .map(function (c) {
+      return [c.id, c.updatedAt || '', c.status || ''].join(':');
+    })
+    .join('|');
+}
+
+function persistCoursesToLocalStorage(list) {
+  try {
+    var json = JSON.stringify(list);
+    localStorage.setItem(COURSES_STORAGE_KEY, json);
+    localStorage.setItem(COURSES_LEGACY_KEY, json);
+    lastPersistedSignature = coursesSignature(list);
+  } catch (err) {
+    console.warn('[PlatformCoursesFirestore] localStorage persist failed', err);
+  }
+}
+
+function maybePersistCoursesFromCache() {
+  var nextSig = coursesSignature(cachedCourses);
+  if (nextSig === lastPersistedSignature) return;
+  persistCoursesToLocalStorage(cachedCourses);
+}
+
+function hydrateCoursesFromLocalStorage() {
+  var stored = readStoredCourses();
+  if (!stored.length) return;
+  setCachedCourses(
+    stored.map(function (item) {
+      return normalizeCourse(item, item.id);
+    })
+  );
+  lastPersistedSignature = coursesSignature(cachedCourses);
 }
 
 function setCachedCourses(list) {
@@ -345,6 +395,7 @@ function handleSnapshot(snap) {
       return normalizeCourse(docSnap.data(), docSnap.id);
     })
   );
+  maybePersistCoursesFromCache();
   snapshotReady = true;
   notifyListeners();
 }
@@ -638,6 +689,7 @@ var api = {
 };
 
 window.PlatformCoursesFirestore = api;
+hydrateCoursesFromLocalStorage();
 startCoursesFirestoreSync();
 bootstrapCoursesAutoSeed();
 

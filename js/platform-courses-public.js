@@ -43,7 +43,27 @@
     return list || [];
   }
 
+  function hasCachedCoursesInStorage() {
+    var list = readRawList(COURSES_KEY) || readRawList(LEGACY_KEY);
+    return !!(list && list.length);
+  }
+
+  function getPublishedFromStorageOnly() {
+    var list = readRawList(COURSES_KEY);
+    if (!list) list = readRawList(LEGACY_KEY);
+    if (!list) list = [];
+    return list.filter(function (c) {
+      return (
+        c &&
+        String(c.status || '').toLowerCase() === 'published' &&
+        !c.softDeleted
+      );
+    });
+  }
+
   function isCoursesDataLoading() {
+    if (hasCachedCoursesInStorage()) return false;
+
     if (window.PlatformCourses && typeof window.PlatformCourses.isFirestoreBootstrapping === 'function') {
       return window.PlatformCourses.isFirestoreBootstrapping();
     }
@@ -56,11 +76,10 @@
 
   function getPublishedCourses() {
     if (window.PlatformCourses && typeof window.PlatformCourses.getPublished === 'function') {
-      return window.PlatformCourses.getPublished().slice();
+      var published = window.PlatformCourses.getPublished().slice();
+      if (published.length) return published;
     }
-    return fetchCoursesFromLocalStorage().filter(function (c) {
-      return c && String(c.status || '').toLowerCase() === 'published';
-    });
+    return getPublishedFromStorageOnly();
   }
 
   function formatDurationLabel(course) {
@@ -492,14 +511,16 @@
       return;
     }
 
-    if (isCoursesDataLoading()) {
+    if (isCoursesDataLoading() && !hasCachedCoursesInStorage()) {
       renderCourseDetailsLoading(root);
       return;
     }
 
     var course = findCourseInCache(courseId);
     if (!course) {
-      renderCourseDetailsLoading(root);
+      if (!hasCachedCoursesInStorage()) {
+        renderCourseDetailsLoading(root);
+      }
       course = await fetchCourseByIdFallback(courseId);
       if (seq !== detailsRenderSeq) return;
     }

@@ -400,6 +400,13 @@
     return (global.PlatformCoursesFirestore.getCachedCourses() || []).map(normalizeCourse).filter(Boolean);
   }
 
+  function readLocalCoursesCache() {
+    ensureSeeded();
+    var list = readJson(COURSES_KEY, null);
+    if (!list) list = readJson(LEGACY_KEY, []);
+    return (Array.isArray(list) ? list : []).map(normalizeCourse).filter(Boolean);
+  }
+
   function normalizeCourse(raw) {
     if (!raw || typeof raw !== 'object') return null;
     var rawStatus = String(raw.status || '').toLowerCase();
@@ -628,14 +635,13 @@
   }
 
   function getCourses() {
-    if (isFirestoreCoursesBootstrapping()) return [];
+    if (isFirestoreCoursesBootstrapping()) {
+      return ensureDisplayOrder(readLocalCoursesCache());
+    }
     if (usesFirestoreCourses()) {
       return ensureDisplayOrder(readFirestoreCourses());
     }
-    ensureSeeded();
-    var list = readJson(COURSES_KEY, []);
-    list = (Array.isArray(list) ? list : []).map(normalizeCourse).filter(Boolean);
-    return ensureDisplayOrder(list);
+    return ensureDisplayOrder(readLocalCoursesCache());
   }
 
   function saveCourses(list, detail) {
@@ -654,7 +660,13 @@
   function findCourse(id) {
     var key = String(id || '');
     if (!key) return null;
-    if (isFirestoreCoursesBootstrapping()) return null;
+    if (isFirestoreCoursesBootstrapping()) {
+      var localList = readLocalCoursesCache();
+      for (var li = 0; li < localList.length; li++) {
+        if (localList[li].id === key) return localList[li];
+      }
+      return null;
+    }
     if (usesFirestoreCourses() && global.PlatformCoursesFirestore.findCourse) {
       var cached = global.PlatformCoursesFirestore.findCourse(key);
       return cached ? normalizeCourse(cached) : null;
@@ -667,16 +679,15 @@
   }
 
   function getPublished() {
-    if (isFirestoreCoursesBootstrapping()) return [];
-    if (usesFirestoreCourses()) {
-      return readFirestoreCourses()
-        .filter(function (c) {
-          return c.status === 'published' && !c.softDeleted;
-        })
-        .slice()
-        .sort(sortByDisplayOrder);
+    var source;
+    if (isFirestoreCoursesBootstrapping()) {
+      source = readLocalCoursesCache();
+    } else if (usesFirestoreCourses()) {
+      source = readFirestoreCourses();
+    } else {
+      source = readLocalCoursesCache();
     }
-    return getCourses()
+    return source
       .filter(function (c) {
         return c.status === 'published' && !c.softDeleted;
       })
