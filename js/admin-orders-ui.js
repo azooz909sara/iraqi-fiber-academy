@@ -10,9 +10,11 @@ import {
   onSnapshot,
   setDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-import { notifyStudentOrderStatus } from './mail-notifications.js';
+import { notifyStudentOrderApproved, notifyStudentOrderStatus } from './mail-notifications.js';
+import { syncEntitlementsFromApprovedOrders } from './entitlements-sync.js';
 
 var ordersUnsubscribe = null;
 var cachedOrders = [];
@@ -34,17 +36,26 @@ function formatIqd(amount) {
   return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',') + ' د.ع';
 }
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
 function formatDate(value) {
   if (!value) return '—';
   try {
     var d = value.toDate ? value.toDate() : new Date(value);
-    return d.toLocaleString('ar-IQ', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+    if (isNaN(d.getTime())) return '—';
+    return (
+      d.getFullYear() +
+      '/' +
+      pad2(d.getMonth() + 1) +
+      '/' +
+      pad2(d.getDate()) +
+      ' ' +
+      pad2(d.getHours()) +
+      ':' +
+      pad2(d.getMinutes())
+    );
   } catch (err) {
     return '—';
   }
@@ -120,18 +131,9 @@ function mergeSimulatorIds(existing, additions) {
   return out;
 }
 
-async function computeAllowedSimulators(order, enrolledCourseIds) {
-  var ids = [];
-  if (order.planId) {
-    var planSnap = await getDoc(doc(db, 'pricing', String(order.planId)));
-    if (planSnap.exists()) {
-      var plan = planSnap.data() || {};
-      if (Array.isArray(plan.allowedSimulators)) {
-        ids = mergeSimulatorIds(ids, plan.allowedSimulators);
-      }
-    }
-  }
+async function computeAllowedSimulators(_order, enrolledCourseIds) {
   var courses = await fetchPublishedCourses();
+  var ids = [];
   (enrolledCourseIds || []).forEach(function (courseId) {
     var course = courses.find(function (c) {
       return String(c.id) === String(courseId);
@@ -140,14 +142,6 @@ async function computeAllowedSimulators(order, enrolledCourseIds) {
       ids = mergeSimulatorIds(ids, course.allowedSimulators);
     }
   });
-  if (order.courseId) {
-    var direct = courses.find(function (c) {
-      return String(c.id) === String(order.courseId);
-    });
-    if (direct && Array.isArray(direct.allowedSimulators)) {
-      ids = mergeSimulatorIds(ids, direct.allowedSimulators);
-    }
-  }
   return ids;
 }
 
@@ -175,13 +169,36 @@ async function computeEnrolledCourseIds(order) {
   return uniqueIds(ids);
 }
 
+function applyEntitlementsToActiveSession(userId, userEmail, entitlements) {
+  if (
+    !userId ||
+    !auth.currentUser ||
+    auth.currentUser.uid !== userId ||
+    !window.IFAAuth ||
+    typeof window.IFAAuth.applyEntitlements !== 'function'
+  ) {
+    return;
+  }
+  window.IFAAuth.applyEntitlements(
+    {
+      isSubscriber: !!(entitlements && entitlements.isSubscriber),
+      planId: entitlements && entitlements.planId != null ? String(entitlements.planId) : '',
+      enrolledCourseIds:
+        entitlements && Array.isArray(entitlements.enrolledCourseIds) ? entitlements.enrolledCourseIds : [],
+      allowedSimulators:
+        entitlements && Array.isArray(entitlements.allowedSimulators) ? entitlements.allowedSimulators : [],
+    },
+    userEmail
+  );
+}
+
 function dispatchSubscriptionChanged(order, entitlements) {
   var detail = {
     userId: order.userId,
     planId: entitlements.planId,
     enrolledCourseIds: entitlements.enrolledCourseIds,
     allowedSimulators: entitlements.allowedSimulators,
-    isSubscriber: true,
+    isSubscriber: !!(entitlements && entitlements.isSubscriber),
   };
   try {
     window.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: detail }));
@@ -189,22 +206,7 @@ function dispatchSubscriptionChanged(order, entitlements) {
   } catch (err) {
     /* ignore */
   }
-  if (
-    auth.currentUser &&
-    auth.currentUser.uid === order.userId &&
-    window.IFAAuth &&
-    typeof window.IFAAuth.applyEntitlements === 'function'
-  ) {
-    window.IFAAuth.applyEntitlements(
-      {
-        isSubscriber: true,
-        planId: entitlements.planId,
-        enrolledCourseIds: entitlements.enrolledCourseIds,
-        allowedSimulators: entitlements.allowedSimulators,
-      },
-      order.userEmail
-    );
-  }
+  applyEntitlementsToActiveSession(order.userId, order.userEmail, entitlements);
 }
 
 async function grantUserAccess(order) {
@@ -216,15 +218,13 @@ async function grantUserAccess(order) {
   newIds.forEach(function (id) {
     if (enrolled.indexOf(id) === -1) enrolled.push(id);
   });
+  enrolled = uniqueIds(enrolled);
 
-  var allowedSimulators = mergeSimulatorIds(
-    existing.allowedSimulators,
-    await computeAllowedSimulators(order, enrolled)
-  );
+  var allowedSimulators = await computeAllowedSimulators(null, enrolled);
 
   var entitlements = {
-    isSubscriber: true,
-    planId: String(order.planId || existing.planId || ''),
+    isSubscriber: enrolled.length > 0,
+    planId: enrolled.length > 0 ? String(order.planId || existing.planId || '') : '',
     enrolledCourseIds: enrolled,
     allowedSimulators: allowedSimulators,
   };
@@ -308,6 +308,10 @@ function renderOrdersTable() {
           '" alt="وصل" /></button>'
         : '<span class="admin-order-thumb admin-order-thumb--empty">—</span>';
 
+      var deleteBtn =
+        '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-delete-order="' +
+        id +
+        '">حذف</button>';
       var actions = '';
       if (isPending) {
         actions =
@@ -318,12 +322,20 @@ function renderOrdersTable() {
           '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-reject-order="' +
           id +
           '">رفض</button>' +
+          deleteBtn +
           '</div>';
       } else {
         actions =
+          '<div class="admin-table__actions admin-table__actions--row">' +
           '<span class="admin-row-status-note">' +
-          (order.adminNote || order.rejectNote ? escapeHtml(order.adminNote || order.rejectNote) : status === 'approved' ? 'تم التفعيل' : '—') +
-          '</span>';
+          (order.adminNote || order.rejectNote
+            ? escapeHtml(order.adminNote || order.rejectNote)
+            : status === 'approved'
+              ? 'تم التفعيل'
+              : '—') +
+          '</span>' +
+          deleteBtn +
+          '</div>';
       }
 
       return (
@@ -396,6 +408,12 @@ function bindOrdersPanel() {
       var rejectBtn = e.target.closest('[data-reject-order]');
       if (rejectBtn) {
         handleReject(rejectBtn.getAttribute('data-reject-order'));
+        return;
+      }
+
+      var deleteBtn = e.target.closest('[data-delete-order]');
+      if (deleteBtn) {
+        deleteOrder(deleteBtn.getAttribute('data-delete-order'));
       }
     });
   }
@@ -544,17 +562,44 @@ async function submitApprove() {
       reviewedAt: serverTimestamp(),
       reviewedBy: auth.currentUser ? auth.currentUser.uid : '',
     });
-    var mailResult = await notifyStudentOrderStatus(
-      Object.assign({}, order, { amountLabel: formatIqd(order.amount) }),
-      'approved',
-      note
-    );
+    var entitlements = await syncEntitlementsFromApprovedOrders(order.userId);
+    dispatchSubscriptionChanged(order, entitlements);
+    var approvedOrder = Object.assign({}, order, {
+      id: orderId,
+      amountLabel: formatIqd(order.amount),
+    });
+    var mailResult = await notifyStudentOrderApproved(approvedOrder, note);
     warnIfMailNotSent(mailResult, 'approve');
     closeApproveModal();
     showToast('تم قبول الطلب وتفعيل وصول الطالب.');
   } catch (err) {
     console.error('[AdminOrders] approve failed', err);
     alert((err && err.message) || 'تعذر قبول الطلب.');
+  }
+}
+
+async function deleteOrder(orderId) {
+  if (!orderId) return;
+  var order = cachedOrders.find(function (o) {
+    return o.id === orderId;
+  });
+  if (!order) return;
+  if (!window.confirm('حذف هذا الطلب نهائياً من Firestore؟ لا يمكن التراجع.')) return;
+
+  var userId = String(order.userId || '');
+  var userEmail = order.userEmail || '';
+
+  try {
+    await deleteDoc(doc(db, 'orders', orderId));
+    if (userId) {
+      var entitlements = await syncEntitlementsFromApprovedOrders(userId);
+      applyEntitlementsToActiveSession(userId, userEmail, entitlements);
+    }
+    showToast('تم حذف الطلب.');
+    renderOrdersTable();
+  } catch (err) {
+    console.error('[AdminOrders] delete failed', err);
+    alert((err && err.message) || 'تعذر حذف الطلب.');
   }
 }
 

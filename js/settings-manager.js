@@ -135,6 +135,21 @@
         '</button>' +
         '<div class="settings-dropdown__row">' +
         '<div class="settings-dropdown__row-main">' +
+        '<span class="settings-dropdown__row-icon" aria-hidden="true">' +
+        '<svg class="settings-dropdown__bell-icon" viewBox="0 0 24 24">' +
+        '<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '<path d="M13.7 21a2 2 0 0 1-3.4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+        '</svg>' +
+        '</span>' +
+        '<span class="settings-dropdown__row-label" data-i18n="settings.pushNotifications">إشعارات المتصفح</span>' +
+        '</div>' +
+        '<label class="toggle-switch" title="Push notifications">' +
+        '<input type="checkbox" id="settingsPushNotificationsToggle" />' +
+        '<span class="toggle-switch__track" aria-hidden="true"><span class="toggle-switch__thumb"></span></span>' +
+        '</label>' +
+        '</div>' +
+        '<div class="settings-dropdown__row">' +
+        '<div class="settings-dropdown__row-main">' +
         '<span class="settings-dropdown__row-icon settings-dropdown__row-icon--theme" aria-hidden="true">' +
         '<svg class="settings-dropdown__theme-icon settings-dropdown__theme-icon--moon" viewBox="0 0 24 24"><path d="M21 14.5A8.5 8.5 0 1 1 9.5 3 6.5 6.5 0 0 0 21 14.5Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>' +
         '<svg class="settings-dropdown__theme-icon settings-dropdown__theme-icon--sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>' +
@@ -179,6 +194,11 @@
     syncPanelControls();
     if (global.PlatformNotifications && typeof global.PlatformNotifications.renderBell === 'function') {
       global.PlatformNotifications.renderBell();
+    }
+    try {
+      global.dispatchEvent(new CustomEvent('ifa:settings-menu-mounted'));
+    } catch (errMount) {
+      /* ignore */
     }
   }
 

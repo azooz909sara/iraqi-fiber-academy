@@ -603,9 +603,23 @@
           return;
         }
         if (purgeBtn) {
-          if (!window.confirm('حذف نهائي؟ لا يمكن التراجع.')) return;
-          window.AdminUsers.permanentDeleteUser(purgeBtn.getAttribute('data-purge-user'));
-          renderUsersTable();
+          if (!window.confirm('حذف نهائي؟ سيتم إلغاء الاشتراك وحذف الطلبات المرتبطة في Firestore.')) return;
+          var purgeId = purgeBtn.getAttribute('data-purge-user');
+          closeUsersRowMenus();
+          purgeBtn.disabled = true;
+          var purgeFn =
+            window.AdminUsers.permanentDeleteUserWithFirestore ||
+            window.AdminUsers.permanentDeleteUser;
+          Promise.resolve(purgeFn(purgeId))
+            .then(function () {
+              renderUsersTable();
+            })
+            .catch(function (err) {
+              alert((err && err.message) || 'تعذر حذف المستخدم');
+            })
+            .finally(function () {
+              purgeBtn.disabled = false;
+            });
         }
       } catch (err) {
         alert((err && err.message) || 'تعذر تنفيذ الإجراء');

@@ -13,6 +13,31 @@ import {
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 var COLLECTION = 'pricing';
+var LEGACY_PLAN_IDS = { plan_free: true, plan_standard: true, plan_pro: true };
+var LEGACY_PLAN_NAMES = {
+  المجانية: true,
+  القياسية: true,
+  الاحترافية: true,
+  Free: true,
+  Standard: true,
+  Pro: true,
+};
+
+function isLegacyPricingPlan(plan) {
+  if (!plan) return false;
+  if (window.PlatformPlans && typeof window.PlatformPlans.isLegacyTierPlan === 'function') {
+    return window.PlatformPlans.isLegacyTierPlan(plan);
+  }
+  if (LEGACY_PLAN_IDS[String(plan.id || '')]) return true;
+  if (LEGACY_PLAN_NAMES[String(plan.name || '').trim()]) return true;
+  return false;
+}
+
+function stripLegacyPricingPlans(list) {
+  return (list || []).filter(function (plan) {
+    return plan && !isLegacyPricingPlan(plan);
+  });
+}
 var PLANS_STORAGE_KEY = 'platform_plans';
 var PLANS_LEGACY_KEY = 'ifa_pricing_plans';
 var cachedPlans = [];
@@ -100,9 +125,13 @@ function hydratePlansFromLocalStorage() {
   var stored = readStoredPlans();
   if (!stored.length) return;
   setCachedPlans(
-    stored.map(function (item) {
-      return normalizePlan(item, item.id);
-    })
+    stored
+      .map(function (item) {
+        return normalizePlan(item, item.id);
+      })
+      .filter(function (plan) {
+        return plan && !isLegacyPricingPlan(plan);
+      })
   );
   lastPersistedSignature = plansSignature(cachedPlans);
 }
@@ -158,11 +187,10 @@ function notifyListeners() {
 }
 
 function handleSnapshot(snap) {
-  setCachedPlans(
-    snap.docs.map(function (docSnap) {
-      return normalizePlan(docSnap.data(), docSnap.id);
-    })
-  );
+  var plans = snap.docs.map(function (docSnap) {
+    return normalizePlan(docSnap.data(), docSnap.id);
+  });
+  setCachedPlans(stripLegacyPricingPlans(plans));
   maybePersistPlansFromCache();
   snapshotReady = true;
   notifyListeners();

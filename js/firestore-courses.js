@@ -130,6 +130,7 @@ function preparePayload(payload, existing) {
     weeklySchedule: normalized.weeklySchedule,
     allowedSimulators: normalized.allowedSimulators,
     autoPricingPlan: normalized.autoPricingPlan,
+    suppressPricingPlan: normalized.suppressPricingPlan === true,
     lessons: normalized.lessons,
     enrolledCount: normalized.enrolledCount,
     views: normalized.views,

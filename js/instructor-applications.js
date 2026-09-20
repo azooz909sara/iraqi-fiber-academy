@@ -632,14 +632,16 @@
     return results;
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
   function formatDate(iso) {
     if (!iso) return '—';
     try {
-      return new Date(iso).toLocaleDateString('ar-IQ', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-      });
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      return d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate());
     } catch (e) {
       return iso;
     }

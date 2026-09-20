@@ -31,6 +31,18 @@ service cloud.firestore {
         || (isOwner(userId)
           && request.resource.data.role == resource.data.role);
       allow delete: if isAdmin();
+
+      match /fcmTokens/{tokenId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create, update: if isOwner(userId)
+          && request.resource.data.token is string
+          && request.resource.data.token.size() > 20
+          && request.resource.data.role in ['user', 'admin']
+          && request.resource.data.role == (
+            userDoc().data.role == 'admin' ? 'admin' : 'user'
+          );
+        allow delete: if isOwner(userId) || isAdmin();
+      }
     }
 
     // Public pricing plans — world-readable; admin-only writes.
@@ -122,11 +134,28 @@ service cloud.firestore {
         .hasOnly(['deliveryChannel', 'deliveryStatus', 'deliveredAt', 'deliveryError']);
     }
 
+    function validNewOrderNotification() {
+      return request.resource.data.type == 'new_order'
+        && request.resource.data.targetAudience == 'admin'
+        && request.resource.data.active == true
+        && request.resource.data.read == false
+        && request.resource.data.orderId is string
+        && request.resource.data.orderId.size() > 0
+        && request.resource.data.title is string
+        && request.resource.data.userId == request.auth.uid
+        && (request.resource.data.body is string || request.resource.data.message is string)
+        && (request.resource.data.createdAt is timestamp
+          || request.resource.data.createdAt == request.time);
+    }
+
     // Platform announcements (course publish, etc.) — signed-in read; admin write.
     match /notifications/{notificationId} {
       allow read: if isSignedIn()
-        && resource.data.active == true;
-      allow create, update, delete: if isAdmin();
+        && resource.data.active == true
+        && (resource.data.targetAudience != 'admin' || isAdmin());
+      allow create: if isAdmin()
+        || (isSignedIn() && validNewOrderNotification());
+      allow update, delete: if isAdmin();
     }
 
     // Outbound email queue (Firebase Trigger Email Extension format).

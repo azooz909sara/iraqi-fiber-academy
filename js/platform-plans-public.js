@@ -51,10 +51,36 @@
     return !!(list && list.length);
   }
 
+  function isLegacyTierPlan(plan) {
+    if (window.PlatformPlans && typeof window.PlatformPlans.isLegacyTierPlan === 'function') {
+      return window.PlatformPlans.isLegacyTierPlan(plan);
+    }
+    if (window.CoursePlanSync && typeof window.CoursePlanSync.isLegacyTierPlan === 'function') {
+      return window.CoursePlanSync.isLegacyTierPlan(plan);
+    }
+    var id = String(plan && plan.id ? plan.id : '');
+    if (id === 'plan_free' || id === 'plan_standard' || id === 'plan_pro') return true;
+    var name = String(plan && plan.name ? plan.name : '').trim();
+    return name === 'المجانية' || name === 'القياسية' || name === 'الاحترافية';
+  }
+
+  function filterPublicCatalogPlans(list) {
+    return (list || []).filter(function (plan) {
+      if (!plan || isLegacyTierPlan(plan)) return false;
+      if (window.CoursePlanSync && typeof window.CoursePlanSync.isCatalogPricingPlan === 'function') {
+        return window.CoursePlanSync.isCatalogPricingPlan(plan);
+      }
+      if (window.PlatformPlans && typeof window.PlatformPlans.isCatalogPricingPlan === 'function') {
+        return window.PlatformPlans.isCatalogPricingPlan(plan);
+      }
+      return true;
+    });
+  }
+
   function getPlansFromStorageOnly() {
     var list = readRawPlansList(PLANS_KEY);
     if (!list) list = readRawPlansList(PLANS_LEGACY_KEY);
-    return list || [];
+    return filterPublicCatalogPlans(list || []);
   }
 
   function usesFirestorePricing() {
@@ -66,37 +92,31 @@
   }
 
   function isPlansDataLoading() {
-    if (hasCachedPlansInStorage()) return false;
-
     if (window.PlatformPlans && typeof window.PlatformPlans.isFirestoreBootstrapping === 'function') {
-      return window.PlatformPlans.isFirestoreBootstrapping();
+      if (window.PlatformPlans.isFirestoreBootstrapping()) return true;
     }
     var FS = window.PlatformPricingFirestore;
-    if (!FS) return false;
-    return typeof FS.isReady === 'function' && !FS.isReady();
+    if (FS && typeof FS.isReady === 'function' && !FS.isReady()) return true;
+    return false;
   }
 
-  function getAllPlans() {
+  function getAllPlansRaw() {
     if (usesFirestorePricing()) {
       return window.PlatformPricingFirestore.getCachedPlans();
     }
     if (window.PlatformPlans && typeof window.PlatformPlans.getPlans === 'function') {
-      var plans = window.PlatformPlans.getPlans();
-      if (plans.length) return plans;
+      return window.PlatformPlans.getPlans();
     }
-    return getPlansFromStorageOnly();
+    var list = readRawPlansList(PLANS_KEY);
+    if (!list) list = readRawPlansList(PLANS_LEGACY_KEY);
+    return list || [];
   }
 
   function getPlans() {
     if (window.PlatformPlans && typeof window.PlatformPlans.getCatalogPricingPlans === 'function') {
-      var catalog = window.PlatformPlans.getCatalogPricingPlans();
-      if (catalog.length) return catalog;
+      return window.PlatformPlans.getCatalogPricingPlans();
     }
-    var all = getAllPlans();
-    if (window.CoursePlanSync && typeof window.CoursePlanSync.isCatalogPricingPlan === 'function') {
-      return all.filter(window.CoursePlanSync.isCatalogPricingPlan);
-    }
-    return all;
+    return filterPublicCatalogPlans(getAllPlansRaw());
   }
 
   function getPublishedCourses() {
@@ -426,7 +446,7 @@
     if (window.PlatformPlans && typeof window.PlatformPlans.findPlan === 'function') {
       return window.PlatformPlans.findPlan(planId);
     }
-    var plans = getAllPlans();
+    var plans = getAllPlansRaw();
     for (var i = 0; i < plans.length; i++) {
       if (String(plans[i].id) === String(planId)) return plans[i];
     }

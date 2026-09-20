@@ -398,13 +398,22 @@
   }
 
   function getPlans() {
+    if (global.PlatformPlans && typeof global.PlatformPlans.getCatalogPricingPlans === 'function') {
+      return global.PlatformPlans.getCatalogPricingPlans();
+    }
     if (global.PlatformPlans && typeof global.PlatformPlans.getPlans === 'function') {
       return global.PlatformPlans.getPlans();
     }
     var primary = readJson('platform_plans', null);
     var alias = readJson('ifa_pricing_plans', null);
     var list = Array.isArray(primary) && primary.length ? primary : alias;
-    return Array.isArray(list) ? list : [];
+    if (!Array.isArray(list)) return [];
+    if (global.PlatformPlans && typeof global.PlatformPlans.isLegacyTierPlan === 'function') {
+      return list.filter(function (plan) {
+        return plan && !global.PlatformPlans.isLegacyTierPlan(plan);
+      });
+    }
+    return list;
   }
 
   function cacheFirestorePlan(planId, planData) {
@@ -770,10 +779,27 @@
     });
   }
 
-  function collectViewerSimulatorIds(authUser, directoryUser) {
+  function uniqueEnrolledCourseIds(authUser, directoryUser) {
+    var seen = {};
+    var enrolled = [];
+    function pushId(courseId) {
+      var key = String(courseId || '').trim();
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      enrolled.push(key);
+    }
+    if (directoryUser && Array.isArray(directoryUser.enrolledCourseIds)) {
+      directoryUser.enrolledCourseIds.forEach(pushId);
+    }
+    if (authUser && Array.isArray(authUser.enrolledCourseIds)) {
+      authUser.enrolledCourseIds.forEach(pushId);
+    }
+    return enrolled;
+  }
+
+  function simulatorsFromEnrolledCourseIds(enrolledCourseIds) {
     var ids = [];
     var seen = {};
-
     function add(list) {
       normalizeSimulatorIds(list).forEach(function (id) {
         if (seen[id]) return;
@@ -781,53 +807,18 @@
         ids.push(id);
       });
     }
-
-    var planId = String(
-      (directoryUser && (directoryUser.planId || directoryUser.subscribedPlanId)) ||
-        (authUser && authUser.planId) ||
-        ''
-    );
-    var plan = findPlan(planId);
-    if (plan) add(simulatorsFromPlan(plan));
-
-    var enrolled = [];
-    if (directoryUser && Array.isArray(directoryUser.enrolledCourseIds)) {
-      enrolled = enrolled.concat(directoryUser.enrolledCourseIds);
-    }
-    if (authUser && Array.isArray(authUser.enrolledCourseIds)) {
-      enrolled = enrolled.concat(authUser.enrolledCourseIds);
-    }
-    enrolled.forEach(function (courseId) {
+    (enrolledCourseIds || []).forEach(function (courseId) {
       add(simulatorsFromCourse(findCourse(courseId)));
     });
-
     return ids;
   }
 
+  function collectViewerSimulatorIds(authUser, directoryUser) {
+    return simulatorsFromEnrolledCourseIds(uniqueEnrolledCourseIds(authUser, directoryUser));
+  }
+
   function getUserAllowedSimulatorIds(authUser, directoryUser) {
-    var ids = [];
-    var seen = {};
-
-    function add(list) {
-      normalizeSimulatorIds(list).forEach(function (id) {
-        if (seen[id]) return;
-        seen[id] = true;
-        ids.push(id);
-      });
-    }
-
-    if (authUser && Array.isArray(authUser.allowedSimulators)) {
-      add(authUser.allowedSimulators);
-    }
-    if (directoryUser && Array.isArray(directoryUser.allowedSimulators)) {
-      add(directoryUser.allowedSimulators);
-    }
-
-    var planId = resolvePlanIdForUser(authUser, directoryUser);
-    if (planId || !ids.length) {
-      add(collectViewerSimulatorIds(authUser, directoryUser));
-    }
-    return ids;
+    return collectViewerSimulatorIds(authUser, directoryUser);
   }
 
   function resolveViewerAccess() {
@@ -1230,6 +1221,7 @@
     highlightTargetPlan: highlightTargetPlan,
     subscribeCurrentUserToPlan: subscribeCurrentUserToPlan,
     simulatorsFromCourse: simulatorsFromCourse,
+    simulatorsFromEnrolledCourseIds: simulatorsFromEnrolledCourseIds,
     simulatorsFromPlan: simulatorsFromPlan,
     ensurePlanCached: ensurePlanCached,
     warmEntitlementCaches: warmEntitlementCaches,

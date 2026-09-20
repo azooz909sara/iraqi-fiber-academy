@@ -463,6 +463,7 @@
           : [];
       })(),
       autoPricingPlan: !!raw.autoPricingPlan,
+      suppressPricingPlan: raw.suppressPricingPlan === true,
       lessons: normalizeLessons(raw.lessons),
       enrolledCount: Number(raw.enrolledCount) || 0,
       views: Number(raw.views) || 0,

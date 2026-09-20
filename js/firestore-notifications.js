@@ -179,6 +179,7 @@ export function startNotificationsFirestoreSync() {
   var q = query(
     collection(db, COLLECTION),
     where('active', '==', true),
+    where('targetAudience', 'in', ['all', 'subscribers']),
     orderBy('createdAt', 'desc'),
     limit(50)
   );

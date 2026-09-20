@@ -1,6 +1,6 @@
 /**
  * Manual checkout — ZainCash / Mastercard transfer + Base64 receipt (no Storage).
- * Creates Firestore order + mail_notifications queue for admin email trigger.
+ * Creates Firestore order, in-app admin notification, and mail_notifications email trigger.
  */
 import { auth, db } from './firebase-config.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
@@ -10,7 +10,11 @@ import {
   setDoc,
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
-import { fetchCheckoutConfig, toPaymentDisplayConfig } from './checkout-config.js';
+import {
+  fetchCheckoutConfig,
+  toPaymentDisplayConfig,
+  getMissingEmailJsKeys,
+} from './checkout-config.js';
 import { notifyAdminNewOrder } from './mail-notifications.js';
 
 var MAX_RECEIPT_INPUT_BYTES = 8 * 1024 * 1024;
@@ -369,7 +373,56 @@ function validateReceiptFile(file) {
   return '';
 }
 
-async function queueAdminNotification(orderId, orderPayload, adminEmail) {
+async function ensureCheckoutNotificationConfig() {
+  var adminEmail = state.paymentConfig && state.paymentConfig.adminEmail;
+  var missingAdminEmail = !adminEmail || String(adminEmail).indexOf('@') === -1;
+  var checkoutConfig = await fetchCheckoutConfig();
+
+  if (missingAdminEmail || getMissingEmailJsKeys(checkoutConfig).length > 0) {
+    state.paymentConfig = toPaymentDisplayConfig(checkoutConfig);
+  }
+
+  console.log('[Checkout] Loaded checkout_config from Firestore:', {
+    adminEmail: checkoutConfig.adminEmail,
+    emailjsServiceId: checkoutConfig.emailjsServiceId,
+    emailjsTemplateId: checkoutConfig.emailjsTemplateId,
+    emailjsPublicKeyPresent: !!checkoutConfig.emailjsPublicKey,
+    emailjsPublicKeyLength: String(checkoutConfig.emailjsPublicKey || '').length,
+    missingEmailJsKeys: getMissingEmailJsKeys(checkoutConfig),
+  });
+
+  return {
+    adminEmail: (state.paymentConfig && state.paymentConfig.adminEmail) || checkoutConfig.adminEmail,
+    checkoutConfig: checkoutConfig,
+  };
+}
+
+async function recordAdminOrderNotification(orderId, product, userId) {
+  var message =
+    'تم استلام طلب شراء جديد لـ ' +
+    String(product.title || 'منتج') +
+    ' بقيمة ' +
+    formatIqd(product.amount);
+  try {
+    await setDoc(doc(db, 'notifications', 'order_' + orderId), {
+      type: 'new_order',
+      title: 'طلب شراء جديد',
+      body: message,
+      message: message,
+      orderId: orderId,
+      read: false,
+      active: true,
+      targetAudience: 'admin',
+      linkUrl: 'admin.html#orders',
+      userId: userId,
+      createdAt: serverTimestamp(),
+    });
+  } catch (err) {
+    console.error('[Checkout] Failed to record in-app admin notification for order', orderId, err);
+  }
+}
+
+async function queueAdminNotification(orderId, orderPayload, adminEmail, checkoutConfig) {
   var recipient = String(adminEmail || '').trim();
   if (!recipient || recipient.indexOf('@') === -1) {
     console.error(
@@ -384,7 +437,8 @@ async function queueAdminNotification(orderId, orderPayload, adminEmail) {
     Object.assign({}, orderPayload, {
       amountLabel: formatIqd(orderPayload.amount),
     }),
-    recipient
+    recipient,
+    { checkoutConfig: checkoutConfig || null }
   );
 }
 
@@ -465,15 +519,37 @@ async function handleSubmit() {
 
     await setDoc(doc(db, 'orders', orderId), orderData);
 
-    var adminEmail = (state.paymentConfig && state.paymentConfig.adminEmail) || '';
-    var mailResult = await queueAdminNotification(orderId, {
-      userId: user.uid,
-      userEmail: orderData.userEmail,
-      userName: userName,
-      productTitle: product.title,
-      amount: product.amount,
-      paymentMethod: paymentMethod,
-    }, adminEmail);
+    try {
+      await recordAdminOrderNotification(orderId, product, user.uid);
+    } catch (inAppErr) {
+      console.warn(
+        '[Checkout] In-app admin notification failed (order saved, continuing)',
+        inAppErr
+      );
+    }
+
+    var mailResult = { queued: false, sent: false, error: 'not_attempted' };
+    try {
+      var notificationConfig = await ensureCheckoutNotificationConfig();
+      mailResult = await queueAdminNotification(
+        orderId,
+        {
+          userId: user.uid,
+          userEmail: orderData.userEmail,
+          userName: userName,
+          productTitle: product.title,
+          amount: product.amount,
+          paymentMethod: paymentMethod,
+        },
+        notificationConfig.adminEmail,
+        notificationConfig.checkoutConfig
+      );
+    } catch (emailErr) {
+      console.error(
+        '[Checkout] Admin email notification failed (order saved, continuing)',
+        emailErr
+      );
+    }
 
     if (!mailResult || mailResult.sent !== true) {
       console.warn(

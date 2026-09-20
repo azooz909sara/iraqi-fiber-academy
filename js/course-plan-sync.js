@@ -6,6 +6,14 @@
   'use strict';
 
   var LEGACY_TIER_IDS = { plan_free: true, plan_standard: true, plan_pro: true };
+  var LEGACY_TIER_NAMES = {
+    المجانية: true,
+    القياسية: true,
+    الاحترافية: true,
+    Free: true,
+    Standard: true,
+    Pro: true,
+  };
 
   function planIdForCourse(courseId) {
     return 'plan_course_' + String(courseId || '').trim();
@@ -126,9 +134,23 @@
 
   async function syncPlanForCourse(course) {
     if (!course || !course.id) return course;
+    if (course.suppressPricingPlan === true) return course;
+
+    var planId = planIdForCourse(course.id);
+
+    if (course.autoPricingPlan === false) {
+      await deletePlanIfExists(planId);
+      if (String(course.requiredPlanId || '') === planId) {
+        return (await patchCourse(course.id, { requiredPlanId: '' })) || course;
+      }
+      return course;
+    }
+
+    var FS = global.PlatformPricingFirestore;
+    var existingPlan = FS && typeof FS.findPlan === 'function' ? FS.findPlan(planId) : null;
+    if (existingPlan && existingPlan.catalogHidden === true) return course;
 
     var price = parseCoursePrice(course);
-    var planId = planIdForCourse(course.id);
 
     if (price <= 0) {
       await deletePlanIfExists(planId);
@@ -167,12 +189,38 @@
     return deletePlanIfExists(planIdForCourse(key));
   }
 
+  async function hidePlanForCourse(courseId, options) {
+    options = options || {};
+    var key = String(courseId || '').trim();
+    if (!key) return false;
+
+    await patchCourse(key, {
+      autoPricingPlan: false,
+      suppressPricingPlan: true,
+    });
+
+    var planId = planIdForCourse(key);
+    var pricingFs = global.PlatformPricingFirestore;
+    if (pricingFs) {
+      if (options.hardDelete && typeof pricingFs.deletePlan === 'function') {
+        await pricingFs.deletePlan(planId);
+      } else if (typeof pricingFs.updatePlan === 'function') {
+        await pricingFs.updatePlan(planId, { catalogHidden: true });
+      }
+    }
+    return true;
+  }
+
   function isLegacyTierPlan(plan) {
-    return !!(plan && LEGACY_TIER_IDS[plan.id]);
+    if (!plan) return false;
+    if (LEGACY_TIER_IDS[String(plan.id || '')]) return true;
+    if (LEGACY_TIER_NAMES[String(plan.name || '').trim()]) return true;
+    return false;
   }
 
   function isCatalogPricingPlan(plan) {
     if (!plan || isLegacyTierPlan(plan)) return false;
+    if (plan.catalogHidden === true) return false;
     var price =
       global.PlatformPlans && typeof global.PlatformPlans.parsePrice === 'function'
         ? global.PlatformPlans.parsePrice(plan.price)
@@ -261,6 +309,7 @@
     syncPlanForCourse: syncPlanForCourse,
     resyncAllCoursePlans: resyncAllCoursePlans,
     deletePlanForCourse: deletePlanForCourse,
+    hidePlanForCourse: hidePlanForCourse,
     isCatalogPricingPlan: isCatalogPricingPlan,
     isLegacyTierPlan: isLegacyTierPlan,
   };

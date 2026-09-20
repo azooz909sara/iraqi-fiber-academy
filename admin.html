@@ -619,7 +619,7 @@
                   </label>
                 </div>
                 <label class="admin-field--checkbox admin-field--generate-plan">
-                  <input type="checkbox" id="courseEditorGeneratePlan" checked disabled />
+                  <input type="checkbox" id="courseEditorGeneratePlan" checked />
                   <span>إنشاء باقة أسعار مطابقة باسم الكورس تلقائياً</span>
                 </label>
                 <span class="admin-field__hint">تُنشأ باقة باسم الكورس تلقائياً عند كل حفظ، وتشمل المحاكيات المحددة</span>
@@ -728,6 +728,16 @@
               <input class="admin-field__input" type="email" id="checkoutSettingsAdminEmail" dir="ltr" placeholder="admin@example.com" autocomplete="email" required />
               <span class="admin-field__hint">يُستخدم لإرسال تنبيهات الطلبات الجديدة (قائمة mail_notifications)</span>
             </label>
+            <div class="admin-field admin-field--full">
+              <div class="admin-field__label-row" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+                <span class="admin-field__label">إشعارات المتصفح (طلبات جديدة)</span>
+                <label class="toggle-switch" title="Push notifications">
+                  <input type="checkbox" id="adminPushNotificationsToggle" />
+                  <span class="toggle-switch__track" aria-hidden="true"><span class="toggle-switch__thumb"></span></span>
+                </label>
+              </div>
+              <span class="admin-field__hint">فعّل الإشعار لتلقي تنبيهات الخلفية عند إنشاء طلب شراء جديد</span>
+            </div>
             <label class="admin-field">
               <span class="admin-field__label">رقم زين كاش (ZainCash)</span>
               <input class="admin-field__input" type="text" id="checkoutSettingsZaincash" dir="ltr" placeholder="078XXXXXXXX" required />

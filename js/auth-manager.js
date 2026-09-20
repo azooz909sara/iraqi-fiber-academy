@@ -15,6 +15,8 @@ import {
   onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
 import { syncUserProfile, createUserProfileOnSignUp } from './db-manager.js';
+import { syncEntitlementsFromApprovedOrders } from './entitlements-sync.js';
+import { startFcmOnAuth, setupNotificationToggle } from './fcm-push.js';
 
 /**
  * RBAC: admin access is granted only when Firestore users/{uid}.role === 'admin'.
@@ -1114,6 +1116,28 @@ function initAuthUI() {
   });
   window.addEventListener('ifa:subscription-changed', scheduleEnforceSimulatorPageFromAuth);
 
+  startFcmOnAuth(function () {
+    return lastProfile;
+  });
+
+  function wireStudentPushToggle() {
+    setupNotificationToggle('settingsPushNotificationsToggle');
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireStudentPushToggle);
+  } else {
+    wireStudentPushToggle();
+  }
+
+  window.addEventListener('ifa:local-auth-changed', function (e) {
+    var type = e && e.detail ? e.detail.type : '';
+    if (type === 'profile-sync' || type === 'login') {
+      wireStudentPushToggle();
+    }
+  });
+  window.addEventListener('ifa:settings-menu-mounted', wireStudentPushToggle);
+
   onAuthStateChanged(auth, function (user) {
     authInitialized = true;
     lastUser = user || null;
@@ -1151,25 +1175,70 @@ function initAuthUI() {
       .then(function (profile) {
         lastProfile = profile || null;
         var role = String((profile && profile.role) || 'user');
-        var previous = getLocalAuthUser();
-        var entitlements = profileToEntitlements(profile, user, previous);
-        setLocalAuthUser({
-          name: (profile && profile.name) || user.displayName || '',
-          email: (profile && profile.email) || user.email || '',
-          photoURL: user.photoURL || (profile && profile.photo) || '',
-          isSubscriber: entitlements.isSubscriber,
-          isAdmin: role === 'admin',
-          isInstructor: !!(profile && profile.isInstructor),
-          role: role,
-          planId: entitlements.planId,
-          enrolledCourseIds: entitlements.enrolledCourseIds,
-          allowedSimulators: entitlements.allowedSimulators,
-        });
-        profileSynced = true;
-        refreshSlots();
-        startPlatformNotifications(user, profile);
-        notifyLocalAuthChanged({ type: 'profile-sync', email: email });
-        notifyAuthChange(user, { profileSynced: true });
+        return syncEntitlementsFromApprovedOrders(user.uid)
+          .then(function (orderEntitlements) {
+            setLocalAuthUser({
+              name: (profile && profile.name) || user.displayName || '',
+              email: (profile && profile.email) || user.email || '',
+              photoURL: user.photoURL || (profile && profile.photo) || '',
+              isSubscriber: !!orderEntitlements.isSubscriber,
+              isAdmin: role === 'admin',
+              isInstructor: !!(profile && profile.isInstructor),
+              role: role,
+              planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
+              enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
+                ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
+                : [],
+              allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
+                ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
+                : [],
+            });
+            try {
+              var subDetail = {
+                userId: user.uid,
+                planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
+                enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
+                  ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
+                  : [],
+                allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
+                  ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
+                  : [],
+                isSubscriber: !!orderEntitlements.isSubscriber,
+                email: email,
+              };
+              window.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
+              document.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
+            } catch (evtErr) {
+              /* ignore */
+            }
+            profileSynced = true;
+            refreshSlots();
+            startPlatformNotifications(user, profile);
+            notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+            notifyAuthChange(user, { profileSynced: true });
+          })
+          .catch(function (syncErr) {
+            console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
+            var previous = getLocalAuthUser();
+            var entitlements = profileToEntitlements(profile, user, previous);
+            setLocalAuthUser({
+              name: (profile && profile.name) || user.displayName || '',
+              email: (profile && profile.email) || user.email || '',
+              photoURL: user.photoURL || (profile && profile.photo) || '',
+              isSubscriber: entitlements.isSubscriber,
+              isAdmin: role === 'admin',
+              isInstructor: !!(profile && profile.isInstructor),
+              role: role,
+              planId: entitlements.planId,
+              enrolledCourseIds: entitlements.enrolledCourseIds,
+              allowedSimulators: entitlements.allowedSimulators,
+            });
+            profileSynced = true;
+            refreshSlots();
+            startPlatformNotifications(user, profile);
+            notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+            notifyAuthChange(user, { profileSynced: true });
+          });
       })
       .catch(function (err) {
         profileSynced = true;

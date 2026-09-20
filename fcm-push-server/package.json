@@ -1,0 +1,18 @@
+{
+  "name": "iraqi-fiber-academy-fcm-push-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Express + Firestore listeners for FCM (Render.com)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^12.7.0"
+  }
+}

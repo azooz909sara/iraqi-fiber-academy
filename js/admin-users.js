@@ -168,14 +168,16 @@
     return list;
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, '0');
+  }
+
   function formatDate(iso) {
     if (!iso) return '—';
     try {
-      return new Date(iso).toLocaleDateString('ar-IQ', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      });
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      return d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate());
     } catch (err) {
       return String(iso);
     }
@@ -330,6 +332,18 @@
     return restored;
   }
 
+  function findUserInDirectory(id) {
+    var list = getUsers();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return list[i];
+    }
+    var archive = getArchivedUsers();
+    for (var j = 0; j < archive.length; j++) {
+      if (archive[j].id === id) return archive[j];
+    }
+    return null;
+  }
+
   function permanentDeleteUser(id) {
     var list = getUsers();
     var inActive = null;
@@ -353,6 +367,18 @@
     if (!inArchive) throw new Error('المستخدم غير موجود');
     saveArchivedUsers(nextArchive);
     return inArchive;
+  }
+
+  function permanentDeleteUserWithFirestore(id) {
+    var directoryUser = findUserInDirectory(id);
+    if (!directoryUser) throw new Error('المستخدم غير موجود');
+    return import('./admin-user-firestore-purge.js')
+      .then(function (mod) {
+        return mod.purgeUserPlatformData(directoryUser);
+      })
+      .then(function () {
+        return permanentDeleteUser(id);
+      });
   }
 
   function permanentDeleteUsers(ids) {
@@ -383,6 +409,7 @@
     archiveUsers: archiveUsers,
     restoreUser: restoreUser,
     permanentDeleteUser: permanentDeleteUser,
+    permanentDeleteUserWithFirestore: permanentDeleteUserWithFirestore,
     permanentDeleteUsers: permanentDeleteUsers,
     formatDate: formatDate,
     roleLabel: roleLabel,

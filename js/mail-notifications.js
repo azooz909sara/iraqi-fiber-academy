@@ -18,6 +18,11 @@ import {
 
 var emailDeliveryWarningShown = false;
 
+export var STUDENT_APPROVAL_EMAILJS = {
+  serviceId: 'service_8mp116m',
+  templateId: 'template_b6ozru',
+};
+
 function normalizeRecipients(value) {
   if (Array.isArray(value)) {
     return value.map(function (e) {
@@ -110,40 +115,106 @@ function notifyEmailDeliveryUnconfigured(message) {
   }
 }
 
-function buildEmailJsTemplateParams(recipient, subject, html) {
+export function buildStudentApprovalTemplateParams(order) {
+  var target = order || {};
+  var studentEmail =
+    target.userEmail || target.email || target.customerEmail || target.user_email || '';
+  var studentName = target.userName || target.name || target.customerName || 'Student';
+  var orderId = target.id || target.orderId || '';
   return {
-    to_email: String(recipient || '').trim(),
-    subject: String(subject || '').trim(),
-    message_html: String(html || '').trim(),
-    reply_to: String(recipient || '').trim(),
+    to_email: String(studentEmail).trim(),
+    to_name: String(studentName).trim(),
+    order_id: String(orderId).trim(),
   };
 }
 
-export async function tryEmailJsDispatch(to, subject, html, config) {
+function buildEmailJsTemplateParams(recipient, subject, html, orderPayload) {
+  var payload = orderPayload && typeof orderPayload === 'object' ? orderPayload : {};
+  var studentEmail = String(payload.userEmail || '').trim();
+  return {
+    to_email: String(recipient || '').trim(),
+    admin_email: String(recipient || '').trim(),
+    user_email: studentEmail,
+    user_name: String(payload.userName || '').trim(),
+    product_title: String(payload.productTitle || '').trim(),
+    amount: String(payload.amountLabel || payload.amount || '').trim(),
+    payment_method: String(payload.paymentMethod || '').trim(),
+    subject: String(subject || '').trim(),
+    message_html: String(html || '').trim(),
+    reply_to: studentEmail || String(recipient || '').trim(),
+  };
+}
+
+export async function tryEmailJsDispatch(to, subject, html, config, orderPayload, dispatchOptions) {
+  dispatchOptions = dispatchOptions && typeof dispatchOptions === 'object' ? dispatchOptions : {};
+  var isStrictDispatch = dispatchOptions.strict === true;
   var resolvedConfig = config || (await fetchCheckoutConfig());
   var publicKey = String(resolvedConfig.emailjsPublicKey || '').trim();
-  var serviceId = String(resolvedConfig.emailjsServiceId || '').trim();
-  var templateId = String(resolvedConfig.emailjsTemplateId || '').trim();
-  var missingKeys = getMissingEmailJsKeys(resolvedConfig);
+  var serviceId = isStrictDispatch
+    ? String(dispatchOptions.serviceId || '').trim()
+    : String(dispatchOptions.serviceId || resolvedConfig.emailjsServiceId || '').trim();
+  var templateId = isStrictDispatch
+    ? String(dispatchOptions.templateId || '').trim()
+    : String(dispatchOptions.templateId || resolvedConfig.emailjsTemplateId || '').trim();
+  var usingCustomTemplate = isStrictDispatch || !!(dispatchOptions.serviceId || dispatchOptions.templateId);
+  var missingKeys = [];
+
+  if (!publicKey) missingKeys.push('emailjsPublicKey');
+  if (!serviceId) missingKeys.push(usingCustomTemplate ? 'serviceId' : 'emailjsServiceId');
+  if (!templateId) missingKeys.push(usingCustomTemplate ? 'templateId' : 'emailjsTemplateId');
 
   if (missingKeys.length) {
-    logEmailJsConfigStatus(resolvedConfig);
+    if (!usingCustomTemplate) {
+      logEmailJsConfigStatus(resolvedConfig);
+    }
     missingKeys.forEach(function (key) {
       console.error('[MailNotifications] EmailJS missing key:', key);
     });
-    var unconfiguredMsg = getEmailDeliveryWarning(resolvedConfig);
+    var unconfiguredMsg = usingCustomTemplate
+      ? 'EmailJS public key is missing in settings/checkout_config.'
+      : getEmailDeliveryWarning(resolvedConfig);
     console.error('[MailNotifications] EmailJS not configured:', unconfiguredMsg);
     notifyEmailDeliveryUnconfigured(unconfiguredMsg);
     return { sent: false, error: 'emailjs_not_configured: ' + missingKeys.join(', ') };
   }
 
-  var recipient = normalizeRecipients(to)[0];
+  var templateParams = null;
+  var recipient = '';
+
+  if (isStrictDispatch) {
+    if (!dispatchOptions.templateParams || typeof dispatchOptions.templateParams !== 'object') {
+      console.error('[MailNotifications] Strict EmailJS dispatch requires templateParams');
+      return { sent: false, error: 'missing_template_params' };
+    }
+    templateParams = dispatchOptions.templateParams;
+    recipient = normalizeRecipients(templateParams.to_email || to)[0];
+  } else {
+    recipient = normalizeRecipients(to)[0];
+    if (!recipient) {
+      console.error('[MailNotifications] EmailJS skipped — no valid recipient for:', to);
+      return { sent: false, error: 'invalid_recipient' };
+    }
+    templateParams =
+      dispatchOptions.templateParams && typeof dispatchOptions.templateParams === 'object'
+        ? dispatchOptions.templateParams
+        : buildEmailJsTemplateParams(recipient, subject, html, orderPayload);
+  }
+
   if (!recipient) {
     console.error('[MailNotifications] EmailJS skipped — no valid recipient for:', to);
     return { sent: false, error: 'invalid_recipient' };
   }
 
-  var templateParams = buildEmailJsTemplateParams(recipient, subject, html);
+  console.log('[EmailJS] Preparing send:', {
+    strict: isStrictDispatch,
+    serviceId: serviceId,
+    templateId: templateId,
+    to_email: isStrictDispatch ? templateParams.to_email : recipient,
+    templateParams: isStrictDispatch ? templateParams : undefined,
+    subject: subject,
+    publicKeyConfigured: !!publicKey,
+    publicKeyLength: publicKey.length,
+  });
 
   try {
     var response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
@@ -159,6 +230,13 @@ export async function tryEmailJsDispatch(to, subject, html, config) {
     });
     if (!response.ok) {
       var responseText = await response.text();
+      var errorBody = responseText;
+      try {
+        errorBody = JSON.parse(responseText);
+      } catch (parseErr) {
+        /* keep raw text */
+      }
+      console.error('[EmailJS Error]', errorBody);
       var apiError =
         'EmailJS API HTTP ' + response.status + ' ' + response.statusText + ': ' + responseText;
       console.error(
@@ -173,8 +251,10 @@ export async function tryEmailJsDispatch(to, subject, html, config) {
       );
       return { sent: false, error: apiError };
     }
+    console.log('[EmailJS] Send succeeded');
     return { sent: true, error: null };
   } catch (err) {
+    console.error('[EmailJS] Runtime error:', err);
     console.error('[MailNotifications] EmailJS dispatch exception:', err);
     return { sent: false, error: String((err && err.message) || err) };
   }
@@ -203,11 +283,29 @@ export async function queueMailNotification(notificationId, to, subject, html, m
     meta && meta.extra ? meta.extra : {}
   );
 
-  await setDoc(doc(db, 'mail_notifications', notificationId), docPayload, { merge: true });
+  var queued = false;
+  try {
+    await setDoc(doc(db, 'mail_notifications', notificationId), docPayload, { merge: true });
+    queued = true;
+  } catch (queueErr) {
+    console.error(
+      '[MailNotifications] Firestore queue write failed — will still attempt EmailJS',
+      queueErr
+    );
+  }
 
-  var config = await fetchCheckoutConfig();
+  var config = (meta && meta.checkoutConfig) || (await fetchCheckoutConfig());
   var emailJsConfigured = isEmailJsConfigured(config);
-  var dispatchResult = await tryEmailJsDispatch(recipients, subject, html, config);
+  var orderPayload = meta && meta.orderPayload ? meta.orderPayload : null;
+  var dispatchOptions = meta && meta.emailJsDispatch ? meta.emailJsDispatch : null;
+  var dispatchResult = await tryEmailJsDispatch(
+    recipients,
+    subject,
+    html,
+    config,
+    orderPayload,
+    dispatchOptions
+  );
   var sent = !!(dispatchResult && dispatchResult.sent);
   var deliveryError = dispatchResult && dispatchResult.error ? dispatchResult.error : null;
   var deliveryChannel = sent ? 'emailjs' : emailJsConfigured ? 'emailjs' : 'queue_only';
@@ -215,6 +313,7 @@ export async function queueMailNotification(notificationId, to, subject, html, m
 
   console.log('[MailNotifications] Dispatch result:', {
     notificationId: notificationId,
+    queued: queued,
     sent: sent,
     emailJsConfigured: emailJsConfigured,
     deliveryChannel: deliveryChannel,
@@ -222,24 +321,26 @@ export async function queueMailNotification(notificationId, to, subject, html, m
     deliveryError: deliveryError,
   });
 
-  try {
-    await updateDoc(doc(db, 'mail_notifications', notificationId), {
-      deliveryChannel: deliveryChannel,
-      deliveryStatus: deliveryStatus,
-      deliveredAt: serverTimestamp(),
-      deliveryError: deliveryError || null,
-    });
-  } catch (err) {
-    console.error('[MailNotifications] Failed to update delivery metadata for', notificationId, err);
+  if (queued) {
+    try {
+      await updateDoc(doc(db, 'mail_notifications', notificationId), {
+        deliveryChannel: deliveryChannel,
+        deliveryStatus: deliveryStatus,
+        deliveredAt: serverTimestamp(),
+        deliveryError: deliveryError || null,
+      });
+    } catch (err) {
+      console.error('[MailNotifications] Failed to update delivery metadata for', notificationId, err);
+    }
   }
 
   if (!sent) {
     var warning = getEmailDeliveryWarning(config);
     var deliveryMsg =
       (deliveryError || warning || 'EmailJS dispatch failed.') +
-      ' Message queued in mail_notifications (' +
-      notificationId +
-      ') pending server/extension delivery.';
+      (queued
+        ? ' Message queued in mail_notifications (' + notificationId + ') pending server/extension delivery.'
+        : ' Firestore queue was unavailable; only direct EmailJS was attempted.');
     console.error('[MailNotifications] Delivery failed:', deliveryMsg);
     if (!emailDeliveryWarningShown) {
       emailDeliveryWarningShown = true;
@@ -248,7 +349,7 @@ export async function queueMailNotification(notificationId, to, subject, html, m
   }
 
   return {
-    queued: true,
+    queued: queued,
     sent: sent,
     notificationId: notificationId,
     emailJsConfigured: emailJsConfigured,
@@ -258,7 +359,8 @@ export async function queueMailNotification(notificationId, to, subject, html, m
   };
 }
 
-export async function notifyAdminNewOrder(orderId, orderPayload, adminEmail) {
+export async function notifyAdminNewOrder(orderId, orderPayload, adminEmail, options) {
+  options = options || {};
   var subject =
     '[طلب دفع جديد] ' + (orderPayload.productTitle || 'طلب') + ' — ' + (orderPayload.amountLabel || '');
   var html = buildOrderAdminAlertHtml(orderId, orderPayload);
@@ -266,18 +368,79 @@ export async function notifyAdminNewOrder(orderId, orderPayload, adminEmail) {
     type: 'order_pending',
     orderId: orderId,
     userId: orderPayload.userId,
+    orderPayload: orderPayload,
+    checkoutConfig: options.checkoutConfig || null,
   });
+}
+
+/**
+ * Direct EmailJS-only student welcome email — no Firestore mail_notifications write.
+ */
+export async function dispatchStudentApprovalEmail(order, options) {
+  options = options || {};
+  var templateParams = buildStudentApprovalTemplateParams(order);
+  if (!templateParams.to_email) {
+    console.error('[MailNotifications] Student approval email skipped — no student email on order', order);
+    return { queued: false, sent: false, error: 'no_student_email' };
+  }
+
+  var orderId = String(order.id || order.orderId || '').trim();
+  console.log('[EmailJS] Student welcome approval send:', {
+    serviceId: STUDENT_APPROVAL_EMAILJS.serviceId,
+    templateId: STUDENT_APPROVAL_EMAILJS.templateId,
+    to_email: templateParams.to_email,
+    to_name: templateParams.to_name,
+    order_id: templateParams.order_id,
+  });
+
+  var config = options.checkoutConfig || (await fetchCheckoutConfig());
+  var dispatchResult = await tryEmailJsDispatch(
+    templateParams.to_email,
+    '',
+    '',
+    config,
+    order,
+    {
+      strict: true,
+      serviceId: STUDENT_APPROVAL_EMAILJS.serviceId,
+      templateId: STUDENT_APPROVAL_EMAILJS.templateId,
+      templateParams: templateParams,
+    }
+  );
+
+  var sent = !!(dispatchResult && dispatchResult.sent);
+  console.log('[MailNotifications] Student approval EmailJS result:', {
+    orderId: orderId,
+    sent: sent,
+    error: dispatchResult && dispatchResult.error,
+  });
+
+  return {
+    queued: false,
+    sent: sent,
+    notificationId: orderId ? 'emailjs_student_' + orderId : '',
+    deliveryChannel: 'emailjs',
+    deliveryStatus: sent ? 'sent' : 'failed',
+    error: dispatchResult && dispatchResult.error,
+  };
+}
+
+export async function notifyStudentOrderApproved(order, customMessage) {
+  return dispatchStudentApprovalEmail(order, {});
 }
 
 export async function notifyStudentOrderStatus(order, status, customMessage) {
   if (!order || !order.userEmail) return { queued: false, sent: false, error: 'no_student_email' };
+  if (status === 'approved') {
+    return notifyStudentOrderApproved(order, customMessage);
+  }
   var subject = 'تحديث حالة طلبك - أكاديمية الفايبر';
   var html = buildStudentStatusHtml(status, order, customMessage);
-  var suffix = status === 'approved' ? 'approved' : 'rejected';
-  return queueMailNotification('mail_student_' + order.id + '_' + suffix, order.userEmail, subject, html, {
-    type: 'order_' + suffix,
+  return queueMailNotification('mail_student_' + order.id + '_rejected', order.userEmail, subject, html, {
+    type: 'order_rejected',
     orderId: order.id,
     userId: order.userId,
+    orderPayload: order,
     extra: { adminNote: String(customMessage || '') },
   });
 }

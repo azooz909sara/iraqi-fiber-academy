@@ -19,6 +19,9 @@
       'header.navToggle': 'فتح القائمة',
       'settings.menu': 'الإعدادات',
       'settings.notifications': 'الإشعارات',
+      'settings.pushNotifications': 'إشعارات المتصفح',
+      'settings.pushDeniedHint':
+        'لتفعيل الإشعارات، افتح إعدادات الموقع في المتصفح واسمح بالإشعارات.',
       'settings.theme': 'المظهر',
       'settings.language': 'اللغة',
       'settings.markAllRead': 'تعيين الكل كمقروء',
@@ -111,6 +114,9 @@
       'header.navToggle': 'Open menu',
       'settings.menu': 'Settings',
       'settings.notifications': 'Notifications',
+      'settings.pushNotifications': 'Browser notifications',
+      'settings.pushDeniedHint':
+        'To enable notifications, open your browser site settings and allow notifications for this site.',
       'settings.theme': 'Theme',
       'settings.language': 'Language',
       'settings.markAllRead': 'Mark all read',

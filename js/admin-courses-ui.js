@@ -222,10 +222,17 @@
     return ids;
   }
 
-  function writeGeneratePlanCheck() {
+  function readGeneratePlanCheck() {
+    var el = document.getElementById('courseEditorGeneratePlan');
+    if (!el) return true;
+    return el.checked === true;
+  }
+
+  function writeGeneratePlanCheck(course) {
     var el = document.getElementById('courseEditorGeneratePlan');
     if (!el) return;
-    el.checked = true;
+    var enabled = !course || course.autoPricingPlan !== false;
+    el.checked = enabled;
   }
 
   async function syncCoursePricingPlan(course) {
@@ -576,7 +583,7 @@
       ? course.category || 'individual'
       : 'individual';
     writeSimulatorChecks(course ? course.allowedSimulators : []);
-    writeGeneratePlanCheck();
+    writeGeneratePlanCheck(course);
 
     fillInstructorSelect(course && !course.isAcademy ? course.instructorEmail : '');
     lessonDrafts =
@@ -1102,6 +1109,7 @@
         if (!window.PlatformCourses) return;
         var id = (document.getElementById('courseEditorId') || {}).value || '';
         var instructor = resolveInstructorFromForm();
+        var autoPricingPlan = readGeneratePlanCheck();
         var payload = {
           title: (document.getElementById('courseEditorName') || {}).value,
           description: (document.getElementById('courseEditorDescription') || {}).value,
@@ -1114,7 +1122,8 @@
           status: (document.getElementById('courseEditorStatus') || {}).value,
           category: (document.getElementById('courseEditorCategory') || {}).value || 'individual',
           allowedSimulators: readSimulatorChecks(),
-          autoPricingPlan: true,
+          autoPricingPlan: autoPricingPlan,
+          suppressPricingPlan: autoPricingPlan ? false : undefined,
           instructorEmail: instructor.instructorEmail,
           instructorName: instructor.instructorName,
           lessons: collectLessonDraftsFromDom(),

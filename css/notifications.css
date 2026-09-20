@@ -1,3 +1,11 @@
+.ifa-fcm-hint {
+  margin: 0.35rem 0 0;
+  padding: 0 0.25rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--color-text-muted, #94a3b8);
+}
+
 /* Notifications panel (inside settings hamburger menu) */
 
 .notif-panel--menu {

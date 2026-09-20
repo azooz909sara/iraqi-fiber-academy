@@ -11,9 +11,17 @@
   var PLANS_ALIAS_KEY = 'ifa_pricing_plans';
   var SEED_FLAG_KEY = 'platform_plans_initialized';
   var SEED_VERSION_KEY = 'platform_plans_seed_version';
-  var SEED_VERSION = '3';
+  var SEED_VERSION = '4';
 
   var LEGACY_TIER_IDS = { plan_free: true, plan_standard: true, plan_pro: true };
+  var LEGACY_TIER_NAMES = {
+    المجانية: true,
+    القياسية: true,
+    الاحترافية: true,
+    Free: true,
+    Standard: true,
+    Pro: true,
+  };
 
   var DEFAULT_SIMULATOR_IDS = [
     'ftth-simulator',
@@ -231,6 +239,7 @@
       allowedSimulators: normalizeSimulatorIds(raw.allowedSimulators),
       sourceCourseId: String(raw.sourceCourseId || '').trim(),
       includedCourseIds: includedCourseIds,
+      catalogHidden: raw.catalogHidden === true,
       updatedAt: raw.updatedAt || new Date().toISOString(),
       createdAt: raw.createdAt || new Date().toISOString(),
     };
@@ -240,9 +249,16 @@
     return [];
   }
 
+  function isLegacyTierPlan(plan) {
+    if (!plan) return false;
+    if (LEGACY_TIER_IDS[String(plan.id || '')]) return true;
+    if (LEGACY_TIER_NAMES[String(plan.name || '').trim()]) return true;
+    return false;
+  }
+
   function stripLegacyTierPlans(list) {
     return (list || []).filter(function (plan) {
-      return plan && !LEGACY_TIER_IDS[plan.id];
+      return plan && !isLegacyTierPlan(plan);
     });
   }
 
@@ -275,8 +291,8 @@
     }
 
     if (version !== SEED_VERSION) {
-      // Soft migrate existing plans (add accessLevel etc.) without restoring deleted ones.
-      writeJson(PLANS_KEY, migratePlanFields(current));
+      // Soft migrate + drop deprecated default tier cards (plan_free / المجانية etc.).
+      writeJson(PLANS_KEY, stripLegacyTierPlans(migratePlanFields(current)));
       storageSet(SEED_FLAG_KEY, '1');
       storageSet(SEED_VERSION_KEY, SEED_VERSION);
     } else if (!initialized) {
@@ -519,7 +535,8 @@
     if (global.CoursePlanSync && typeof global.CoursePlanSync.isCatalogPricingPlan === 'function') {
       return global.CoursePlanSync.isCatalogPricingPlan(plan);
     }
-    if (!plan || LEGACY_TIER_IDS[plan.id]) return false;
+    if (!plan || isLegacyTierPlan(plan)) return false;
+    if (plan.catalogHidden === true) return false;
     if (parsePrice(plan.price) <= 0) return false;
     var type = String(plan.planType || '').toLowerCase();
     if (type === 'course') return !!plan.sourceCourseId;
@@ -565,6 +582,7 @@
     planUnlocksCategory: planUnlocksCategory,
     courseMatchesPlan: courseMatchesPlan,
     countCoursesForPlan: countCoursesForPlan,
+    isLegacyTierPlan: isLegacyTierPlan,
     isCatalogPricingPlan: isCatalogPricingPlan,
     getCatalogPricingPlans: getCatalogPricingPlans,
     normalizeSimulatorIds: normalizeSimulatorIds,

@@ -366,26 +366,34 @@
         : Plans && Plans.findPlan
           ? Plans.findPlan(key)
           : null;
-    if (isCourseManagedPlan(plan)) {
-      toast('باقات الكورسات تُدار من قسم الكورسات — عدّل السعر هناك أو احذف الكورس', true);
-      return;
-    }
-    if (!window.confirm('حذف هذه الباقة من الموقع؟')) return;
 
-    document.querySelectorAll('.admin-plan-card[data-plan-id]').forEach(function (card) {
-      if (String(card.getAttribute('data-plan-id')) === key && card.parentNode) {
-        card.parentNode.removeChild(card);
-      }
-    });
+    var isCoursePlan = isCourseManagedPlan(plan);
+    var confirmMsg = isCoursePlan
+      ? 'إخفاء باقة الكورس من صفحة الأسعار؟ (الكورس سيبقى موجوداً في قسم الكورسات)'
+      : 'هل أنت متأكد من حذف هذه الباقة من الموقع؟';
+    if (!window.confirm(confirmMsg)) return;
 
     try {
-      var Firestore = window.PlatformPricingFirestore;
-      if (Firestore && typeof Firestore.deletePlan === 'function') {
-        await Firestore.deletePlan(key);
-      } else if (Plans) {
-        Plans.deletePlan(key);
+      if (isCoursePlan) {
+        if (
+          !window.CoursePlanSync ||
+          typeof window.CoursePlanSync.hidePlanForCourse !== 'function' ||
+          !plan ||
+          !plan.sourceCourseId
+        ) {
+          throw new Error('تعذّر إخفاء باقة الكورس');
+        }
+        await window.CoursePlanSync.hidePlanForCourse(plan.sourceCourseId, { hardDelete: true });
+        toast('تم إخفاء الباقة من صفحة الأسعار بنجاح');
+      } else {
+        var Firestore = window.PlatformPricingFirestore;
+        if (Firestore && typeof Firestore.deletePlan === 'function') {
+          await Firestore.deletePlan(key);
+        } else if (Plans) {
+          Plans.deletePlan(key);
+        }
+        toast('تم حذف الباقة بنجاح');
       }
-      toast('تم حذف الباقة');
       renderPlansList();
     } catch (err) {
       toast((err && err.message) || 'تعذّر الحذف', true);

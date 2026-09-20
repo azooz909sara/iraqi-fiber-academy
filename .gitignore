@@ -64,6 +64,11 @@ node_modules/
 
 # dotenv environment variables file
 .env
+fcm-push-server/.env
+
+# Firebase service account keys (never commit)
+*-firebase-adminsdk-*.json
+**/firebase-adminsdk*.json
 
 # dataconnect generated files
 .dataconnect

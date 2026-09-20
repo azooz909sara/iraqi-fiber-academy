@@ -5,7 +5,7 @@
  */
 import { auth } from './firebase-config.js';
 import { onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { syncUserProfile, getUserAllowedSimulators } from './db-manager.js';
+import { syncUserProfile, fetchUserProfile } from './db-manager.js';
 import { loginWithGoogle } from './auth-manager.js';
 
 function shouldBypassAccessControl() {
@@ -116,6 +116,19 @@ async function evaluateAccess(user) {
   try {
     await syncUserProfile(user);
 
+    var profile = await fetchUserProfile(user.uid);
+    if (profile && window.IFAAuth && typeof window.IFAAuth.applyEntitlements === 'function') {
+      window.IFAAuth.applyEntitlements(
+        {
+          isSubscriber: profile.isSubscriber === true,
+          planId: profile.planId != null ? String(profile.planId) : '',
+          enrolledCourseIds: Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [],
+          allowedSimulators: [],
+        },
+        user.email
+      );
+    }
+
     var localUser =
       window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function'
         ? window.IFAAuth.getLocalAuthUser()
@@ -136,16 +149,22 @@ async function evaluateAccess(user) {
       return;
     }
 
-    var allowed = await getUserAllowedSimulators(user.uid);
-    if (allowed.indexOf(simulatorId) !== -1) {
+    var enrolled =
+      profile && Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [];
+    var courseAllowed =
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.simulatorsFromEnrolledCourseIds === 'function'
+        ? window.PlatformSimulators.simulatorsFromEnrolledCourseIds(enrolled)
+        : [];
+    if (courseAllowed.indexOf(simulatorId) !== -1) {
       setGateVisible(false);
       return;
     }
     console.error(
       '[SimulatorAccess] Access denied — simulator "' +
         simulatorId +
-        '" not permitted. Firestore allowedSimulators:',
-      allowed
+        '" not permitted for enrolled courses:',
+      enrolled
     );
     setGateVisible(true, 'simulator-locked');
   } catch (err) {
