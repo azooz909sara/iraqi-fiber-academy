@@ -1664,8 +1664,8 @@ body.ifa-sim-dev-lock-active {
    Global settings hamburger menu
    ============================================ */
 
-.settings-menu,
-[data-settings-root] {
+.header__actions > .settings-menu:not(.settings-menu--drawer),
+.header__actions > [data-settings-root]:not(.settings-menu--drawer) {
   position: relative !important;
   display: inline-flex;
   align-items: center;
@@ -1716,8 +1716,12 @@ body.light-theme .settings-menu__btn {
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   box-shadow: var(--shadow-card);
-  z-index: 1000 !important;
+  z-index: 99999 !important;
   overflow: hidden;
+}
+
+.header__actions .settings-menu:has([data-settings-toggle][aria-expanded='true']) {
+  z-index: 99999 !important;
 }
 
 [dir='ltr'] .settings-dropdown,
@@ -1985,5 +1989,35 @@ body.light-theme .header.scrolled {
     right: auto !important;
     width: min(320px, calc(100vw - 2rem));
     min-width: min(280px, calc(100vw - 2rem));
+  }
+}
+
+/* --- MOBILE: Hide header gear & Show drawer settings --- */
+@media (max-width: 1024px) {
+  .header__actions .settings-menu,
+  .header__actions [data-settings-root]:not(.settings-menu--drawer),
+  .header__actions #settingsMenuBtn,
+  .header__actions .settings-menu__btn,
+  .header__actions [data-settings-trigger] {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+  }
+
+  .settings-menu--drawer {
+    display: block !important;
+  }
+}
+
+/* --- DESKTOP: Hide drawer settings --- */
+@media (min-width: 1025px) {
+  .settings-menu--drawer {
+    display: none !important;
   }
 }

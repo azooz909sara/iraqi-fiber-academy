@@ -9,6 +9,8 @@
 import { auth, provider } from './firebase-config.js';
 import {
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signOut,
@@ -333,6 +335,9 @@ function formatAuthError(err) {
   if (code === 'auth/weak-password') return 'كلمة المرور ضعيفة (6 أحرف على الأقل).';
   if (code === 'auth/too-many-requests') return 'محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.';
   if (code === 'auth/network-request-failed') return 'تعذّر الاتصال. تحقق من الشبكة.';
+  if (code === 'auth/popup-blocked') return 'تم حظر النافذة المنبثقة من قبل المتصفح';
+  if (code === 'auth/operation-not-allowed') return 'طريقة تسجيل الدخول غير مفعلة';
+  if (code === 'auth/unauthorized-domain') return 'النطاق غير مصرح به في إعدادات فايبربيس';
   return (err && err.message) || 'حدث خطأ. حاول مرة أخرى.';
 }
 
@@ -535,7 +540,7 @@ function isProductionEnvironment() {
   }
   try {
     var host = String((window && window.location && window.location.hostname) || '').toLowerCase();
-    return host === 'irabi-fiber-academy.web.app' || host === 'irabi-fiber-academy.firebaseapp.com';
+    return host === 'iraqi-fiber-academy.web.app' || host === 'iraqi-fiber-academy.firebaseapp.com';
   } catch (err) {
     return false;
   }
@@ -962,14 +967,59 @@ async function handleAuthModalSubmit() {
   }
 }
 
+function isGooglePopupLikelyBlocked() {
+  try {
+    if (window.innerWidth <= 1024) return true;
+    if (window.matchMedia && window.matchMedia('(max-width: 1024px)').matches) return true;
+    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
+  } catch (err) {
+    /* ignore */
+  }
+  return false;
+}
+
+function isPopupCancellationError(err) {
+  var code = err && err.code ? String(err.code) : '';
+  return (
+    code === 'auth/popup-closed-by-user' ||
+    code === 'auth/cancelled-popup-request' ||
+    code === 'auth/user-cancelled'
+  );
+}
+
+function shouldFallbackGoogleToRedirect(err) {
+  var code = err && err.code ? String(err.code) : '';
+  return code === 'auth/popup-blocked';
+}
+
 export async function loginWithGoogle() {
   setAuthModalError('');
+  if (isGooglePopupLikelyBlocked()) {
+    try {
+      await signInWithRedirect(auth, provider);
+      return;
+    } catch (err) {
+      setAuthModalError(formatAuthError(err));
+      console.warn('[Auth] Google redirect sign-in failed', err);
+      return;
+    }
+  }
   try {
     await signInWithPopup(auth, provider);
     closeAuthModal();
   } catch (err) {
-    if (err && (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request')) {
+    if (isPopupCancellationError(err)) {
       return;
+    }
+    if (shouldFallbackGoogleToRedirect(err)) {
+      try {
+        await signInWithRedirect(auth, provider);
+        return;
+      } catch (redirectErr) {
+        setAuthModalError(formatAuthError(redirectErr));
+        console.warn('[Auth] Google redirect fallback failed', redirectErr);
+        return;
+      }
     }
     setAuthModalError(formatAuthError(err));
     console.warn('[Auth] Google sign-in failed', err);
@@ -1071,8 +1121,24 @@ function enforceSimulatorPageFromAuth() {
   }
 }
 
+function completeGoogleRedirectSignIn() {
+  getRedirectResult(auth)
+    .then(function (result) {
+      if (result && result.user) {
+        closeAuthModal();
+      }
+    })
+    .catch(function (err) {
+      if (!err || !err.code) return;
+      if (isPopupCancellationError(err)) return;
+      setAuthModalError(formatAuthError(err));
+      console.warn('[Auth] Google redirect result failed', err);
+    });
+}
+
 function initAuthUI() {
   ensureAuthModal();
+  completeGoogleRedirectSignIn();
   bindAuthClicks();
   slots = Array.prototype.slice.call(document.querySelectorAll('[data-auth-slot]'));
 
@@ -1122,6 +1188,7 @@ function initAuthUI() {
 
   function wireStudentPushToggle() {
     setupNotificationToggle('settingsPushNotificationsToggle');
+    setupNotificationToggle('settingsPushNotificationsToggleDrawer');
   }
 
   if (document.readyState === 'loading') {

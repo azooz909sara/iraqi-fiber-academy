@@ -6,8 +6,8 @@
   'use strict';
 
   var PRODUCTION_HOSTS = [
-    'irabi-fiber-academy.web.app',
-    'irabi-fiber-academy.firebaseapp.com',
+    'iraqi-fiber-academy.web.app',
+    'iraqi-fiber-academy.firebaseapp.com',
   ];
 
   function hostname() {

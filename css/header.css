@@ -165,6 +165,9 @@
   justify-content: flex-end;
   flex-shrink: 0;
   min-height: 42px;
+  overflow: visible;
+  position: relative;
+  z-index: 2;
 }
 
 .auth-slot > .header__login,
@@ -234,6 +237,12 @@
   position: relative;
   display: inline-flex;
   align-items: center;
+  overflow: visible;
+  z-index: 1;
+}
+
+.user-menu.open {
+  z-index: 99999;
 }
 
 .user-menu__toggle {
@@ -298,7 +307,11 @@
   border-radius: var(--border-radius);
   box-shadow: var(--shadow-card), 0 8px 32px rgba(0, 0, 0, 0.35);
   padding: 0.4rem;
-  z-index: 1200;
+  z-index: 99999 !important;
+  max-height: min(70vh, calc(100dvh - 5.5rem));
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .user-menu__dropdown[hidden] {
@@ -674,7 +687,66 @@ body.auth-modal-open {
     order: 4;
   }
 
+  .header__actions .settings-menu:not(.settings-menu--drawer),
+  .header__actions [data-settings-root]:not(.settings-menu--drawer),
+  .header__actions #settingsMenuBtn,
+  .header__actions .settings-menu__btn {
+    display: none !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
+  .settings-menu--drawer {
+    display: block;
+    width: 100%;
+    margin-top: auto;
+    padding-top: 1rem;
+    flex-shrink: 0;
+  }
+
+  .nav__drawer-settings {
+    width: 100%;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .nav__drawer-settings-title {
+    margin: 0 0 0.65rem;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .settings-menu--drawer .settings-dropdown--drawer {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    inset: auto !important;
+    min-width: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .settings-menu--drawer .notif-panel--menu {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    width: 100%;
+    max-height: min(280px, 38vh);
+    margin-top: 0.75rem;
+  }
+
   .header__inner > .nav {
+    display: flex;
     position: fixed;
     top: 0;
     left: 0;
@@ -789,13 +861,43 @@ body.auth-modal-open {
     white-space: nowrap;
   }
 
+  .header:has(.user-menu.open) {
+    z-index: 99998 !important;
+    overflow: visible !important;
+  }
+
+  .header__inner,
+  .header__actions,
+  .auth-slot,
+  .user-menu {
+    overflow: visible !important;
+  }
+
+  .user-menu.open {
+    z-index: 99999 !important;
+  }
+
   .user-menu__dropdown {
-    position: absolute;
-    top: calc(100% + 0.5rem);
-    inset-inline-end: 0;
-    inset-inline-start: auto;
-    width: min(280px, calc(100vw - 2rem));
+    position: fixed !important;
+    top: calc(env(safe-area-inset-top, 0px) + 4.35rem) !important;
+    inset-inline-end: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
+    inset-inline-start: auto !important;
+    left: auto !important;
+    right: auto !important;
+    width: min(300px, calc(100vw - 1.5rem)) !important;
     min-width: 0;
+    z-index: 99999 !important;
+    max-height: min(72vh, calc(100dvh - 5rem)) !important;
+  }
+
+  [dir='ltr'] .user-menu__dropdown {
+    inset-inline-end: max(0.75rem, env(safe-area-inset-right, 0px)) !important;
+    inset-inline-start: auto !important;
+  }
+
+  [dir='rtl'] .user-menu__dropdown {
+    inset-inline-start: max(0.75rem, env(safe-area-inset-left, 0px)) !important;
+    inset-inline-end: auto !important;
   }
 
   .auth-login-btn {
@@ -835,6 +937,10 @@ body.auth-modal-open {
 }
 
 .nav__close {
+  display: none;
+}
+
+.settings-menu--drawer {
   display: none;
 }
 
@@ -947,4 +1053,34 @@ body.light-theme .nav__toggle {
   width: 100% !important;
   max-width: 100% !important;
   overflow: visible !important;
+}
+
+/* --- MOBILE: Hide header gear & Show drawer settings --- */
+@media (max-width: 1024px) {
+  .header__actions .settings-menu,
+  .header__actions [data-settings-root]:not(.settings-menu--drawer),
+  .header__actions #settingsMenuBtn,
+  .header__actions .settings-menu__btn,
+  .header__actions [data-settings-trigger] {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+    opacity: 0 !important;
+  }
+
+  .settings-menu--drawer {
+    display: block !important;
+  }
+}
+
+/* --- DESKTOP: Hide drawer settings --- */
+@media (min-width: 1025px) {
+  .settings-menu--drawer {
+    display: none !important;
+  }
 }
