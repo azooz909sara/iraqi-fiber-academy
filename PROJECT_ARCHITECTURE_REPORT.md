@@ -1,5 +1,5 @@
 # PROJECT ARCHITECTURE REPORT
-## Fiber Academy FTTH Network Simulator
+## ENGINEER 360° FTTH Network Simulator
 
 **Generated:** July 22, 2026
 **Analysis Scope:** Complete JavaScript codebase, CSS, HTML structure

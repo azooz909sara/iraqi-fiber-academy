@@ -434,7 +434,7 @@ export async function notifyStudentOrderStatus(order, status, customMessage) {
   if (status === 'approved') {
     return notifyStudentOrderApproved(order, customMessage);
   }
-  var subject = 'تحديث حالة طلبك - أكاديمية الفايبر';
+  var subject = 'تحديث حالة طلبك - مهندس 360';
   var html = buildStudentStatusHtml(status, order, customMessage);
   return queueMailNotification('mail_student_' + order.id + '_rejected', order.userEmail, subject, html, {
     type: 'order_rejected',

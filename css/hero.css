@@ -506,6 +506,17 @@
 
 @keyframes floatBadge { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
 
+@media (max-width: 768px) {
+  .hero-content-slide__inner {
+    padding-inline: max(1.25rem, var(--container-padding));
+  }
+
+  .hero-content-slide__title,
+  .hero-content-slide__desc {
+    padding-inline: 0.15rem;
+  }
+}
+
 @media (max-width: 1024px) {
   .hero-content-slide__inner {
     grid-template-columns: 1fr;

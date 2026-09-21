@@ -9,6 +9,8 @@
   var DEFAULT_DESCRIPTION =
     'منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.';
 
+  var DEFAULT_LOGO_SUBTITLE = 'منصة المسار المهني الهندسي';
+
   var SOCIAL_ORDER = [
     { id: 'youtube', label: 'YouTube', icon: 'youtube' },
     { id: 'linkedin', label: 'LinkedIn', icon: 'linkedin' },
@@ -41,6 +43,13 @@
   function clampFontSize(value) {
     var n = parseFloat(value);
     if (!isFinite(n) || n < 0.65) n = 0.9;
+    if (n > 1.5) n = 1.5;
+    return Math.round(n * 100) / 100;
+  }
+
+  function clampLogoSubtitleFontSize(value) {
+    var n = parseFloat(value);
+    if (!isFinite(n) || n < 0.5) n = 0.85;
     if (n > 1.5) n = 1.5;
     return Math.round(n * 100) / 100;
   }
@@ -92,6 +101,10 @@
         fontSize: 0.9,
         color: '#94a3b8',
       },
+      logoSubtitle: {
+        text: DEFAULT_LOGO_SUBTITLE,
+        fontSize: 0.85,
+      },
       social: social,
     };
   }
@@ -128,6 +141,12 @@
     SOCIAL_ORDER.forEach(function (item) {
       base.social[item.id] = normalizeSocialUrl(item.id, incomingSocial[item.id] || '');
     });
+    var logoSub = src.logoSubtitle && typeof src.logoSubtitle === 'object' ? src.logoSubtitle : {};
+    base.logoSubtitle.text =
+      String(logoSub.text != null ? logoSub.text : base.logoSubtitle.text).trim() || DEFAULT_LOGO_SUBTITLE;
+    base.logoSubtitle.fontSize = clampLogoSubtitleFontSize(
+      logoSub.fontSize != null ? logoSub.fontSize : base.logoSubtitle.fontSize
+    );
     return base;
   }
 
@@ -153,6 +172,12 @@
           current.social[item.id] = normalizeSocialUrl(item.id, incoming.social[item.id]);
         }
       });
+    }
+    if (incoming.logoSubtitle) {
+      current.logoSubtitle = Object.assign({}, current.logoSubtitle, incoming.logoSubtitle);
+      current.logoSubtitle.text =
+        String(current.logoSubtitle.text || '').trim() || DEFAULT_LOGO_SUBTITLE;
+      current.logoSubtitle.fontSize = clampLogoSubtitleFontSize(current.logoSubtitle.fontSize);
     }
     current = normalizeSettings(current);
     if (global.PlatformFooterFirestore && typeof global.PlatformFooterFirestore.saveSettings === 'function') {
@@ -215,9 +240,24 @@
     }).join('');
   }
 
+  function applyLogoSubtitle(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var settings = getFooterSettings();
+    var sub = settings.logoSubtitle || {};
+    var text = String(sub.text || '').trim() || DEFAULT_LOGO_SUBTITLE;
+    var fontSize = clampLogoSubtitleFontSize(sub.fontSize);
+    scope.querySelectorAll('.logo__text-sub').forEach(function (el) {
+      el.textContent = text;
+      el.style.setProperty('font-size', fontSize + 'rem', 'important');
+    });
+    return settings;
+  }
+
   function applyFooter(root) {
     var scope = root && root.querySelectorAll ? root : document;
     var settings = getFooterSettings();
+
+    applyLogoSubtitle(scope);
 
     var descEl = scope.querySelector('[data-footer-desc]');
     if (descEl) {
@@ -258,10 +298,12 @@
     KEY: KEY,
     SOCIAL_ORDER: SOCIAL_ORDER,
     DEFAULT_DESCRIPTION: DEFAULT_DESCRIPTION,
+    DEFAULT_LOGO_SUBTITLE: DEFAULT_LOGO_SUBTITLE,
     getFooterSettings: getFooterSettings,
     saveFooterSettings: saveFooterSettings,
     normalizeSettings: normalizeSettings,
     normalizeSocialUrl: normalizeSocialUrl,
+    applyLogoSubtitle: applyLogoSubtitle,
     applyFooter: applyFooter,
     buildSocialHtml: buildSocialHtml,
     usesFirestore: usesFirestoreFooter,

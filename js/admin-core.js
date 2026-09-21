@@ -23,7 +23,7 @@
     };
 
     var VIEW_META = {
-      overview: { title: 'نظرة عامة', subtitle: 'أكاديمية الفايبر العراقية — نظرة عامة على المنصة' },
+      overview: { title: 'نظرة عامة', subtitle: 'ENGINEER 360° Admin — منصة المسار المهني الهندسي' },
       users: { title: 'إدارة المستخدمين', subtitle: 'عرض وإدارة حسابات الطلاب' },
       'site-stats': { title: 'إدارة الإحصائيات', subtitle: 'Website Statistics — أرقام قسم الإحصائيات على الصفحة الرئيسية' },
       instructors: { title: 'إدارة المدربين', subtitle: 'طلبات الانضمام وحسابات المدربين' },

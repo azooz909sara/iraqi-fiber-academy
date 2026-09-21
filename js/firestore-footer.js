@@ -70,6 +70,7 @@ function mergeFooterPatch(current, patch) {
   var incoming = patch && typeof patch === 'object' ? patch : {};
   var merged = {
     description: Object.assign({}, current.description, incoming.description || {}),
+    logoSubtitle: Object.assign({}, current.logoSubtitle, incoming.logoSubtitle || {}),
     social: Object.assign({}, current.social),
   };
   if (typeof incoming.description === 'string') {

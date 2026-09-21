@@ -1,6 +1,6 @@
 /**
  * Firebase app + Auth + Firestore (ES module).
- * Iraqi Fiber Academy — Email/Password + Google Sign-In & subscriber profiles.
+ * ENGINEER 360° — Email/Password + Google Sign-In & subscriber profiles.
  * Enable Email/Password in Firebase Console → Authentication → Sign-in method.
  */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';

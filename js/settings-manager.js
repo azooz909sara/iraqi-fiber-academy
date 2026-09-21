@@ -116,8 +116,9 @@
       root.setAttribute('data-settings-root', '');
       root.innerHTML =
         '<button type="button" id="settingsMenuBtn" class="settings-menu__btn" data-settings-toggle data-settings-trigger data-i18n-aria="settings.menu" aria-label="الإعدادات" aria-expanded="false" aria-haspopup="true">' +
-        '<svg class="settings-menu__icon" viewBox="0 0 24 24" aria-hidden="true">' +
-        '<path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>' +
+        '<svg class="settings-menu__icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="12" cy="12" r="3"/>' +
+        '<path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' +
         '</svg>' +
         '</button>' +
         '<div class="settings-dropdown" data-settings-panel hidden>' +

@@ -56,13 +56,38 @@
     return normalizeStatus(status) === 'trash';
   }
 
+  function applyFaqRebrandPatches(list) {
+    return (list || []).map(function (faq) {
+      var next = Object.assign({}, faq);
+      if (next.answer) {
+        next.answer = next.answer
+          .replace(/أكاديمية الفايبر العراقية/g, 'منصة مهندس 360°')
+          .replace(/أكاديمية الفايبر/g, 'منصة مهندس 360°');
+      }
+      if (next.question) {
+        next.question = next.question
+          .replace(/أكاديمية الفايبر العراقية/g, 'منصة مهندس 360°')
+          .replace(/أكاديمية الفايبر/g, 'منصة مهندس 360°');
+      }
+      if (
+        next.id === 'faq-3' ||
+        (next.question && next.question.indexOf('متى سيكون المحاكي التفاعلي') !== -1)
+      ) {
+        next.question = 'هل المحاكي التفاعلي متاح الآن؟';
+        next.answer =
+          'المحاكي التفاعلي متاح الآن بالكامل! يمكنك الوصول إليه والبدء بالتطبيق العملي فور اشتراكك في الكورس.';
+      }
+      return next;
+    });
+  }
+
   function defaultFaqs() {
     return [
       {
         id: 'faq-1',
-        question: 'ما هي أكاديمية الفايبر العراقية وما الذي تقدمه؟',
+        question: 'ما هي منصة مهندس 360° وما الذي تقدمها؟',
         answer:
-          'أكاديمية الفايبر العراقية هي منصة تدريبية متخصصة في مجال الألياف الضوئية وشبكات FTTH. نوفر محاكيات افتراضية تفاعلية تتيح لك التعلم والتدرب على تصميم وتركيب وصيانة الشبكات البصرية دون الحاجة لمعدات ميدانية.',
+          'منصة مهندس 360° (ENGINEER 360°) هي منصة المسار المهني الهندسي — مسارات تعليمية منظمة ومحاكيات تفاعلية لبناء مهاراتك في الاتصالات والبنية التحتية، من الأساسيات حتى الاحتراف.',
         status: 'published',
       },
       {
@@ -74,16 +99,16 @@
       },
       {
         id: 'faq-3',
-        question: 'متى سيكون المحاكي التفاعلي متاحاً؟',
+        question: 'هل المحاكي التفاعلي متاح الآن؟',
         answer:
-          'نعمل حالياً على تطوير المحاكي التفاعلي الكامل ونخطط لإطلاق النسخة التجريبية (Beta) خلال الربع القادم. يمكنك الانضمام لقائمة الانتظار للحصول على وصول مبكر.',
+          'المحاكي التفاعلي متاح الآن بالكامل! يمكنك الوصول إليه والبدء بالتطبيق العملي فور اشتراكك في الكورس.',
         status: 'published',
       },
       {
         id: 'faq-4',
         question: 'هل الشهادات معتمدة؟',
         answer:
-          'شهادات الباقة الاحترافية معتمدة من أكاديمية الفايبر العراقية وتُثبت إتمامك للمسار التدريبي الكامل واجتياز المشاريع العملية.',
+          'شهادات الباقة الاحترافية معتمدة من منصة مهندس 360° وتُثبت إتمامك للمسار التدريبي الكامل واجتياز المشاريع العملية.',
         status: 'published',
       },
       {
@@ -239,10 +264,10 @@
     var listEl = findPublicFaqHost();
     if (!listEl) return;
     listEl.style.display = 'block';
-    var list = getPublishedFaqs();
+    var list = applyFaqRebrandPatches(getPublishedFaqs());
     if (isAdminPreview()) {
       var all = getFaqs();
-      if (all.length) list = all;
+      if (all.length) list = applyFaqRebrandPatches(all);
     }
     if (list.length) {
       listEl.innerHTML = list.map(itemHtml).join('');

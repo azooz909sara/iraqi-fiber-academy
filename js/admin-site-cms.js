@@ -953,6 +953,10 @@
       });
     }
     return {
+      logoSubtitle: {
+        text: $('cmsFooterLogoSubText') ? $('cmsFooterLogoSubText').value : '',
+        fontSize: $('cmsFooterLogoSubSize') ? $('cmsFooterLogoSubSize').value : 0.85,
+      },
       description: {
         text: $('cmsFooterDescText') ? $('cmsFooterDescText').value : '',
         fontSize: $('cmsFooterDescSize') ? $('cmsFooterDescSize').value : 0.9,
@@ -967,9 +971,12 @@
     var incoming = collectFooterDraftFromForm();
     var base = window.PlatformFooter.getFooterSettings();
     var previewSettings = {
+      logoSubtitle: Object.assign({}, base.logoSubtitle, incoming.logoSubtitle),
       description: Object.assign({}, base.description, incoming.description),
       social: Object.assign({}, base.social),
     };
+    previewSettings.logoSubtitle.fontSize =
+      parseFloat(incoming.logoSubtitle.fontSize) || base.logoSubtitle.fontSize;
     previewSettings.description.fontSize = parseFloat(incoming.description.fontSize) || base.description.fontSize;
     window.PlatformFooter.SOCIAL_ORDER.forEach(function (item) {
       previewSettings.social[item.id] = window.PlatformFooter.normalizeSocialUrl(
@@ -978,6 +985,17 @@
       );
     });
 
+    var logoSubPreview = $('cmsFooterLogoSubPreview');
+    if (logoSubPreview) {
+      logoSubPreview.textContent =
+        String(previewSettings.logoSubtitle.text || '').trim() ||
+        window.PlatformFooter.DEFAULT_LOGO_SUBTITLE;
+      logoSubPreview.style.setProperty(
+        'font-size',
+        String(previewSettings.logoSubtitle.fontSize || 0.85) + 'rem',
+        'important'
+      );
+    }
     var descPreview = $('cmsFooterDescPreview');
     if (descPreview) {
       descPreview.textContent =
@@ -1014,6 +1032,14 @@
   function loadFooterEditorForm() {
     if (!window.PlatformFooter) return;
     var settings = window.PlatformFooter.getFooterSettings();
+    if ($('cmsFooterLogoSubText')) {
+      $('cmsFooterLogoSubText').value = settings.logoSubtitle ? settings.logoSubtitle.text : '';
+    }
+    if ($('cmsFooterLogoSubSize')) {
+      $('cmsFooterLogoSubSize').value = String(
+        settings.logoSubtitle ? settings.logoSubtitle.fontSize : 0.85
+      );
+    }
     if ($('cmsFooterDescText')) $('cmsFooterDescText').value = settings.description.text;
     if ($('cmsFooterDescSize')) $('cmsFooterDescSize').value = String(settings.description.fontSize);
     if ($('cmsFooterDescColor')) $('cmsFooterDescColor').value = settings.description.color;
@@ -1067,6 +1093,8 @@
 
       form.addEventListener('input', function (e) {
         if (
+          e.target.id === 'cmsFooterLogoSubText' ||
+          e.target.id === 'cmsFooterLogoSubSize' ||
           e.target.id === 'cmsFooterDescText' ||
           e.target.id === 'cmsFooterDescSize' ||
           e.target.id === 'cmsFooterDescColor' ||
@@ -1091,6 +1119,10 @@
           });
           try {
             var defaults = {
+              logoSubtitle: {
+                text: window.PlatformFooter.DEFAULT_LOGO_SUBTITLE,
+                fontSize: 0.85,
+              },
               description: {
                 text: window.PlatformFooter.DEFAULT_DESCRIPTION,
                 fontSize: 0.9,

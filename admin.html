@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="لوحة إدارة أكاديمية الفايبر العراقية">
-  <title>لوحة الإدارة | أكاديمية الفايبر العراقية</title>
+  <meta name="description" content="ENGINEER 360° Admin — لوحة إدارة منصة المسار المهني الهندسي">
+  <title>لوحة الإدارة | ENGINEER 360° Admin</title>
   <link rel="icon" type="image/png" href="images/logo.png" />
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/admin.css">
@@ -18,10 +18,10 @@
 
   <aside class="admin-sidebar" id="adminSidebar" aria-label="قائمة لوحة الإدارة">
     <a href="index.html" class="admin-sidebar__brand">
-      <img class="admin-sidebar__brand-img" src="images/logo.png" alt="Iraqi Fiber Academy" width="40" height="40" />
+      <img class="admin-sidebar__brand-img" src="images/logo.png" alt="ENGINEER 360°" width="40" height="40" />
       <div class="admin-sidebar__brand-text">
-        <span class="admin-sidebar__brand-name">أكاديمية الفايبر</span>
-        <span class="admin-sidebar__brand-role">ADMIN DASHBOARD</span>
+        <span class="admin-sidebar__brand-name">ENGINEER 360° Admin</span>
+        <span class="admin-sidebar__brand-role">منصة المسار المهني الهندسي</span>
       </div>
     </a>
 
@@ -134,7 +134,7 @@
         <button class="admin-menu-toggle" id="adminMenuToggle" aria-label="فتح القائمة" type="button">☰</button>
         <div>
           <h1 class="admin-topbar__title">لوحة الإدارة</h1>
-          <p class="admin-topbar__subtitle">أكاديمية الفايبر العراقية — نظرة عامة على المنصة</p>
+          <p class="admin-topbar__subtitle">ENGINEER 360° Admin — منصة المسار المهني الهندسي</p>
         </div>
       </div>
       <div class="admin-topbar__actions">
@@ -557,7 +557,7 @@
               <label class="admin-field">
                 <span class="admin-field__label">المدرب المسؤول</span>
                 <select class="admin-field__input" id="courseEditorInstructor"></select>
-                <span class="admin-field__hint">اترك «أكاديمية الفايبر العراقية» لكورس رسمي من المنصة</span>
+                <span class="admin-field__hint">اترك «مهندس 360» لكورس رسمي من المنصة</span>
               </label>
               <label class="admin-field">
                 <span class="admin-field__label">حالة النشر</span>
@@ -1104,19 +1104,27 @@
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="siteFooterHeading">إعدادات التذييل (Footer Settings)</h2>
-            <p class="admin-panel__desc">وصف العلامة التجارية، حجم الخط، اللون، وروابط التواصل الاجتماعي</p>
+            <p class="admin-panel__desc">عبارة الشعار الفرعية، وصف العلامة التجارية، أحجام الخط، اللون، وروابط التواصل الاجتماعي</p>
           </div>
         </div>
         <form class="admin-settings-form cms-footer-form" id="cmsFooterForm">
           <div class="cms-footer-editor">
             <div class="cms-footer-editor__fields">
               <label class="admin-field">
+                <span class="admin-field__label">عبارة الشعار الفرعية (Logo Subtitle)</span>
+                <input class="admin-field__input" id="cmsFooterLogoSubText" type="text" data-footer-field="logoSubtitleText" />
+              </label>
+              <label class="admin-field">
+                <span class="admin-field__label">حجم خط الشعار الفرعي (rem)</span>
+                <input class="admin-field__input" id="cmsFooterLogoSubSize" type="number" min="0.5" max="1.5" step="0.05" data-footer-field="logoSubtitleFontSize" dir="ltr" lang="en" />
+              </label>
+              <label class="admin-field">
                 <span class="admin-field__label">وصف الأكاديمية</span>
                 <textarea class="admin-field__input admin-field__textarea" id="cmsFooterDescText" rows="4" data-footer-field="text"></textarea>
               </label>
               <div class="admin-form-grid">
                 <label class="admin-field">
-                  <span class="admin-field__label">حجم الخط (rem)</span>
+                  <span class="admin-field__label">حجم خط الوصف (rem)</span>
                   <input class="admin-field__input" id="cmsFooterDescSize" type="number" min="0.65" max="1.5" step="0.05" data-footer-field="fontSize" dir="ltr" lang="en" />
                 </label>
                 <label class="admin-field">
@@ -1134,7 +1142,10 @@
               <div class="cms-footer-preview-card">
                 <div class="footer__logo cms-footer-preview-card__logo">
                   <img class="footer__logo-img" src="images/logo.png" alt="" width="42" height="42" />
-                  <span class="footer__logo-text">أكاديمية الفايبر العراقية</span>
+                  <div class="logo__text">
+                    <span class="logo__text-main">مهندس 360°</span>
+                    <span class="logo__text-sub" id="cmsFooterLogoSubPreview"></span>
+                  </div>
                 </div>
                 <p class="footer__desc" id="cmsFooterDescPreview" data-footer-desc></p>
                 <div class="footer__social" id="cmsFooterSocialPreview" data-footer-social></div>

@@ -4,6 +4,7 @@
   const header = document.getElementById('header');
   const nav = document.getElementById('nav');
   const navToggle = document.getElementById('navToggle');
+  const navClose = document.getElementById('navClose');
   const navOverlay = document.getElementById('navOverlay');
   const navLinks = document.querySelectorAll('.nav__link');
 
@@ -12,6 +13,7 @@
     nav.classList.remove('open');
     if (navToggle) navToggle.classList.remove('active');
     if (navOverlay) navOverlay.classList.remove('active');
+    document.body.classList.remove('nav-menu-open');
     document.body.style.overflow = '';
   }
 
@@ -20,6 +22,7 @@
     nav.classList.add('open');
     if (navToggle) navToggle.classList.add('active');
     if (navOverlay) navOverlay.classList.add('active');
+    document.body.classList.add('nav-menu-open');
     document.body.style.overflow = 'hidden';
   }
 
@@ -31,6 +34,10 @@
 
   if (navOverlay) {
     navOverlay.addEventListener('click', closeMenu);
+  }
+
+  if (navClose) {
+    navClose.addEventListener('click', closeMenu);
   }
 
   navLinks.forEach(function (link) {
@@ -124,6 +131,10 @@
 
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') return;
+    if (nav && nav.classList.contains('open')) {
+      closeMenu();
+      return;
+    }
     var menu = document.getElementById('userMenu');
     if (!menu) return;
     menu.classList.remove('open');

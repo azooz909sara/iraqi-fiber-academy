@@ -17,6 +17,7 @@
       'header.login': 'تسجيل الدخول',
       'header.cta': 'ابدأ مجاناً',
       'header.navToggle': 'فتح القائمة',
+      'header.navClose': 'إغلاق القائمة',
       'settings.menu': 'الإعدادات',
       'settings.notifications': 'الإشعارات',
       'settings.pushNotifications': 'إشعارات المتصفح',
@@ -27,13 +28,13 @@
       'settings.markAllRead': 'تعيين الكل كمقروء',
       'settings.emptyNotifications': 'لا توجد إشعارات حالياً',
       'settings.viewDetails': 'عرض التفاصيل',
-      'logo.main': 'أكاديمية الفايبر العراقية',
-      'hero.default.title': 'تعلّم شبكات FTTH والألياف الضوئية عملياً',
-      'hero.default.description':
-        'أكاديمية الفايبر العراقية توفر لك بيئة محاكاة واقعية لتصميم وتركيب وصيانة شبكات الألياف الضوئية — من الأساسيات حتى الاحتراف، بدون مخاطر ميدانية.',
+      'logo.main': 'مهندس 360°',
+      'logo.sub': 'منصة المسار المهني الهندسي',
+      'hero.default.title': 'مسارك المهني الهندسي يبدأ هنا',
+      'hero.default.description': 'منصة المسار المهني الهندسي — كورسات منظمة ومحاكيات تفاعلية لبناء مهاراتك خطوة بخطوة.',
       'hero.default.cta': 'ابدأ التدريب الآن',
       'hero.default.secondaryCta': 'Try Simulator',
-      'hero.default.badge': 'منصة تدريبية تفاعلية',
+      'hero.default.badge': 'منصة المسار المهني الهندسي',
       'hero.trust.realistic': 'محاكاة واقعية 100%',
       'hero.trust.certificates': 'شهادات معتمدة',
       'hero.trust.support': 'دعم فني متواصل',
@@ -65,8 +66,7 @@
       'section.faq.badge': 'أسئلة شائعة',
       'section.faq.title': 'كل ما تحتاج معرفته',
       'section.faq.subtitle': 'إجابات على أكثر الأسئلة تكراراً حول المنصة والمحاكي والاشتراكات',
-      'footer.desc':
-        'منصة تدريبية رائدة في مجال الألياف الضوئية وشبكات FTTH. نُعدّ الجيل القادم من فنيي ومهندسي الاتصالات.',
+      'footer.desc': 'منصة المسار المهني الهندسي — مسارات تعليمية ومحاكاة عملية لمهندسي وفنيي الاتصالات والبنية التحتية.',
       'footer.social': 'روابط التواصل',
       'footer.platform': 'المنصة',
       'footer.features': 'المميزات',
@@ -77,7 +77,7 @@
       'footer.contact': 'تواصل معنا',
       'footer.dashboards': 'لوحات التحكم',
       'footer.joinInstructor': 'انضم إلينا كمدرب',
-      'footer.copyright': '© 2026 أكاديمية الفايبر العراقية. جميع الحقوق محفوظة.',
+      'footer.copyright': '© 2026 مهندس 360. جميع الحقوق محفوظة لمهندس 360.',
       'footer.privacy': 'سياسة الخصوصية',
       'footer.terms': 'شروط الاستخدام',
       'auth.login': 'تسجيل الدخول',
@@ -94,10 +94,11 @@
       'checkout.ok': 'حسناً',
       'instructor.modalTitle': 'انضم إلينا كمدرب',
       'instructor.modalSubtitle':
-        'قدّم طلبك للانضمام إلى فريق المدربين في أكاديمية الفايبر العراقية. ستتم مراجعة الطلب من لوحة الإدارة.',
-      'page.title.home': 'أكاديمية الفايبر العراقية | Iraqi Fiber Academy',
-      'page.title.courseDetails': 'تفاصيل الكورس | أكاديمية الفايبر العراقية',
-      'page.title.checkout': 'إتمام الدفع | أكاديمية الفايبر العراقية',
+        'قدّم طلبك للانضمام إلى فريق المدربين في مهندس 360. ستتم مراجعة الطلب من لوحة الإدارة.',
+      'page.title.home': 'مهندس 360 | ENGINEER 360°',
+      'page.title.courseDetails': 'تفاصيل الكورس | مهندس 360',
+      'page.title.checkout': 'إتمام الدفع | مهندس 360',
+      'page.title.admin': 'لوحة الإدارة | ENGINEER 360° Admin',
       'time.now': 'الآن',
       'time.minutes': ' د',
       'time.hours': ' س',
@@ -112,6 +113,7 @@
       'header.login': 'Login',
       'header.cta': 'Start Free',
       'header.navToggle': 'Open menu',
+      'header.navClose': 'Close menu',
       'settings.menu': 'Settings',
       'settings.notifications': 'Notifications',
       'settings.pushNotifications': 'Browser notifications',
@@ -122,13 +124,14 @@
       'settings.markAllRead': 'Mark all read',
       'settings.emptyNotifications': 'No notifications yet',
       'settings.viewDetails': 'View details',
-      'logo.main': 'Iraqi Fiber Academy',
-      'hero.default.title': 'Learn FTTH & Fiber Optics Hands-On',
+      'logo.main': 'ENGINEER 360°',
+      'logo.sub': 'Engineering Career Path Platform',
+      'hero.default.title': 'Your Engineering Career Path Starts Here',
       'hero.default.description':
-        'Iraqi Fiber Academy gives you a realistic simulation environment to design, install, and maintain fiber networks — from basics to pro, without field risk.',
+        'Engineering Career Path Platform — structured courses and interactive simulators to build your skills step by step.',
       'hero.default.cta': 'Start Training Now',
       'hero.default.secondaryCta': 'Try Simulator',
-      'hero.default.badge': 'Interactive Training Platform',
+      'hero.default.badge': 'Engineering Career Path Platform',
       'hero.trust.realistic': '100% Realistic Simulation',
       'hero.trust.certificates': 'Certified Courses',
       'hero.trust.support': 'Ongoing Technical Support',
@@ -161,7 +164,7 @@
       'section.faq.title': 'Everything You Need to Know',
       'section.faq.subtitle': 'Answers to the most common questions about the platform, simulator, and subscriptions',
       'footer.desc':
-        'A leading training platform for fiber optics and FTTH networks. We prepare the next generation of telecom technicians and engineers.',
+        'Engineering Career Path Platform — learning paths and hands-on simulation for telecom and infrastructure engineers.',
       'footer.social': 'Social links',
       'footer.platform': 'Platform',
       'footer.features': 'Features',
@@ -172,7 +175,7 @@
       'footer.contact': 'Contact Us',
       'footer.dashboards': 'Dashboards',
       'footer.joinInstructor': 'Join as Instructor',
-      'footer.copyright': '© 2026 Iraqi Fiber Academy. All rights reserved.',
+      'footer.copyright': '© 2026 ENGINEER 360°. All rights reserved.',
       'footer.privacy': 'Privacy Policy',
       'footer.terms': 'Terms of Use',
       'auth.login': 'Login',
@@ -189,10 +192,11 @@
       'checkout.ok': 'OK',
       'instructor.modalTitle': 'Join as Instructor',
       'instructor.modalSubtitle':
-        'Apply to join the instructor team at Iraqi Fiber Academy. Your application will be reviewed by admin.',
-      'page.title.home': 'Iraqi Fiber Academy | FTTH Training Platform',
-      'page.title.courseDetails': 'Course Details | Iraqi Fiber Academy',
-      'page.title.checkout': 'Checkout | Iraqi Fiber Academy',
+        'Apply to join the instructor team at ENGINEER 360°. Your application will be reviewed by admin.',
+      'page.title.home': 'ENGINEER 360° | Engineering Career Path Platform',
+      'page.title.courseDetails': 'Course Details | ENGINEER 360°',
+      'page.title.checkout': 'Checkout | ENGINEER 360°',
+      'page.title.admin': 'Admin | ENGINEER 360° Admin',
       'time.now': 'Now',
       'time.minutes': 'm',
       'time.hours': 'h',
@@ -252,6 +256,10 @@
     });
 
     if (!root || root === document) applyDocumentTitle(code);
+
+    if (global.PlatformFooter && typeof global.PlatformFooter.applyLogoSubtitle === 'function') {
+      global.PlatformFooter.applyLogoSubtitle(scope);
+    }
   }
 
   function apply(lang) {

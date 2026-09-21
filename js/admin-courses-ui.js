@@ -45,7 +45,7 @@
 
   function academyName() {
     return (window.PlatformCourses && window.PlatformCourses.ACADEMY_NAME) ||
-      'أكاديمية الفايبر العراقية';
+      'مهندس 360';
   }
 
   function showToast(message, type) {

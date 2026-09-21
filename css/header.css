@@ -30,7 +30,7 @@
   font-size: 1.25rem;
   flex-shrink: 0;
   min-width: 0;
-  max-width: min(42vw, 280px);
+  max-width: min(48vw, 300px);
 }
 
 .logo__img {
@@ -51,21 +51,36 @@
 .logo__text {
   display: flex;
   flex-direction: column;
-  line-height: 1.2;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.12rem;
+  line-height: 1.15;
   min-width: 0;
 }
 
 .logo__text-main {
+  font-family: 'Cairo', 'Tajawal', 'Segoe UI', system-ui, sans-serif;
+  font-size: 1.38rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--color-text, #f4f7fb);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .logo__text-sub {
-  font-size: 0.7rem;
-  color: var(--color-accent-cyan);
-  letter-spacing: 1px;
+  font-family: 'Cairo', 'Tajawal', 'Segoe UI', system-ui, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--color-accent-cyan, #00e5ff);
+  letter-spacing: 0.02em;
+  opacity: 0.92;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .nav {
@@ -636,39 +651,83 @@ body.auth-modal-open {
 }
 
 @media (max-width: 1024px) {
+  .header__inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+  }
+
+  .logo {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+    margin-inline-end: 0.25rem;
+  }
+
   .nav__toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex: 0 0 auto;
+    order: 4;
   }
 
-  .nav {
+  .header__inner > .nav {
     position: fixed;
     top: 0;
-    inset-inline-end: 0;
-    width: min(320px, 85vw);
-    height: 100vh;
+    left: 0;
+    right: auto;
+    width: min(320px, 88vw);
+    max-width: 100%;
     height: 100dvh;
+    z-index: 10001;
     background: var(--color-bg-secondary);
-    flex: none;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease, visibility 0.3s ease;
+    visibility: hidden;
+    pointer-events: none;
+    overflow-y: auto;
+    flex: 0 0 auto;
     flex-direction: column;
     align-items: stretch;
     justify-content: flex-start;
-    padding: 5rem 1.5rem 2rem;
+    padding: 4.75rem 1.25rem 2rem;
     gap: 1rem;
-    transform: translateX(100%);
-    transition: transform var(--transition-normal);
-    border-inline-start: 1px solid var(--color-border);
-    z-index: 1000;
-    overflow-y: auto;
+    border-inline-end: 1px solid var(--color-border);
+    box-shadow: 4px 0 32px rgba(0, 0, 0, 0.45);
   }
 
-  [dir='rtl'] .nav {
-    transform: translateX(-100%);
-  }
-
-  .nav.open {
+  .header__inner > .nav.open {
     transform: translateX(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .nav__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 1rem;
+    inset-inline-end: 1rem;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.85);
+    color: var(--color-text-primary);
+    font-size: 1.75rem;
+    line-height: 1;
+    cursor: pointer;
+    z-index: 2;
+  }
+
+  .nav__close:hover {
+    border-color: var(--color-accent-cyan);
+    color: var(--color-accent-cyan);
   }
 
   .nav__list {
@@ -686,13 +745,15 @@ body.auth-modal-open {
     box-sizing: border-box;
   }
 
-  /* Keep header bar single-line: Logo | [☰][Login] | Nav toggle */
   .header__actions {
+    flex: 0 0 auto;
     flex-direction: row !important;
     flex-wrap: nowrap;
     width: auto;
     gap: 0.4rem;
     direction: ltr;
+    margin-inline-start: 0 !important;
+    order: 3;
   }
 
   .header__login,
@@ -745,28 +806,53 @@ body.auth-modal-open {
   .nav__overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(3, 7, 18, 0.72);
+    backdrop-filter: blur(2px);
     opacity: 0;
     visibility: hidden;
-    transition: all var(--transition-normal);
-    z-index: 999;
+    transition: opacity var(--transition-normal), visibility var(--transition-normal);
+    z-index: 10000;
+    pointer-events: none;
   }
 
   .nav__overlay.active {
     opacity: 1;
     visibility: visible;
+    pointer-events: auto;
   }
+
+  body.nav-menu-open .header {
+    z-index: 10002;
+  }
+
+  body.nav-menu-open .nav__toggle {
+    z-index: 10003;
+  }
+}
+
+.nav__close {
+  display: none;
 }
 
 @media (max-width: 768px) {
   .header__inner {
-    gap: 0.45rem;
-    padding-inline: 0.85rem;
+    gap: 0.4rem;
+    padding-inline: 1rem;
+    padding-block: 0.35rem;
+    justify-content: space-between;
+    height: auto;
+    min-height: 68px;
   }
 
   .logo {
-    max-width: min(46vw, 200px);
-    gap: 0.5rem;
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: calc(100% - 9.5rem);
+    gap: 0.45rem;
   }
 
   .logo__img {
@@ -774,8 +860,27 @@ body.auth-modal-open {
     max-height: 36px;
   }
 
+  .logo__text {
+    gap: 0.06rem;
+    line-height: 1.1;
+  }
+
   .logo__text-main {
-    font-size: 0.82rem;
+    font-size: 0.92rem;
+    line-height: 1.1;
+  }
+
+  .logo__text-sub {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: unset;
+    -webkit-line-clamp: unset;
+    -webkit-box-orient: unset;
   }
 
   .header__actions {
@@ -789,26 +894,57 @@ body.auth-modal-open {
 
   .settings-menu__btn,
   .nav__toggle {
-    width: 38px;
-    height: 38px;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+  }
+
+  .header__inner > .nav {
+    width: 100%;
+    padding: 4.25rem 1.25rem 2rem;
+    border-inline-end: none;
+    box-shadow: none;
+  }
+
+  .nav__list {
+    max-width: 28rem;
+    margin-inline: auto;
   }
 }
 
 @media (max-width: 480px) {
-  .logo__text-sub {
-    display: none;
-  }
-
   .header__inner {
-    height: 64px;
+    height: auto;
+    min-height: 68px;
+    padding-inline: 0.85rem;
   }
 
   .logo {
-    max-width: min(52vw, 170px);
+    max-width: calc(100% - 8.75rem);
+  }
+
+  .auth-login-btn {
+    padding: 0.4rem 0.55rem;
+    font-size: 0.74rem;
+    max-width: 5.5rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }
 
 body.light-theme .nav__toggle {
   background: rgba(255, 255, 255, 0.9);
   border-color: rgba(15, 23, 42, 0.12);
+}
+
+.logo__text-sub {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  font-size: 0.72rem !important;
+  line-height: 1.25 !important;
+  white-space: normal !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  overflow: visible !important;
 }
