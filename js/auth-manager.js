@@ -9,7 +9,6 @@
 import { auth, provider } from './firebase-config.js';
 import {
   signInWithPopup,
-  signInWithRedirect,
   getRedirectResult,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -335,7 +334,12 @@ function formatAuthError(err) {
   if (code === 'auth/weak-password') return 'كلمة المرور ضعيفة (6 أحرف على الأقل).';
   if (code === 'auth/too-many-requests') return 'محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.';
   if (code === 'auth/network-request-failed') return 'تعذّر الاتصال. تحقق من الشبكة.';
-  if (code === 'auth/popup-blocked') return 'تم حظر النافذة المنبثقة من قبل المتصفح';
+  if (code === 'auth/popup-blocked') {
+    return 'تم حظر النافذة المنبثقة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.';
+  }
+  if (code === 'auth/missing-initial-state') {
+    return 'تعذّر إكمال تسجيل الدخول. أعد المحاولة من نفس المتصفح (بدون وضع التصفح الخاص إن أمكن).';
+  }
   if (code === 'auth/operation-not-allowed') return 'طريقة تسجيل الدخول غير مفعلة';
   if (code === 'auth/unauthorized-domain') return 'النطاق غير مصرح به في إعدادات فايبربيس';
   return (err && err.message) || 'حدث خطأ. حاول مرة أخرى.';
@@ -967,17 +971,6 @@ async function handleAuthModalSubmit() {
   }
 }
 
-function isGooglePopupLikelyBlocked() {
-  try {
-    if (window.innerWidth <= 1024) return true;
-    if (window.matchMedia && window.matchMedia('(max-width: 1024px)').matches) return true;
-    if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return true;
-  } catch (err) {
-    /* ignore */
-  }
-  return false;
-}
-
 function isPopupCancellationError(err) {
   var code = err && err.code ? String(err.code) : '';
   return (
@@ -987,23 +980,8 @@ function isPopupCancellationError(err) {
   );
 }
 
-function shouldFallbackGoogleToRedirect(err) {
-  var code = err && err.code ? String(err.code) : '';
-  return code === 'auth/popup-blocked';
-}
-
 export async function loginWithGoogle() {
   setAuthModalError('');
-  if (isGooglePopupLikelyBlocked()) {
-    try {
-      await signInWithRedirect(auth, provider);
-      return;
-    } catch (err) {
-      setAuthModalError(formatAuthError(err));
-      console.warn('[Auth] Google redirect sign-in failed', err);
-      return;
-    }
-  }
   try {
     await signInWithPopup(auth, provider);
     closeAuthModal();
@@ -1011,18 +989,8 @@ export async function loginWithGoogle() {
     if (isPopupCancellationError(err)) {
       return;
     }
-    if (shouldFallbackGoogleToRedirect(err)) {
-      try {
-        await signInWithRedirect(auth, provider);
-        return;
-      } catch (redirectErr) {
-        setAuthModalError(formatAuthError(redirectErr));
-        console.warn('[Auth] Google redirect fallback failed', redirectErr);
-        return;
-      }
-    }
+    console.error('[Auth] Google login error:', err);
     setAuthModalError(formatAuthError(err));
-    console.warn('[Auth] Google sign-in failed', err);
   }
 }
 
@@ -1310,7 +1278,18 @@ function initAuthUI() {
       .catch(function (err) {
         profileSynced = true;
         console.error('[Auth] syncUserProfile failed:', err);
+        lastProfile = {
+          uid: user.uid,
+          email: user.email || email,
+          name: user.displayName || '',
+          photo: user.photoURL || '',
+          photoURL: user.photoURL || '',
+          role: 'user',
+          isSubscriber: false,
+        };
+        refreshSlots();
         startPlatformNotifications(user, lastProfile);
+        notifyLocalAuthChanged({ type: 'profile-sync', email: email });
         notifyAuthChange(user, { profileSynced: true });
       });
   });

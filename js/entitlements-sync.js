@@ -2,6 +2,7 @@
  * Authoritative entitlements derived from approved checkout orders.
  */
 import { db } from './firebase-config.js';
+import { ensureUserDocExistsForUid } from './db-manager.js';
 import {
   collection,
   doc,
@@ -141,6 +142,7 @@ export async function syncEntitlementsFromApprovedOrders(uid) {
     planId: planId,
   };
 
+  await ensureUserDocExistsForUid(uid);
   await setDoc(
     doc(db, 'users', uid),
     Object.assign({}, entitlements, { updatedAt: serverTimestamp() }),

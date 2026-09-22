@@ -2,6 +2,7 @@
  * Web Push (FCM) — opt-in toggle, token registration, Firestore persistence.
  */
 import { app, auth, db } from './firebase-config.js';
+import { ensureUserDocExistsForUid } from './db-manager.js';
 import { getMessaging, getToken, onMessage, isSupported } from
   'https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging.js';
 import { doc, setDoc, getDoc, serverTimestamp } from
@@ -92,6 +93,7 @@ export async function getNotificationsEnabledPreference(uid) {
 
 export async function setNotificationsEnabledPreference(uid, enabled) {
   if (!uid) return;
+  await ensureUserDocExistsForUid(uid);
   await setDoc(
     doc(db, 'users', uid),
     {

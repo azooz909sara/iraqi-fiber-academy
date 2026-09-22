@@ -14,6 +14,40 @@ import {
   setDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
+function buildDefaultUserProfile(user) {
+  return {
+    uid: user.uid,
+    name: user.displayName || '',
+    email: user.email || '',
+    photoURL: user.photoURL || '',
+    photo: user.photoURL || '',
+    isSubscriber: false,
+    isAdmin: false,
+    role: 'user',
+    createdAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Ensure users/{uid} exists (safe for first-time Google / redirect sign-in).
+ * Firestore rules require role === 'user' on create.
+ * @param {import('firebase/auth').User} user
+ * @returns {Promise<object|null>}
+ */
+export async function ensureUserProfileDocument(user) {
+  if (!user || !user.uid) return null;
+
+  var ref = doc(db, 'users', user.uid);
+  var snap = await getDoc(ref);
+  if (snap.exists()) {
+    return snap.data();
+  }
+
+  var profile = buildDefaultUserProfile(user);
+  await setDoc(ref, profile);
+  return profile;
+}
+
 /**
  * Create users/{uid} immediately after Email/Password sign-up.
  * @param {import('firebase/auth').User} user
@@ -21,16 +55,7 @@ import {
  */
 export async function createUserProfileOnSignUp(user) {
   if (!user || !user.uid) return null;
-
-  var profile = {
-    uid: user.uid,
-    email: user.email || null,
-    role: 'user',
-    createdAt: new Date(),
-  };
-
-  await setDoc(doc(db, 'users', user.uid), profile);
-  return profile;
+  return ensureUserProfileDocument(user);
 }
 
 /**
@@ -49,28 +74,25 @@ export async function fetchUserProfile(uid) {
  * @returns {Promise<object|null>}
  */
 export async function syncUserProfile(user) {
-  if (!user || !user.uid) return null;
+  return ensureUserProfileDocument(user);
+}
 
-  var ref = doc(db, 'users', user.uid);
+/**
+ * Minimal users/{uid} stub when only uid is known (entitlements / settings merge).
+ * @param {string} uid
+ * @returns {Promise<void>}
+ */
+export async function ensureUserDocExistsForUid(uid) {
+  if (!uid) return;
+  var ref = doc(db, 'users', uid);
   var snap = await getDoc(ref);
-
-  if (snap.exists()) {
-    return snap.data();
-  }
-
-  var profile = {
-    uid: user.uid,
-    email: user.email || null,
-    name: user.displayName || null,
-    photo: user.photoURL || null,
-    isSubscriber: false,
-    isAdmin: false,
+  if (snap.exists()) return;
+  await setDoc(ref, {
+    uid: uid,
     role: 'user',
-    createdAt: new Date(),
-  };
-
-  await setDoc(ref, profile);
-  return profile;
+    isSubscriber: false,
+    createdAt: new Date().toISOString(),
+  });
 }
 
 /**

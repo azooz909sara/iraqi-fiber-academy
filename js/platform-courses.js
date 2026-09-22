@@ -14,7 +14,7 @@
   var INSTRUCTOR_CONTENT_KEY = 'ifa_instructor_content';
 
   var ACADEMY_EMAIL = '';
-  var ACADEMY_NAME = 'مهندس 360';
+  var ACADEMY_NAME = 'مسار المهندس ‎°360';
 
   var VALID_STATUS = { draft: true, published: true, suspended: true };
   var VALID_CATEGORY = { individual: true, program: true, master: true };

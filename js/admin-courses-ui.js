@@ -45,7 +45,7 @@
 
   function academyName() {
     return (window.PlatformCourses && window.PlatformCourses.ACADEMY_NAME) ||
-      'مهندس 360';
+      'مسار المهندس ‎°360';
   }
 
   function showToast(message, type) {

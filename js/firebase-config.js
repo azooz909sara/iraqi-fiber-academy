@@ -1,6 +1,6 @@
 /**
  * Firebase app + Auth + Firestore (ES module).
- * ENGINEER 360° — Email/Password + Google Sign-In & subscriber profiles.
+ * Engineer Path °360 — Email/Password + Google Sign-In & subscriber profiles.
  * Enable Email/Password in Firebase Console → Authentication → Sign-in method.
  */
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
@@ -25,6 +25,7 @@ const firebaseConfig = {
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: 'select_account' });
 export const db = initializeFirestore(app, {
   localCache: persistentLocalCache({
     tabManager: persistentMultipleTabManager(),
