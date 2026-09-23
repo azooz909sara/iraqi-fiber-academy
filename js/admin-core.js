@@ -262,58 +262,213 @@
     FtthLabSettingsCms.mountAdminEmbeddedPanel('admin-ftth-lab-config-root');
   }
 
+  function isoToDatetimeLocalValue(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (!isFinite(d.getTime())) return '';
+    var offset = d.getTimezoneOffset();
+    var local = new Date(d.getTime() - offset * 60000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  function datetimeLocalToIso(value) {
+    if (!value) return '';
+    var d = new Date(value);
+    if (!isFinite(d.getTime())) return '';
+    return d.toISOString();
+  }
+
+  function parseGlobalOfferEndsAtMs(settings) {
+    var raw = settings && settings.globalOfferEndsAt;
+    if (raw == null || raw === '') return 0;
+    var ms = typeof raw === 'number' ? raw : Date.parse(String(raw));
+    return isFinite(ms) ? ms : 0;
+  }
+
+  function isGlobalOfferCurrentlyActive(settings) {
+    if (!settings || !settings.globalOfferEnabled) return false;
+    var expiryMs = parseGlobalOfferEndsAtMs(settings);
+    return expiryMs > Date.now();
+  }
+
+  function formatPlatformSettingsStatus(saved) {
+    var bannerNote = '';
+    if (isGlobalOfferCurrentlyActive(saved)) {
+      bannerNote = ' · عرض عام مفعّل';
+    } else if (saved.globalOfferEnabled) {
+      bannerNote = ' · عرض عام (منتهي أو بلا تاريخ)';
+    } else if ((saved.freeTrialDays || 0) > 0) {
+      bannerNote = ' · شريط تجربة تلقائي';
+    }
+    return (
+      'تم الحفظ — تجربة ' +
+      formatFreeTrialDaysForStatus(saved.freeTrialDays) +
+      '، تجريبي: ' +
+      (saved.freeSimulatorIds.length || 0) +
+      '، قيد التطوير: ' +
+      (saved.comingSoonSimulatorIds.length || 0) +
+      bannerNote
+    );
+  }
+
+  function splitFreeTrialDaysToDhm(totalDays) {
+    var total = parseFloat(totalDays);
+    if (!isFinite(total) || total <= 0) {
+      return { days: 0, hours: 0, minutes: 0 };
+    }
+    var totalMinutes = Math.round(total * 24 * 60);
+    var days = Math.floor(totalMinutes / 1440);
+    var rem = totalMinutes - days * 1440;
+    var hours = Math.floor(rem / 60);
+    var minutes = rem - hours * 60;
+    return { days: days, hours: hours, minutes: minutes };
+  }
+
+  function combineDhmToFreeTrialDays(days, hours, minutes) {
+    var d = parseFloat(days) || 0;
+    var h = parseFloat(hours) || 0;
+    var m = parseFloat(minutes) || 0;
+    if (d < 0 || h < 0 || m < 0) return 0;
+    return d + h / 24 + m / 1440;
+  }
+
+  function formatFreeTrialDaysForStatus(totalDays) {
+    var parts = splitFreeTrialDaysToDhm(totalDays);
+    if (!parts.days && !parts.hours && !parts.minutes) return '0';
+    var bits = [];
+    if (parts.days) bits.push(parts.days + ' يوم');
+    if (parts.hours) bits.push(parts.hours + ' س');
+    if (parts.minutes) bits.push(parts.minutes + ' د');
+    return bits.join(' · ');
+  }
+
+  function persistPlatformSettingsToFirestore(platformSettings) {
+    var ready = window.__ifaSimulatorsFirestoreReady;
+    if (!ready) {
+      return Promise.resolve({ ok: false, reason: 'firestore-not-ready' });
+    }
+    return Promise.resolve(ready)
+      .then(function (api) {
+        if (!api || typeof api.saveSimulatorsBundle !== 'function') {
+          return { ok: false, reason: 'missing-api' };
+        }
+        return api.saveSimulatorsBundle({ platformSettings: platformSettings }).then(function () {
+          return { ok: true };
+        });
+      })
+      .catch(function (err) {
+        console.error('[Admin] platform settings Firestore save failed', err);
+        return { ok: false, error: err };
+      });
+  }
+
   function bindPlatformSettingsForm() {
     var form = document.getElementById('platformSettingsForm');
     var list = document.getElementById('settingsFreeSimulators');
     var comingSoonList = document.getElementById('settingsComingSoonSimulators');
-    var daysInput = document.getElementById('settingsFreeTrialDays');
+    var trialDaysInput = document.getElementById('settingsTrialDays');
+    var trialHoursInput = document.getElementById('settingsTrialHours');
+    var trialMinutesInput = document.getElementById('settingsTrialMinutes');
+    var trialAnnouncementTextInput = document.getElementById('settingsTrialAnnouncementText');
+    var globalOfferEnabledInput = document.getElementById('settingsGlobalOfferEnabled');
+    var globalOfferTextInput = document.getElementById('settingsGlobalOfferText');
+    var globalOfferEndsAtInput = document.getElementById('settingsGlobalOfferEndsAt');
+    var globalOfferEndsAtWrap = document.getElementById('settingsGlobalOfferEndsAtWrap');
     var statusEl = document.getElementById('settingsSaveStatus');
     if (!form || !window.PlatformSimulators) return;
+    if (form.dataset.platformSettingsBound === '1') return;
+    form.dataset.platformSettingsBound = '1';
 
     var catalog =
       typeof window.PlatformSimulators.getCatalog === 'function'
         ? window.PlatformSimulators.getCatalog()
         : [];
-    var settings =
-      typeof window.PlatformSimulators.getPlatformSettings === 'function'
-        ? window.PlatformSimulators.getPlatformSettings()
-        : { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
-    var selected = {};
-    (settings.freeSimulatorIds || []).forEach(function (id) {
-      selected[id] = true;
-    });
-    var comingSoonSelected = {};
-    (settings.comingSoonSimulatorIds || []).forEach(function (id) {
-      comingSoonSelected[id] = true;
-    });
 
-    function renderChecklist(host, name, selectedMap) {
-      if (!host) return;
-      host.innerHTML = catalog
-        .map(function (sim) {
-          return (
-            '<label>' +
-            '<input type="checkbox" name="' +
-            name +
-            '" value="' +
-            String(sim.id).replace(/"/g, '') +
-            '"' +
-            (selectedMap[sim.id] ? ' checked' : '') +
-            ' />' +
-            '<span>' +
-            String(sim.label || sim.id) +
-            ' <code>' +
-            String(sim.id) +
-            '</code></span>' +
-            '</label>'
-          );
-        })
-        .join('');
+    function applyPlatformSettingsToForm(settings) {
+      settings = settings || { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
+      var selected = {};
+      (settings.freeSimulatorIds || []).forEach(function (id) {
+        selected[id] = true;
+      });
+      var comingSoonSelected = {};
+      (settings.comingSoonSimulatorIds || []).forEach(function (id) {
+        comingSoonSelected[id] = true;
+      });
+
+      function renderChecklist(host, name, selectedMap) {
+        if (!host) return;
+        host.innerHTML = catalog
+          .map(function (sim) {
+            return (
+              '<label>' +
+              '<input type="checkbox" name="' +
+              name +
+              '" value="' +
+              String(sim.id).replace(/"/g, '') +
+              '"' +
+              (selectedMap[sim.id] ? ' checked' : '') +
+              ' />' +
+              '<span>' +
+              String(sim.label || sim.id) +
+              ' <code>' +
+              String(sim.id) +
+              '</code></span>' +
+              '</label>'
+            );
+          })
+          .join('');
+      }
+
+      renderChecklist(list, 'freeSimulator', selected);
+      renderChecklist(comingSoonList, 'comingSoonSimulator', comingSoonSelected);
+      var trialParts = splitFreeTrialDaysToDhm(settings.freeTrialDays);
+      if (trialDaysInput) trialDaysInput.value = String(trialParts.days);
+      if (trialHoursInput) trialHoursInput.value = String(trialParts.hours);
+      if (trialMinutesInput) trialMinutesInput.value = String(trialParts.minutes);
+      if (trialAnnouncementTextInput) {
+        trialAnnouncementTextInput.value = String(settings.trialAnnouncementText || '');
+      }
+      if (globalOfferEnabledInput) {
+        globalOfferEnabledInput.checked = !!settings.globalOfferEnabled;
+      }
+      if (globalOfferTextInput) {
+        globalOfferTextInput.value = String(settings.globalOfferText || '');
+      }
+      if (globalOfferEndsAtInput) {
+        globalOfferEndsAtInput.value = isoToDatetimeLocalValue(settings.globalOfferEndsAt || '');
+      }
+      if (globalOfferEndsAtWrap && globalOfferEnabledInput) {
+        var showEndDate = globalOfferEnabledInput.checked;
+        globalOfferEndsAtWrap.hidden = !showEndDate;
+        globalOfferEndsAtWrap.setAttribute('aria-hidden', showEndDate ? 'false' : 'true');
+      }
     }
 
-    renderChecklist(list, 'freeSimulator', selected);
-    renderChecklist(comingSoonList, 'comingSoonSimulator', comingSoonSelected);
-    if (daysInput) daysInput.value = String(settings.freeTrialDays || 0);
+    if (globalOfferEnabledInput) {
+      globalOfferEnabledInput.addEventListener('change', function () {
+        if (!globalOfferEndsAtWrap) return;
+        var showEndDate = globalOfferEnabledInput.checked;
+        globalOfferEndsAtWrap.hidden = !showEndDate;
+        globalOfferEndsAtWrap.setAttribute('aria-hidden', showEndDate ? 'false' : 'true');
+      });
+    }
+
+    applyPlatformSettingsToForm(
+      typeof window.PlatformSimulators.getPlatformSettings === 'function'
+        ? window.PlatformSimulators.getPlatformSettings()
+        : null
+    );
+
+    window.addEventListener('ifa:platform-settings-changed', function (ev) {
+      var detail = ev && ev.detail;
+      if (detail && typeof detail === 'object') {
+        applyPlatformSettingsToForm(detail);
+        return;
+      }
+      if (typeof window.PlatformSimulators.getPlatformSettings === 'function') {
+        applyPlatformSettingsToForm(window.PlatformSimulators.getPlatformSettings());
+      }
+    });
 
     form.addEventListener('submit', function (e) {
       e.preventDefault();
@@ -325,21 +480,59 @@
       form.querySelectorAll('input[name="comingSoonSimulator"]:checked').forEach(function (input) {
         if (input.value) comingSoonIds.push(input.value);
       });
-      var days = daysInput ? Number(daysInput.value) : 0;
+      var totalTrialDays = combineDhmToFreeTrialDays(
+        trialDaysInput ? trialDaysInput.value : 0,
+        trialHoursInput ? trialHoursInput.value : 0,
+        trialMinutesInput ? trialMinutesInput.value : 0
+      );
+      if (
+        window.PlatformSimulators &&
+        typeof window.PlatformSimulators.normalizeFreeTrialDays === 'function'
+      ) {
+        totalTrialDays = window.PlatformSimulators.normalizeFreeTrialDays(totalTrialDays);
+      } else if (isFinite(totalTrialDays) && totalTrialDays > 0) {
+        totalTrialDays = Math.min(365, totalTrialDays);
+      } else {
+        totalTrialDays = 0;
+      }
+      var trialAnnouncementText = trialAnnouncementTextInput
+        ? String(trialAnnouncementTextInput.value || '').trim()
+        : '';
+      var globalOfferEnabled = !!(globalOfferEnabledInput && globalOfferEnabledInput.checked);
+      var globalOfferText = globalOfferTextInput ? String(globalOfferTextInput.value || '').trim() : '';
+      var globalOfferEndsAt = '';
+      if (globalOfferEnabled) {
+        if (!globalOfferEndsAtInput || !globalOfferEndsAtInput.value) {
+          window.alert('يرجى تحديد تاريخ انتهاء العرض');
+          return;
+        }
+        globalOfferEndsAt = datetimeLocalToIso(globalOfferEndsAtInput.value);
+        if (!globalOfferEndsAt || Date.parse(globalOfferEndsAt) <= Date.now()) {
+          window.alert('يرجى تحديد تاريخ انتهاء العرض');
+          return;
+        }
+      }
       var saved = window.PlatformSimulators.savePlatformSettings({
         freeSimulatorIds: ids,
         comingSoonSimulatorIds: comingSoonIds,
-        freeTrialDays: isFinite(days) && days > 0 ? days : 0,
+        freeTrialDays: totalTrialDays,
+        trialAnnouncementText: trialAnnouncementText.slice(0, 500),
+        globalOfferEnabled: globalOfferEnabled,
+        globalOfferText: globalOfferText.slice(0, 500),
+        globalOfferEndsAt: globalOfferEndsAt,
       });
-      if (statusEl) {
+      if (statusEl) statusEl.textContent = 'جاري الحفظ في Firestore…';
+
+      persistPlatformSettingsToFirestore(saved).then(function (result) {
+        if (!statusEl) return;
+        if (result.ok) {
+          statusEl.textContent = formatPlatformSettingsStatus(saved) + ' · تم النشر على Firestore';
+          return;
+        }
         statusEl.textContent =
-          'تم الحفظ — تجربة ' +
-          (saved.freeTrialDays || 0) +
-          ' يوم، مجاني: ' +
-          (saved.freeSimulatorIds.length || 0) +
-          '، قيد التطوير: ' +
-          (saved.comingSoonSimulatorIds.length || 0);
-      }
+          formatPlatformSettingsStatus(saved) +
+          ' · محفوظ محلياً — فشل النشر على Firestore (تحقق من صلاحيات المسؤول والاتصال)';
+      });
     });
   }
 

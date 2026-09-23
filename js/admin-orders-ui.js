@@ -222,9 +222,12 @@ async function grantUserAccess(order) {
 
   var allowedSimulators = await computeAllowedSimulators(null, enrolled);
 
+  var globalFromOrder = !!(order.planId && !order.courseId);
   var entitlements = {
-    isSubscriber: enrolled.length > 0,
-    planId: enrolled.length > 0 ? String(order.planId || existing.planId || '') : '',
+    isSubscriber: globalFromOrder || existing.isSubscriber === true,
+    planId: globalFromOrder
+      ? String(order.planId || existing.planId || '')
+      : String(existing.planId || order.planId || ''),
     enrolledCourseIds: enrolled,
     allowedSimulators: allowedSimulators,
   };

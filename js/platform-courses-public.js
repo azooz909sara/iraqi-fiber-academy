@@ -10,6 +10,26 @@
   var GRID_ID = 'publicCoursesGrid';
   var lastSignature = '';
   var detailsRenderSeq = 0;
+  var coursePlyrPlayer = null;
+
+  var PLYR_YOUTUBE_CONTROLS = [
+    'play-large',
+    'play',
+    'progress',
+    'current-time',
+    'duration',
+    'mute',
+    'volume',
+    'fullscreen',
+  ];
+
+  var PLYR_YOUTUBE_OPTIONS = {
+    noCookie: true,
+    rel: 0,
+    showinfo: 0,
+    iv_load_policy: 3,
+    modestbranding: 1,
+  };
 
   function escapeHtml(value) {
     return String(value == null ? '' : value)
@@ -424,17 +444,61 @@
     return viewerHasCourseAccess(course);
   }
 
+  function destroyCoursePlyrPlayer() {
+    if (!coursePlyrPlayer) return;
+    try {
+      coursePlyrPlayer.destroy();
+    } catch (err) {
+      /* ignore */
+    }
+    coursePlyrPlayer = null;
+  }
+
+  function bindCoursePlayerProtection(container) {
+    if (!container) return;
+    var wrap = container.querySelector('.course-details__player--youtube');
+    if (!wrap || wrap.dataset.shieldBound === '1') return;
+    wrap.dataset.shieldBound = '1';
+    wrap.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+    });
+  }
+
+  function initCoursePlyrPlayer(container) {
+    destroyCoursePlyrPlayer();
+    if (!container || typeof window.Plyr !== 'function') return;
+
+    var el = container.querySelector('#course-video-player');
+    if (!el || el.getAttribute('data-plyr-provider') !== 'youtube') return;
+
+    coursePlyrPlayer = new window.Plyr(el, {
+      youtube: PLYR_YOUTUBE_OPTIONS,
+      controls: PLYR_YOUTUBE_CONTROLS,
+      fullscreen: { iosNative: true },
+    });
+
+    bindCoursePlayerProtection(container);
+  }
+
+  function resolveLessonYouTubeId(lesson) {
+    if (!lesson) return '';
+    var storedId = lesson.videoId ? String(lesson.videoId).trim() : '';
+    if (storedId && /^[A-Za-z0-9_-]{11}$/.test(storedId)) return storedId;
+    var videoUrl = lesson.videoUrl ? String(lesson.videoUrl).trim() : '';
+    return extractYouTubeId(videoUrl);
+  }
+
   function renderLessonPlayer(lesson) {
     var videoUrl = lesson && lesson.videoUrl ? String(lesson.videoUrl).trim() : '';
-    var youtubeId = extractYouTubeId(videoUrl);
+    var youtubeId = resolveLessonYouTubeId(lesson);
     if (youtubeId) {
       return (
-        '<div class="course-details__player">' +
-        '<iframe src="https://www.youtube.com/embed/' +
+        '<div class="course-details__player course-details__player--youtube">' +
+        '<div class="course-details__player-shield course-details__player-shield--top" aria-hidden="true"></div>' +
+        '<div class="course-details__player-shield course-details__player-shield--bottom" aria-hidden="true"></div>' +
+        '<div id="course-video-player" class="course-details__plyr" data-plyr-provider="youtube" data-plyr-embed-id="' +
         escapeHtml(youtubeId) +
-        '" title="' +
-        escapeHtml(lesson.title || 'فيديو') +
-        '" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>' +
+        '"></div>' +
         '</div>'
       );
     }
@@ -503,6 +567,8 @@
   async function renderCourseDetailsPage() {
     var root = document.getElementById('courseDetailsRoot');
     if (!root) return;
+
+    destroyCoursePlyrPlayer();
 
     var seq = ++detailsRenderSeq;
     var courseId = getCourseIdFromUrl();
@@ -646,6 +712,11 @@
       playerHtml +
       '</section>' +
       '</div>';
+
+    window.requestAnimationFrame(function () {
+      if (seq !== detailsRenderSeq) return;
+      initCoursePlyrPlayer(root);
+    });
   }
 
   if (document.readyState === 'loading') {

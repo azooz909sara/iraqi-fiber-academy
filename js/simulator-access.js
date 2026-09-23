@@ -81,9 +81,26 @@ function currentSimulatorIdFromPage() {
   return '';
 }
 
-function isGloballyFreeSimulator(simulatorId) {
-  if (window.PlatformSimulators && typeof window.PlatformSimulators.isGloballyFreeSimulator === 'function') {
-    return window.PlatformSimulators.isGloballyFreeSimulator(simulatorId);
+function tryKickOutExpiredTrial(simulatorId, localUser) {
+  if (!window.PlatformSimulators) return false;
+  if (
+    typeof window.PlatformSimulators.isTrialTierSimulator !== 'function' ||
+    !window.PlatformSimulators.isTrialTierSimulator(simulatorId)
+  ) {
+    return false;
+  }
+  var settings =
+    typeof window.PlatformSimulators.getPlatformSettings === 'function'
+      ? window.PlatformSimulators.getPlatformSettings()
+      : null;
+  var expMs =
+    window.IFAAuth && typeof window.IFAAuth.getTrialExpiryMs === 'function'
+      ? window.IFAAuth.getTrialExpiryMs(localUser, settings)
+      : 0;
+  if (!(expMs > 0 && Date.now() >= expMs)) return false;
+  if (typeof window.PlatformSimulators.kickOutTrialExpiredUser === 'function') {
+    window.PlatformSimulators.kickOutTrialExpiredUser(simulatorId);
+    return true;
   }
   return false;
 }
@@ -105,11 +122,6 @@ async function evaluateAccess(user) {
   if (!simulatorId) {
     console.error('[SimulatorAccess] Could not resolve simulator id for page:', window.location.pathname);
     setGateVisible(true, 'simulator-locked');
-    return;
-  }
-
-  if (isGloballyFreeSimulator(simulatorId)) {
-    setGateVisible(false);
     return;
   }
 
@@ -146,6 +158,9 @@ async function evaluateAccess(user) {
       window.PlatformSimulators.viewerCanAccess(simulatorId)
     ) {
       setGateVisible(false);
+      if (typeof window.PlatformSimulators.armTrialExpiryWatch === 'function') {
+        window.PlatformSimulators.armTrialExpiryWatch();
+      }
       return;
     }
 
@@ -160,6 +175,9 @@ async function evaluateAccess(user) {
       setGateVisible(false);
       return;
     }
+    if (tryKickOutExpiredTrial(simulatorId, localUser)) {
+      return;
+    }
     console.error(
       '[SimulatorAccess] Access denied — simulator "' +
         simulatorId +
@@ -169,6 +187,13 @@ async function evaluateAccess(user) {
     setGateVisible(true, 'simulator-locked');
   } catch (err) {
     console.error('[SimulatorAccess] access check failed:', err);
+    var catchUser =
+      window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function'
+        ? window.IFAAuth.getLocalAuthUser()
+        : null;
+    if (tryKickOutExpiredTrial(simulatorId, catchUser)) {
+      return;
+    }
     setGateVisible(true, 'simulator-locked');
   }
 }

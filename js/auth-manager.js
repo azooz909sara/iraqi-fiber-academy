@@ -72,10 +72,61 @@ function getLocalAuthUser() {
       enrolledCourseIds: Array.isArray(parsed.enrolledCourseIds) ? parsed.enrolledCourseIds.slice() : [],
       allowedSimulators: Array.isArray(parsed.allowedSimulators) ? parsed.allowedSimulators.slice() : [],
       trialExpiresAt: Number(parsed.trialExpiresAt) || 0,
+      createdAt: String(parsed.createdAt || ''),
+      loggedInAt: String(parsed.loggedInAt || ''),
     };
   } catch (err) {
     return null;
   }
+}
+
+function resolveTrialPlatformSettings(settings) {
+  if (settings && typeof settings === 'object') return settings;
+  if (typeof window !== 'undefined' && window.PlatformSimulators && typeof window.PlatformSimulators.getPlatformSettings === 'function') {
+    return window.PlatformSimulators.getPlatformSettings();
+  }
+  return readPlatformSettings();
+}
+
+function getTrialAccountCreatedAt(authUser) {
+  if (!authUser) return null;
+  var createdAt =
+    authUser.metadata && authUser.metadata.creationTime
+      ? new Date(authUser.metadata.creationTime)
+      : authUser.createdAt
+        ? new Date(authUser.createdAt)
+        : authUser.loggedInAt
+          ? new Date(authUser.loggedInAt)
+          : new Date();
+  if (isNaN(createdAt.getTime())) return null;
+  return createdAt;
+}
+
+function getTrialExpiryMs(authUser, settings) {
+  if (!authUser) return 0;
+  var storedExp = trialExpiryMs(authUser.trialExpiresAt);
+  return storedExp > 0 ? storedExp : 0;
+}
+
+function getRemainingTrialDays(authUser, settings) {
+  if (!authUser) return 0;
+  var expMs = getTrialExpiryMs(authUser, settings);
+  if (expMs <= Date.now()) return 0;
+  return Math.max(1, Math.ceil((expMs - Date.now()) / (1000 * 60 * 60 * 24)));
+}
+
+function resolveAuthUserForTrial() {
+  var local = getLocalAuthUser();
+  var firebaseUser = lastUser;
+  if (!firebaseUser && !local) return null;
+  if (!firebaseUser) return local;
+  return Object.assign({}, local || {}, {
+    email: firebaseUser.email || (local && local.email),
+    metadata: firebaseUser.metadata,
+    trialExpiresAt: local && local.trialExpiresAt ? local.trialExpiresAt : 0,
+    createdAt: local && local.createdAt ? local.createdAt : '',
+    loggedInAt: local && local.loggedInAt ? local.loggedInAt : '',
+  });
 }
 
 function readPlatformSettings() {
@@ -83,10 +134,10 @@ function readPlatformSettings() {
     var raw = localStorage.getItem('ifa_platform_settings');
     if (!raw) return { freeSimulatorIds: [], freeTrialDays: 0 };
     var parsed = JSON.parse(raw);
-    var days = Number(parsed && parsed.freeTrialDays);
+    var days = parseFloat(parsed && parsed.freeTrialDays);
     return {
       freeSimulatorIds: Array.isArray(parsed && parsed.freeSimulatorIds) ? parsed.freeSimulatorIds : [],
-      freeTrialDays: isFinite(days) && days > 0 ? Math.round(days) : 0,
+      freeTrialDays: isFinite(days) && days > 0 ? Math.min(365, days) : 0,
     };
   } catch (err) {
     return { freeSimulatorIds: [], freeTrialDays: 0 };
@@ -99,8 +150,8 @@ function trialExpiryMs(value) {
   return isFinite(n) ? n : 0;
 }
 
-function hasActiveTrial(user) {
-  return trialExpiryMs(user && user.trialExpiresAt) > Date.now();
+function hasActiveTrial(user, settings) {
+  return getTrialExpiryMs(user, settings) > Date.now();
 }
 
 function resolveTrialExpiresAt(email, incoming) {
@@ -123,7 +174,9 @@ function resolveTrialExpiresAt(email, incoming) {
   } catch (err) {
     /* ignore */
   }
-  if (sameEmail) return trialExpiryMs(previous.trialExpiresAt);
+  if (sameEmail && previous) {
+    return 0;
+  }
   var days = readPlatformSettings().freeTrialDays;
   if (days > 0) return Date.now() + days * 24 * 60 * 60 * 1000;
   return 0;
@@ -176,6 +229,14 @@ function setLocalAuthUser(user) {
           ? normalizeAllowedSimulators(previous.allowedSimulators)
           : [],
     trialExpiresAt: trialExpiresAt,
+    createdAt:
+      sameEmail && previous && previous.createdAt
+        ? previous.createdAt
+        : String(
+            user.createdAt ||
+              (user.metadata && user.metadata.creationTime) ||
+              new Date().toISOString()
+          ),
     loggedInAt: new Date().toISOString(),
   };
   try {
@@ -283,6 +344,7 @@ function notifyLocalAuthChanged(detail) {
   } catch (err) {
     /* ignore */
   }
+  refreshGlobalTopBanner();
 }
 
 function startPlatformNotifications(user, profile) {
@@ -1320,6 +1382,12 @@ function initAuthUI() {
 
 initAuthUI();
 
+function refreshGlobalTopBanner() {
+  if (typeof window.applyGlobalAnnouncementBar === 'function') {
+    window.applyGlobalAnnouncementBar();
+  }
+}
+
 window.IFAAuth = {
   auth: auth,
   getCurrentUser: function () {
@@ -1367,12 +1435,17 @@ window.IFAAuth = {
   clearLocalAuthUser: clearLocalAuthUser,
   loginLocalSession: loginLocalSession,
   hasActiveTrial: hasActiveTrial,
+  getTrialExpiryMs: getTrialExpiryMs,
+  getRemainingTrialDays: getRemainingTrialDays,
+  resolveAuthUserForTrial: resolveAuthUserForTrial,
   isAdminUser: isAdminUser,
   canShowSimulatorAdminSettingsUI: canShowSimulatorAdminSettingsUI,
   isInstructorUser: isInstructorUser,
   applyEntitlements: applyEntitlements,
   profileToEntitlements: profileToEntitlements,
 };
+
+refreshGlobalTopBanner();
 
 document.addEventListener('ifa:subscription-changed', function (e) {
   var detail = (e && e.detail) || {};

@@ -102,6 +102,12 @@ async function computeEnrolledCourseIdsForOrder(order) {
   return uniqueIds(ids);
 }
 
+function orderGrantsGlobalPlatformSubscription(order) {
+  if (!order || typeof order !== 'object') return false;
+  if (order.courseId) return false;
+  return !!String(order.planId || '').trim();
+}
+
 /**
  * Rebuild users/{uid} entitlements from all approved orders for that user.
  * @param {string} uid
@@ -132,8 +138,14 @@ export async function syncEntitlementsFromApprovedOrders(uid) {
   }
 
   var allowedSimulators = await computeAllowedSimulatorsFromCourses(enrolled);
-  var planId = approvedOrders.length ? String(approvedOrders[0].planId || '') : '';
-  var isSubscriber = enrolled.length > 0;
+  var planId = '';
+  var isSubscriber = false;
+  for (var j = 0; j < approvedOrders.length; j++) {
+    if (!orderGrantsGlobalPlatformSubscription(approvedOrders[j])) continue;
+    isSubscriber = true;
+    planId = String(approvedOrders[j].planId || planId || '');
+    break;
+  }
 
   var entitlements = {
     enrolledCourseIds: enrolled,

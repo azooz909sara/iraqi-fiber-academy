@@ -39,6 +39,58 @@
       .replace(/"/g, '&quot;');
   }
 
+  var YOUTUBE_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+  function extractYouTubeVideoId(url) {
+    var raw = String(url || '').trim();
+    if (!raw) return '';
+    if (YOUTUBE_ID_RE.test(raw)) return raw;
+
+    var patterns = [
+      /(?:youtube\.com\/watch\?.*v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i,
+      /youtu\.be\/([A-Za-z0-9_-]{11})/i,
+      /youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/i,
+      /m\.youtube\.com\/watch\?.*v=([A-Za-z0-9_-]{11})/i,
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = raw.match(patterns[i]);
+      if (match && match[1] && YOUTUBE_ID_RE.test(match[1])) return match[1];
+    }
+    return '';
+  }
+
+  function looksLikeYouTubeInput(value) {
+    return /youtube|youtu\.be|youtube-nocookie/i.test(String(value || ''));
+  }
+
+  /**
+   * @returns {{ videoId: string, videoUrl: string, invalid?: boolean }}
+   */
+  function normalizeLessonVideoFields(rawInput) {
+    var trimmed = String(rawInput || '').trim();
+    if (!trimmed) {
+      return { videoId: '', videoUrl: '' };
+    }
+
+    var youtubeId = extractYouTubeVideoId(trimmed);
+    if (youtubeId) {
+      return { videoId: youtubeId, videoUrl: '' };
+    }
+
+    if (looksLikeYouTubeInput(trimmed)) {
+      return { videoId: '', videoUrl: '', invalid: true };
+    }
+
+    return { videoId: '', videoUrl: trimmed };
+  }
+
+  function lessonVideoInputValue(lesson) {
+    if (!lesson) return '';
+    if (lesson.videoId) return String(lesson.videoId).trim();
+    return String(lesson.videoUrl || '').trim();
+  }
+
   function normalize(email) {
     return String(email || '').trim().toLowerCase();
   }
@@ -340,6 +392,7 @@
       id: (l && l.id) || 'lesson_' + Date.now().toString(36) + '_' + (index || 0),
       title: (l && l.title) || '',
       description: (l && l.description) || '',
+      videoId: (l && l.videoId) || '',
       videoUrl: (l && l.videoUrl) || '',
       videoFileName: (l && l.videoFileName) || '',
       videoTitle: (l && l.videoTitle) || '',
@@ -519,11 +572,11 @@
           '</label>' +
           '<div class="admin-lesson-card__media">' +
           '<label class="admin-field">' +
-          '<span class="admin-field__label">رابط الفيديو</span>' +
-          '<input class="admin-field__input" type="url" placeholder="https://..." data-lesson-field="videoUrl" data-lesson-index="' +
+          '<span class="admin-field__label">رابط YouTube أو ملف مباشر</span>' +
+          '<input class="admin-field__input" type="text" placeholder="https://youtube.com/... أو معرّف 11 حرفاً" data-lesson-field="videoUrl" data-lesson-index="' +
           index +
           '" value="' +
-          escapeHtml(lesson.videoUrl) +
+          escapeHtml(lessonVideoInputValue(lesson)) +
           '" />' +
           '</label>' +
           '<label class="admin-field">' +
@@ -619,7 +672,12 @@
       );
       if (title) lesson.title = title.value;
       if (description) lesson.description = description.value;
-      if (videoUrl) lesson.videoUrl = videoUrl.value;
+      if (videoUrl) {
+        var normalizedVideo = normalizeLessonVideoFields(videoUrl.value);
+        lesson.videoId = normalizedVideo.videoId;
+        lesson.videoUrl = normalizedVideo.videoUrl;
+        lesson._videoInvalid = !!normalizedVideo.invalid;
+      }
       if (videoFileName) lesson.videoFileName = videoFileName.value;
       lesson.isFreePreview = !!(freePreview && freePreview.checked);
       if (!lesson.quiz || typeof lesson.quiz !== 'object') lesson.quiz = emptyQuiz();
@@ -627,6 +685,22 @@
       lesson.order = index + 1;
     });
     return lessonDrafts;
+  }
+
+  function validateLessonVideosFromDom() {
+    var lessons = collectLessonDraftsFromDom();
+    for (var i = 0; i < lessons.length; i++) {
+      if (lessons[i]._videoInvalid) {
+        return {
+          ok: false,
+          message:
+            'رابط YouTube غير صالح في الدرس «' +
+            (lessons[i].title || 'بدون عنوان') +
+            '». تأكد من الرابط أو معرّف الفيديو (11 حرفاً).',
+        };
+      }
+    }
+    return { ok: true, lessons: lessons };
   }
 
   function readQuizBuilderFields(index) {
@@ -1088,6 +1162,7 @@
               id: 'lesson_' + Date.now().toString(36),
               title: '',
               description: '',
+              videoId: '',
               videoUrl: '',
               videoFileName: '',
               isFreePreview: false,
@@ -1110,6 +1185,12 @@
         var id = (document.getElementById('courseEditorId') || {}).value || '';
         var instructor = resolveInstructorFromForm();
         var autoPricingPlan = readGeneratePlanCheck();
+        var videoValidation = validateLessonVideosFromDom();
+        if (!videoValidation.ok) {
+          showToast(videoValidation.message, 'error');
+          return;
+        }
+
         var payload = {
           title: (document.getElementById('courseEditorName') || {}).value,
           description: (document.getElementById('courseEditorDescription') || {}).value,
@@ -1126,7 +1207,11 @@
           suppressPricingPlan: autoPricingPlan ? false : undefined,
           instructorEmail: instructor.instructorEmail,
           instructorName: instructor.instructorName,
-          lessons: collectLessonDraftsFromDom(),
+          lessons: (videoValidation.lessons || []).map(function (lesson) {
+            var copy = Object.assign({}, lesson);
+            delete copy._videoInvalid;
+            return copy;
+          }),
           softDeleted: false,
           deletedAt: '',
           source: 'admin',

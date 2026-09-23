@@ -108,8 +108,68 @@ function normalizeShowcaseStore(raw) {
   return out;
 }
 
+function normalizeFreeTrialDays(value) {
+  var days = parseFloat(value);
+  if (!isFinite(days) || days <= 0) return 0;
+  return Math.min(365, days);
+}
+
 function defaultPlatformSettings() {
-  return { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
+  return {
+    freeSimulatorIds: [],
+    comingSoonSimulatorIds: [],
+    freeTrialDays: 0,
+    trialAnnouncementText: '',
+    globalOfferEnabled: false,
+    globalOfferText: '',
+    globalOfferEndsAt: '',
+  };
+}
+
+function normalizeBannerOfferEndsAt(value) {
+  if (value == null || value === '') return '';
+  var ms = typeof value === 'number' ? value : Date.parse(String(value));
+  if (!isFinite(ms) || ms <= 0) return '';
+  try {
+    return new Date(ms).toISOString();
+  } catch (err) {
+    return '';
+  }
+}
+
+function normalizeBannerTimerEnabled(src) {
+  if (src && src.bannerTimerEnabled != null) return !!src.bannerTimerEnabled;
+  if (src && src.bannerTimerMode === 'global_offer' && normalizeBannerOfferEndsAt(src.bannerOfferEndsAt)) {
+    return true;
+  }
+  return false;
+}
+
+function normalizeTopBannerFields(src) {
+  var raw = src && typeof src === 'object' ? src : {};
+  var trialAnnouncementText = String(raw.trialAnnouncementText || '').trim().slice(0, 500);
+  var globalOfferText = String(raw.globalOfferText || '').trim().slice(0, 500);
+  var globalOfferEndsAt = normalizeBannerOfferEndsAt(raw.globalOfferEndsAt);
+  var globalOfferEnabled = raw.globalOfferEnabled;
+
+  if (globalOfferEnabled == null) {
+    var legacyEnds = normalizeBannerOfferEndsAt(raw.bannerOfferEndsAt);
+    var timerOn = normalizeBannerTimerEnabled(raw);
+    globalOfferEnabled = !!raw.announcementEnabled || (timerOn && !!legacyEnds);
+    if (!globalOfferText && raw.announcementText) {
+      globalOfferText = String(raw.announcementText).trim().slice(0, 500);
+    }
+    if (!globalOfferEndsAt && legacyEnds) {
+      globalOfferEndsAt = legacyEnds;
+    }
+  }
+
+  return {
+    trialAnnouncementText: trialAnnouncementText,
+    globalOfferEnabled: !!globalOfferEnabled,
+    globalOfferText: globalOfferText,
+    globalOfferEndsAt: globalOfferEndsAt,
+  };
 }
 
 function normalizePlatformSettings(raw) {
@@ -121,13 +181,19 @@ function normalizePlatformSettings(raw) {
     }
     return Array.isArray(list) ? list.map(String).filter(Boolean) : [];
   };
-  var days = Number(src.freeTrialDays != null ? src.freeTrialDays : base.freeTrialDays);
+  var banner = normalizeTopBannerFields(src);
   return {
     freeSimulatorIds: normalizeIds(src.freeSimulatorIds != null ? src.freeSimulatorIds : base.freeSimulatorIds),
     comingSoonSimulatorIds: normalizeIds(
       src.comingSoonSimulatorIds != null ? src.comingSoonSimulatorIds : base.comingSoonSimulatorIds
     ),
-    freeTrialDays: isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0,
+    freeTrialDays: normalizeFreeTrialDays(
+      src.freeTrialDays != null ? src.freeTrialDays : base.freeTrialDays
+    ),
+    trialAnnouncementText: banner.trialAnnouncementText,
+    globalOfferEnabled: banner.globalOfferEnabled,
+    globalOfferText: banner.globalOfferText,
+    globalOfferEndsAt: banner.globalOfferEndsAt,
   };
 }
 

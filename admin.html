@@ -1377,13 +1377,13 @@
         <div class="admin-panel__header">
           <div>
             <h2 class="admin-panel__title" id="settingsHeading">الإعدادات</h2>
-            <p class="admin-panel__desc">التحكم في المحاكيات المجانية وفترة التجربة للحسابات الجديدة</p>
+            <p class="admin-panel__desc">محاكيات الفترة التجريبية، قيد التطوير، وإعدادات التجربة والعروض</p>
           </div>
         </div>
         <form class="admin-settings-form" id="platformSettingsForm">
           <fieldset class="admin-field admin-field--fieldset">
-            <legend class="admin-field__label">المحاكيات المجانية الافتراضية (Free Access)</legend>
-            <p class="admin-field__hint">المحاكيات المحددة تُفتح مباشرة للجميع دون اشتراك</p>
+            <legend class="admin-field__label">محاكيات الفترة التجريبية المجانية للحسابات الجدد</legend>
+            <p class="admin-field__hint">المحاكيات المحددة متاحة فقط أثناء التجربة النشطة (حسب عدد أيام التجربة في القسم أدناه) أو للمشتركين والمسؤولين. بعد انتهاء التجربة تُقفل وتتطلب الاشتراك في باقة — وليست مجانية للزوار أو للجميع.</p>
             <div class="admin-simulator-checklist" id="settingsFreeSimulators"></div>
           </fieldset>
           <fieldset class="admin-field admin-field--fieldset">
@@ -1391,12 +1391,50 @@
             <p class="admin-field__hint">عند التفعيل: تظهر شارة «قريباً — قيد التطوير» على البطاقة ويُقفل الوصول المباشر للمحاكي</p>
             <div class="admin-simulator-checklist" id="settingsComingSoonSimulators"></div>
           </fieldset>
-          <label class="admin-field">
-            <span class="admin-field__label">فترة التجربة للحسابات الجديدة (Free Trial Days)</span>
-            <input class="admin-field__input" id="settingsFreeTrialDays" type="number" min="0" max="365" step="1" value="0" />
-            <span class="admin-field__hint">0 = تعطيل التجربة. عند تسجيل حساب جديد تُمنح N يوماً من الوصول الكامل للمحاكيات.</span>
-          </label>
-          <fieldset class="admin-field admin-field--fieldset admin-ftth-lab-config" id="ifa_ftth_lab_config" aria-labelledby="adminFtthLabConfigLegend">
+          <fieldset class="admin-field admin-field--fieldset">
+            <legend class="admin-field__label">أ — التجربة التلقائية للمستخدمين الجدد</legend>
+            <p class="admin-field__hint">يُفعَّل تلقائياً عندما تكون مدة التجربة أكبر من صفر. يظهر الشريط والعدّاد للمستخدمين المسجّلين الجدد فقط (ضمن فترة التجربة)، ويُخفى عن الزوار والمشتركين والمسؤولين.</p>
+            <div class="admin-field">
+              <span class="admin-field__label">مدة التجربة</span>
+              <div class="admin-trial-duration" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+                <label class="admin-field" style="margin: 0; flex: 1 1 100px; min-width: 88px;">
+                  <span class="admin-field__label">أيام</span>
+                  <input class="admin-field__input" id="settingsTrialDays" type="number" min="0" step="1" value="0" />
+                </label>
+                <label class="admin-field" style="margin: 0; flex: 1 1 100px; min-width: 88px;">
+                  <span class="admin-field__label">ساعات</span>
+                  <input class="admin-field__input" id="settingsTrialHours" type="number" min="0" max="23" step="1" value="0" />
+                </label>
+                <label class="admin-field" style="margin: 0; flex: 1 1 100px; min-width: 88px;">
+                  <span class="admin-field__label">دقائق</span>
+                  <input class="admin-field__input" id="settingsTrialMinutes" type="number" min="0" max="59" step="1" value="0" />
+                </label>
+              </div>
+              <span class="admin-field__hint">0 في كل الحقول = تعطيل التجربة. عند التسجيل يُمنح المستخدم هذه المدة للوصول إلى المحاكيات في قائمة التجربة أعلاه (مثال للاختبار: 0 أيام، 0 ساعات، 5 دقائق).</span>
+            </div>
+            <label class="admin-field">
+              <span class="admin-field__label">نص شريط التجربة الشخصي</span>
+              <textarea class="admin-field__input admin-field__textarea" id="settingsTrialAnnouncementText" rows="2" maxlength="500" placeholder="مثال: استمتع بتجربتك المجانية على المحاكيات"></textarea>
+            </label>
+          </fieldset>
+          <fieldset class="admin-field admin-field--fieldset">
+            <legend class="admin-field__label">ب — عرض ترويجي عام (للجميع)</legend>
+            <p class="admin-field__hint">عند التفعيل يظهر هذا الشريط لجميع الزوار والمستخدمين حتى تاريخ الانتهاء، و<strong>يلغي أولوية</strong> شريط التجربة التلقائي طالما العرض العام سارياً.</p>
+            <label class="admin-field admin-field--checkbox">
+              <input type="checkbox" id="settingsGlobalOfferEnabled" name="globalOfferEnabled" />
+              <span>تفعيل العرض الترويجي العام</span>
+            </label>
+            <label class="admin-field">
+              <span class="admin-field__label">نص العرض</span>
+              <textarea class="admin-field__input admin-field__textarea" id="settingsGlobalOfferText" rows="2" maxlength="500" placeholder="مثال: عرض خاص — اشترك الآن بخصم محدود"></textarea>
+            </label>
+            <label class="admin-field" id="settingsGlobalOfferEndsAtWrap" hidden>
+              <span class="admin-field__label">انتهاء العرض</span>
+              <input class="admin-field__input" id="settingsGlobalOfferEndsAt" type="datetime-local" />
+              <span class="admin-field__hint">العدّاد التنازلي حتى هذا التاريخ والوقت. يُحفظ بتوقيت UTC.</span>
+            </label>
+          </fieldset>
+          <fieldset class="admin-field admin-field--fieldset admin-ftth-lab-config" id="ifa_ftth_lab_config" aria-labelledby="adminFtthLabConfigLegend" hidden aria-hidden="true">
             <legend class="admin-field__label" id="adminFtthLabConfigLegend">إعدادات مختبر FTTH · <code>ifa_ftth_lab_config</code></legend>
             <p class="admin-field__hint">Device names, specs, toolbox icons — use the tabs below to edit lab device configuration.</p>
             <div class="admin-ftth-lab-config__panel lab-settings-cms lab-settings-cms--embedded" id="admin-ftth-lab-config-root">
@@ -1452,7 +1490,7 @@
   <script src="js/admin-plans-ui.js?v=20260921"></script>
   <script src="js/settings/FtthLabSettings.js?v=20260921"></script>
   <script src="js/ftth-lab-settings-cms.js?v=20260921"></script>
-  <script src="js/admin-core.js?v=20260921"></script>
+  <script src="js/admin-core.js?v=20260925"></script>
   <script src="js/admin-users-ui.js?v=20260921"></script>
   <script src="js/admin-instructors-ui.js?v=20260921"></script>
   <script type="module" src="js/platform-simulators-firestore-sync.js?v=20260921"></script>

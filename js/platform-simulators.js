@@ -54,6 +54,10 @@
   var PAYWALL_TOAST_MSG = 'يتطلب فتح هذا المحاكي الاشتراك في باقة تدريبية';
   var PAYWALL_PLAN_KEY = 'ifa_paywall_plan';
   var PAYWALL_SIM_KEY = 'ifa_paywall_sim';
+  var TRIAL_KICKOUT_FLAG = 'ifa_trial_kickout';
+  var TRIAL_EXPIRED_REDIRECT_MSG = 'انتهت تجربتك المجانية. جاري تحويلك إلى الباقات…';
+  var TRIAL_KICKOUT_DELAY_MS = 2000;
+  var trialKickoutInFlight = false;
 
   var ALLOWED_IDS = {};
   SIMULATOR_CATALOG.forEach(function (s) {
@@ -300,8 +304,70 @@
   var COMING_SOON_MSG = 'هذا المحاكي قيد التطوير حالياً — سيتوفر قريباً';
   var COMING_SOON_BADGE = 'قريباً — قيد التطوير';
 
+  function normalizeFreeTrialDays(value) {
+    var days = parseFloat(value);
+    if (!isFinite(days) || days <= 0) return 0;
+    return Math.min(365, days);
+  }
+
   function defaultPlatformSettings() {
-    return { freeSimulatorIds: [], comingSoonSimulatorIds: [], freeTrialDays: 0 };
+    return {
+      freeSimulatorIds: [],
+      comingSoonSimulatorIds: [],
+      freeTrialDays: 0,
+      trialAnnouncementText: '',
+      globalOfferEnabled: false,
+      globalOfferText: '',
+      globalOfferEndsAt: '',
+    };
+  }
+
+  function normalizeBannerOfferEndsAt(value) {
+    if (value == null || value === '') return '';
+    var ms = typeof value === 'number' ? value : Date.parse(String(value));
+    if (!isFinite(ms) || ms <= 0) return '';
+    try {
+      return new Date(ms).toISOString();
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function normalizeBannerTimerEnabled(raw) {
+    if (raw && typeof raw === 'object' && raw.bannerTimerEnabled != null) {
+      return !!raw.bannerTimerEnabled;
+    }
+    if (raw && raw.bannerTimerMode === 'global_offer' && normalizeBannerOfferEndsAt(raw.bannerOfferEndsAt)) {
+      return true;
+    }
+    return false;
+  }
+
+  function normalizeTopBannerFields(src) {
+    var raw = src && typeof src === 'object' ? src : {};
+    var trialAnnouncementText = String(raw.trialAnnouncementText || '').trim().slice(0, 500);
+    var globalOfferText = String(raw.globalOfferText || '').trim().slice(0, 500);
+    var globalOfferEndsAt = normalizeBannerOfferEndsAt(raw.globalOfferEndsAt);
+    var globalOfferEnabled = raw.globalOfferEnabled;
+
+    if (globalOfferEnabled == null) {
+      var legacyEnds = normalizeBannerOfferEndsAt(raw.bannerOfferEndsAt);
+      var timerOn = normalizeBannerTimerEnabled(raw);
+      globalOfferEnabled = !!raw.announcementEnabled || (timerOn && !!legacyEnds);
+      if (!globalOfferText && raw.announcementText) {
+        globalOfferText = String(raw.announcementText).trim().slice(0, 500);
+      }
+      if (!globalOfferEndsAt && legacyEnds) {
+        globalOfferEndsAt = legacyEnds;
+      }
+    }
+
+    return {
+      trialAnnouncementText: trialAnnouncementText,
+      globalOfferEnabled: !!globalOfferEnabled,
+      globalOfferText: globalOfferText,
+      globalOfferEndsAt: globalOfferEndsAt,
+    };
   }
 
   function getPlatformSettings() {
@@ -310,8 +376,12 @@
     if (!parsed || typeof parsed !== 'object') return base;
     base.freeSimulatorIds = normalizeSimulatorIds(parsed.freeSimulatorIds);
     base.comingSoonSimulatorIds = normalizeSimulatorIds(parsed.comingSoonSimulatorIds);
-    var days = Number(parsed.freeTrialDays);
-    base.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
+    base.freeTrialDays = normalizeFreeTrialDays(parsed.freeTrialDays);
+    var banner = normalizeTopBannerFields(parsed);
+    base.trialAnnouncementText = banner.trialAnnouncementText;
+    base.globalOfferEnabled = banner.globalOfferEnabled;
+    base.globalOfferText = banner.globalOfferText;
+    base.globalOfferEndsAt = banner.globalOfferEndsAt;
     return base;
   }
 
@@ -319,8 +389,12 @@
     var next = Object.assign(defaultPlatformSettings(), getPlatformSettings(), patch || {});
     next.freeSimulatorIds = normalizeSimulatorIds(next.freeSimulatorIds);
     next.comingSoonSimulatorIds = normalizeSimulatorIds(next.comingSoonSimulatorIds);
-    var days = Number(next.freeTrialDays);
-    next.freeTrialDays = isFinite(days) && days > 0 ? Math.min(365, Math.round(days)) : 0;
+    next.freeTrialDays = normalizeFreeTrialDays(next.freeTrialDays);
+    var banner = normalizeTopBannerFields(next);
+    next.trialAnnouncementText = banner.trialAnnouncementText;
+    next.globalOfferEnabled = banner.globalOfferEnabled;
+    next.globalOfferText = banner.globalOfferText;
+    next.globalOfferEndsAt = banner.globalOfferEndsAt;
     try {
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
     } catch (err) {
@@ -334,8 +408,17 @@
     return next;
   }
 
+  function getTrialTierSimulatorIds() {
+    return getPlatformSettings().freeSimulatorIds.slice();
+  }
+
+  function isTrialTierSimulator(simulatorId) {
+    return getTrialTierSimulatorIds().indexOf(String(simulatorId || '')) !== -1;
+  }
+
+  /** @deprecated Use isTrialTierSimulator — list is trial-tier, not permanently free. */
   function isGloballyFreeSimulator(simulatorId) {
-    return getPlatformSettings().freeSimulatorIds.indexOf(String(simulatorId || '')) !== -1;
+    return isTrialTierSimulator(simulatorId);
   }
 
   function isSimulatorUnderDevelopment(simulatorId) {
@@ -352,6 +435,43 @@
 
   function hasActiveTrial(user) {
     return trialExpiryMs(user) > Date.now();
+  }
+
+  function hasActiveTrialForAccess(authUser) {
+    if (!authUser) return false;
+    var settings = getPlatformSettings();
+    if (global.IFAAuth && typeof global.IFAAuth.getTrialExpiryMs === 'function') {
+      return global.IFAAuth.getTrialExpiryMs(authUser, settings) > Date.now();
+    }
+    if (global.IFAAuth && typeof global.IFAAuth.hasActiveTrial === 'function') {
+      return global.IFAAuth.hasActiveTrial(authUser, settings);
+    }
+    return hasActiveTrial(authUser);
+  }
+
+  function isGlobalPlatformSubscriber(authUser) {
+    return !!(authUser && authUser.isSubscriber === true);
+  }
+
+  function canAccessFullTrialTierPool(authUser, directoryUser) {
+    if (!authUser) return false;
+    if (isPrivilegedRole(authUser, directoryUser)) return true;
+    if (hasActiveTrialForAccess(authUser)) return true;
+    if (isGlobalPlatformSubscriber(authUser)) return true;
+    return false;
+  }
+
+  function canAccessTrialTierSimulators(authUser, directoryUser) {
+    return canAccessFullTrialTierPool(authUser, directoryUser);
+  }
+
+  function mergeTrialTierSimulatorIds(ids, authUser, directoryUser) {
+    var out = ids.slice();
+    if (!canAccessFullTrialTierPool(authUser, directoryUser)) return out;
+    getTrialTierSimulatorIds().forEach(function (trialId) {
+      if (out.indexOf(trialId) === -1) out.push(trialId);
+    });
+    return out;
   }
 
   function findDirectoryUser(email) {
@@ -595,6 +715,41 @@
     return '';
   }
 
+  function isOnSimulatorEnvironmentPage() {
+    return !!currentSimulatorIdFromLocation();
+  }
+
+  function isOnHomeOrCatalogPage() {
+    var file = currentPageFile();
+    if (file === 'index.html' || file === '') return true;
+    return !currentSimulatorIdFromLocation();
+  }
+
+  var homePaywallUrlStripped = false;
+
+  function stripHomePaywallUrlFromAddressBar() {
+    if (homePaywallUrlStripped) return;
+    if (!isOnHomeOrCatalogPage()) return;
+    var file = currentPageFile();
+    if (file !== 'index.html' && file !== '') return;
+    var search = String(global.location.search || '');
+    var hash = String(global.location.hash || '');
+    var needsStrip =
+      search.indexOf('needSim=') !== -1 ||
+      search.indexOf('highlightPlan=') !== -1 ||
+      hash === '#plans' ||
+      hash === '#pricing';
+    if (!needsStrip) return;
+    try {
+      var clean = global.location.pathname || 'index.html';
+      if (!clean || clean === '/') clean = '/index.html';
+      global.history.replaceState(null, document.title, clean);
+      homePaywallUrlStripped = true;
+    } catch (err) {
+      /* ignore */
+    }
+  }
+
   function showPaywallNotice(message) {
     var text = message || PAYWALL_TOAST_MSG;
     var el = document.getElementById('ifa-paywall-toast');
@@ -625,6 +780,33 @@
     var qs = 'needSim=' + encodeURIComponent(simulatorId || '');
     if (plan) qs += '&highlightPlan=' + encodeURIComponent(plan.id);
     return 'index.html?' + qs + '#plans';
+  }
+
+  function kickOutTrialExpiredUser(simulatorId) {
+    var id = String(simulatorId || currentSimulatorIdFromLocation() || '');
+    if (!id || trialKickoutInFlight) return;
+    if (!isOnSimulatorEnvironmentPage() || isOnHomeOrCatalogPage()) return;
+
+    var authUser = getLocalAuthUser();
+    var expMs = resolveTrialExpiryMsForAccess(authUser);
+    if (expMs > Date.now() && viewerCanAccess(id)) return;
+
+    trialKickoutInFlight = true;
+    clearTrialExpiryWatch();
+
+    var target = paywallRedirectUrl(id);
+    showPaywallNotice(TRIAL_EXPIRED_REDIRECT_MSG);
+
+    try {
+      sessionStorage.setItem(PAYWALL_SIM_KEY, id);
+      sessionStorage.setItem(TRIAL_KICKOUT_FLAG, '1');
+    } catch (err) {
+      /* ignore */
+    }
+
+    setTimeout(function () {
+      global.location.replace(target);
+    }, TRIAL_KICKOUT_DELAY_MS);
   }
 
   function showSimulatorDevLock(simulatorId) {
@@ -735,6 +917,7 @@
     if ((hash === '#pricing' || hash === '#plans') && target) {
       setTimeout(function () {
         target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(stripHomePaywallUrlFromAddressBar, 500);
       }, 80);
     }
   }
@@ -837,7 +1020,7 @@
       return {
         role: 'guest',
         unlocked: false,
-        simulatorIds: getPlatformSettings().freeSimulatorIds.slice(),
+        simulatorIds: [],
       };
     }
 
@@ -871,14 +1054,15 @@
       return {
         role: 'student',
         unlocked: false,
-        simulatorIds: getPlatformSettings().freeSimulatorIds.slice(),
+        simulatorIds: [],
       };
     }
 
-    var ids = getUserAllowedSimulatorIds(authUser, directoryUser);
-    getPlatformSettings().freeSimulatorIds.forEach(function (id) {
-      if (ids.indexOf(id) === -1) ids.push(id);
-    });
+    var ids = mergeTrialTierSimulatorIds(
+      getUserAllowedSimulatorIds(authUser, directoryUser),
+      authUser,
+      directoryUser
+    );
     return {
       role: 'student',
       unlocked: false,
@@ -888,21 +1072,24 @@
 
   function viewerCanAccess(simulatorId) {
     var id = String(simulatorId || '');
-    if (isGloballyFreeSimulator(id)) return true;
-
     if (isAdminPreviewContext()) return true;
 
     var authUser = getLocalAuthUser();
-    if (!authUser) return false;
+    var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
 
-    var directoryUser = findDirectoryUser(authUser.email);
     if (isPrivilegedRole(authUser, directoryUser)) return true;
 
-    var permitted = getUserAllowedSimulatorIds(authUser, directoryUser);
-    getPlatformSettings().freeSimulatorIds.forEach(function (freeId) {
-      if (permitted.indexOf(freeId) === -1) permitted.push(freeId);
-    });
-    return permitted.indexOf(id) !== -1;
+    if (!authUser) return false;
+
+    var entitled = getUserAllowedSimulatorIds(authUser, directoryUser);
+    if (isGlobalPlatformSubscriber(authUser)) return true;
+
+    if (isTrialTierSimulator(id)) {
+      if (hasActiveTrialForAccess(authUser)) return true;
+      return entitled.indexOf(id) !== -1;
+    }
+
+    return entitled.indexOf(id) !== -1;
   }
 
   function withPreviewQuery(href) {
@@ -963,17 +1150,47 @@
 
       var allowed = viewerCanAccess(id);
       var openHref = withPreviewQuery(href);
-      var free = isGloballyFreeSimulator(id);
+      var trialTier = isTrialTierSimulator(id);
+      var authUser = getLocalAuthUser();
+      var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
+      var badgeHtml = '';
+      var btnText = allowed ? 'افتح المحاكي' : 'يتطلب الاشتراك بالباقة';
+      var btnHref = openHref || '#simulators';
+
+      if (trialTier) {
+        var privileged = authUser && isPrivilegedRole(authUser, directoryUser);
+        var globalSub = authUser && isGlobalPlatformSubscriber(authUser);
+        var entitled = authUser ? getUserAllowedSimulatorIds(authUser, directoryUser) : [];
+        var courseGrantsThisSim = entitled.indexOf(id) !== -1;
+        var activeTrial = authUser && hasActiveTrialForAccess(authUser);
+        var snapMs = authUser ? trialExpiryMs(authUser) : 0;
+
+        if (!privileged && !globalSub && authUser) {
+          if (activeTrial && allowed) {
+            badgeHtml =
+              '<span class="feature-card__free-badge">ضمن التجربة</span>';
+          } else if (snapMs > 0 && !activeTrial && !courseGrantsThisSim) {
+            badgeHtml =
+              '<span class="feature-card__free-badge feature-card__trial-expired">انتهت التجربة</span>';
+            btnText = 'يتطلب الاشتراك بالباقة';
+            btnHref = paywallRedirectUrl(id);
+          }
+        }
+
+        if (!allowed) {
+          btnText = 'يتطلب الاشتراك بالباقة';
+          btnHref = paywallRedirectUrl(id);
+        }
+      }
+
       accessEl.innerHTML =
-        (free
-          ? '<span class="feature-card__free-badge">مجاني</span>'
-          : '') +
+        badgeHtml +
         '<a class="feature-card__open-btn" href="' +
-        escapeHtml(openHref || '#simulators') +
+        escapeHtml(btnHref) +
         '" data-simulator-launch="' +
         escapeHtml(id) +
         '">' +
-        (allowed ? 'افتح المحاكي' : 'يتطلب الاشتراك بالباقة') +
+        btnText +
         '</a>';
       if (!allowed) {
         card.classList.add('feature-card--locked');
@@ -1117,13 +1334,110 @@
     highlightTargetPlan();
   }
 
+  var trialExpiryWatchInterval = null;
+  var trialExpiryWatchTimeout = null;
+  var trialExpiryWatchVisibilityHandler = null;
+
+  function clearTrialExpiryWatch() {
+    if (trialExpiryWatchInterval) {
+      clearInterval(trialExpiryWatchInterval);
+      trialExpiryWatchInterval = null;
+    }
+    if (trialExpiryWatchTimeout) {
+      clearTimeout(trialExpiryWatchTimeout);
+      trialExpiryWatchTimeout = null;
+    }
+    if (trialExpiryWatchVisibilityHandler) {
+      document.removeEventListener('visibilitychange', trialExpiryWatchVisibilityHandler);
+      trialExpiryWatchVisibilityHandler = null;
+    }
+  }
+
+  function resolveTrialExpiryMsForAccess(authUser) {
+    var settings = getPlatformSettings();
+    if (global.IFAAuth && typeof global.IFAAuth.getTrialExpiryMs === 'function') {
+      return global.IFAAuth.getTrialExpiryMs(authUser, settings);
+    }
+    var stored = trialExpiryMs(authUser);
+    return stored > 0 ? stored : 0;
+  }
+
+  function shouldMonitorTrialExpiryOnPage(simId, authUser, directoryUser) {
+    if (!isOnSimulatorEnvironmentPage()) return false;
+    if (!simId || !isTrialTierSimulator(simId)) return false;
+    if (!authUser) return false;
+    if (isAdminPreviewContext()) return false;
+    if (isPrivilegedRole(authUser, directoryUser)) return false;
+    if (isGlobalPlatformSubscriber(authUser)) return false;
+    var entitled = getUserAllowedSimulatorIds(authUser, directoryUser);
+    if (entitled.indexOf(simId) !== -1) return false;
+    if (!hasActiveTrialForAccess(authUser)) return false;
+    return resolveTrialExpiryMsForAccess(authUser) > Date.now();
+  }
+
+  function armTrialExpiryWatch() {
+    clearTrialExpiryWatch();
+    if (!isOnSimulatorEnvironmentPage()) return;
+    var simId = currentSimulatorIdFromLocation();
+    if (!simId) return;
+
+    var authUser = getLocalAuthUser();
+    var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
+    if (!shouldMonitorTrialExpiryOnPage(simId, authUser, directoryUser)) return;
+
+    function onTrialExpiredOrDenied() {
+      if (!isOnSimulatorEnvironmentPage()) return;
+      if (viewerCanAccess(simId)) return;
+
+      var liveUser = getLocalAuthUser();
+      var expMs = resolveTrialExpiryMsForAccess(liveUser || authUser);
+      var trialEnded = expMs > 0 && Date.now() >= expMs;
+
+      if (isTrialTierSimulator(simId) && trialEnded) {
+        kickOutTrialExpiredUser(simId);
+        if (typeof global.applyGlobalAnnouncementBar === 'function') {
+          global.applyGlobalAnnouncementBar();
+        }
+        return;
+      }
+
+      clearTrialExpiryWatch();
+      enforceSimulatorPageAccess();
+      refreshAccessUi();
+    }
+
+    trialExpiryWatchInterval = setInterval(onTrialExpiredOrDenied, 1000);
+
+    var expMs = resolveTrialExpiryMsForAccess(authUser);
+    var delay = expMs - Date.now();
+    if (delay > 0 && delay <= 2147483647) {
+      trialExpiryWatchTimeout = setTimeout(onTrialExpiredOrDenied, delay);
+    }
+
+    trialExpiryWatchVisibilityHandler = function () {
+      if (document.visibilityState !== 'visible') return;
+      onTrialExpiredOrDenied();
+    };
+    document.addEventListener('visibilitychange', trialExpiryWatchVisibilityHandler);
+  }
+
   function scheduleSimulatorPageAccessCheck() {
-    if (!currentSimulatorIdFromLocation()) return;
+    if (!currentSimulatorIdFromLocation()) {
+      clearTrialExpiryWatch();
+      return;
+    }
     var authUser = getLocalAuthUser();
     var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
     warmEntitlementCaches(authUser, directoryUser).then(function () {
+      if (!isOnSimulatorEnvironmentPage()) {
+        clearTrialExpiryWatch();
+        return;
+      }
       enforceSimulatorPageAccess();
       refreshAccessUi();
+      if (isOnSimulatorEnvironmentPage()) {
+        armTrialExpiryWatch();
+      }
     });
   }
 
@@ -1157,7 +1471,10 @@
     global.addEventListener('ifa:platform-courses-changed', refreshAccessUi);
     global.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
     document.addEventListener('ifa:platform-plans-changed', refreshAccessUi);
-    global.addEventListener('ifa:platform-settings-changed', refreshAccessUi);
+    global.addEventListener('ifa:platform-settings-changed', function () {
+      refreshAccessUi();
+      scheduleSimulatorPageAccessCheck();
+    });
     global.addEventListener('ifa:simulators-meta-changed', refreshAccessUi);
     global.addEventListener('ifa:simulators-firestore-changed', refreshAccessUi);
     document.addEventListener('ifa:simulators-firestore-changed', refreshAccessUi);
@@ -1205,7 +1522,13 @@
     simulatorLabels: simulatorLabels,
     getPlatformSettings: getPlatformSettings,
     savePlatformSettings: savePlatformSettings,
+    normalizeFreeTrialDays: normalizeFreeTrialDays,
     isGloballyFreeSimulator: isGloballyFreeSimulator,
+    isTrialTierSimulator: isTrialTierSimulator,
+    getTrialTierSimulatorIds: getTrialTierSimulatorIds,
+    canAccessTrialTierSimulators: canAccessTrialTierSimulators,
+    canAccessFullTrialTierPool: canAccessFullTrialTierPool,
+    isGlobalPlatformSubscriber: isGlobalPlatformSubscriber,
     isSimulatorUnderDevelopment: isSimulatorUnderDevelopment,
     COMING_SOON_BADGE: COMING_SOON_BADGE,
     COMING_SOON_MSG: COMING_SOON_MSG,
@@ -1226,6 +1549,9 @@
     ensurePlanCached: ensurePlanCached,
     warmEntitlementCaches: warmEntitlementCaches,
     scheduleSimulatorPageAccessCheck: scheduleSimulatorPageAccessCheck,
+    armTrialExpiryWatch: armTrialExpiryWatch,
+    clearTrialExpiryWatch: clearTrialExpiryWatch,
+    kickOutTrialExpiredUser: kickOutTrialExpiredUser,
   };
 
   if (document.readyState === 'loading') {

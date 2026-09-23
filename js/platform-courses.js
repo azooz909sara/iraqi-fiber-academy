@@ -137,6 +137,7 @@
         id: 'lesson_mod_' + (index + 1),
         title: title,
         description: '',
+        videoId: '',
         videoUrl: '',
         videoFileName: '',
         isFreePreview: false,
@@ -353,15 +354,54 @@
     return { questions: normalizeQuizQuestions(quiz.questions) };
   }
 
+  var YOUTUBE_VIDEO_ID_RE = /^[A-Za-z0-9_-]{11}$/;
+
+  function extractYouTubeVideoIdFromInput(value) {
+    var raw = String(value || '').trim();
+    if (!raw) return '';
+    if (YOUTUBE_VIDEO_ID_RE.test(raw)) return raw;
+
+    var patterns = [
+      /(?:youtube\.com\/watch\?.*v=|youtube\.com\/embed\/|youtube\.com\/v\/|youtube\.com\/shorts\/)([A-Za-z0-9_-]{11})/i,
+      /youtu\.be\/([A-Za-z0-9_-]{11})/i,
+      /youtube-nocookie\.com\/embed\/([A-Za-z0-9_-]{11})/i,
+      /m\.youtube\.com\/watch\?.*v=([A-Za-z0-9_-]{11})/i,
+    ];
+
+    for (var i = 0; i < patterns.length; i++) {
+      var match = raw.match(patterns[i]);
+      if (match && match[1] && YOUTUBE_VIDEO_ID_RE.test(match[1])) return match[1];
+    }
+    return '';
+  }
+
+  function normalizeLessonVideoStorage(lesson) {
+    var videoId = String((lesson && lesson.videoId) || '').trim();
+    var videoUrl = String((lesson && lesson.videoUrl) || '').trim();
+
+    if (!videoId && videoUrl) {
+      videoId = extractYouTubeVideoIdFromInput(videoUrl);
+    }
+    if (videoId && !YOUTUBE_VIDEO_ID_RE.test(videoId)) {
+      videoId = '';
+    }
+    if (videoId) {
+      return { videoId: videoId, videoUrl: '' };
+    }
+    return { videoId: '', videoUrl: videoUrl };
+  }
+
   function normalizeLessons(lessons) {
     if (!Array.isArray(lessons)) return [];
     return lessons
       .map(function (l, index) {
+        var videoFields = normalizeLessonVideoStorage(l);
         return {
           id: l.id || uid('lesson'),
           title: String(l.title || '').trim(),
           description: String(l.description || '').trim(),
-          videoUrl: String(l.videoUrl || '').trim(),
+          videoId: videoFields.videoId,
+          videoUrl: videoFields.videoUrl,
           videoFileName: String(l.videoFileName || '').trim(),
           videoTitle: String(l.videoTitle || l.title || '').trim(),
           templateFiles: Array.isArray(l.templateFiles) ? l.templateFiles : [],

@@ -1435,6 +1435,113 @@ body.ifa-sim-dev-lock-active {
   overflow: hidden;
 }
 
+.platform-top-banner {
+  position: fixed;
+  top: 72px;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border-bottom: none;
+  box-shadow: none;
+}
+
+.platform-top-banner__inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  padding: 0.5rem 1rem;
+  text-align: center;
+}
+
+.platform-top-banner__text {
+  margin: 0;
+  font-size: 0.9rem;
+  font-weight: 700;
+  line-height: 1.4;
+  direction: rtl;
+}
+
+.platform-top-banner__text strong {
+  color: #fff;
+  font-weight: 800;
+}
+
+.trial-banner-flex {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2rem;
+  width: 100%;
+  direction: rtl;
+  padding: 0.6rem 1.5rem;
+  background: linear-gradient(90deg, #1e3a8a, #78350f);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fde68a;
+  font-weight: 600;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+
+.trial-banner-flex__announcement {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: center;
+  direction: rtl;
+  unicode-bidi: isolate;
+}
+
+.trial-banner-flex__timer {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: center;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.trial-timer-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 8px;
+  background: #1c1c28;
+  color: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  box-shadow: none;
+  unicode-bidi: isolate;
+}
+
+.trial-banner-flex--announcement-only .trial-banner-flex__announcement {
+  text-align: center;
+  flex: 1 1 100%;
+}
+
+.trial-banner-flex--timer-only {
+  justify-content: center;
+}
+
+.trial-banner-flex--timer-only .trial-banner-flex__timer {
+  flex: 0 1 auto;
+  min-width: 0;
+  text-align: center;
+}
+
+body.has-announcement-bar .hero {
+  padding-top: calc(72px + 2.5rem);
+}
+
+body.admin-body.has-announcement-bar .admin-content {
+  padding-top: 2.5rem;
+}
+
 .feature-card__free-badge {
   display: inline-block;
   margin-inline-end: 0.45rem;
@@ -1444,6 +1551,12 @@ body.ifa-sim-dev-lock-active {
   font-weight: 700;
   color: #0a0e17;
   background: var(--color-accent-phosphor);
+}
+
+.feature-card__free-badge.feature-card__trial-expired {
+  color: #4a5568;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
 }
 
 .course-details {
@@ -1530,6 +1643,49 @@ body.ifa-sim-dev-lock-active {
   border: 0;
   border-radius: 12px;
   background: #000;
+}
+
+.course-details__player--youtube {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  background: #000;
+}
+
+.course-details__player--youtube .course-details__plyr.plyr {
+  width: 100%;
+  min-height: 18rem;
+  border-radius: 12px;
+}
+
+.course-details__player--youtube .plyr__video-embed iframe,
+.course-details__player--youtube .plyr__video-wrapper iframe {
+  pointer-events: none;
+}
+
+.course-details__player-shield {
+  position: absolute;
+  z-index: 4;
+  pointer-events: auto;
+  background: transparent;
+}
+
+.course-details__player-shield--top {
+  top: 0;
+  right: 0;
+  width: 7.5rem;
+  height: 4.5rem;
+}
+
+.course-details__player-shield--bottom {
+  bottom: 3.25rem;
+  right: 0;
+  width: 8.5rem;
+  height: 3.5rem;
+}
+
+.course-details__player--youtube .plyr__controls {
+  z-index: 5;
 }
 
 .course-details__locked-panel {

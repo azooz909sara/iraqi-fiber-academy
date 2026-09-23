@@ -2785,7 +2785,9 @@
 }
 
 /* ---------- FTTH Lab config (embedded CMS in Settings) ---------- */
+/* Hidden from global Settings; CMS still mounts for Site Preview / simulators. */
 .admin-ftth-lab-config {
+  display: none !important;
   --lab-cyan: var(--color-accent-cyan);
   --lab-muted: var(--color-text-secondary);
   --lab-text: var(--color-text-primary);
