@@ -12,7 +12,16 @@ import {
   doc,
   getDoc,
   setDoc,
+  runTransaction,
+  serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+function normalizeTrialConsumptionDocId(canvasHash) {
+  var id = String(canvasHash || '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 500);
+  return id || '';
+}
 
 function buildDefaultUserProfile(user) {
   return {
@@ -145,4 +154,31 @@ export async function checkAdminStatus(uid) {
   if (!snap.exists()) return false;
   var data = snap.data() || {};
   return String(data.role || '') === 'admin';
+}
+
+/**
+ * Global device trial lock (canvas fingerprint). One trial per fingerprint across profiles.
+ * @param {string} canvasHash
+ * @param {string} uid
+ * @returns {Promise<boolean>} true if registered and trial may be granted; false if already consumed
+ */
+export async function checkAndRegisterDeviceTrial(canvasHash, uid) {
+  var hashId = normalizeTrialConsumptionDocId(canvasHash);
+  if (!hashId || !uid) return false;
+
+  var ref = doc(db, 'trialConsumptions', hashId);
+  try {
+    return await runTransaction(db, async function (transaction) {
+      var snap = await transaction.get(ref);
+      if (snap.exists()) return false;
+      transaction.set(ref, {
+        uid: String(uid),
+        createdAt: serverTimestamp(),
+      });
+      return true;
+    });
+  } catch (err) {
+    console.error('[db-manager] checkAndRegisterDeviceTrial failed:', err);
+    return false;
+  }
 }

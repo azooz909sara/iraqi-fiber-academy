@@ -23,6 +23,16 @@ service cloud.firestore {
 
     // User profiles — own doc read/write; admins manage all.
     // Users cannot escalate their own role (only admins may change role).
+    match /trialConsumptions/{hashId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn()
+        && !exists(/databases/$(database)/documents/trialConsumptions/$(hashId))
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.uid is string
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isAdmin();
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId)

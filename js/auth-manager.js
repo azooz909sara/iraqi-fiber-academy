@@ -15,7 +15,7 @@ import {
   signOut,
   onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { syncUserProfile, createUserProfileOnSignUp } from './db-manager.js';
+import { syncUserProfile, createUserProfileOnSignUp, checkAndRegisterDeviceTrial } from './db-manager.js';
 import { syncEntitlementsFromApprovedOrders } from './entitlements-sync.js';
 import { startFcmOnAuth, setupNotificationToggle } from './fcm-push.js';
 
@@ -28,6 +28,27 @@ console.info(
 );
 var LOCAL_AUTH_KEY = 'ifa_auth_user';
 var LOCAL_DEV_EMAIL = 'abdulazizyassin909@gmail.com';
+var DEVICE_TRIAL_CONSUMED_KEY = 'ifa_device_trial_consumed';
+var ADMIN_DEVICE_BYPASS_KEY = 'ifa_admin_bypass_device_check';
+var DEVICE_TRIAL_COOKIE_MAX_AGE_SEC = 365 * 24 * 60 * 60;
+var TRIAL_GRANT_ATTEMPTED_PREFIX = 'ifa_trial_grant_attempted:';
+var DISPOSABLE_EMAIL_DOMAINS = [
+  'mohmal.com',
+  'mohmal.in',
+  'mohmal.tech',
+  'temp-mail.org',
+  '10minutemail.com',
+  '10minutemail.net',
+  'guerrillamail.com',
+  'mailinator.com',
+  'yopmail.com',
+  'throwaway.email',
+  'tempmail.com',
+  'fakeinbox.com',
+  'getnada.com',
+  'maildrop.cc',
+  'sharklasers.com',
+];
 
 var slots = [];
 var lastUser = null;
@@ -150,6 +171,206 @@ function trialExpiryMs(value) {
   return isFinite(n) ? n : 0;
 }
 
+function readDocumentCookie(name) {
+  if (typeof document === 'undefined' || !name) return '';
+  try {
+    var escaped = String(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var match = document.cookie.match(new RegExp('(?:^|;\\s*)' + escaped + '=([^;]*)'));
+    return match ? decodeURIComponent(match[1]) : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function isLocalDevEnvironment() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isLocalDevEnvironment === 'function') {
+    return window.IFA_ENV.isLocalDevEnvironment();
+  }
+  try {
+    if (!window || !window.location) return false;
+    if (window.location.protocol === 'file:') return true;
+    var host = String(window.location.hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  } catch (err) {
+    return false;
+  }
+}
+
+function shouldBypassAccessControl() {
+  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.shouldBypassAccessControl === 'function') {
+    return window.IFA_ENV.shouldBypassAccessControl();
+  }
+  return isLocalDevEnvironment();
+}
+
+function shouldSkipTrialAbuseChecks() {
+  if (shouldBypassAccessControl()) return true;
+  try {
+    return localStorage.getItem(ADMIN_DEVICE_BYPASS_KEY) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function emailDomain(email) {
+  var normalized = normalizeEmail(email);
+  var at = normalized.lastIndexOf('@');
+  return at === -1 ? '' : normalized.slice(at + 1);
+}
+
+function isDisposableEmail(email) {
+  var domain = emailDomain(email);
+  if (!domain) return false;
+  return DISPOSABLE_EMAIL_DOMAINS.indexOf(domain) !== -1;
+}
+
+function simpleFingerprintHash(str) {
+  var h = 0;
+  var s = String(str || '');
+  for (var i = 0; i < s.length; i++) {
+    h = (h << 5) - h + s.charCodeAt(i);
+    h |= 0;
+  }
+  return 'fp_' + (h >>> 0).toString(16);
+}
+
+function getCanvasFingerprint() {
+  if (typeof document === 'undefined') return '';
+  try {
+    var canvas = document.createElement('canvas');
+    canvas.width = 280;
+    canvas.height = 60;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return '';
+    ctx.textBaseline = 'top';
+    ctx.font = '16px Arial';
+    ctx.fillStyle = '#f60';
+    ctx.fillRect(0, 0, 280, 60);
+    ctx.fillStyle = '#069';
+    ctx.fillText('IFA trial fingerprint', 2, 15);
+    ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+    ctx.fillText('IFA trial fingerprint', 4, 17);
+    return simpleFingerprintHash(canvas.toDataURL());
+  } catch (err) {
+    return '';
+  }
+}
+
+function emailHadPriorTrialSnapshot(email) {
+  try {
+    var usersRaw = localStorage.getItem('ifa_admin_users');
+    var users = usersRaw ? JSON.parse(usersRaw) : [];
+    if (!Array.isArray(users)) return false;
+    for (var i = 0; i < users.length; i++) {
+      if (normalizeEmail(users[i] && users[i].email) !== normalizeEmail(email)) continue;
+      if (trialExpiryMs(users[i].trialExpiresAt) > 0) return true;
+    }
+  } catch (err) {
+    /* ignore */
+  }
+  return false;
+}
+
+function hasAttemptedAsyncTrialGrant(uid) {
+  if (!uid) return false;
+  try {
+    return sessionStorage.getItem(TRIAL_GRANT_ATTEMPTED_PREFIX + uid) === '1';
+  } catch (err) {
+    return false;
+  }
+}
+
+function markAsyncTrialGrantAttempted(uid) {
+  if (!uid) return;
+  try {
+    sessionStorage.setItem(TRIAL_GRANT_ATTEMPTED_PREFIX + uid, '1');
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function computeNewTrialExpiresAt() {
+  var days = readPlatformSettings().freeTrialDays;
+  if (!(days > 0)) return 0;
+  return Date.now() + days * 24 * 60 * 60 * 1000;
+}
+
+function applyGrantedTrialToSession(email, expiresAt) {
+  if (!expiresAt) return;
+  var current = getLocalAuthUser();
+  if (!current || normalizeEmail(current.email) !== normalizeEmail(email)) return;
+  setLocalAuthUser(
+    Object.assign({}, current, {
+      trialExpiresAt: expiresAt,
+    })
+  );
+  markDeviceTrialConsumed();
+  try {
+    notifyLocalAuthChanged({ type: 'profile-sync', email: normalizeEmail(email) });
+  } catch (err) {
+    /* ignore */
+  }
+  if (typeof refreshGlobalTopBanner === 'function') {
+    refreshGlobalTopBanner();
+  }
+}
+
+function maybeGrantTrialForUser(user) {
+  if (!user || !user.uid) return Promise.resolve();
+  if (shouldSkipTrialAbuseChecks()) return Promise.resolve();
+
+  var email = normalizeEmail(user.email || '');
+  if (!email) return Promise.resolve();
+  if (isDisposableEmail(email)) return Promise.resolve();
+  if (emailHadPriorTrialSnapshot(email)) return Promise.resolve();
+
+  var local = getLocalAuthUser();
+  if (getTrialExpiryMs(local) > Date.now()) return Promise.resolve();
+  if (hasAttemptedAsyncTrialGrant(user.uid)) return Promise.resolve();
+
+  var days = readPlatformSettings().freeTrialDays;
+  if (!(days > 0)) return Promise.resolve();
+
+  var fp = getCanvasFingerprint();
+  if (!fp) {
+    markAsyncTrialGrantAttempted(user.uid);
+    return Promise.resolve();
+  }
+
+  return checkAndRegisterDeviceTrial(fp, user.uid)
+    .then(function (allowed) {
+      markAsyncTrialGrantAttempted(user.uid);
+      if (!allowed) return;
+      var expiresAt = computeNewTrialExpiresAt();
+      if (!expiresAt) return;
+      applyGrantedTrialToSession(email, expiresAt);
+    })
+    .catch(function (err) {
+      console.error('[Auth] maybeGrantTrialForUser failed:', err);
+    });
+}
+
+function markDeviceTrialConsumed() {
+  try {
+    localStorage.setItem(DEVICE_TRIAL_CONSUMED_KEY, '1');
+  } catch (err) {
+    /* ignore */
+  }
+  if (typeof document === 'undefined') return;
+  try {
+    var secure = typeof location !== 'undefined' && location.protocol === 'https:';
+    var cookie =
+      DEVICE_TRIAL_CONSUMED_KEY +
+      '=1; path=/; max-age=' +
+      DEVICE_TRIAL_COOKIE_MAX_AGE_SEC +
+      '; SameSite=Lax';
+    if (secure) cookie += '; Secure';
+    document.cookie = cookie;
+  } catch (err2) {
+    /* ignore */
+  }
+}
+
 function hasActiveTrial(user, settings) {
   return getTrialExpiryMs(user, settings) > Date.now();
 }
@@ -178,7 +399,13 @@ function resolveTrialExpiresAt(email, incoming) {
     return 0;
   }
   var days = readPlatformSettings().freeTrialDays;
-  if (days > 0) return Date.now() + days * 24 * 60 * 60 * 1000;
+  if (days <= 0) return 0;
+  if (!shouldSkipTrialAbuseChecks() && isDisposableEmail(email)) return 0;
+  if (shouldSkipTrialAbuseChecks()) {
+    var bypassExpiresAt = Date.now() + days * 24 * 60 * 60 * 1000;
+    markDeviceTrialConsumed();
+    return bypassExpiresAt;
+  }
   return 0;
 }
 
@@ -585,21 +812,6 @@ function readLocalSessionEmail() {
   return '';
 }
 
-/** file:// or localhost / 127.0.0.1 — local development bypass */
-function isLocalDevEnvironment() {
-  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isLocalDevEnvironment === 'function') {
-    return window.IFA_ENV.isLocalDevEnvironment();
-  }
-  try {
-    if (!window || !window.location) return false;
-    if (window.location.protocol === 'file:') return true;
-    var host = String(window.location.hostname || '').toLowerCase();
-    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
-  } catch (err) {
-    return false;
-  }
-}
-
 function isProductionEnvironment() {
   if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.isProductionEnvironment === 'function') {
     return window.IFA_ENV.isProductionEnvironment();
@@ -610,13 +822,6 @@ function isProductionEnvironment() {
   } catch (err) {
     return false;
   }
-}
-
-function shouldBypassAccessControl() {
-  if (typeof window !== 'undefined' && window.IFA_ENV && typeof window.IFA_ENV.shouldBypassAccessControl === 'function') {
-    return window.IFA_ENV.shouldBypassAccessControl();
-  }
-  return isLocalDevEnvironment();
 }
 
 /** Local → always show Admin + Instructor; production → admin email allow-list only */
@@ -1004,6 +1209,9 @@ export async function signUpWithEmailPassword(email, password) {
   if (!password || String(password).length < 6) {
     throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
   }
+  if (!shouldSkipTrialAbuseChecks() && isDisposableEmail(key)) {
+    throw new Error('لا يمكن التسجيل ببريد مؤقت. استخدم بريدك الشخصي.');
+  }
   var result = await createUserWithEmailAndPassword(auth, key, String(password));
   await createUserProfileOnSignUp(result.user);
   closeAuthModal();
@@ -1313,6 +1521,7 @@ function initAuthUI() {
             startPlatformNotifications(user, profile);
             notifyLocalAuthChanged({ type: 'profile-sync', email: email });
             notifyAuthChange(user, { profileSynced: true });
+            return maybeGrantTrialForUser(user);
           })
           .catch(function (syncErr) {
             console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
@@ -1335,6 +1544,7 @@ function initAuthUI() {
             startPlatformNotifications(user, profile);
             notifyLocalAuthChanged({ type: 'profile-sync', email: email });
             notifyAuthChange(user, { profileSynced: true });
+            return maybeGrantTrialForUser(user);
           });
       })
       .catch(function (err) {
