@@ -97,6 +97,10 @@ export async function ensureUserProfileDocument(user, options) {
 
   options = options || {};
   var profile = buildDefaultUserProfile(user);
+  var signupName = String(options.displayName || options.fullName || '').trim();
+  if (signupName) {
+    profile.name = signupName;
+  }
   var payload = Object.assign({}, profile, { createdAt: serverTimestamp() });
 
   var deviceUuid = String(options.deviceUuid || '').trim();

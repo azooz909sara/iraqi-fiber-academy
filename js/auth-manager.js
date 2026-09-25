@@ -959,6 +959,19 @@ function setAuthModalMode(mode) {
     switchSignup.hidden = authModalMode === 'signup';
     switchSignup.textContent = authText('auth.switchSignup', 'ليس لديك حساب؟ إنشاء حساب');
   }
+  var nameContainer = document.getElementById('authNameContainer');
+  var nameInput = document.getElementById('authNameInput');
+  if (nameContainer && nameInput) {
+    if (authModalMode === 'signup') {
+      nameContainer.style.display = '';
+      nameInput.setAttribute('required', 'required');
+      nameInput.setAttribute('autocomplete', 'name');
+    } else {
+      nameContainer.style.display = 'none';
+      nameInput.removeAttribute('required');
+      nameInput.value = '';
+    }
+  }
   setAuthModalError('');
 }
 
@@ -977,6 +990,12 @@ function ensureAuthModal() {
       '<p class="auth-modal__hint">استخدم بريدك وكلمة المرور للوصول إلى المحاكيات واللوحات.</p>' +
       '<p class="auth-modal__error" id="authModalError" role="alert" hidden></p>' +
       '<form class="auth-modal__form" id="authModalForm" novalidate>' +
+        '<div id="authNameContainer" style="display:none">' +
+        '<label class="auth-modal__field">' +
+          '<span>الاسم الكامل</span>' +
+          '<input type="text" id="authNameInput" name="name" data-auth-name autocomplete="name" />' +
+        '</label>' +
+        '</div>' +
         '<label class="auth-modal__field">' +
           '<span>البريد الإلكتروني</span>' +
           '<input type="email" name="email" data-auth-email autocomplete="email" dir="ltr" required />' +
@@ -1487,13 +1506,17 @@ export async function loginWithEmailPassword(email, password) {
   return result.user;
 }
 
-export async function signUpWithEmailPassword(email, password) {
+export async function signUpWithEmailPassword(email, password, fullName) {
   var key = normalizeEmail(email);
   if (!key || key.indexOf('@') === -1) {
     throw new Error('البريد الإلكتروني غير صالح.');
   }
   if (!password || String(password).length < 6) {
     throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+  }
+  var name = String(fullName || '').trim();
+  if (!name) {
+    throw new Error('الاسم الكامل مطلوب.');
   }
   if (!isWhitelistedSignupEmailDomain(key)) {
     alert(
@@ -1502,7 +1525,9 @@ export async function signUpWithEmailPassword(email, password) {
     return null;
   }
   var result = await createUserWithEmailAndPassword(auth, key, String(password));
-  await createUserProfileOnSignUp(result.user, await buildTrialProfileOptions());
+  var profileOptions = await buildTrialProfileOptions();
+  profileOptions.displayName = name;
+  await createUserProfileOnSignUp(result.user, profileOptions);
   closeAuthModal();
   return result.user;
 }
@@ -1512,14 +1537,16 @@ async function handleAuthModalSubmit() {
   if (!modal) return;
   var emailInput = modal.querySelector('[data-auth-email]');
   var passwordInput = modal.querySelector('[data-auth-password]');
+  var nameInput = modal.querySelector('[data-auth-name]');
   var submitBtn = modal.querySelector('[data-auth-submit]');
   var email = emailInput ? emailInput.value : '';
   var password = passwordInput ? passwordInput.value : '';
+  var fullName = nameInput ? nameInput.value : '';
   setAuthModalError('');
   if (submitBtn) submitBtn.disabled = true;
   try {
     if (authModalMode === 'signup') {
-      var signedUpUser = await signUpWithEmailPassword(email, password);
+      var signedUpUser = await signUpWithEmailPassword(email, password, fullName);
       if (!signedUpUser) return;
     } else {
       await loginWithEmailPassword(email, password);
