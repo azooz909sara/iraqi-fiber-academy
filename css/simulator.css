@@ -10270,3 +10270,19 @@ body.fd-matrix-col-resizing * {
  white-space: nowrap;
  font-variant-numeric: tabular-nums;
 }
+
+@media (max-width: 980px) {
+  #main-layout,
+  #simulator-container {
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    overflow: hidden !important;
+    min-width: 0 !important;
+  }
+
+  #canvas-main {
+    position: relative !important;
+    overflow: hidden !important;
+    height: 100% !important;
+  }
+}

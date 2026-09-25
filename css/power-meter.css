@@ -259,25 +259,12 @@ body.opm-page {
 
 @media (max-width: 900px) {
   .opm-workspace {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(320px, 1fr) auto;
-    overflow: auto;
-  }
-
-  .opm-sidebar--toolbox {
-    max-height: 150px;
-    border-right: none;
-    border-bottom: 1px solid var(--opm-border);
-  }
-
-  .opm-sidebar--props {
-    max-height: 280px;
-    border-left: none;
-    border-top: 1px solid var(--opm-border);
+    grid-template-columns: minmax(0, 140px) minmax(0, 1fr) minmax(0, 160px);
+    overflow: hidden;
   }
 
   .opm-stage {
-    min-height: 360px;
+    min-height: 0;
   }
 }
 
@@ -1163,15 +1150,15 @@ body.opm-page--workspace .lab-app {
 
 @media (max-width: 720px) {
   html,
-  body.opm-page {
-    height: auto !important;
-    overflow: auto !important;
+  body.opm-page.opm-page--workspace {
+    height: 100% !important;
+    overflow: hidden !important;
   }
 
   .opm-app {
-    height: auto;
-    min-height: 100vh;
-    overflow: visible;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 
   .opm-field--row {

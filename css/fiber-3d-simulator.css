@@ -1195,20 +1195,19 @@ html, body {
 .anatomy-cms__status.is-error { color: #f87171; }
 
 @media (max-width: 980px) {
-  .f3d-main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+  .f3d-main > .f3d-stage-wrap {
+    position: relative !important;
+    overflow: hidden !important;
+    height: 100% !important;
   }
 
-  .f3d-rail,
-  .f3d-inspector {
-    border: none;
-    border-bottom: 1px solid var(--f3d-border);
-    max-height: 180px;
-  }
-
-  .f3d-stage-wrap {
-    min-height: 46vh;
+  #f3d-canvas-host,
+  #f3d-2d-host,
+  #f3d-media-host {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
   }
 
   .f3d-hint {

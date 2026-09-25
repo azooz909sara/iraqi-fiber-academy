@@ -1760,20 +1760,39 @@ body.lab-node-resizing .lab-2d-stage {
 }
 
 @media (max-width: 980px) {
-  .lab-main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
+  /* Keep 3-column grid on mobile; clip 20kpx lab world inside center column */
+  body.lab-page .lab-main,
+  body.splicer-lab-page .lab-main,
+  .lab-main,
+  .opm-workspace {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
   }
 
-  .lab-rail,
-  .lab-inspector {
-    border: none;
-    border-bottom: 1px solid var(--lab-border);
-    max-height: 160px;
+  body.lab-page .lab-main > .lab-stage-wrap,
+  body.splicer-lab-page .lab-main > .lab-stage-wrap,
+  .lab-main > .lab-stage-wrap,
+  .opm-workspace > .opm-stage,
+  .opm-workspace > .opm-stage .opm-stage__canvas,
+  .opm-workspace > .opm-stage .lab-app,
+  .opm-workspace > .opm-stage .lab-stage-wrap {
+    position: relative !important;
+    overflow: hidden !important;
+    height: 100% !important;
   }
 
-  .lab-stage-wrap {
-    min-height: 46vh;
+  .lab-stage-wrap #lab-canvas-2d,
+  .opm-stage__canvas #lab-canvas-2d {
+    position: absolute !important;
+    inset: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+  }
+
+  html,
+  body {
+    overflow: hidden !important;
   }
 
   .lab-fx-workspace {
