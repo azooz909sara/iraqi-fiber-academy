@@ -15,7 +15,13 @@ import {
   signOut,
   onAuthStateChanged,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
-import { syncUserProfile, createUserProfileOnSignUp, checkAndRegisterDeviceTrial } from './db-manager.js';
+import {
+  syncUserProfile,
+  createUserProfileOnSignUp,
+  checkAndRegisterDeviceTrial,
+  setUserTrialExpiresAt,
+  countRecentUsersWithIp,
+} from './db-manager.js';
 import { syncEntitlementsFromApprovedOrders } from './entitlements-sync.js';
 import { startFcmOnAuth, setupNotificationToggle } from './fcm-push.js';
 
@@ -29,6 +35,8 @@ console.info(
 var LOCAL_AUTH_KEY = 'ifa_auth_user';
 var LOCAL_DEV_EMAIL = 'abdulazizyassin909@gmail.com';
 var DEVICE_TRIAL_CONSUMED_KEY = 'ifa_device_trial_consumed';
+var DEVICE_UUID_STORAGE_KEY = 'ifa_device_uuid';
+var DEVICE_UUID_COOKIE = 'ifa_device_uuid';
 var ADMIN_DEVICE_BYPASS_KEY = 'ifa_admin_bypass_device_check';
 var DEVICE_TRIAL_COOKIE_MAX_AGE_SEC = 365 * 24 * 60 * 60;
 var TRIAL_GRANT_ATTEMPTED_PREFIX = 'ifa_trial_grant_attempted:';
@@ -125,8 +133,12 @@ function getTrialAccountCreatedAt(authUser) {
 
 function getTrialExpiryMs(authUser, settings) {
   if (!authUser) return 0;
-  var storedExp = trialExpiryMs(authUser.trialExpiresAt);
-  return storedExp > 0 ? storedExp : 0;
+  var storedExp = trialMsFromFirestoreValue(authUser.trialExpiresAt);
+  if (storedExp > 0) return storedExp;
+  if (lastProfile) {
+    return getTrialExpiryFromProfile(lastProfile, settings);
+  }
+  return 0;
 }
 
 function getRemainingTrialDays(authUser, settings) {
@@ -166,9 +178,64 @@ function readPlatformSettings() {
 }
 
 function trialExpiryMs(value) {
+  return trialMsFromFirestoreValue(value);
+}
+
+function trialMsFromFirestoreValue(value) {
   if (value == null || value === '') return 0;
-  var n = typeof value === 'number' ? value : Date.parse(value);
-  return isFinite(n) ? n : 0;
+  try {
+    if (value && typeof value.toDate === 'function') {
+      var d = value.toDate();
+      return d && !isNaN(d.getTime()) ? d.getTime() : 0;
+    }
+    if (typeof value === 'number' && isFinite(value)) return value;
+    if (typeof value === 'string') {
+      var parsed = Date.parse(value);
+      return isFinite(parsed) ? parsed : 0;
+    }
+  } catch (err) {
+    /* ignore */
+  }
+  return 0;
+}
+
+function getFreeTrialDaysFromSettings(settings) {
+  settings = settings || readPlatformSettings();
+  var days = Number(settings && settings.freeTrialDays);
+  if (isFinite(days) && days > 0) return Math.min(365, days);
+  return 7;
+}
+
+/** Active trial end (ms) from Firestore profile: trialExpiresAt, else createdAt + freeTrialDays. */
+function getTrialExpiryFromProfile(profile, settings) {
+  if (!profile) return 0;
+  if (Object.prototype.hasOwnProperty.call(profile, 'trialExpiresAt')) {
+    var rawTrial = profile.trialExpiresAt;
+    if (rawTrial != null && rawTrial !== '') {
+      var explicitMs = trialMsFromFirestoreValue(rawTrial);
+      if (explicitMs > 0) return explicitMs;
+      return 0;
+    }
+  }
+  var created = trialMsFromFirestoreValue(profile.createdAt);
+  if (!created) return 0;
+  var days = getFreeTrialDaysFromSettings(settings);
+  return created + days * 24 * 60 * 60 * 1000;
+}
+
+function firestoreCreatedAtToIso(value) {
+  var ms = trialMsFromFirestoreValue(value);
+  if (ms > 0) return new Date(ms).toISOString();
+  if (value == null || value === '') return '';
+  return String(value);
+}
+
+function unwrapProfileSyncResult(syncResult) {
+  if (!syncResult) return { profile: null, isNew: false };
+  if (syncResult.profile != null && typeof syncResult.isNew === 'boolean') {
+    return { profile: syncResult.profile, isNew: syncResult.isNew };
+  }
+  return { profile: syncResult, isNew: false };
 }
 
 function readDocumentCookie(name) {
@@ -212,10 +279,39 @@ function shouldSkipTrialAbuseChecks() {
   }
 }
 
+var ALLOWED_SIGNUP_EMAIL_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com'];
+
 function emailDomain(email) {
   var normalized = normalizeEmail(email);
   var at = normalized.lastIndexOf('@');
   return at === -1 ? '' : normalized.slice(at + 1);
+}
+
+function isWhitelistedSignupEmailDomain(email) {
+  var domain = emailDomain(email);
+  if (!domain) return false;
+  return ALLOWED_SIGNUP_EMAIL_DOMAINS.indexOf(domain) !== -1;
+}
+
+async function fetchCurrentClientIp() {
+  try {
+    var response = await fetch('https://api.ipify.org?format=json');
+    if (!response.ok) return 'unknown';
+    var data = await response.json();
+    return data && data.ip ? String(data.ip) : 'unknown';
+  } catch (err) {
+    return 'unknown';
+  }
+}
+
+function resolveIpForTrialCheck(profile, fetchedIp) {
+  var fromProfile = profile && profile.ipAddress ? String(profile.ipAddress).trim() : '';
+  if (fromProfile && fromProfile !== 'unknown') return fromProfile;
+  return fetchedIp || 'unknown';
+}
+
+function isIpTrialRateLimited(recentCount) {
+  return recentCount >= 2;
 }
 
 function isDisposableEmail(email) {
@@ -234,7 +330,77 @@ function simpleFingerprintHash(str) {
   return 'fp_' + (h >>> 0).toString(16);
 }
 
-function getCanvasFingerprint() {
+function generateDeviceUuid() {
+  try {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+  } catch (err) {
+    /* ignore */
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = (Math.random() * 16) | 0;
+    var v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+function persistDeviceUuid(uuid) {
+  if (!uuid) return;
+  try {
+    localStorage.setItem(DEVICE_UUID_STORAGE_KEY, uuid);
+  } catch (err) {
+    /* ignore */
+  }
+  try {
+    localStorage.setItem('device_uuid', uuid);
+  } catch (err2) {
+    /* ignore */
+  }
+  if (typeof document === 'undefined') return;
+  try {
+    var secure = typeof location !== 'undefined' && location.protocol === 'https:';
+    var cookie =
+      DEVICE_UUID_COOKIE +
+      '=' +
+      encodeURIComponent(uuid) +
+      '; path=/; max-age=' +
+      DEVICE_TRIAL_COOKIE_MAX_AGE_SEC +
+      '; SameSite=Lax';
+    if (secure) cookie += '; Secure';
+    document.cookie = cookie;
+    document.cookie =
+      'device_uuid=' +
+      encodeURIComponent(uuid) +
+      '; path=/; max-age=' +
+      DEVICE_TRIAL_COOKIE_MAX_AGE_SEC +
+      '; SameSite=Lax' +
+      (secure ? '; Secure' : '');
+  } catch (err3) {
+    /* ignore */
+  }
+}
+
+/** Primary anti-abuse key: stable per-browser UUID in localStorage + cookie. */
+function getOrCreateDeviceUuid() {
+  var fromCookie = readDocumentCookie(DEVICE_UUID_COOKIE) || readDocumentCookie('device_uuid');
+  var fromStorage = '';
+  try {
+    fromStorage = localStorage.getItem(DEVICE_UUID_STORAGE_KEY) || localStorage.getItem('device_uuid') || '';
+  } catch (err) {
+    /* ignore */
+  }
+  var uuid = String(fromCookie || fromStorage || '').trim();
+  if (uuid) {
+    persistDeviceUuid(uuid);
+    return uuid;
+  }
+  uuid = generateDeviceUuid();
+  persistDeviceUuid(uuid);
+  return uuid;
+}
+
+function getCanvasFingerprintComponent() {
   if (typeof document === 'undefined') return '';
   try {
     var canvas = document.createElement('canvas');
@@ -254,6 +420,56 @@ function getCanvasFingerprint() {
   } catch (err) {
     return '';
   }
+}
+
+/** Secondary fallback: canvas + UA + screen + timezone (reduces mobile false positives vs canvas alone). */
+function getCompositeDeviceFingerprint() {
+  var tz = '';
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+  } catch (err) {
+    /* ignore */
+  }
+  var ua = typeof navigator !== 'undefined' ? String(navigator.userAgent || '') : '';
+  var screenPx =
+    typeof screen !== 'undefined'
+      ? String(screen.width) + 'x' + String(screen.height) + 'x' + String(screen.colorDepth || 0)
+      : '';
+  return simpleFingerprintHash(
+    [getCanvasFingerprintComponent(), ua, screenPx, tz].join('\u0001')
+  );
+}
+
+async function buildTrialProfileOptions() {
+  var days = readPlatformSettings().freeTrialDays;
+  var durationMs = days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
+  var currentIp = await fetchCurrentClientIp();
+  return {
+    deviceUuid: getOrCreateDeviceUuid(),
+    skipTrialAbuseChecks: shouldSkipTrialAbuseChecks(),
+    trialDurationMs: durationMs,
+    ipAddress: currentIp,
+  };
+}
+
+function registerTrialForDevice(user) {
+  if (!user || !user.uid) return Promise.resolve(false);
+  if (shouldSkipTrialAbuseChecks()) return Promise.resolve(true);
+
+  var uuid = getOrCreateDeviceUuid();
+  var uuidKey = 'uuid_' + uuid;
+
+  return checkAndRegisterDeviceTrial(uuidKey, user.uid)
+    .then(function (allowedByUuid) {
+      if (allowedByUuid) return true;
+      return false;
+    })
+    .catch(function (err) {
+      console.warn('[Auth] UUID trial registration failed, trying composite fallback:', err);
+      var composite = getCompositeDeviceFingerprint();
+      if (!composite) return false;
+      return checkAndRegisterDeviceTrial('fp2_' + composite, user.uid);
+    });
 }
 
 function emailHadPriorTrialSnapshot(email) {
@@ -295,16 +511,20 @@ function computeNewTrialExpiresAt() {
   return Date.now() + days * 24 * 60 * 60 * 1000;
 }
 
-function applyGrantedTrialToSession(email, expiresAt) {
+function applyGrantedTrialToSession(email, expiresAt, options) {
   if (!expiresAt) return;
+  options = options || {};
   var current = getLocalAuthUser();
   if (!current || normalizeEmail(current.email) !== normalizeEmail(email)) return;
   setLocalAuthUser(
     Object.assign({}, current, {
       trialExpiresAt: expiresAt,
-    })
+    }),
+    lastProfile
   );
-  markDeviceTrialConsumed();
+  if (options.markDeviceConsumed !== false) {
+    markDeviceTrialConsumed();
+  }
   try {
     notifyLocalAuthChanged({ type: 'profile-sync', email: normalizeEmail(email) });
   } catch (err) {
@@ -315,8 +535,11 @@ function applyGrantedTrialToSession(email, expiresAt) {
   }
 }
 
-function maybeGrantTrialForUser(user) {
+function maybeGrantTrialForUser(user, profile, options) {
   if (!user || !user.uid) return Promise.resolve();
+  options = options || {};
+  var isNewProfile = options.isNewProfile === true;
+
   if (shouldSkipTrialAbuseChecks()) return Promise.resolve();
 
   var email = normalizeEmail(user.email || '');
@@ -324,29 +547,54 @@ function maybeGrantTrialForUser(user) {
   if (isDisposableEmail(email)) return Promise.resolve();
   if (emailHadPriorTrialSnapshot(email)) return Promise.resolve();
 
-  var local = getLocalAuthUser();
-  if (getTrialExpiryMs(local) > Date.now()) return Promise.resolve();
-  if (hasAttemptedAsyncTrialGrant(user.uid)) return Promise.resolve();
-
   var days = readPlatformSettings().freeTrialDays;
   if (!(days > 0)) return Promise.resolve();
 
-  var fp = getCanvasFingerprint();
-  if (!fp) {
+  var profileTrialMs = getTrialExpiryFromProfile(profile);
+  if (profileTrialMs > Date.now()) {
+    console.log('Auth: Existing user detected, fetching Firestore data...');
+    if (trialMsFromFirestoreValue(profile && profile.trialExpiresAt) > 0) {
+      console.log('Auth: Trial Active based on Firestore trialExpiresAt.');
+    } else {
+      console.log('Auth: Trial Active based on Firestore createdAt.');
+    }
+    console.log('Auth: Bypassing device fingerprint for existing valid account.');
+    applyGrantedTrialToSession(email, profileTrialMs, { markDeviceConsumed: false });
     markAsyncTrialGrantAttempted(user.uid);
     return Promise.resolve();
   }
 
-  return checkAndRegisterDeviceTrial(fp, user.uid)
-    .then(function (allowed) {
-      markAsyncTrialGrantAttempted(user.uid);
-      if (!allowed) return;
-      var expiresAt = computeNewTrialExpiresAt();
-      if (!expiresAt) return;
-      applyGrantedTrialToSession(email, expiresAt);
+  if (!isNewProfile) {
+    console.log('Auth: Existing user detected, fetching Firestore data...');
+    markAsyncTrialGrantAttempted(user.uid);
+    return Promise.resolve();
+  }
+
+  var local = getLocalAuthUser();
+  if (getTrialExpiryMs(local) > Date.now()) return Promise.resolve();
+
+  return fetchCurrentClientIp()
+    .then(function (fetchedIp) {
+      var ipToCheck = resolveIpForTrialCheck(profile, fetchedIp);
+      return countRecentUsersWithIp(ipToCheck, 7, user.uid).then(function (recentOnIp) {
+        if (isIpTrialRateLimited(recentOnIp)) {
+          console.warn('Free trial denied: IP rate limit exceeded for this network.');
+          markAsyncTrialGrantAttempted(user.uid);
+          return setUserTrialExpiresAt(user.uid, 0);
+        }
+        return registerTrialForDevice(user).then(function (allowed) {
+          markAsyncTrialGrantAttempted(user.uid);
+          if (!allowed) return;
+          var expiresAt = computeNewTrialExpiresAt();
+          if (!expiresAt) return;
+          applyGrantedTrialToSession(email, expiresAt);
+          return setUserTrialExpiresAt(user.uid, expiresAt);
+        });
+      });
     })
     .catch(function (err) {
       console.error('[Auth] maybeGrantTrialForUser failed:', err);
+      markAsyncTrialGrantAttempted(user.uid);
     });
 }
 
@@ -375,18 +623,29 @@ function hasActiveTrial(user, settings) {
   return getTrialExpiryMs(user, settings) > Date.now();
 }
 
-function resolveTrialExpiresAt(email, incoming) {
+function resolveTrialExpiresAt(email, incoming, firestoreProfile) {
   var previous = getLocalAuthUser();
   var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(email);
-  if (incoming && trialExpiryMs(incoming) > 0) return trialExpiryMs(incoming);
-  if (sameEmail && trialExpiryMs(previous.trialExpiresAt) > 0) return trialExpiryMs(previous.trialExpiresAt);
+
+  if (firestoreProfile) {
+    var fromProfile = getTrialExpiryFromProfile(firestoreProfile);
+    if (fromProfile > Date.now()) return fromProfile;
+  }
+
+  var incomingMs = trialMsFromFirestoreValue(incoming);
+  if (incomingMs > 0) return incomingMs;
+
+  if (sameEmail && trialMsFromFirestoreValue(previous.trialExpiresAt) > Date.now()) {
+    return trialMsFromFirestoreValue(previous.trialExpiresAt);
+  }
+
   try {
     var usersRaw = localStorage.getItem('ifa_admin_users');
     var users = usersRaw ? JSON.parse(usersRaw) : [];
     if (Array.isArray(users)) {
       for (var i = 0; i < users.length; i++) {
         if (normalizeEmail(users[i] && users[i].email) === normalizeEmail(email)) {
-          var fromDir = trialExpiryMs(users[i].trialExpiresAt);
+          var fromDir = trialMsFromFirestoreValue(users[i].trialExpiresAt);
           if (fromDir) return fromDir;
           break;
         }
@@ -395,9 +654,7 @@ function resolveTrialExpiresAt(email, incoming) {
   } catch (err) {
     /* ignore */
   }
-  if (sameEmail && previous) {
-    return 0;
-  }
+
   var days = readPlatformSettings().freeTrialDays;
   if (days <= 0) return 0;
   if (!shouldSkipTrialAbuseChecks() && isDisposableEmail(email)) return 0;
@@ -429,11 +686,21 @@ function persistDirectoryTrial(email, trialExpiresAt) {
   }
 }
 
-function setLocalAuthUser(user) {
+function setLocalAuthUser(user, firestoreProfile) {
   if (!user || !normalizeEmail(user.email)) return;
   var previous = getLocalAuthUser();
   var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(user.email);
-  var trialExpiresAt = resolveTrialExpiresAt(user.email, user.trialExpiresAt);
+  var trialFromProfile = firestoreProfile ? getTrialExpiryFromProfile(firestoreProfile) : 0;
+  var incomingTrial =
+    user.trialExpiresAt != null && user.trialExpiresAt !== ''
+      ? user.trialExpiresAt
+      : trialFromProfile > 0
+        ? trialFromProfile
+        : undefined;
+  var trialExpiresAt = resolveTrialExpiresAt(user.email, incomingTrial, firestoreProfile);
+  var profileCreatedIso = firestoreProfile
+    ? firestoreCreatedAtToIso(firestoreProfile.createdAt)
+    : '';
   var payload = {
     name: String(user.name || user.displayName || '').trim() || normalizeEmail(user.email).split('@')[0],
     email: normalizeEmail(user.email),
@@ -457,13 +724,14 @@ function setLocalAuthUser(user) {
           : [],
     trialExpiresAt: trialExpiresAt,
     createdAt:
-      sameEmail && previous && previous.createdAt
+      profileCreatedIso ||
+      (sameEmail && previous && previous.createdAt
         ? previous.createdAt
         : String(
             user.createdAt ||
               (user.metadata && user.metadata.creationTime) ||
               new Date().toISOString()
-          ),
+          )),
     loggedInAt: new Date().toISOString(),
   };
   try {
@@ -552,6 +820,23 @@ function applyEntitlements(entitlements, email) {
   return payload;
 }
 
+function clearTrialGrantAttemptedFlags() {
+  try {
+    var toRemove = [];
+    for (var i = 0; i < sessionStorage.length; i++) {
+      var key = sessionStorage.key(i);
+      if (key && key.indexOf(TRIAL_GRANT_ATTEMPTED_PREFIX) === 0) {
+        toRemove.push(key);
+      }
+    }
+    toRemove.forEach(function (key) {
+      sessionStorage.removeItem(key);
+    });
+  } catch (err) {
+    /* ignore */
+  }
+}
+
 function clearLocalAuthUser() {
   try {
     localStorage.removeItem(LOCAL_AUTH_KEY);
@@ -563,6 +848,7 @@ function clearLocalAuthUser() {
   } catch (err2) {
     /* ignore */
   }
+  clearTrialGrantAttemptedFlags();
 }
 
 function notifyLocalAuthChanged(detail) {
@@ -1209,11 +1495,14 @@ export async function signUpWithEmailPassword(email, password) {
   if (!password || String(password).length < 6) {
     throw new Error('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
   }
-  if (!shouldSkipTrialAbuseChecks() && isDisposableEmail(key)) {
-    throw new Error('لا يمكن التسجيل ببريد مؤقت. استخدم بريدك الشخصي.');
+  if (!isWhitelistedSignupEmailDomain(key)) {
+    alert(
+      'عذراً، لحماية المنصة يرجى التسجيل باستخدام بريد إلكتروني حقيقي من (Gmail, Yahoo, Outlook, Hotmail).'
+    );
+    return null;
   }
   var result = await createUserWithEmailAndPassword(auth, key, String(password));
-  await createUserProfileOnSignUp(result.user);
+  await createUserProfileOnSignUp(result.user, await buildTrialProfileOptions());
   closeAuthModal();
   return result.user;
 }
@@ -1230,7 +1519,8 @@ async function handleAuthModalSubmit() {
   if (submitBtn) submitBtn.disabled = true;
   try {
     if (authModalMode === 'signup') {
-      await signUpWithEmailPassword(email, password);
+      var signedUpUser = await signUpWithEmailPassword(email, password);
+      if (!signedUpUser) return;
     } else {
       await loginWithEmailPassword(email, password);
     }
@@ -1375,6 +1665,7 @@ function completeGoogleRedirectSignIn() {
 }
 
 function initAuthUI() {
+  getOrCreateDeviceUuid();
   ensureAuthModal();
   completeGoogleRedirectSignIn();
   bindAuthClicks();
@@ -1476,28 +1767,42 @@ function initAuthUI() {
     notifyLocalAuthChanged({ type: 'login', email: email });
     notifyAuthChange(user, { profileSynced: false });
 
-    syncUserProfile(user)
-      .then(function (profile) {
+    buildTrialProfileOptions()
+      .then(function (trialOptions) {
+        return syncUserProfile(user, trialOptions);
+      })
+      .then(function (syncResult) {
+        var unwrapped = unwrapProfileSyncResult(syncResult);
+        var profile = unwrapped.profile;
+        var isNewProfile = unwrapped.isNew;
         lastProfile = profile || null;
         var role = String((profile && profile.role) || 'user');
+        var profileTrialEnd = getTrialExpiryFromProfile(profile);
         return syncEntitlementsFromApprovedOrders(user.uid)
           .then(function (orderEntitlements) {
-            setLocalAuthUser({
-              name: (profile && profile.name) || user.displayName || '',
-              email: (profile && profile.email) || user.email || '',
-              photoURL: user.photoURL || (profile && profile.photo) || '',
-              isSubscriber: !!orderEntitlements.isSubscriber,
-              isAdmin: role === 'admin',
-              isInstructor: !!(profile && profile.isInstructor),
-              role: role,
-              planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
-              enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
-                ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
-                : [],
-              allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
-                ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
-                : [],
-            });
+            setLocalAuthUser(
+              {
+                name: (profile && profile.name) || user.displayName || '',
+                email: (profile && profile.email) || user.email || '',
+                photoURL: user.photoURL || (profile && profile.photo) || '',
+                isSubscriber: !!orderEntitlements.isSubscriber,
+                isAdmin: role === 'admin',
+                isInstructor: !!(profile && profile.isInstructor),
+                role: role,
+                planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
+                enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
+                  ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
+                  : [],
+                allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
+                  ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
+                  : [],
+                trialExpiresAt:
+                  profileTrialEnd > 0
+                    ? profileTrialEnd
+                    : trialMsFromFirestoreValue(profile && profile.trialExpiresAt),
+              },
+              profile
+            );
             try {
               var subDetail = {
                 userId: user.uid,
@@ -1521,30 +1826,38 @@ function initAuthUI() {
             startPlatformNotifications(user, profile);
             notifyLocalAuthChanged({ type: 'profile-sync', email: email });
             notifyAuthChange(user, { profileSynced: true });
-            return maybeGrantTrialForUser(user);
+            return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
           })
           .catch(function (syncErr) {
             console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
             var previous = getLocalAuthUser();
             var entitlements = profileToEntitlements(profile, user, previous);
-            setLocalAuthUser({
-              name: (profile && profile.name) || user.displayName || '',
-              email: (profile && profile.email) || user.email || '',
-              photoURL: user.photoURL || (profile && profile.photo) || '',
-              isSubscriber: entitlements.isSubscriber,
-              isAdmin: role === 'admin',
-              isInstructor: !!(profile && profile.isInstructor),
-              role: role,
-              planId: entitlements.planId,
-              enrolledCourseIds: entitlements.enrolledCourseIds,
-              allowedSimulators: entitlements.allowedSimulators,
-            });
+            var profileTrialEndCatch = getTrialExpiryFromProfile(profile);
+            setLocalAuthUser(
+              {
+                name: (profile && profile.name) || user.displayName || '',
+                email: (profile && profile.email) || user.email || '',
+                photoURL: user.photoURL || (profile && profile.photo) || '',
+                isSubscriber: entitlements.isSubscriber,
+                isAdmin: role === 'admin',
+                isInstructor: !!(profile && profile.isInstructor),
+                role: role,
+                planId: entitlements.planId,
+                enrolledCourseIds: entitlements.enrolledCourseIds,
+                allowedSimulators: entitlements.allowedSimulators,
+                trialExpiresAt:
+                  profileTrialEndCatch > 0
+                    ? profileTrialEndCatch
+                    : trialMsFromFirestoreValue(profile && profile.trialExpiresAt),
+              },
+              profile
+            );
             profileSynced = true;
             refreshSlots();
             startPlatformNotifications(user, profile);
             notifyLocalAuthChanged({ type: 'profile-sync', email: email });
             notifyAuthChange(user, { profileSynced: true });
-            return maybeGrantTrialForUser(user);
+            return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
           });
       })
       .catch(function (err) {

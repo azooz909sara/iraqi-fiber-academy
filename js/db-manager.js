@@ -9,18 +9,62 @@
  */
 import { db } from './firebase-config.js';
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
+  query,
   setDoc,
   runTransaction,
   serverTimestamp,
+  where,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
-function normalizeTrialConsumptionDocId(canvasHash) {
-  var id = String(canvasHash || '')
+function normalizeTrialConsumptionDocId(consumptionKey) {
+  var id = String(consumptionKey || '')
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 500);
   return id || '';
+}
+
+function profileCreatedAtMs(data) {
+  var value = data && data.createdAt;
+  if (value == null || value === '') return 0;
+  try {
+    if (value && typeof value.toDate === 'function') {
+      var d = value.toDate();
+      return d && !isNaN(d.getTime()) ? d.getTime() : 0;
+    }
+    if (typeof value === 'number' && isFinite(value)) return value;
+    var parsed = Date.parse(String(value));
+    return isFinite(parsed) ? parsed : 0;
+  } catch (err) {
+    return 0;
+  }
+}
+
+/**
+ * Count users sharing an IP whose profile was created within the last N days.
+ * @param {string} ipAddress
+ * @param {number} withinDays
+ * @param {string} [excludeUid] Current user uid to exclude from the count
+ * @returns {Promise<number>}
+ */
+export async function countRecentUsersWithIp(ipAddress, withinDays, excludeUid) {
+  var ip = String(ipAddress || '').trim();
+  if (!ip || ip === 'unknown') return 0;
+  var days = Number(withinDays);
+  if (!isFinite(days) || days <= 0) days = 7;
+  var cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  var q = query(collection(db, 'users'), where('ipAddress', '==', ip));
+  var snap = await getDocs(q);
+  var count = 0;
+  snap.forEach(function (docSnap) {
+    if (excludeUid && docSnap.id === excludeUid) return;
+    var createdMs = profileCreatedAtMs(docSnap.data());
+    if (createdMs >= cutoff) count++;
+  });
+  return count;
 }
 
 function buildDefaultUserProfile(user) {
@@ -39,32 +83,72 @@ function buildDefaultUserProfile(user) {
 
 /**
  * Ensure users/{uid} exists (safe for first-time Google / redirect sign-in).
- * Firestore rules require role === 'user' on create.
- * @param {import('firebase/auth').User} user
- * @returns {Promise<object|null>}
+ * On first create: createdAt = serverTimestamp(); optional trial when device UUID is new.
+ * @returns {Promise<{ profile: object, isNew: boolean }|null>}
  */
-export async function ensureUserProfileDocument(user) {
+export async function ensureUserProfileDocument(user, options) {
   if (!user || !user.uid) return null;
 
   var ref = doc(db, 'users', user.uid);
   var snap = await getDoc(ref);
   if (snap.exists()) {
-    return snap.data();
+    return { profile: snap.data(), isNew: false };
   }
 
+  options = options || {};
   var profile = buildDefaultUserProfile(user);
-  await setDoc(ref, profile);
-  return profile;
+  var payload = Object.assign({}, profile, { createdAt: serverTimestamp() });
+
+  var deviceUuid = String(options.deviceUuid || '').trim();
+  if (deviceUuid) {
+    payload.deviceUuid = deviceUuid;
+  }
+
+  var ipAddress = String(options.ipAddress || '').trim() || 'unknown';
+  payload.ipAddress = ipAddress;
+
+  var trialDurationMs = Number(options.trialDurationMs);
+  var ipBlocksTrial = false;
+  if (!options.skipTrialAbuseChecks) {
+    var recentOnIp = await countRecentUsersWithIp(ipAddress, 7, user.uid);
+    if (recentOnIp >= 2) {
+      ipBlocksTrial = true;
+      payload.trialExpiresAt = 0;
+      console.warn('Free trial denied: IP rate limit exceeded for this network.');
+    }
+  }
+
+  if (
+    !ipBlocksTrial &&
+    !options.skipTrialAbuseChecks &&
+    deviceUuid &&
+    isFinite(trialDurationMs) &&
+    trialDurationMs > 0
+  ) {
+    var uuidKey = 'uuid_' + normalizeTrialConsumptionDocId(deviceUuid);
+    var allowed = await checkAndRegisterDeviceTrial(uuidKey, user.uid);
+    if (allowed) {
+      payload.trialExpiresAt = Date.now() + trialDurationMs;
+    }
+  } else if (!ipBlocksTrial && options.skipTrialAbuseChecks && isFinite(trialDurationMs) && trialDurationMs > 0) {
+    payload.trialExpiresAt = Date.now() + trialDurationMs;
+  }
+
+  await setDoc(ref, payload);
+  var created = await getDoc(ref);
+  var data = created.exists() ? created.data() : payload;
+  return { profile: data, isNew: true };
 }
 
 /**
  * Create users/{uid} immediately after Email/Password sign-up.
  * @param {import('firebase/auth').User} user
- * @returns {Promise<object|null>}
+ * @param {{ deviceUuid?: string, skipTrialAbuseChecks?: boolean, trialDurationMs?: number }} [options]
+ * @returns {Promise<{ profile: object, isNew: boolean }|null>}
  */
-export async function createUserProfileOnSignUp(user) {
+export async function createUserProfileOnSignUp(user, options) {
   if (!user || !user.uid) return null;
-  return ensureUserProfileDocument(user);
+  return ensureUserProfileDocument(user, options);
 }
 
 /**
@@ -80,10 +164,10 @@ export async function fetchUserProfile(uid) {
 /**
  * Ensure users/{uid} exists; create a default non-subscriber profile if missing.
  * @param {import('firebase/auth').User} user
- * @returns {Promise<object|null>}
+ * @returns {Promise<{ profile: object, isNew: boolean }|null>}
  */
-export async function syncUserProfile(user) {
-  return ensureUserProfileDocument(user);
+export async function syncUserProfile(user, options) {
+  return ensureUserProfileDocument(user, options);
 }
 
 /**
@@ -157,13 +241,13 @@ export async function checkAdminStatus(uid) {
 }
 
 /**
- * Global device trial lock (canvas fingerprint). One trial per fingerprint across profiles.
- * @param {string} canvasHash
+ * Device trial lock in trialConsumptions/{key}. Keys: uuid_{deviceUuid} (primary) or fp2_{composite} (fallback).
+ * @param {string} consumptionKey
  * @param {string} uid
  * @returns {Promise<boolean>} true if registered and trial may be granted; false if already consumed
  */
-export async function checkAndRegisterDeviceTrial(canvasHash, uid) {
-  var hashId = normalizeTrialConsumptionDocId(canvasHash);
+export async function checkAndRegisterDeviceTrial(consumptionKey, uid) {
+  var hashId = normalizeTrialConsumptionDocId(consumptionKey);
   if (!hashId || !uid) return false;
 
   var ref = doc(db, 'trialConsumptions', hashId);
@@ -173,6 +257,7 @@ export async function checkAndRegisterDeviceTrial(canvasHash, uid) {
       if (snap.exists()) return false;
       transaction.set(ref, {
         uid: String(uid),
+        key: hashId,
         createdAt: serverTimestamp(),
       });
       return true;
@@ -181,4 +266,20 @@ export async function checkAndRegisterDeviceTrial(canvasHash, uid) {
     console.error('[db-manager] checkAndRegisterDeviceTrial failed:', err);
     return false;
   }
+}
+
+/**
+ * @param {string} uid
+ * @param {number} expiresAtMs
+ */
+export async function setUserTrialExpiresAt(uid, expiresAtMs) {
+  if (!uid || expiresAtMs == null || expiresAtMs === '') return;
+  await setDoc(
+    doc(db, 'users', uid),
+    {
+      trialExpiresAt: expiresAtMs,
+      updatedAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
 }

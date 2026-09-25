@@ -9,7 +9,7 @@
   var ARCHIVE_KEY = 'ifa_admin_users_archive';
   var SEED_VERSION_KEY = 'ifa_admin_users_seed_version';
   /* Bump to force-reset mock data for all browsers with old rows. */
-  var SEED_VERSION = '3';
+  var SEED_VERSION = '4';
 
   var ROLE_LABELS = {
     student: 'طالب',
@@ -23,6 +23,17 @@
     pending: 'قيد المراجعة',
     expired: 'منتهي',
   };
+
+  var SUBSCRIPTION_LABELS = {
+    trial: 'فترة تجريبية',
+    subscriber: 'مشترك نشط',
+    expired: 'منتهي',
+  };
+
+  var DEFAULT_FREE_TRIAL_DAYS = 7;
+
+  var firestoreUsers = [];
+  var firestoreReady = false;
 
   function storageGet(key) {
     try {
@@ -63,31 +74,176 @@
     return String(email || '').trim().toLowerCase();
   }
 
+  function timestampToIso(value) {
+    if (value == null || value === '') return '';
+    try {
+      if (value && typeof value.toDate === 'function') {
+        return value.toDate().toISOString();
+      }
+      if (typeof value === 'number' && isFinite(value)) {
+        return new Date(value).toISOString();
+      }
+      var d = new Date(value);
+      if (!isNaN(d.getTime())) return d.toISOString();
+    } catch (err) {
+      /* ignore */
+    }
+    return String(value);
+  }
+
+  function trialExpiryMs(value) {
+    if (value == null || value === '') return 0;
+    if (typeof value === 'number' && isFinite(value)) return value;
+    if (value && typeof value.toDate === 'function') return value.toDate().getTime();
+    var parsed = Date.parse(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+
+  function getFreeTrialDays() {
+    try {
+      var raw = storageGet('ifa_platform_settings');
+      if (!raw) return DEFAULT_FREE_TRIAL_DAYS;
+      var parsed = JSON.parse(raw);
+      var days = Number(parsed && parsed.freeTrialDays);
+      if (isFinite(days) && days > 0) return Math.min(365, days);
+    } catch (err) {
+      /* ignore */
+    }
+    return DEFAULT_FREE_TRIAL_DAYS;
+  }
+
+  function normalizeFirestoreRole(data) {
+    data = data || {};
+    if (data.isAdmin === true || String(data.role || '').toLowerCase() === 'admin') return 'admin';
+    if (String(data.role || '').toLowerCase() === 'instructor') return 'instructor';
+    if (String(data.role || '').toLowerCase() === 'student') return 'student';
+    return 'student';
+  }
+
+  function mapFirestoreRow(row) {
+    var data = row || {};
+    var id = String(data.id || data.uid || '').trim();
+    var role = normalizeFirestoreRole(data);
+    var statusRaw = String(data.status || '').toLowerCase();
+    var status =
+      statusRaw === 'suspended' || statusRaw === 'pending' || statusRaw === 'expired'
+        ? statusRaw
+        : 'active';
+    return {
+      id: id,
+      uid: String(data.uid || id),
+      name: String(data.name || data.displayName || '').trim() || '—',
+      email: normalizeEmail(data.email),
+      role: role,
+      status: status,
+      createdAt: timestampToIso(data.createdAt),
+      isSubscriber: data.isSubscriber === true,
+      trialExpiresAt: trialExpiryMs(data.trialExpiresAt) || data.trialExpiresAt || 0,
+      subscriptionEndsAt: timestampToIso(data.subscriptionEndsAt || data.subscriptionEndAt) || null,
+      planId: String(data.planId || ''),
+      enrolledCourseIds: Array.isArray(data.enrolledCourseIds) ? data.enrolledCourseIds : [],
+      source: 'firestore',
+    };
+  }
+
+  function ingestFirestoreUsers(rows) {
+    firestoreReady = true;
+    firestoreUsers = (rows || [])
+      .map(mapFirestoreRow)
+      .filter(function (u) {
+        return !!u.id;
+      })
+      .map(function (u) {
+        var access = resolveUserAccess(u);
+        if (u.status !== 'suspended' && u.status !== 'pending') {
+          u.status = access.status;
+        }
+        u.subscriptionDisplay = access.subscriptionLabel;
+        return u;
+      });
+  }
+
+  function clearFirestoreUsers() {
+    firestoreReady = false;
+    firestoreUsers = [];
+  }
+
+  function createdAtMs(user) {
+    if (!user || !user.createdAt) return 0;
+    var ms = Date.parse(user.createdAt);
+    return isNaN(ms) ? 0 : ms;
+  }
+
+  function getTrialEndMs(user) {
+    if (!user) return 0;
+    var stored = trialExpiryMs(user.trialExpiresAt);
+    if (stored > 0) return stored;
+    var start = createdAtMs(user);
+    if (!start) return 0;
+    return start + getFreeTrialDays() * 24 * 60 * 60 * 1000;
+  }
+
+  /**
+   * Subscription + account status for admin table (Firestore-aware).
+   * @returns {{ status: string, subscriptionKey: string, subscriptionLabel: string }}
+   */
+  function resolveUserAccess(user) {
+    if (!user) {
+      return { status: 'active', subscriptionKey: 'expired', subscriptionLabel: '—' };
+    }
+    if (user.status === 'suspended') {
+      return {
+        status: 'suspended',
+        subscriptionKey: 'expired',
+        subscriptionLabel: SUBSCRIPTION_LABELS.expired,
+      };
+    }
+    if (user.role !== 'student' && user.role !== 'instructor') {
+      return {
+        status: user.status === 'pending' ? 'pending' : 'active',
+        subscriptionKey: 'subscriber',
+        subscriptionLabel: '—',
+      };
+    }
+    if (user.isSubscriber === true) {
+      var subLabel = user.subscriptionEndsAt
+        ? formatDate(user.subscriptionEndsAt)
+        : SUBSCRIPTION_LABELS.subscriber;
+      return {
+        status: 'active',
+        subscriptionKey: 'subscriber',
+        subscriptionLabel: subLabel,
+      };
+    }
+    var trialEnd = getTrialEndMs(user);
+    if (trialEnd > Date.now()) {
+      return {
+        status: 'active',
+        subscriptionKey: 'trial',
+        subscriptionLabel: SUBSCRIPTION_LABELS.trial,
+      };
+    }
+    return {
+      status: 'expired',
+      subscriptionKey: 'expired',
+      subscriptionLabel: SUBSCRIPTION_LABELS.expired,
+    };
+  }
+
+  function getDisplayStatus(user) {
+    return resolveUserAccess(user).status;
+  }
+
+  function getSubscriptionLabel(user) {
+    return resolveUserAccess(user).subscriptionLabel;
+  }
+
+  function subscriptionLabel(key) {
+    return SUBSCRIPTION_LABELS[key] || key || '—';
+  }
+
   function seedUsers() {
-    return [
-      {
-        id: 'usr_example_1',
-        name: 'أحمد الطالب',
-        email: 'ahmed.student@example.com',
-        role: 'student',
-        status: 'active',
-        createdAt: '2026-06-01T10:00:00.000Z',
-        subscriptionEndsAt: '2026-12-31T23:59:59.000Z',
-        planId: 'plan_standard',
-        enrolledCourseIds: [],
-      },
-      {
-        id: 'usr_example_2',
-        name: 'سارة المتعلمة',
-        email: 'sara.learner@example.com',
-        role: 'student',
-        status: 'active',
-        createdAt: '2026-07-15T10:00:00.000Z',
-        subscriptionEndsAt: '2026-11-30T23:59:59.000Z',
-        planId: 'plan_free',
-        enrolledCourseIds: [],
-      },
-    ];
+    return [];
   }
 
   function ensureSeeded() {
@@ -163,6 +319,7 @@
   }
 
   function getActiveUsers() {
+    if (firestoreReady) return firestoreUsers.slice();
     var list = getUsers();
     if (refreshExpiredStatuses(list)) saveUsers(list);
     return list;
@@ -267,8 +424,13 @@
   }
 
   function isSubscriptionEnded(user) {
-    if (!user || !user.subscriptionEndsAt) return user && user.status === 'expired';
-    return new Date(user.subscriptionEndsAt).getTime() < Date.now();
+    if (!user) return false;
+    if (user.isSubscriber === true) {
+      if (!user.subscriptionEndsAt) return false;
+      return new Date(user.subscriptionEndsAt).getTime() < Date.now();
+    }
+    if (user.status === 'suspended') return false;
+    return getTrialEndMs(user) <= Date.now();
   }
 
   function renewSubscription(id, days) {
@@ -415,7 +577,18 @@
     roleLabel: roleLabel,
     statusLabel: statusLabel,
     isSubscriptionEnded: isSubscriptionEnded,
+    ingestFirestoreUsers: ingestFirestoreUsers,
+    clearFirestoreUsers: clearFirestoreUsers,
+    resolveUserAccess: resolveUserAccess,
+    getDisplayStatus: getDisplayStatus,
+    getSubscriptionLabel: getSubscriptionLabel,
+    subscriptionLabel: subscriptionLabel,
+    getFreeTrialDays: getFreeTrialDays,
+    isFirestoreLive: function () {
+      return firestoreReady;
+    },
     ROLE_LABELS: ROLE_LABELS,
     STATUS_LABELS: STATUS_LABELS,
+    SUBSCRIPTION_LABELS: SUBSCRIPTION_LABELS,
   };
 })(typeof window !== 'undefined' ? window : this);

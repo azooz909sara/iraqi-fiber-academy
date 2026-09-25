@@ -294,11 +294,14 @@
       var statusFilter = usersStatusFilter || 'all';
       var filtered = list.filter(function (u) {
         if (!showingArchive && statusFilter !== 'all') {
+          var displayStatus = window.AdminUsers.getDisplayStatus
+            ? window.AdminUsers.getDisplayStatus(u)
+            : u.status;
           if (statusFilter === 'expired') {
             var isExpired =
-              u.status === 'expired' || window.AdminUsers.isSubscriptionEnded(u);
+              displayStatus === 'expired' || window.AdminUsers.isSubscriptionEnded(u);
             if (!isExpired) return false;
-          } else if (u.status !== statusFilter) {
+          } else if (displayStatus !== statusFilter) {
             return false;
           }
         }
@@ -311,10 +314,21 @@
 
       var archiveCount = window.AdminUsers.getArchivedUsers().length;
       if (meta) {
-        meta.textContent = showingArchive
-          ? archiveCount + ' في الأرشيف · عرض ' + filtered.length
-          : 'عرض ' + filtered.length + ' من ' + list.length +
-            (archiveCount ? ' · الأرشيف: ' + archiveCount : '');
+        if (
+          !showingArchive &&
+          window.AdminUsers.isFirestoreLive &&
+          !window.AdminUsers.isFirestoreLive()
+        ) {
+          meta.textContent = 'جاري مزامنة المستخدمين من Firestore…';
+        } else {
+          meta.textContent = showingArchive
+            ? archiveCount + ' في الأرشيف · عرض ' + filtered.length
+            : 'عرض ' + filtered.length + ' من ' + list.length +
+              (archiveCount ? ' · الأرشيف: ' + archiveCount : '') +
+              (window.AdminUsers.isFirestoreLive && window.AdminUsers.isFirestoreLive()
+                ? ' · Firestore'
+                : '');
+        }
       }
 
       if (!filtered.length) {
@@ -336,16 +350,26 @@
         .map(function (user) {
           var id = escapeHtml(user.id);
           var initial = escapeHtml((user.name || '?').charAt(0));
-          var subLabel =
-            user.role === 'student'
-              ? user.subscriptionEndsAt
-                ? window.AdminUsers.formatDate(user.subscriptionEndsAt)
-                : '—'
-              : '—';
-          if (user.role === 'student' && (user.status === 'expired' || window.AdminUsers.isSubscriptionEnded(user))) {
-            subLabel = '<span class="admin-sub-ended">منتهي · ' + escapeHtml(window.AdminUsers.formatDate(user.subscriptionEndsAt)) + '</span>';
+          var rowStatus = window.AdminUsers.getDisplayStatus
+            ? window.AdminUsers.getDisplayStatus(user)
+            : user.status;
+          var subLabel;
+          var access = window.AdminUsers.resolveUserAccess
+            ? window.AdminUsers.resolveUserAccess(user)
+            : null;
+
+          if (user.role === 'student' || user.role === 'instructor') {
+            var subText = access
+              ? access.subscriptionLabel
+              : window.AdminUsers.getSubscriptionLabel(user);
+            if (rowStatus === 'expired' || window.AdminUsers.isSubscriptionEnded(user)) {
+              subLabel =
+                '<span class="admin-sub-ended">' + escapeHtml(subText) + '</span>';
+            } else {
+              subLabel = escapeHtml(subText);
+            }
           } else {
-            subLabel = escapeHtml(subLabel);
+            subLabel = '—';
           }
 
           var actions;
@@ -360,14 +384,14 @@
               '">حذف نهائي</button>' +
               '</div>';
           } else {
-            var suspendLabel = user.status === 'suspended' ? 'تفعيل' : 'إيقاف';
+            var suspendLabel = rowStatus === 'suspended' ? 'تفعيل' : 'إيقاف';
             var suspendCls =
-              user.status === 'suspended'
+              rowStatus === 'suspended'
                 ? 'admin-btn admin-btn--ghost admin-btn--sm admin-btn--activate'
                 : 'admin-btn admin-btn--danger admin-btn--sm';
             var moreNeeded =
               user.role === 'student' ||
-              user.status === 'expired' ||
+              rowStatus === 'expired' ||
               window.AdminUsers.isSubscriptionEnded(user);
 
             actions =
@@ -381,9 +405,12 @@
               id +
               '">' +
               suspendLabel +
-              '</button>';
+              '</button>' +
+              '<button class="admin-btn admin-btn--danger admin-btn--sm" type="button" data-delete-user="' +
+              id +
+              '">حذف</button>';
 
-            if (user.status === 'expired') {
+            if (rowStatus === 'expired') {
               actions +=
                 '<button class="admin-btn admin-btn--primary admin-btn--sm" type="button" data-renew-user="' +
                 id +
@@ -433,7 +460,7 @@
             userRoleBadge(user.role) +
             '</td>' +
             '<td>' +
-            userStatusBadge(user.status) +
+            userStatusBadge(rowStatus) +
             '</td>' +
             '<td>' +
             subLabel +
@@ -571,8 +598,36 @@
       var archiveBtn = e.target.closest ? e.target.closest('[data-archive-user]') : null;
       var restoreBtn = e.target.closest ? e.target.closest('[data-restore-user]') : null;
       var purgeBtn = e.target.closest ? e.target.closest('[data-purge-user]') : null;
+      var deleteUserBtn = e.target.closest ? e.target.closest('[data-delete-user]') : null;
 
       try {
+        if (deleteUserBtn) {
+          var deleteId = deleteUserBtn.getAttribute('data-delete-user');
+          if (
+            !window.confirm(
+              'هل أنت متأكد من حذف هذا المستخدم نهائياً؟ سيتم مسح جميع بياناته.'
+            )
+          ) {
+            return;
+          }
+          if (!window.AdminUsers || typeof window.AdminUsers.deleteUser !== 'function') {
+            alert('تعذر الحذف: Firestore غير متصل.');
+            return;
+          }
+          deleteUserBtn.disabled = true;
+          Promise.resolve(window.AdminUsers.deleteUser(deleteId))
+            .then(function () {
+              alert('تم حذف المستخدم بنجاح.');
+              renderUsersTable();
+            })
+            .catch(function (err) {
+              alert((err && err.message) || 'تعذر حذف المستخدم');
+            })
+            .finally(function () {
+              deleteUserBtn.disabled = false;
+            });
+          return;
+        }
         if (editBtn) {
           var editUser = window.AdminUsers.findUser(editBtn.getAttribute('data-edit-user'));
           if (editUser) openUserEditor(editUser);
@@ -652,6 +707,9 @@
 
     window.addEventListener('scroll', closeUsersRowMenus, true);
     window.addEventListener('resize', closeUsersRowMenus);
+
+    document.addEventListener('ifa:admin-users-changed', renderUsersTable);
+    window.addEventListener('ifa:admin-users-changed', renderUsersTable);
 
     renderUsersTable();
   }
