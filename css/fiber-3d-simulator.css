@@ -1195,12 +1195,32 @@ html, body {
 .anatomy-cms__status.is-error { color: #f87171; }
 
 @media (max-width: 980px) {
+  /* Enable native browser zooming */
+  html,
+  body.f3d-page {
+    overflow: auto !important;
+    touch-action: pan-x pan-y pinch-zoom !important;
+  }
+
+  /* Force the desktop 3-column layout and width */
+  .f3d-app,
+  .f3d-main {
+    min-width: 1100px !important;
+  }
+
+  .f3d-main {
+    display: grid !important;
+    grid-template-columns: 240px 1fr 280px !important;
+  }
+
+  /* Contain the center 3D workspace properly so it doesn't break out */
   .f3d-main > .f3d-stage-wrap {
     position: relative !important;
     overflow: hidden !important;
     height: 100% !important;
   }
 
+  /* Lock the inner canvases */
   #f3d-canvas-host,
   #f3d-2d-host,
   #f3d-media-host {
@@ -1210,7 +1230,36 @@ html, body {
     height: 100% !important;
   }
 
-  .f3d-hint {
-    display: none;
+  #f3d-canvas-host canvas {
+    touch-action: pan-x pan-y pinch-zoom !important;
+  }
+
+  /* Header / footer wrap — f3d-* only */
+  .f3d-header,
+  .f3d-menubar-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    height: auto !important;
+    min-height: fit-content !important;
+    padding: 10px 5px !important;
+    gap: 8px !important;
+    white-space: normal !important;
+  }
+
+  .f3d-footer {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    height: auto !important;
+    min-height: fit-content !important;
+    padding: 10px !important;
+    white-space: normal !important;
+    line-height: 1.5 !important;
+  }
+
+  .f3d-header > *,
+  .f3d-menubar-row > *,
+  .f3d-footer > * {
+    max-width: 100% !important;
+    flex-shrink: 1 !important;
   }
 }
