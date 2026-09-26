@@ -108,6 +108,22 @@ function orderGrantsGlobalPlatformSubscription(order) {
   return !!String(order.planId || '').trim();
 }
 
+function trialExpiresAtMs(profile) {
+  if (!profile || profile.trialExpiresAt == null || profile.trialExpiresAt === '') return 0;
+  var value = profile.trialExpiresAt;
+  try {
+    if (value && typeof value.toDate === 'function') {
+      var d = value.toDate();
+      return d && !isNaN(d.getTime()) ? d.getTime() : 0;
+    }
+    if (typeof value === 'number' && isFinite(value)) return value;
+    var parsed = Date.parse(String(value));
+    return isFinite(parsed) ? parsed : 0;
+  } catch (err) {
+    return 0;
+  }
+}
+
 /**
  * Rebuild users/{uid} entitlements from all approved orders for that user.
  * @param {string} uid
@@ -155,11 +171,34 @@ export async function syncEntitlementsFromApprovedOrders(uid) {
   };
 
   await ensureUserDocExistsForUid(uid);
-  await setDoc(
-    doc(db, 'users', uid),
-    Object.assign({}, entitlements, { updatedAt: serverTimestamp() }),
-    { merge: true }
-  );
+  var userRef = doc(db, 'users', uid);
+  var existingSnap = await getDoc(userRef);
+  var existing = existingSnap.exists() ? existingSnap.data() || {} : {};
 
-  return entitlements;
+  /** Order-derived fields only — never touch trialStartDate / trialExpiresAt / createdAt. */
+  var patch = {
+    enrolledCourseIds: enrolled,
+    allowedSimulators: allowedSimulators,
+    updatedAt: serverTimestamp(),
+  };
+
+  if (isSubscriber) {
+    patch.isSubscriber = true;
+    patch.planId = planId;
+  } else if (existing.isSubscriber !== true) {
+    patch.isSubscriber = false;
+    if (!String(existing.planId || '').trim()) {
+      patch.planId = '';
+    }
+  }
+
+  await setDoc(userRef, patch, { merge: true });
+
+  var trialExpiresAt = existing.trialExpiresAt;
+  var trialStartDate = existing.trialStartDate;
+  return Object.assign({}, entitlements, {
+    trialExpiresAt: trialExpiresAt,
+    trialStartDate: trialStartDate,
+    trialExpiresAtMs: trialExpiresAtMs(existing),
+  });
 }

@@ -129,7 +129,17 @@ async function evaluateAccess(user) {
     await syncUserProfile(user);
 
     var profile = await fetchUserProfile(user.uid);
-    if (profile && window.IFAAuth && typeof window.IFAAuth.applyEntitlements === 'function') {
+    if (profile && window.IFAAuth && typeof window.IFAAuth.setLocalAuthUser === 'function') {
+      window.IFAAuth.setLocalAuthUser(
+        {
+          isSubscriber: profile.isSubscriber === true,
+          planId: profile.planId != null ? String(profile.planId) : '',
+          enrolledCourseIds: Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [],
+          allowedSimulators: Array.isArray(profile.allowedSimulators) ? profile.allowedSimulators.slice() : [],
+        },
+        profile
+      );
+    } else if (profile && window.IFAAuth && typeof window.IFAAuth.applyEntitlements === 'function') {
       window.IFAAuth.applyEntitlements(
         {
           isSubscriber: profile.isSubscriber === true,

@@ -223,6 +223,24 @@ function getTrialExpiryFromProfile(profile, settings) {
   return created + days * 24 * 60 * 60 * 1000;
 }
 
+/** Prefer Firestore profile trial; fall back to entitlements sync snapshot (never clears trial). */
+function resolveSessionTrialExpiresAt(profile, orderEntitlements) {
+  var fromProfile = getTrialExpiryFromProfile(profile);
+  if (fromProfile > 0) return fromProfile;
+  if (
+    orderEntitlements &&
+    typeof orderEntitlements.trialExpiresAtMs === 'number' &&
+    orderEntitlements.trialExpiresAtMs > 0
+  ) {
+    return orderEntitlements.trialExpiresAtMs;
+  }
+  if (orderEntitlements && orderEntitlements.trialExpiresAt != null) {
+    var fromEntitlements = trialMsFromFirestoreValue(orderEntitlements.trialExpiresAt);
+    if (fromEntitlements > 0) return fromEntitlements;
+  }
+  return trialMsFromFirestoreValue(profile && profile.trialExpiresAt);
+}
+
 function firestoreCreatedAtToIso(value) {
   var ms = trialMsFromFirestoreValue(value);
   if (ms > 0) return new Date(ms).toISOString();
@@ -1804,7 +1822,6 @@ function initAuthUI() {
         var isNewProfile = unwrapped.isNew;
         lastProfile = profile || null;
         var role = String((profile && profile.role) || 'user');
-        var profileTrialEnd = getTrialExpiryFromProfile(profile);
         return syncEntitlementsFromApprovedOrders(user.uid)
           .then(function (orderEntitlements) {
             setLocalAuthUser(
@@ -1823,10 +1840,7 @@ function initAuthUI() {
                 allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
                   ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
                   : [],
-                trialExpiresAt:
-                  profileTrialEnd > 0
-                    ? profileTrialEnd
-                    : trialMsFromFirestoreValue(profile && profile.trialExpiresAt),
+                trialExpiresAt: resolveSessionTrialExpiresAt(profile, orderEntitlements),
               },
               profile
             );
@@ -1859,7 +1873,6 @@ function initAuthUI() {
             console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
             var previous = getLocalAuthUser();
             var entitlements = profileToEntitlements(profile, user, previous);
-            var profileTrialEndCatch = getTrialExpiryFromProfile(profile);
             setLocalAuthUser(
               {
                 name: (profile && profile.name) || user.displayName || '',
@@ -1872,10 +1885,7 @@ function initAuthUI() {
                 planId: entitlements.planId,
                 enrolledCourseIds: entitlements.enrolledCourseIds,
                 allowedSimulators: entitlements.allowedSimulators,
-                trialExpiresAt:
-                  profileTrialEndCatch > 0
-                    ? profileTrialEndCatch
-                    : trialMsFromFirestoreValue(profile && profile.trialExpiresAt),
+                trialExpiresAt: resolveSessionTrialExpiresAt(profile, null),
               },
               profile
             );

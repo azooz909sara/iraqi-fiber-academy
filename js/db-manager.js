@@ -75,15 +75,31 @@ function buildDefaultUserProfile(user) {
     photoURL: user.photoURL || '',
     photo: user.photoURL || '',
     isSubscriber: false,
+    planId: '',
     isAdmin: false,
     role: 'user',
     createdAt: new Date().toISOString(),
   };
 }
 
+/** Matches auth-manager default when platform settings omit freeTrialDays. */
+function effectiveTrialDurationMs(options) {
+  var ms = Number(options && options.trialDurationMs);
+  if (isFinite(ms) && ms > 0) return ms;
+  return 7 * 24 * 60 * 60 * 1000;
+}
+
+function stampActiveTrialOnPayload(payload, durationMs) {
+  var ms = Number(durationMs);
+  if (!isFinite(ms) || ms <= 0) return;
+  var startMs = Date.now();
+  payload.trialStartDate = new Date(startMs).toISOString();
+  payload.trialExpiresAt = startMs + ms;
+}
+
 /**
  * Ensure users/{uid} exists (safe for first-time Google / redirect sign-in).
- * On first create: createdAt = serverTimestamp(); optional trial when device UUID is new.
+ * On first create: createdAt = serverTimestamp(); trialStartDate + trialExpiresAt when abuse checks pass.
  * @returns {Promise<{ profile: object, isNew: boolean }|null>}
  */
 export async function ensureUserProfileDocument(user, options) {
@@ -111,7 +127,7 @@ export async function ensureUserProfileDocument(user, options) {
   var ipAddress = String(options.ipAddress || '').trim() || 'unknown';
   payload.ipAddress = ipAddress;
 
-  var trialDurationMs = Number(options.trialDurationMs);
+  var trialDurationMs = effectiveTrialDurationMs(options);
   var ipBlocksTrial = false;
   if (!options.skipTrialAbuseChecks) {
     var recentOnIp = await countRecentUsersWithIp(ipAddress, 7, user.uid);
@@ -122,20 +138,14 @@ export async function ensureUserProfileDocument(user, options) {
     }
   }
 
-  if (
-    !ipBlocksTrial &&
-    !options.skipTrialAbuseChecks &&
-    deviceUuid &&
-    isFinite(trialDurationMs) &&
-    trialDurationMs > 0
-  ) {
+  if (!ipBlocksTrial && options.skipTrialAbuseChecks) {
+    stampActiveTrialOnPayload(payload, trialDurationMs);
+  } else if (!ipBlocksTrial && deviceUuid) {
     var uuidKey = 'uuid_' + normalizeTrialConsumptionDocId(deviceUuid);
     var allowed = await checkAndRegisterDeviceTrial(uuidKey, user.uid);
     if (allowed) {
-      payload.trialExpiresAt = Date.now() + trialDurationMs;
+      stampActiveTrialOnPayload(payload, trialDurationMs);
     }
-  } else if (!ipBlocksTrial && options.skipTrialAbuseChecks && isFinite(trialDurationMs) && trialDurationMs > 0) {
-    payload.trialExpiresAt = Date.now() + trialDurationMs;
   }
 
   await setDoc(ref, payload);
@@ -278,12 +288,12 @@ export async function checkAndRegisterDeviceTrial(consumptionKey, uid) {
  */
 export async function setUserTrialExpiresAt(uid, expiresAtMs) {
   if (!uid || expiresAtMs == null || expiresAtMs === '') return;
-  await setDoc(
-    doc(db, 'users', uid),
-    {
-      trialExpiresAt: expiresAtMs,
-      updatedAt: serverTimestamp(),
-    },
-    { merge: true }
-  );
+  var patch = {
+    trialExpiresAt: expiresAtMs,
+    updatedAt: serverTimestamp(),
+  };
+  if (Number(expiresAtMs) > 0) {
+    patch.trialStartDate = new Date().toISOString();
+  }
+  await setDoc(doc(db, 'users', uid), patch, { merge: true });
 }
