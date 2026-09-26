@@ -540,10 +540,20 @@ function maybeGrantTrialForUser(user, profile, options) {
   options = options || {};
   var isNewProfile = options.isNewProfile === true;
 
-  if (shouldSkipTrialAbuseChecks()) return Promise.resolve();
-
   var email = normalizeEmail(user.email || '');
   if (!email) return Promise.resolve();
+
+  if (!isNewProfile) {
+    var existingProfileTrialMs = getTrialExpiryFromProfile(profile);
+    if (existingProfileTrialMs > 0) {
+      applyGrantedTrialToSession(email, existingProfileTrialMs, { markDeviceConsumed: false });
+    }
+    markAsyncTrialGrantAttempted(user.uid);
+    return Promise.resolve();
+  }
+
+  if (shouldSkipTrialAbuseChecks()) return Promise.resolve();
+
   if (isDisposableEmail(email)) return Promise.resolve();
   if (emailHadPriorTrialSnapshot(email)) return Promise.resolve();
 
@@ -560,12 +570,6 @@ function maybeGrantTrialForUser(user, profile, options) {
     }
     console.log('Auth: Bypassing device fingerprint for existing valid account.');
     applyGrantedTrialToSession(email, profileTrialMs, { markDeviceConsumed: false });
-    markAsyncTrialGrantAttempted(user.uid);
-    return Promise.resolve();
-  }
-
-  if (!isNewProfile) {
-    console.log('Auth: Existing user detected, fetching Firestore data...');
     markAsyncTrialGrantAttempted(user.uid);
     return Promise.resolve();
   }
@@ -628,8 +632,7 @@ function resolveTrialExpiresAt(email, incoming, firestoreProfile) {
   var sameEmail = previous && normalizeEmail(previous.email) === normalizeEmail(email);
 
   if (firestoreProfile) {
-    var fromProfile = getTrialExpiryFromProfile(firestoreProfile);
-    if (fromProfile > Date.now()) return fromProfile;
+    return getTrialExpiryFromProfile(firestoreProfile);
   }
 
   var incomingMs = trialMsFromFirestoreValue(incoming);
@@ -725,13 +728,10 @@ function setLocalAuthUser(user, firestoreProfile) {
     trialExpiresAt: trialExpiresAt,
     createdAt:
       profileCreatedIso ||
-      (sameEmail && previous && previous.createdAt
-        ? previous.createdAt
-        : String(
-            user.createdAt ||
-              (user.metadata && user.metadata.creationTime) ||
-              new Date().toISOString()
-          )),
+      (sameEmail && previous && previous.createdAt ? previous.createdAt : '') ||
+      String(
+        user.createdAt || (user.metadata && user.metadata.creationTime) || ''
+      ),
     loggedInAt: new Date().toISOString(),
   };
   try {
