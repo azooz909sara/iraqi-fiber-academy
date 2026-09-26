@@ -99,7 +99,7 @@ function stampActiveTrialOnPayload(payload, durationMs) {
 
 /**
  * Ensure users/{uid} exists (safe for first-time Google / redirect sign-in).
- * On first create: createdAt = serverTimestamp(); trialStartDate + trialExpiresAt when abuse checks pass.
+ * Base profile is written first; trial fields are merged afterward so IP/query failures cannot block create.
  * @returns {Promise<{ profile: object, isNew: boolean }|null>}
  */
 export async function ensureUserProfileDocument(user, options) {
@@ -127,30 +127,41 @@ export async function ensureUserProfileDocument(user, options) {
   var ipAddress = String(options.ipAddress || '').trim() || 'unknown';
   payload.ipAddress = ipAddress;
 
+  await setDoc(ref, payload);
+
   var trialDurationMs = effectiveTrialDurationMs(options);
   var ipBlocksTrial = false;
   if (!options.skipTrialAbuseChecks) {
-    var recentOnIp = await countRecentUsersWithIp(ipAddress, 7, user.uid);
-    if (recentOnIp >= 2) {
-      ipBlocksTrial = true;
-      payload.trialExpiresAt = 0;
-      console.warn('Free trial denied: IP rate limit exceeded for this network.');
+    try {
+      var recentOnIp = await countRecentUsersWithIp(ipAddress, 7, user.uid);
+      if (recentOnIp >= 2) {
+        ipBlocksTrial = true;
+        console.warn('Free trial denied: IP rate limit exceeded for this network.');
+      }
+    } catch (err) {
+      console.warn('[db-manager] IP trial check skipped (query failed):', err);
     }
   }
 
-  if (!ipBlocksTrial && options.skipTrialAbuseChecks) {
-    stampActiveTrialOnPayload(payload, trialDurationMs);
-  } else if (!ipBlocksTrial && deviceUuid) {
+  var trialPatch = {};
+  if (ipBlocksTrial) {
+    trialPatch.trialExpiresAt = 0;
+  } else if (options.skipTrialAbuseChecks) {
+    stampActiveTrialOnPayload(trialPatch, trialDurationMs);
+  } else if (deviceUuid) {
     var uuidKey = 'uuid_' + normalizeTrialConsumptionDocId(deviceUuid);
     var allowed = await checkAndRegisterDeviceTrial(uuidKey, user.uid);
     if (allowed) {
-      stampActiveTrialOnPayload(payload, trialDurationMs);
+      stampActiveTrialOnPayload(trialPatch, trialDurationMs);
     }
   }
 
-  await setDoc(ref, payload);
+  if (Object.keys(trialPatch).length) {
+    await setDoc(ref, trialPatch, { merge: true });
+  }
+
   var created = await getDoc(ref);
-  var data = created.exists() ? created.data() : payload;
+  var data = created.exists() ? created.data() : Object.assign({}, payload, trialPatch);
   return { profile: data, isNew: true };
 }
 
