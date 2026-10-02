@@ -1723,8 +1723,29 @@ function dispatchSubscriptionChanged(user, orderEntitlements, email) {
   }
 }
 
+function resolveSessionRoleFromProfileAndLocal(profile, user, email) {
+  var firestoreRole = String((profile && profile.role) || 'user');
+  var sessionEmail = normalizeEmail(email || (user && user.email) || '');
+  var local = getLocalAuthUser();
+  if (
+    local &&
+    sessionEmail &&
+    normalizeEmail(local.email) === sessionEmail &&
+    (isAdminUser({ role: local.role }) || local.isAdmin === true) &&
+    !isAdminUser(profile)
+  ) {
+    return 'admin';
+  }
+  return firestoreRole;
+}
+
 function applySessionFromProfileAndEntitlements(user, profile, orderEntitlements, email, isNewProfile) {
-  var role = String((profile && profile.role) || 'user');
+  var role = resolveSessionRoleFromProfileAndLocal(profile, user, email);
+  var profileForSession =
+    profile && typeof profile === 'object' ? Object.assign({}, profile, { role: role }) : { role: role };
+
+  lastProfile = profileForSession;
+
   setLocalAuthUser(
     {
       name: (profile && profile.name) || user.displayName || '',
@@ -1743,15 +1764,15 @@ function applySessionFromProfileAndEntitlements(user, profile, orderEntitlements
         : [],
       trialExpiresAt: resolveSessionTrialExpiresAt(profile, orderEntitlements),
     },
-    profile
+    profileForSession
   );
   dispatchSubscriptionChanged(user, orderEntitlements, email);
   profileSynced = true;
   refreshSlots();
-  startPlatformNotifications(user, profile);
+  startPlatformNotifications(user, profileForSession);
   notifyLocalAuthChanged({ type: 'profile-sync', email: email });
   notifyAuthChange(user, { profileSynced: true });
-  return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
+  return maybeGrantTrialForUser(user, profileForSession, { isNewProfile: isNewProfile });
 }
 
 function applyCachedEntitlementsToSession(user, cachedEntitlements, email) {
@@ -1800,7 +1821,6 @@ function runBackgroundProfileAndEntitlementsSync(user) {
       var unwrapped = unwrapProfileSyncResult(syncResult);
       var profile = unwrapped.profile;
       var isNewProfile = unwrapped.isNew;
-      lastProfile = profile || null;
 
       return syncEntitlementsFromApprovedOrders(user.uid)
         .then(function (orderEntitlements) {
@@ -1816,7 +1836,6 @@ function runBackgroundProfileAndEntitlementsSync(user) {
         .catch(function (syncErr) {
           console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
           var previous = getLocalAuthUser();
-          var role = String((profile && profile.role) || 'user');
           var entitlements = profileToEntitlements(profile, user, previous);
           applySessionFromProfileAndEntitlements(
             user,
