@@ -145,17 +145,6 @@ function getLocalAuthSnapshot() {
   return raw;
 }
 
-function isLocalAdminAuth(localAuth) {
-  if (!localAuth) return false;
-  if (String(localAuth.role || '').toLowerCase() === 'admin') return true;
-  if (localAuth.isAdmin === true) return true;
-  if (normalizeEmail(localAuth.email) === normalizeEmail(OWNER_ACCOUNT_EMAIL)) return true;
-  if (window.IFAAuth && typeof window.IFAAuth.isAdminUser === 'function') {
-    if (window.IFAAuth.isAdminUser(localAuth)) return true;
-  }
-  return false;
-}
-
 function localTrialExpiryMs(localAuth) {
   if (!localAuth) return 0;
   var raw = readRawLocalAuthUser();
@@ -178,11 +167,6 @@ function localTrialExpiryMs(localAuth) {
     if (fromAuth > 0) return fromAuth;
   }
   return parseTrialExpiresAtMs(localAuth.trialExpiresAt);
-}
-
-function hasActiveLocalTrial(localAuth) {
-  var expMs = localTrialExpiryMs(localAuth);
-  return expMs > Date.now();
 }
 
 function withTimeout(promise, ms, label) {
@@ -234,13 +218,15 @@ function applyProfileToLocalSession(user, profile) {
         : previous && Array.isArray(previous.allowedSimulators)
           ? previous.allowedSimulators.slice()
           : [],
-    role: (previous && previous.role) || profile.role || 'user',
-    isAdmin: !!(previous && previous.isAdmin) || profile.role === 'admin',
-    isInstructor: !!(previous && previous.isInstructor),
+    role: profile.role || (previous && previous.role) || 'user',
+    isAdmin: profile.role === 'admin' || !!(previous && previous.isAdmin),
+    isInstructor: profile.isInstructor === true || !!(previous && previous.isInstructor),
     trialExpiresAt:
-      previous && previous.trialExpiresAt != null && previous.trialExpiresAt !== ''
-        ? previous.trialExpiresAt
-        : profile.trialExpiresAt,
+      profile.trialExpiresAt != null && profile.trialExpiresAt !== ''
+        ? profile.trialExpiresAt
+        : previous && previous.trialExpiresAt != null && previous.trialExpiresAt !== ''
+          ? previous.trialExpiresAt
+          : 0,
   };
   if (typeof window.IFAAuth.setLocalAuthUser === 'function') {
     window.IFAAuth.setLocalAuthUser(payload, profile);
@@ -279,28 +265,42 @@ function runBackgroundProfileSync(user) {
   });
 }
 
-function qualifiesForInstantLocalBypass(localAuth) {
-  return isLocalAdminAuth(localAuth) || hasActiveLocalTrial(localAuth);
+function isOwnerFirebaseUser(user) {
+  return !!(user && normalizeEmail(user.email) === normalizeEmail(OWNER_ACCOUNT_EMAIL));
+}
+
+function repairOwnerLocalCache(user) {
+  if (!user || !window.IFAAuth || typeof window.IFAAuth.setLocalAuthUser !== 'function') return;
+  var email = normalizeEmail(user.email);
+  window.IFAAuth.setLocalAuthUser(
+    {
+      name: user.displayName || '',
+      email: email,
+      photoURL: user.photoURL || '',
+      role: 'admin',
+      isAdmin: true,
+      isSubscriber: true,
+      isInstructor: false,
+    },
+    { role: 'admin', email: email }
+  );
+}
+
+function profileHasActiveTrial(profile) {
+  if (!profile) return false;
+  var expMs = parseTrialExpiresAtMs(profile.trialExpiresAt);
+  return expMs > Date.now();
+}
+
+function profileIsFirestoreAdmin(profile) {
+  return !!(profile && String(profile.role || '').toLowerCase() === 'admin');
 }
 
 function resolveGateAfterAccessError(user, simulatorId) {
-  var localAuth = readRawLocalAuthUser() || getLocalAuthSnapshot();
-  if (qualifiesForInstantLocalBypass(localAuth)) {
+  if (isOwnerFirebaseUser(user)) {
+    repairOwnerLocalCache(user);
     grantSimulatorAccess(simulatorId);
     return;
-  }
-  try {
-    if (
-      simulatorId &&
-      window.PlatformSimulators &&
-      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
-      window.PlatformSimulators.viewerCanAccess(simulatorId)
-    ) {
-      grantSimulatorAccess(simulatorId);
-      return;
-    }
-  } catch (accessErr) {
-    console.warn('[SimulatorAccess] viewerCanAccess recovery check failed:', accessErr);
   }
   if (!user) {
     setGateVisible(true, 'logged-out');
@@ -332,17 +332,10 @@ async function evaluateAccess(user) {
     return;
   }
 
-  var localAuth = getLocalAuthSnapshot();
-
-  if (isLocalAdminAuth(localAuth)) {
-    grantSimulatorAccess();
-    if (user) runBackgroundProfileSync(user);
-    return;
-  }
-
-  if (hasActiveLocalTrial(localAuth)) {
-    grantSimulatorAccess();
-    if (user) runBackgroundProfileSync(user);
+  if (isOwnerFirebaseUser(user)) {
+    setGateVisible(false);
+    repairOwnerLocalCache(user);
+    runBackgroundProfileSync(user);
     return;
   }
 
@@ -384,10 +377,20 @@ async function evaluateAccess(user) {
         FIRESTORE_ACCESS_TIMEOUT_MS,
         'profile-access-check-timeout'
       );
-      applyProfileToLocalSession(user, profile);
     } catch (err) {
       console.warn('[SimulatorAccess] profile sync skipped or timed out:', err);
       runBackgroundProfileSync(user);
+    }
+
+    if (profile && (profileIsFirestoreAdmin(profile) || profileHasActiveTrial(profile))) {
+      applyProfileToLocalSession(user, profile);
+      grantSimulatorAccess(simulatorId);
+      accessSettled = true;
+      return;
+    }
+
+    if (profile) {
+      applyProfileToLocalSession(user, profile);
     }
 
     var localUser = getLocalAuthSnapshot();
@@ -480,14 +483,6 @@ function initSimulatorAccess() {
   if (shouldBypassAccessControl()) {
     setGateVisible(false);
     document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
-    return;
-  }
-
-  var localAuth = readRawLocalAuthUser();
-  if (qualifiesForInstantLocalBypass(localAuth)) {
-    setGateVisible(false);
-    document.documentElement.setAttribute('data-ifa-access', 'instant-local-grant');
-    grantSimulatorAccess(currentSimulatorIdFromPage());
     return;
   }
 
