@@ -38,6 +38,16 @@ console.info(
 );
 var LOCAL_AUTH_KEY = 'ifa_auth_user';
 var LOCAL_DEV_EMAIL = 'abdulazizyassin909@gmail.com';
+var OWNER_ACCOUNT_EMAIL = LOCAL_DEV_EMAIL;
+
+function isOwnerAccountEmail(email) {
+  return normalizeEmail(email) === normalizeEmail(OWNER_ACCOUNT_EMAIL);
+}
+
+function applyOwnerAdminSessionRole(email, role) {
+  if (isOwnerAccountEmail(email)) return 'admin';
+  return role;
+}
 var DEVICE_TRIAL_CONSUMED_KEY = 'ifa_device_trial_consumed';
 var DEVICE_UUID_STORAGE_KEY = 'ifa_device_uuid';
 var DEVICE_UUID_COOKIE = 'ifa_device_uuid';
@@ -730,14 +740,16 @@ function setLocalAuthUser(user, firestoreProfile) {
   var profileCreatedIso = firestoreProfile
     ? firestoreCreatedAtToIso(firestoreProfile.createdAt)
     : '';
+  var sessionRole = applyOwnerAdminSessionRole(user.email, String(user.role || ''));
+  var sessionIsAdmin = sessionRole === 'admin' ? true : !!user.isAdmin;
   var payload = {
     name: String(user.name || user.displayName || '').trim() || normalizeEmail(user.email).split('@')[0],
     email: normalizeEmail(user.email),
     photoURL: String(user.photoURL || ''),
     isSubscriber: !!user.isSubscriber,
-    isAdmin: !!user.isAdmin,
+    isAdmin: sessionIsAdmin,
     isInstructor: !!user.isInstructor,
-    role: String(user.role || ''),
+    role: sessionRole,
     planId: user.planId != null ? String(user.planId) : sameEmail ? String(previous.planId || '') : '',
     enrolledCourseIds:
       Array.isArray(user.enrolledCourseIds)
@@ -1184,6 +1196,10 @@ function ensureLocalDevSession() {
 }
 
 function isAdminUser(profile) {
+  if (profile && isOwnerAccountEmail(profile.email)) return true;
+  if (lastUser && isOwnerAccountEmail(lastUser.email)) return true;
+  var local = getLocalAuthUser();
+  if (local && isOwnerAccountEmail(local.email)) return true;
   return !!(profile && String(profile.role || '') === 'admin');
 }
 
@@ -1734,15 +1750,21 @@ function resolveSessionRoleFromProfileAndLocal(profile, user, email) {
     (isAdminUser({ role: local.role }) || local.isAdmin === true) &&
     !isAdminUser(profile)
   ) {
-    return 'admin';
+    return applyOwnerAdminSessionRole(sessionEmail, 'admin');
   }
-  return firestoreRole;
+  return applyOwnerAdminSessionRole(sessionEmail, firestoreRole);
 }
 
 function applySessionFromProfileAndEntitlements(user, profile, orderEntitlements, email, isNewProfile) {
-  var role = resolveSessionRoleFromProfileAndLocal(profile, user, email);
+  var sessionEmail = normalizeEmail(email || (user && user.email) || '');
+  var role = applyOwnerAdminSessionRole(
+    sessionEmail,
+    resolveSessionRoleFromProfileAndLocal(profile, user, email)
+  );
   var profileForSession =
-    profile && typeof profile === 'object' ? Object.assign({}, profile, { role: role }) : { role: role };
+    profile && typeof profile === 'object'
+      ? Object.assign({}, profile, { role: role, email: sessionEmail || profile.email })
+      : { role: role, email: sessionEmail };
 
   lastProfile = profileForSession;
 
@@ -1778,14 +1800,17 @@ function applySessionFromProfileAndEntitlements(user, profile, orderEntitlements
 function applyCachedEntitlementsToSession(user, cachedEntitlements, email) {
   if (!user || !cachedEntitlements) return false;
   var previous = getLocalAuthUser();
-  var role = previous && previous.role ? String(previous.role) : 'user';
+  var role = applyOwnerAdminSessionRole(
+    email,
+    previous && previous.role ? String(previous.role) : 'user'
+  );
   setLocalAuthUser(
     {
       name: (previous && previous.name) || user.displayName || '',
       email: email,
       photoURL: user.photoURL || (previous && previous.photoURL) || '',
       isSubscriber: !!cachedEntitlements.isSubscriber,
-      isAdmin: role === 'admin' || !!(previous && previous.isAdmin),
+      isAdmin: role === 'admin',
       isInstructor: !!(previous && previous.isInstructor),
       role: role,
       planId: cachedEntitlements.planId != null ? String(cachedEntitlements.planId) : '',
@@ -1859,13 +1884,16 @@ function runBackgroundProfileAndEntitlementsSync(user) {
       var localMatchesSession =
         local && normalizeEmail(local.email) === normalizeEmail(user.email || email);
       var fallbackRole = 'user';
-      if (localMatchesSession) {
+      if (isOwnerAccountEmail(user.email || email)) {
+        fallbackRole = 'admin';
+      } else if (localMatchesSession) {
         if (isAdminUser({ role: local.role }) || local.isAdmin === true) {
           fallbackRole = 'admin';
         } else if (local.role) {
           fallbackRole = String(local.role);
         }
       }
+      fallbackRole = applyOwnerAdminSessionRole(user.email || email, fallbackRole);
       lastProfile = {
         uid: user.uid,
         email: user.email || email,
@@ -1991,14 +2019,15 @@ function initAuthUI() {
     profileSynced = hasCachedEntitlements;
 
     if (!hasCachedEntitlements) {
+      var bootstrapRole = applyOwnerAdminSessionRole(email, 'user');
       setLocalAuthUser({
         name: user.displayName || '',
         email: email,
         photoURL: user.photoURL || '',
         isSubscriber: false,
-        isAdmin: false,
+        isAdmin: bootstrapRole === 'admin',
         isInstructor: false,
-        role: 'user',
+        role: bootstrapRole,
       });
     }
 
