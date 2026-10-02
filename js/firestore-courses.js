@@ -4,6 +4,7 @@
  */
 import { db } from './firebase-config.js';
 import { isTrashCmsStatus } from './cms-status.js';
+import { scheduleDeferredFirestoreSync } from './firestore-sync-scheduler.js';
 import {
   collection,
   onSnapshot,
@@ -185,13 +186,14 @@ function maybePersistCoursesFromCache() {
 
 function hydrateCoursesFromLocalStorage() {
   var stored = readStoredCourses();
-  if (!stored.length) return;
+  if (!stored.length) return false;
   setCachedCourses(
     stored.map(function (item) {
       return normalizeCourse(item, item.id);
     })
   );
   lastPersistedSignature = coursesSignature(cachedCourses);
+  return true;
 }
 
 function setCachedCourses(list) {
@@ -690,8 +692,12 @@ var api = {
 };
 
 window.PlatformCoursesFirestore = api;
-hydrateCoursesFromLocalStorage();
-startCoursesFirestoreSync();
-bootstrapCoursesAutoSeed();
+if (hydrateCoursesFromLocalStorage() && cachedCourses.length) {
+  notifyListeners();
+}
+scheduleDeferredFirestoreSync(function () {
+  startCoursesFirestoreSync();
+  bootstrapCoursesAutoSeed();
+});
 
 export default api;

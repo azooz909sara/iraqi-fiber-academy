@@ -3,6 +3,7 @@
  * Deploy rules: firebase deploy --only firestore:rules
  */
 import { db } from './firebase-config.js';
+import { scheduleDeferredFirestoreSync } from './firestore-sync-scheduler.js';
 import {
   collection,
   onSnapshot,
@@ -123,7 +124,7 @@ function maybePersistPlansFromCache() {
 
 function hydratePlansFromLocalStorage() {
   var stored = readStoredPlans();
-  if (!stored.length) return;
+  if (!stored.length) return false;
   setCachedPlans(
     stored
       .map(function (item) {
@@ -134,6 +135,7 @@ function hydratePlansFromLocalStorage() {
       })
   );
   lastPersistedSignature = plansSignature(cachedPlans);
+  return true;
 }
 
 function setCachedPlans(list) {
@@ -358,7 +360,9 @@ var api = {
 };
 
 window.PlatformPricingFirestore = api;
-hydratePlansFromLocalStorage();
-startPricingFirestoreSync();
+if (hydratePlansFromLocalStorage() && cachedPlans.length) {
+  notifyListeners();
+}
+scheduleDeferredFirestoreSync(startPricingFirestoreSync);
 
 export default api;

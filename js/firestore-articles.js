@@ -15,8 +15,10 @@ import {
   writeBatch,
   getDocs,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleDeferredFirestoreSync, hydrateListFromLocalStorage } from './firestore-sync-scheduler.js';
 
 var COLLECTION = 'articles';
+var ARTICLES_STORAGE_KEY = 'ifa_platform_articles';
 var cachedArticles = [];
 var snapshotReady = false;
 var listeners = [];
@@ -130,6 +132,25 @@ function preparePayload(payload, existing) {
 
 function setCachedArticles(list) {
   cachedArticles = sortArticles(list);
+}
+
+function persistArticlesToLocalStorage() {
+  try {
+    localStorage.setItem(ARTICLES_STORAGE_KEY, JSON.stringify(cachedArticles));
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function hydrateArticlesFromLocalStorage() {
+  return hydrateListFromLocalStorage(
+    ARTICLES_STORAGE_KEY,
+    normalizeArticle,
+    function (list) {
+      setCachedArticles(list);
+    },
+    notifyListeners
+  );
 }
 
 function upsertCachedArticle(item) {
@@ -333,6 +354,7 @@ function handleSnapshot(snap) {
       return normalizeArticle(docSnap.data(), docSnap.id);
     })
   );
+  persistArticlesToLocalStorage();
   snapshotReady = true;
   notifyListeners();
 }
@@ -514,7 +536,10 @@ var api = {
 };
 
 window.PlatformArticlesFirestore = api;
-startArticlesFirestoreSync();
-bootstrapArticlesAutoSeed();
+hydrateArticlesFromLocalStorage();
+scheduleDeferredFirestoreSync(function () {
+  startArticlesFirestoreSync();
+  bootstrapArticlesAutoSeed();
+});
 
 export default api;

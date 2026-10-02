@@ -58,6 +58,13 @@
     return global.PlatformNotificationsFirestore || null;
   }
 
+  function ensureNotificationsFirestoreSync() {
+    var api = getFirestoreApi();
+    if (api && typeof api.start === 'function') {
+      api.start();
+    }
+  }
+
   function appliesToCurrentUser(notification) {
     var api = getFirestoreApi();
     if (api && typeof api.notificationAppliesToUser === 'function') {
@@ -324,6 +331,7 @@
       return;
     }
 
+    ensureNotificationsFirestoreSync();
     await refreshLastReadAt();
 
     var api = getFirestoreApi();

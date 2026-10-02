@@ -14,8 +14,10 @@ import {
   writeBatch,
   getDocs,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleDeferredFirestoreSync, hydrateListFromLocalStorage } from './firestore-sync-scheduler.js';
 
 var COLLECTION = 'faqs';
+var FAQS_STORAGE_KEY = 'ifa_platform_faqs';
 var cachedFaqs = [];
 var snapshotReady = false;
 var listeners = [];
@@ -114,6 +116,25 @@ function preparePayload(payload, existing) {
 
 function setCachedFaqs(list) {
   cachedFaqs = sortFaqs(list);
+}
+
+function persistFaqsToLocalStorage() {
+  try {
+    localStorage.setItem(FAQS_STORAGE_KEY, JSON.stringify(cachedFaqs));
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function hydrateFaqsFromLocalStorage() {
+  return hydrateListFromLocalStorage(
+    FAQS_STORAGE_KEY,
+    normalizeFaq,
+    function (list) {
+      setCachedFaqs(list);
+    },
+    notifyListeners
+  );
 }
 
 function upsertCachedFaq(faq) {
@@ -246,6 +267,7 @@ function handleSnapshot(snap) {
       return normalizeFaq(docSnap.data(), docSnap.id);
     })
   );
+  persistFaqsToLocalStorage();
   snapshotReady = true;
   notifyListeners();
 }
@@ -446,6 +468,7 @@ var api = {
 };
 
 window.PlatformFaqsFirestore = api;
-startFaqsFirestoreSync();
+hydrateFaqsFromLocalStorage();
+scheduleDeferredFirestoreSync(startFaqsFirestoreSync);
 
 export default api;

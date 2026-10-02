@@ -14,6 +14,70 @@ import {
   serverTimestamp,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
+var ENTITLEMENTS_CACHE_KEY = 'ifa_entitlements_cache_v1';
+
+/**
+ * @param {string} uid
+ * @returns {object|null}
+ */
+export function readCachedEntitlements(uid) {
+  var id = String(uid || '').trim();
+  if (!id) return null;
+  try {
+    var raw = localStorage.getItem(ENTITLEMENTS_CACHE_KEY);
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    if (!parsed || String(parsed.uid || '') !== id) return null;
+    var data = parsed.data;
+    if (!data || typeof data !== 'object') return null;
+    return {
+      enrolledCourseIds: Array.isArray(data.enrolledCourseIds) ? data.enrolledCourseIds.slice() : [],
+      allowedSimulators: Array.isArray(data.allowedSimulators) ? data.allowedSimulators.slice() : [],
+      isSubscriber: !!data.isSubscriber,
+      planId: data.planId != null ? String(data.planId) : '',
+      trialExpiresAt: data.trialExpiresAt,
+      trialStartDate: data.trialStartDate,
+      trialExpiresAtMs: typeof data.trialExpiresAtMs === 'number' ? data.trialExpiresAtMs : 0,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
+ * @param {string} uid
+ * @param {object} entitlements
+ */
+export function writeCachedEntitlements(uid, entitlements) {
+  var id = String(uid || '').trim();
+  if (!id || !entitlements) return;
+  try {
+    localStorage.setItem(
+      ENTITLEMENTS_CACHE_KEY,
+      JSON.stringify({
+        uid: id,
+        updatedAt: Date.now(),
+        data: {
+          enrolledCourseIds: Array.isArray(entitlements.enrolledCourseIds)
+            ? entitlements.enrolledCourseIds.slice()
+            : [],
+          allowedSimulators: Array.isArray(entitlements.allowedSimulators)
+            ? entitlements.allowedSimulators.slice()
+            : [],
+          isSubscriber: !!entitlements.isSubscriber,
+          planId: entitlements.planId != null ? String(entitlements.planId) : '',
+          trialExpiresAt: entitlements.trialExpiresAt,
+          trialStartDate: entitlements.trialStartDate,
+          trialExpiresAtMs:
+            typeof entitlements.trialExpiresAtMs === 'number' ? entitlements.trialExpiresAtMs : 0,
+        },
+      })
+    );
+  } catch (err) {
+    /* ignore quota */
+  }
+}
+
 function uniqueIds(list) {
   var seen = {};
   var out = [];
@@ -196,9 +260,11 @@ export async function syncEntitlementsFromApprovedOrders(uid) {
 
   var trialExpiresAt = existing.trialExpiresAt;
   var trialStartDate = existing.trialStartDate;
-  return Object.assign({}, entitlements, {
+  var result = Object.assign({}, entitlements, {
     trialExpiresAt: trialExpiresAt,
     trialStartDate: trialStartDate,
     trialExpiresAtMs: trialExpiresAtMs(existing),
   });
+  writeCachedEntitlements(uid, result);
+  return result;
 }

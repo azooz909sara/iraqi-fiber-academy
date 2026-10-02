@@ -14,6 +14,7 @@ import {
   serverTimestamp,
   getDoc,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleLazyFirestoreSync } from './firestore-sync-scheduler.js';
 
 var COLLECTION = 'notifications';
 var cachedNotifications = [];
@@ -207,6 +208,6 @@ var api = {
 };
 
 window.PlatformNotificationsFirestore = api;
-startNotificationsFirestoreSync();
+scheduleLazyFirestoreSync(startNotificationsFirestoreSync);
 
 export default api;

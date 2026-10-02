@@ -15,8 +15,10 @@ import {
   writeBatch,
   getDocs,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleLazyFirestoreSync, hydrateListFromLocalStorage } from './firestore-sync-scheduler.js';
 
 var COLLECTION = 'testimonials';
+var TESTIMONIALS_STORAGE_KEY = 'ifa_platform_testimonials';
 var cachedTestimonials = [];
 var snapshotReady = false;
 var listeners = [];
@@ -131,6 +133,25 @@ function preparePayload(payload, existing) {
 
 function setCachedTestimonials(list) {
   cachedTestimonials = sortTestimonials(list);
+}
+
+function persistTestimonialsToLocalStorage() {
+  try {
+    localStorage.setItem(TESTIMONIALS_STORAGE_KEY, JSON.stringify(cachedTestimonials));
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function hydrateTestimonialsFromLocalStorage() {
+  return hydrateListFromLocalStorage(
+    TESTIMONIALS_STORAGE_KEY,
+    normalizeTestimonial,
+    function (list) {
+      setCachedTestimonials(list);
+    },
+    notifyListeners
+  );
 }
 
 function upsertCachedTestimonial(item) {
@@ -319,6 +340,7 @@ function handleSnapshot(snap) {
       return normalizeTestimonial(docSnap.data(), docSnap.id);
     })
   );
+  persistTestimonialsToLocalStorage();
   snapshotReady = true;
   notifyListeners();
 }
@@ -489,6 +511,7 @@ var api = {
 };
 
 window.PlatformTestimonialsFirestore = api;
-startTestimonialsFirestoreSync();
+hydrateTestimonialsFromLocalStorage();
+scheduleLazyFirestoreSync(startTestimonialsFirestoreSync);
 
 export default api;

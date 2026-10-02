@@ -430,9 +430,13 @@
   function isFirestoreCoursesBootstrapping() {
     var FS = global.PlatformCoursesFirestore;
     if (!FS || typeof FS.isReady !== 'function') return false;
-    if (!FS.isReady()) return true;
-    if (typeof FS.isSeeding === 'function' && FS.isSeeding()) return true;
-    return false;
+    if (FS.isReady()) {
+      if (typeof FS.isSeeding === 'function' && FS.isSeeding()) return true;
+      return false;
+    }
+    var cached = typeof FS.getCachedCourses === 'function' ? FS.getCachedCourses() : [];
+    if (cached && cached.length) return false;
+    return true;
   }
 
   function readFirestoreCourses() {

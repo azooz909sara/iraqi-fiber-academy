@@ -3,8 +3,10 @@
  */
 import { db } from './firebase-config.js';
 import { doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleDeferredFirestoreSync, readJsonFromLocalStorage } from './firestore-sync-scheduler.js';
 
 var FOOTER_REF = doc(db, 'settings', 'footer');
+var FOOTER_STORAGE_KEY = 'ifa_platform_footer';
 var cachedSettings = null;
 var snapshotReady = false;
 var listeners = [];
@@ -137,6 +139,23 @@ async function seedDefaultFooterDocument() {
   }
 }
 
+function persistFooterToLocalStorage(settings) {
+  try {
+    localStorage.setItem(FOOTER_STORAGE_KEY, JSON.stringify(normalizeSettings(settings)));
+  } catch (err) {
+    /* ignore */
+  }
+}
+
+function hydrateFooterFromLocalStorage() {
+  var raw = readJsonFromLocalStorage(FOOTER_STORAGE_KEY);
+  if (!raw) return false;
+  cachedSettings = normalizeSettings(raw);
+  snapshotReady = false;
+  notifyListeners();
+  return true;
+}
+
 function handleSnapshot(snap) {
   if (!snap.exists() || isFooterDocumentEmpty(snap.data())) {
     needsSeed = true;
@@ -148,6 +167,7 @@ function handleSnapshot(snap) {
   }
   needsSeed = false;
   cachedSettings = normalizeSettings(snap.data());
+  persistFooterToLocalStorage(cachedSettings);
   snapshotReady = true;
   notifyListeners();
 }
@@ -214,6 +234,7 @@ var api = {
 };
 
 window.PlatformFooterFirestore = api;
-startFooterFirestoreSync();
+hydrateFooterFromLocalStorage();
+scheduleDeferredFirestoreSync(startFooterFirestoreSync);
 
 export default api;

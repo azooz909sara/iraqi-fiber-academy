@@ -324,7 +324,9 @@
   function isFirestorePlansBootstrapping() {
     var FS = global.PlatformPricingFirestore;
     if (!FS || typeof FS.isReady !== 'function') return false;
-    return !FS.isReady();
+    if (FS.isReady()) return false;
+    var cached = typeof FS.getCachedPlans === 'function' ? FS.getCachedPlans() : [];
+    return !(cached && cached.length);
   }
 
   function readLocalPlansCache() {

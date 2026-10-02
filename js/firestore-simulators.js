@@ -4,6 +4,7 @@
  */
 import { db } from './firebase-config.js';
 import { doc, onSnapshot, setDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleDeferredFirestoreSync } from './firestore-sync-scheduler.js';
 
 var SIMULATORS_REF = doc(db, 'settings', 'simulators');
 var FTTH_LAB_CONFIG_REF = doc(db, 'settings', 'ftth_lab_config');
@@ -1293,7 +1294,13 @@ export async function saveSplicerConfigToFirestore(config) {
 
 window.PlatformSplicerConfigFirestore = splicerConfigApi;
 
-startSimulatorsFirestoreSync();
+(function bootstrapSimulatorsSwrShell() {
+  var localBundle = readLocalBundle();
+  applyBundleToPlatform(localBundle);
+  notifyListeners();
+})();
+
+scheduleDeferredFirestoreSync(startSimulatorsFirestoreSync);
 
 if (typeof window.__ifaSimulatorsFirestoreReadyResolve === 'function') {
   window.__ifaSimulatorsFirestoreReadyResolve(api);

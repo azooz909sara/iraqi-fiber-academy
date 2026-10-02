@@ -3,6 +3,7 @@
  */
 import { db } from './firebase-config.js';
 import { doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { scheduleLazyFirestoreSync } from './firestore-sync-scheduler.js';
 
 var DOC_PATH = ['settings', 'stats'];
 var STORAGE_KEY = 'ifa_platform_stats';
@@ -170,6 +171,10 @@ var api = {
 };
 
 window.PlatformStatsFirestore = api;
-startPlatformStatsSync();
+if (cachedStats) {
+  markHydrated(cachedStats);
+  notifyListeners();
+}
+scheduleLazyFirestoreSync(startPlatformStatsSync);
 
 export default api;

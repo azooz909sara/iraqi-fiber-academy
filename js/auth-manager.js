@@ -22,7 +22,11 @@ import {
   setUserTrialExpiresAt,
   countRecentUsersWithIp,
 } from './db-manager.js';
-import { syncEntitlementsFromApprovedOrders } from './entitlements-sync.js';
+import {
+  syncEntitlementsFromApprovedOrders,
+  readCachedEntitlements,
+  writeCachedEntitlements,
+} from './entitlements-sync.js';
 import { startFcmOnAuth, setupNotificationToggle } from './fcm-push.js';
 
 /**
@@ -458,16 +462,20 @@ function getCompositeDeviceFingerprint() {
   );
 }
 
-async function buildTrialProfileOptions() {
+function buildTrialProfileOptionsSync(ipAddress) {
   var days = readPlatformSettings().freeTrialDays;
   var durationMs = days > 0 ? days * 24 * 60 * 60 * 1000 : 0;
-  var currentIp = await fetchCurrentClientIp();
   return {
     deviceUuid: getOrCreateDeviceUuid(),
     skipTrialAbuseChecks: shouldSkipTrialAbuseChecks(),
     trialDurationMs: durationMs,
-    ipAddress: currentIp,
+    ipAddress: ipAddress || 'unknown',
   };
+}
+
+async function buildTrialProfileOptionsForSignUp() {
+  var ip = await fetchCurrentClientIp();
+  return buildTrialProfileOptionsSync(ip);
 }
 
 function registerTrialForDevice(user) {
@@ -1543,7 +1551,7 @@ export async function signUpWithEmailPassword(email, password, fullName) {
     return null;
   }
   var result = await createUserWithEmailAndPassword(auth, key, String(password));
-  var profileOptions = await buildTrialProfileOptions();
+  var profileOptions = await buildTrialProfileOptionsForSignUp();
   profileOptions.displayName = name;
   await createUserProfileOnSignUp(result.user, profileOptions);
   closeAuthModal();
@@ -1694,6 +1702,156 @@ function enforceSimulatorPageFromAuth() {
   }
 }
 
+function dispatchSubscriptionChanged(user, orderEntitlements, email) {
+  try {
+    var subDetail = {
+      userId: user.uid,
+      planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
+      enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
+        ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
+        : [],
+      allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
+        ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
+        : [],
+      isSubscriber: !!orderEntitlements.isSubscriber,
+      email: email,
+    };
+    window.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
+    document.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
+  } catch (evtErr) {
+    /* ignore */
+  }
+}
+
+function applySessionFromProfileAndEntitlements(user, profile, orderEntitlements, email, isNewProfile) {
+  var role = String((profile && profile.role) || 'user');
+  setLocalAuthUser(
+    {
+      name: (profile && profile.name) || user.displayName || '',
+      email: (profile && profile.email) || user.email || '',
+      photoURL: user.photoURL || (profile && profile.photo) || '',
+      isSubscriber: !!orderEntitlements.isSubscriber,
+      isAdmin: role === 'admin',
+      isInstructor: !!(profile && profile.isInstructor),
+      role: role,
+      planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
+      enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
+        ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
+        : [],
+      allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
+        ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
+        : [],
+      trialExpiresAt: resolveSessionTrialExpiresAt(profile, orderEntitlements),
+    },
+    profile
+  );
+  dispatchSubscriptionChanged(user, orderEntitlements, email);
+  profileSynced = true;
+  refreshSlots();
+  startPlatformNotifications(user, profile);
+  notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+  notifyAuthChange(user, { profileSynced: true });
+  return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
+}
+
+function applyCachedEntitlementsToSession(user, cachedEntitlements, email) {
+  if (!user || !cachedEntitlements) return false;
+  var previous = getLocalAuthUser();
+  var role = previous && previous.role ? String(previous.role) : 'user';
+  setLocalAuthUser(
+    {
+      name: (previous && previous.name) || user.displayName || '',
+      email: email,
+      photoURL: user.photoURL || (previous && previous.photoURL) || '',
+      isSubscriber: !!cachedEntitlements.isSubscriber,
+      isAdmin: role === 'admin' || !!(previous && previous.isAdmin),
+      isInstructor: !!(previous && previous.isInstructor),
+      role: role,
+      planId: cachedEntitlements.planId != null ? String(cachedEntitlements.planId) : '',
+      enrolledCourseIds: Array.isArray(cachedEntitlements.enrolledCourseIds)
+        ? normalizeEnrolledCourseIds(cachedEntitlements.enrolledCourseIds)
+        : [],
+      allowedSimulators: Array.isArray(cachedEntitlements.allowedSimulators)
+        ? normalizeAllowedSimulators(cachedEntitlements.allowedSimulators)
+        : [],
+      trialExpiresAt:
+        cachedEntitlements.trialExpiresAtMs > 0
+          ? cachedEntitlements.trialExpiresAtMs
+          : previous && previous.trialExpiresAt
+            ? previous.trialExpiresAt
+            : 0,
+    },
+    lastProfile
+  );
+  dispatchSubscriptionChanged(user, cachedEntitlements, email);
+  profileSynced = true;
+  refreshSlots();
+  notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+  notifyAuthChange(user, { profileSynced: true });
+  return true;
+}
+
+function runBackgroundProfileAndEntitlementsSync(user) {
+  var email = normalizeEmail(user.email || '');
+  var trialOptions = buildTrialProfileOptionsSync();
+
+  syncUserProfile(user, trialOptions)
+    .then(function (syncResult) {
+      var unwrapped = unwrapProfileSyncResult(syncResult);
+      var profile = unwrapped.profile;
+      var isNewProfile = unwrapped.isNew;
+      lastProfile = profile || null;
+
+      return syncEntitlementsFromApprovedOrders(user.uid)
+        .then(function (orderEntitlements) {
+          writeCachedEntitlements(user.uid, orderEntitlements);
+          return applySessionFromProfileAndEntitlements(
+            user,
+            profile,
+            orderEntitlements,
+            email,
+            isNewProfile
+          );
+        })
+        .catch(function (syncErr) {
+          console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
+          var previous = getLocalAuthUser();
+          var role = String((profile && profile.role) || 'user');
+          var entitlements = profileToEntitlements(profile, user, previous);
+          applySessionFromProfileAndEntitlements(
+            user,
+            profile,
+            {
+              isSubscriber: entitlements.isSubscriber,
+              planId: entitlements.planId,
+              enrolledCourseIds: entitlements.enrolledCourseIds,
+              allowedSimulators: entitlements.allowedSimulators,
+              trialExpiresAtMs: resolveSessionTrialExpiresAt(profile, null),
+            },
+            email,
+            isNewProfile
+          );
+        });
+    })
+    .catch(function (err) {
+      profileSynced = true;
+      console.error('[Auth] syncUserProfile failed:', err);
+      lastProfile = {
+        uid: user.uid,
+        email: user.email || email,
+        name: user.displayName || '',
+        photo: user.photoURL || '',
+        photoURL: user.photoURL || '',
+        role: 'user',
+        isSubscriber: false,
+      };
+      refreshSlots();
+      startPlatformNotifications(user, lastProfile);
+      notifyLocalAuthChanged({ type: 'profile-sync', email: email });
+      notifyAuthChange(user, { profileSynced: true });
+    });
+}
+
 function completeGoogleRedirectSignIn() {
   getRedirectResult(auth)
     .then(function (result) {
@@ -1798,122 +1956,27 @@ function initAuthUI() {
     }
 
     var email = normalizeEmail(user.email || '');
-    profileSynced = false;
-    setLocalAuthUser({
-      name: user.displayName || '',
-      email: email,
-      photoURL: user.photoURL || '',
-      isSubscriber: false,
-      isAdmin: false,
-      isInstructor: false,
-      role: 'user',
-    });
+    var cachedEntitlements = readCachedEntitlements(user.uid);
+    var hasCachedEntitlements = applyCachedEntitlementsToSession(user, cachedEntitlements, email);
+    profileSynced = hasCachedEntitlements;
+
+    if (!hasCachedEntitlements) {
+      setLocalAuthUser({
+        name: user.displayName || '',
+        email: email,
+        photoURL: user.photoURL || '',
+        isSubscriber: false,
+        isAdmin: false,
+        isInstructor: false,
+        role: 'user',
+      });
+    }
+
     refreshSlots();
     notifyLocalAuthChanged({ type: 'login', email: email });
-    notifyAuthChange(user, { profileSynced: false });
+    notifyAuthChange(user, { profileSynced: hasCachedEntitlements });
 
-    buildTrialProfileOptions()
-      .then(function (trialOptions) {
-        return syncUserProfile(user, trialOptions);
-      })
-      .then(function (syncResult) {
-        var unwrapped = unwrapProfileSyncResult(syncResult);
-        var profile = unwrapped.profile;
-        var isNewProfile = unwrapped.isNew;
-        lastProfile = profile || null;
-        var role = String((profile && profile.role) || 'user');
-        return syncEntitlementsFromApprovedOrders(user.uid)
-          .then(function (orderEntitlements) {
-            setLocalAuthUser(
-              {
-                name: (profile && profile.name) || user.displayName || '',
-                email: (profile && profile.email) || user.email || '',
-                photoURL: user.photoURL || (profile && profile.photo) || '',
-                isSubscriber: !!orderEntitlements.isSubscriber,
-                isAdmin: role === 'admin',
-                isInstructor: !!(profile && profile.isInstructor),
-                role: role,
-                planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
-                enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
-                  ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
-                  : [],
-                allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
-                  ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
-                  : [],
-                trialExpiresAt: resolveSessionTrialExpiresAt(profile, orderEntitlements),
-              },
-              profile
-            );
-            try {
-              var subDetail = {
-                userId: user.uid,
-                planId: orderEntitlements.planId != null ? String(orderEntitlements.planId) : '',
-                enrolledCourseIds: Array.isArray(orderEntitlements.enrolledCourseIds)
-                  ? normalizeEnrolledCourseIds(orderEntitlements.enrolledCourseIds)
-                  : [],
-                allowedSimulators: Array.isArray(orderEntitlements.allowedSimulators)
-                  ? normalizeAllowedSimulators(orderEntitlements.allowedSimulators)
-                  : [],
-                isSubscriber: !!orderEntitlements.isSubscriber,
-                email: email,
-              };
-              window.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
-              document.dispatchEvent(new CustomEvent('ifa:subscription-changed', { detail: subDetail }));
-            } catch (evtErr) {
-              /* ignore */
-            }
-            profileSynced = true;
-            refreshSlots();
-            startPlatformNotifications(user, profile);
-            notifyLocalAuthChanged({ type: 'profile-sync', email: email });
-            notifyAuthChange(user, { profileSynced: true });
-            return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
-          })
-          .catch(function (syncErr) {
-            console.error('[Auth] syncEntitlementsFromApprovedOrders failed:', syncErr);
-            var previous = getLocalAuthUser();
-            var entitlements = profileToEntitlements(profile, user, previous);
-            setLocalAuthUser(
-              {
-                name: (profile && profile.name) || user.displayName || '',
-                email: (profile && profile.email) || user.email || '',
-                photoURL: user.photoURL || (profile && profile.photo) || '',
-                isSubscriber: entitlements.isSubscriber,
-                isAdmin: role === 'admin',
-                isInstructor: !!(profile && profile.isInstructor),
-                role: role,
-                planId: entitlements.planId,
-                enrolledCourseIds: entitlements.enrolledCourseIds,
-                allowedSimulators: entitlements.allowedSimulators,
-                trialExpiresAt: resolveSessionTrialExpiresAt(profile, null),
-              },
-              profile
-            );
-            profileSynced = true;
-            refreshSlots();
-            startPlatformNotifications(user, profile);
-            notifyLocalAuthChanged({ type: 'profile-sync', email: email });
-            notifyAuthChange(user, { profileSynced: true });
-            return maybeGrantTrialForUser(user, profile, { isNewProfile: isNewProfile });
-          });
-      })
-      .catch(function (err) {
-        profileSynced = true;
-        console.error('[Auth] syncUserProfile failed:', err);
-        lastProfile = {
-          uid: user.uid,
-          email: user.email || email,
-          name: user.displayName || '',
-          photo: user.photoURL || '',
-          photoURL: user.photoURL || '',
-          role: 'user',
-          isSubscriber: false,
-        };
-        refreshSlots();
-        startPlatformNotifications(user, lastProfile);
-        notifyLocalAuthChanged({ type: 'profile-sync', email: email });
-        notifyAuthChange(user, { profileSynced: true });
-      });
+    runBackgroundProfileAndEntitlementsSync(user);
   });
 
   document.addEventListener('ifa:instructor-application-submitted', refreshSlots);

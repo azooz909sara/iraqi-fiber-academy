@@ -182,11 +182,20 @@
     );
   }
 
+  function hasFirestoreArticlesCache() {
+    return !!(
+      global.PlatformArticlesFirestore &&
+      typeof global.PlatformArticlesFirestore.getCachedArticles === 'function' &&
+      global.PlatformArticlesFirestore.getCachedArticles().length
+    );
+  }
+
   function isFirestoreArticlesBootstrapping() {
     return !!(
       global.PlatformArticlesFirestore &&
       typeof global.PlatformArticlesFirestore.isReady === 'function' &&
-      !global.PlatformArticlesFirestore.isReady()
+      !global.PlatformArticlesFirestore.isReady() &&
+      !hasFirestoreArticlesCache()
     );
   }
 
