@@ -20,23 +20,16 @@ function wireAdminPushToggle() {
 function enforceAdminAccess(detail) {
   detail = detail || {};
   var Auth = window.IFAAuth;
-  if (!Auth || typeof Auth.isAuthInitialized !== 'function') {
+  if (!Auth || !Auth.isAuthInitialized()) {
     return;
   }
-
-  if (!Auth.isAuthInitialized()) {
-    return;
-  }
-
   if (detail.profileSynced === false) {
     return;
   }
-
   if (!Auth.isLoggedIn()) {
     redirectHome();
     return;
   }
-
   var profile = detail.profile != null ? detail.profile : Auth.getAuthState().profile;
   if (!Auth.isAdminUser(profile)) {
     redirectHome();

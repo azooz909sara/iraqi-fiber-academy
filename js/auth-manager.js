@@ -1836,14 +1836,25 @@ function runBackgroundProfileAndEntitlementsSync(user) {
     .catch(function (err) {
       profileSynced = true;
       console.error('[Auth] syncUserProfile failed:', err);
+      var local = getLocalAuthUser();
+      var localMatchesSession =
+        local && normalizeEmail(local.email) === normalizeEmail(user.email || email);
+      var fallbackRole = 'user';
+      if (localMatchesSession) {
+        if (isAdminUser({ role: local.role }) || local.isAdmin === true) {
+          fallbackRole = 'admin';
+        } else if (local.role) {
+          fallbackRole = String(local.role);
+        }
+      }
       lastProfile = {
         uid: user.uid,
         email: user.email || email,
-        name: user.displayName || '',
-        photo: user.photoURL || '',
-        photoURL: user.photoURL || '',
-        role: 'user',
-        isSubscriber: false,
+        name: (localMatchesSession && local.name) || user.displayName || '',
+        photo: user.photoURL || (localMatchesSession && local.photoURL) || '',
+        photoURL: user.photoURL || (localMatchesSession && local.photoURL) || '',
+        role: fallbackRole,
+        isSubscriber: !!(localMatchesSession && local.isSubscriber),
       };
       refreshSlots();
       startPlatformNotifications(user, lastProfile);
