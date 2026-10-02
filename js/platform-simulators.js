@@ -280,88 +280,6 @@
     }
   }
 
-  var ENTITLEMENTS_CACHE_KEY = 'ifa_entitlements_cache_v1';
-
-  function readEntitlementsCache(uid) {
-    var id = String(uid || '').trim();
-    if (!id) return null;
-    try {
-      var raw = global.localStorage.getItem(ENTITLEMENTS_CACHE_KEY);
-      if (!raw) return null;
-      var parsed = JSON.parse(raw);
-      if (!parsed || String(parsed.uid || '') !== id) return null;
-      var data = parsed.data;
-      if (!data || typeof data !== 'object') return null;
-      return {
-        enrolledCourseIds: Array.isArray(data.enrolledCourseIds) ? data.enrolledCourseIds.slice() : [],
-        allowedSimulators: Array.isArray(data.allowedSimulators) ? data.allowedSimulators.slice() : [],
-        isSubscriber: !!data.isSubscriber,
-        planId: data.planId != null ? String(data.planId) : '',
-        trialExpiresAt: data.trialExpiresAt,
-        trialExpiresAtMs: typeof data.trialExpiresAtMs === 'number' ? data.trialExpiresAtMs : 0,
-      };
-    } catch (err) {
-      return null;
-    }
-  }
-
-  function isAdminBypassForSimulatorAccess(authUser) {
-    var local = authUser || getLocalAuthUser();
-    if (local) {
-      if (String(local.role || '').toLowerCase() === 'admin') return true;
-      if (local.isAdmin === true) return true;
-    }
-    if (global.IFAAuth && typeof global.IFAAuth.isAdminUser === 'function') {
-      if (global.IFAAuth.isAdminUser(local)) return true;
-      if (typeof global.IFAAuth.getAuthState === 'function') {
-        var state = global.IFAAuth.getAuthState();
-        if (global.IFAAuth.isAdminUser(state && state.profile)) return true;
-      }
-    }
-    return false;
-  }
-
-  function mergeAuthUserWithAccessCache(authUser) {
-    if (!authUser) return null;
-    var merged = Object.assign({}, authUser);
-    var uid = null;
-    if (global.IFAAuth && typeof global.IFAAuth.getCurrentUser === 'function') {
-      var firebaseUser = global.IFAAuth.getCurrentUser();
-      uid = firebaseUser && firebaseUser.uid;
-    }
-    var cached = readEntitlementsCache(uid);
-    if (cached) {
-      if (cached.isSubscriber) merged.isSubscriber = true;
-      if (cached.trialExpiresAtMs > 0) {
-        merged.trialExpiresAt = cached.trialExpiresAtMs;
-      } else if (cached.trialExpiresAt != null && cached.trialExpiresAt !== '') {
-        merged.trialExpiresAt = cached.trialExpiresAt;
-      }
-      if (Array.isArray(cached.enrolledCourseIds) && cached.enrolledCourseIds.length) {
-        merged.enrolledCourseIds = cached.enrolledCourseIds.slice();
-      }
-      if (Array.isArray(cached.allowedSimulators) && cached.allowedSimulators.length) {
-        merged.allowedSimulators = cached.allowedSimulators.slice();
-      }
-      if (cached.planId && !merged.planId) merged.planId = cached.planId;
-    }
-    var freshLocal = getLocalAuthUser();
-    if (freshLocal && normalizeEmail(freshLocal.email) === normalizeEmail(merged.email)) {
-      if (freshLocal.isSubscriber === true) merged.isSubscriber = true;
-      var localTrial = trialExpiryMs(freshLocal);
-      var mergedTrial = trialExpiryMs(merged);
-      if (localTrial > mergedTrial) merged.trialExpiresAt = freshLocal.trialExpiresAt;
-      if (
-        Array.isArray(freshLocal.enrolledCourseIds) &&
-        freshLocal.enrolledCourseIds.length &&
-        (!Array.isArray(merged.enrolledCourseIds) || !merged.enrolledCourseIds.length)
-      ) {
-        merged.enrolledCourseIds = freshLocal.enrolledCourseIds.slice();
-      }
-    }
-    return merged;
-  }
-
   function getLocalAuthUser() {
     if (global.IFAAuth && typeof global.IFAAuth.getLocalAuthUser === 'function') {
       return global.IFAAuth.getLocalAuthUser();
@@ -785,14 +703,40 @@
     }
   }
 
+  /** Strip .html so Cloudflare pretty URLs (e.g. /simulator) match catalog hrefs (simulator.html). */
+  function normalizeSimulatorPageSlug(pageName) {
+    var slug = String(pageName || '')
+      .split('?')[0]
+      .split('#')[0]
+      .toLowerCase()
+      .trim();
+    if (slug.endsWith('.html')) slug = slug.slice(0, -5);
+    return slug;
+  }
+
+  function simulatorCatalogHrefSlug(href) {
+    return normalizeSimulatorPageSlug(
+      String(href || '')
+        .split('/')
+        .pop()
+    );
+  }
+
+  function currentPageSlug() {
+    return normalizeSimulatorPageSlug(currentPageFile());
+  }
+
   function currentSimulatorIdFromLocation() {
-    var file = currentPageFile();
+    var slug = currentPageSlug();
+    if (!slug) return '';
+
+    if (slug === 'simulator') {
+      return 'ftth-simulator';
+    }
+
     for (var i = 0; i < SIMULATOR_CATALOG.length; i++) {
-      var href = String(SIMULATOR_CATALOG[i].href || '')
-        .split('?')[0]
-        .split('#')[0]
-        .toLowerCase();
-      if (href && href === file) return SIMULATOR_CATALOG[i].id;
+      var hrefSlug = simulatorCatalogHrefSlug(SIMULATOR_CATALOG[i].href);
+      if (hrefSlug && hrefSlug === slug) return SIMULATOR_CATALOG[i].id;
     }
     return '';
   }
@@ -1156,9 +1100,7 @@
     var id = String(simulatorId || '');
     if (isAdminPreviewContext()) return true;
 
-    var authUser = mergeAuthUserWithAccessCache(getLocalAuthUser());
-    if (isAdminBypassForSimulatorAccess(authUser)) return true;
-
+    var authUser = getLocalAuthUser();
     var directoryUser = authUser ? findDirectoryUser(authUser.email) : null;
 
     if (isPrivilegedRole(authUser, directoryUser)) return true;

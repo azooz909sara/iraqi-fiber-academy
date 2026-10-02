@@ -1697,20 +1697,9 @@ function enforceSimulatorPageFromAuth() {
     /* ignore */
   }
   if (window.PlatformSimulators && typeof window.PlatformSimulators.viewerCanAccess === 'function') {
-    var file = '';
-    try {
-      file = decodeURIComponent(String(window.location.pathname || '').split('/').pop() || '').toLowerCase();
-    } catch (err2) {
-      file = '';
-    }
-    var sim = (window.PlatformSimulators.getCatalog && window.PlatformSimulators.getCatalog()) || [];
     var match = null;
-    for (var i = 0; i < sim.length; i++) {
-      var href = String(sim[i].href || '').toLowerCase();
-      if (href && href === file) {
-        match = sim[i].id;
-        break;
-      }
+    if (typeof window.PlatformSimulators.currentSimulatorIdFromLocation === 'function') {
+      match = window.PlatformSimulators.currentSimulatorIdFromLocation();
     }
     if (!match) return;
     if (window.PlatformSimulators.viewerCanAccess(match)) return;
