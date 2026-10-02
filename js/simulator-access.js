@@ -457,6 +457,48 @@ async function evaluateAccess(user) {
   }
 }
 
+function forceRemoveSubscriberGate() {
+  var gate = document.getElementById('subscriber-gate');
+  if (gate) gate.remove();
+  document.body.classList.remove('subscriber-gate-active');
+}
+
+function localAuthTrialExpiresMs(localAuth) {
+  if (!localAuth) return 0;
+  var raw = readRawLocalAuthUser();
+  if (raw && normalizeEmail(raw.email) === normalizeEmail(localAuth.email)) {
+    var fromRaw = parseTrialExpiresAtMs(raw.trialExpiresAt);
+    if (fromRaw > 0) return fromRaw;
+  }
+  return parseTrialExpiresAtMs(localAuth.trialExpiresAt);
+}
+
+function tryBruteForceGateBypassFromLocalAuth() {
+  var localAuth = window.IFAAuth ? window.IFAAuth.getLocalAuthUser() : null;
+  if (!localAuth) {
+    localAuth = readRawLocalAuthUser();
+  }
+  if (!localAuth) return false;
+
+  var simulatorId = currentSimulatorIdFromPage();
+
+  if (normalizeEmail(localAuth.email) === normalizeEmail(OWNER_ACCOUNT_EMAIL)) {
+    forceRemoveSubscriberGate();
+    grantSimulatorAccess(simulatorId);
+    document.documentElement.setAttribute('data-ifa-access', 'brute-force-owner-grant');
+    return true;
+  }
+
+  if (localAuthTrialExpiresMs(localAuth) > Date.now()) {
+    forceRemoveSubscriberGate();
+    grantSimulatorAccess(simulatorId);
+    document.documentElement.setAttribute('data-ifa-access', 'brute-force-trial-grant');
+    return true;
+  }
+
+  return false;
+}
+
 function bindGateActions() {
   var gate = getGate();
   if (!gate || gate.dataset.bound === '1') return;
@@ -483,6 +525,10 @@ function initSimulatorAccess() {
   if (shouldBypassAccessControl()) {
     setGateVisible(false);
     document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
+    return;
+  }
+
+  if (tryBruteForceGateBypassFromLocalAuth()) {
     return;
   }
 
