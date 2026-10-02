@@ -103,10 +103,7 @@ function normalizeEmail(value) {
   return String(value || '').trim().toLowerCase();
 }
 
-function getLocalAuthSnapshot() {
-  if (window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function') {
-    return window.IFAAuth.getLocalAuthUser();
-  }
+function readRawLocalAuthUser() {
   try {
     var raw = localStorage.getItem('ifa_auth_user');
     if (!raw) return null;
@@ -115,6 +112,37 @@ function getLocalAuthSnapshot() {
   } catch (err) {
     return null;
   }
+}
+
+function parseTrialExpiresAtMs(value) {
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number' && isFinite(value)) return value;
+  if (typeof value === 'string') {
+    var trimmed = String(value).trim();
+    if (!trimmed) return 0;
+    var asNum = Number(trimmed);
+    if (isFinite(asNum) && /^\d+(\.\d+)?$/.test(trimmed)) return asNum;
+    var parsed = Date.parse(trimmed);
+    if (isFinite(parsed)) return parsed;
+    var fromDate = new Date(trimmed).getTime();
+    return isFinite(fromDate) ? fromDate : 0;
+  }
+  return 0;
+}
+
+function getLocalAuthSnapshot() {
+  var raw = readRawLocalAuthUser();
+  if (window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function') {
+    var fromApi = window.IFAAuth.getLocalAuthUser();
+    if (!fromApi) return raw;
+    if (!raw || normalizeEmail(raw.email) !== normalizeEmail(fromApi.email)) return fromApi;
+    var trialMs = parseTrialExpiresAtMs(raw.trialExpiresAt);
+    if (trialMs > 0) {
+      return Object.assign({}, fromApi, { trialExpiresAt: trialMs });
+    }
+    return fromApi;
+  }
+  return raw;
 }
 
 function isLocalAdminAuth(localAuth) {
@@ -130,6 +158,11 @@ function isLocalAdminAuth(localAuth) {
 
 function localTrialExpiryMs(localAuth) {
   if (!localAuth) return 0;
+  var raw = readRawLocalAuthUser();
+  var trialSource =
+    raw && normalizeEmail(raw.email) === normalizeEmail(localAuth.email) ? raw : localAuth;
+  var directMs = parseTrialExpiresAtMs(trialSource.trialExpiresAt);
+  if (directMs > 0) return directMs;
   var settings = null;
   if (
     window.PlatformSimulators &&
@@ -138,12 +171,13 @@ function localTrialExpiryMs(localAuth) {
     settings = window.PlatformSimulators.getPlatformSettings();
   }
   if (window.IFAAuth && typeof window.IFAAuth.getTrialExpiryMs === 'function') {
-    return window.IFAAuth.getTrialExpiryMs(localAuth, settings);
+    var fromAuth = window.IFAAuth.getTrialExpiryMs(
+      Object.assign({}, localAuth, { trialExpiresAt: trialSource.trialExpiresAt }),
+      settings
+    );
+    if (fromAuth > 0) return fromAuth;
   }
-  var t = localAuth.trialExpiresAt;
-  if (t == null || t === '') return 0;
-  var n = typeof t === 'number' ? t : Date.parse(t);
-  return isFinite(n) ? n : 0;
+  return parseTrialExpiresAtMs(localAuth.trialExpiresAt);
 }
 
 function hasActiveLocalTrial(localAuth) {
@@ -245,6 +279,36 @@ function runBackgroundProfileSync(user) {
   });
 }
 
+function qualifiesForInstantLocalBypass(localAuth) {
+  return isLocalAdminAuth(localAuth) || hasActiveLocalTrial(localAuth);
+}
+
+function resolveGateAfterAccessError(user, simulatorId) {
+  var localAuth = readRawLocalAuthUser() || getLocalAuthSnapshot();
+  if (qualifiesForInstantLocalBypass(localAuth)) {
+    grantSimulatorAccess(simulatorId);
+    return;
+  }
+  try {
+    if (
+      simulatorId &&
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
+      window.PlatformSimulators.viewerCanAccess(simulatorId)
+    ) {
+      grantSimulatorAccess(simulatorId);
+      return;
+    }
+  } catch (accessErr) {
+    console.warn('[SimulatorAccess] viewerCanAccess recovery check failed:', accessErr);
+  }
+  if (!user) {
+    setGateVisible(true, 'logged-out');
+    return;
+  }
+  setGateVisible(true, 'simulator-locked');
+}
+
 function tryKickOutExpiredTrial(simulatorId, localUser) {
   if (!window.PlatformSimulators) return false;
   if (
@@ -253,14 +317,7 @@ function tryKickOutExpiredTrial(simulatorId, localUser) {
   ) {
     return false;
   }
-  var settings =
-    typeof window.PlatformSimulators.getPlatformSettings === 'function'
-      ? window.PlatformSimulators.getPlatformSettings()
-      : null;
-  var expMs =
-    window.IFAAuth && typeof window.IFAAuth.getTrialExpiryMs === 'function'
-      ? window.IFAAuth.getTrialExpiryMs(localUser, settings)
-      : 0;
+  var expMs = localTrialExpiryMs(localUser);
   if (!(expMs > 0 && Date.now() >= expMs)) return false;
   if (typeof window.PlatformSimulators.kickOutTrialExpiredUser === 'function') {
     window.PlatformSimulators.kickOutTrialExpiredUser(simulatorId);
@@ -301,85 +358,100 @@ async function evaluateAccess(user) {
     return;
   }
 
-  if (
-    window.PlatformSimulators &&
-    typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
-    window.PlatformSimulators.viewerCanAccess(simulatorId)
-  ) {
-    grantSimulatorAccess(simulatorId);
-    runBackgroundProfileSync(user);
-    return;
-  }
+  var accessSettled = false;
 
-  setGateVisible(true, 'loading');
-
-  var profile = null;
-  try {
-    await withTimeout(
-      (async function () {
-        await syncUserProfile(user);
-        profile = await fetchUserProfile(user.uid);
-      })(),
-      FIRESTORE_ACCESS_TIMEOUT_MS,
-      'profile-access-check-timeout'
-    );
-    applyProfileToLocalSession(user, profile);
-  } catch (err) {
-    console.warn('[SimulatorAccess] profile sync skipped or timed out:', err);
-    runBackgroundProfileSync(user);
-  }
-
-  var localUser = getLocalAuthSnapshot();
   try {
     if (
       window.PlatformSimulators &&
-      typeof window.PlatformSimulators.warmEntitlementCaches === 'function'
+      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
+      window.PlatformSimulators.viewerCanAccess(simulatorId)
     ) {
-      await withTimeout(
-        window.PlatformSimulators.warmEntitlementCaches(localUser, null),
-        FIRESTORE_ACCESS_TIMEOUT_MS,
-        'warm-entitlements-timeout'
-      );
+      grantSimulatorAccess(simulatorId);
+      runBackgroundProfileSync(user);
+      accessSettled = true;
+      return;
     }
-  } catch (warmErr) {
-    console.warn('[SimulatorAccess] warmEntitlementCaches skipped:', warmErr);
-  }
 
-  if (
-    window.PlatformSimulators &&
-    typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
-    window.PlatformSimulators.viewerCanAccess(simulatorId)
-  ) {
-    grantSimulatorAccess(simulatorId);
-    return;
-  }
+    setGateVisible(true, 'loading');
 
-  var enrolled =
-    profile && Array.isArray(profile.enrolledCourseIds)
-      ? profile.enrolledCourseIds.slice()
-      : localUser && Array.isArray(localUser.enrolledCourseIds)
-        ? localUser.enrolledCourseIds.slice()
+    var profile = null;
+    try {
+      await withTimeout(
+        (async function () {
+          await syncUserProfile(user);
+          profile = await fetchUserProfile(user.uid);
+        })(),
+        FIRESTORE_ACCESS_TIMEOUT_MS,
+        'profile-access-check-timeout'
+      );
+      applyProfileToLocalSession(user, profile);
+    } catch (err) {
+      console.warn('[SimulatorAccess] profile sync skipped or timed out:', err);
+      runBackgroundProfileSync(user);
+    }
+
+    var localUser = getLocalAuthSnapshot();
+    try {
+      if (
+        window.PlatformSimulators &&
+        typeof window.PlatformSimulators.warmEntitlementCaches === 'function'
+      ) {
+        await withTimeout(
+          window.PlatformSimulators.warmEntitlementCaches(localUser, null),
+          FIRESTORE_ACCESS_TIMEOUT_MS,
+          'warm-entitlements-timeout'
+        );
+      }
+    } catch (warmErr) {
+      console.warn('[SimulatorAccess] warmEntitlementCaches skipped:', warmErr);
+    }
+
+    if (
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
+      window.PlatformSimulators.viewerCanAccess(simulatorId)
+    ) {
+      grantSimulatorAccess(simulatorId);
+      accessSettled = true;
+      return;
+    }
+
+    var enrolled =
+      profile && Array.isArray(profile.enrolledCourseIds)
+        ? profile.enrolledCourseIds.slice()
+        : localUser && Array.isArray(localUser.enrolledCourseIds)
+          ? localUser.enrolledCourseIds.slice()
+          : [];
+    var courseAllowed =
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.simulatorsFromEnrolledCourseIds === 'function'
+        ? window.PlatformSimulators.simulatorsFromEnrolledCourseIds(enrolled)
         : [];
-  var courseAllowed =
-    window.PlatformSimulators &&
-    typeof window.PlatformSimulators.simulatorsFromEnrolledCourseIds === 'function'
-      ? window.PlatformSimulators.simulatorsFromEnrolledCourseIds(enrolled)
-      : [];
-  if (courseAllowed.indexOf(simulatorId) !== -1) {
-    grantSimulatorAccess(simulatorId);
-    return;
-  }
-  if (tryKickOutExpiredTrial(simulatorId, localUser)) {
+    if (courseAllowed.indexOf(simulatorId) !== -1) {
+      grantSimulatorAccess(simulatorId);
+      accessSettled = true;
+      return;
+    }
+    if (tryKickOutExpiredTrial(simulatorId, localUser)) {
+      setGateVisible(true, 'simulator-locked');
+      accessSettled = true;
+      return;
+    }
+    console.error(
+      '[SimulatorAccess] Access denied — simulator "' +
+        simulatorId +
+        '" not permitted for enrolled courses:',
+      enrolled
+    );
     setGateVisible(true, 'simulator-locked');
-    return;
+    accessSettled = true;
+  } catch (err) {
+    console.error('[SimulatorAccess] evaluateAccess failed:', err);
+  } finally {
+    if (!accessSettled) {
+      resolveGateAfterAccessError(user, simulatorId);
+    }
   }
-  console.error(
-    '[SimulatorAccess] Access denied — simulator "' +
-      simulatorId +
-      '" not permitted for enrolled courses:',
-    enrolled
-  );
-  setGateVisible(true, 'simulator-locked');
 }
 
 function bindGateActions() {
@@ -408,6 +480,14 @@ function initSimulatorAccess() {
   if (shouldBypassAccessControl()) {
     setGateVisible(false);
     document.documentElement.setAttribute('data-ifa-access', 'local-bypass');
+    return;
+  }
+
+  var localAuth = readRawLocalAuthUser();
+  if (qualifiesForInstantLocalBypass(localAuth)) {
+    setGateVisible(false);
+    document.documentElement.setAttribute('data-ifa-access', 'instant-local-grant');
+    grantSimulatorAccess(currentSimulatorIdFromPage());
     return;
   }
 
