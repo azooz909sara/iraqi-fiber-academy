@@ -81,6 +81,91 @@ function currentSimulatorIdFromPage() {
   return '';
 }
 
+function readEntitlementsCache(uid) {
+  var id = String(uid || '').trim();
+  if (!id) return null;
+  try {
+    var raw = localStorage.getItem('ifa_entitlements_cache_v1');
+    if (!raw) return null;
+    var parsed = JSON.parse(raw);
+    if (!parsed || String(parsed.uid || '') !== id) return null;
+    var data = parsed.data;
+    if (!data || typeof data !== 'object') return null;
+    return {
+      enrolledCourseIds: Array.isArray(data.enrolledCourseIds) ? data.enrolledCourseIds.slice() : [],
+      allowedSimulators: Array.isArray(data.allowedSimulators) ? data.allowedSimulators.slice() : [],
+      isSubscriber: !!data.isSubscriber,
+      planId: data.planId != null ? String(data.planId) : '',
+      trialExpiresAtMs: typeof data.trialExpiresAtMs === 'number' ? data.trialExpiresAtMs : 0,
+      trialExpiresAt: data.trialExpiresAt,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function mergeProfileEntitlementsWithLocal(localBefore, profile, uid) {
+  var cached = readEntitlementsCache(uid);
+  var profileSubscriber = !!(profile && profile.isSubscriber === true);
+  var profileEnrolled =
+    profile && Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [];
+  var profileAllowed =
+    profile && Array.isArray(profile.allowedSimulators) ? profile.allowedSimulators.slice() : [];
+  var profilePlanId = profile && profile.planId != null ? String(profile.planId) : '';
+
+  var isSubscriber =
+    profileSubscriber ||
+    !!(localBefore && localBefore.isSubscriber) ||
+    !!(cached && cached.isSubscriber);
+  var enrolledCourseIds = profileEnrolled.length
+    ? profileEnrolled
+    : localBefore && Array.isArray(localBefore.enrolledCourseIds) && localBefore.enrolledCourseIds.length
+      ? localBefore.enrolledCourseIds.slice()
+      : cached && Array.isArray(cached.enrolledCourseIds)
+        ? cached.enrolledCourseIds.slice()
+        : [];
+  var allowedSimulators = profileAllowed.length
+    ? profileAllowed
+    : localBefore && Array.isArray(localBefore.allowedSimulators) && localBefore.allowedSimulators.length
+      ? localBefore.allowedSimulators.slice()
+      : cached && Array.isArray(cached.allowedSimulators)
+        ? cached.allowedSimulators.slice()
+        : [];
+  var planId = profilePlanId || (localBefore && localBefore.planId) || (cached && cached.planId) || '';
+
+  var trialExpiresAt =
+    localBefore && localBefore.trialExpiresAt != null && localBefore.trialExpiresAt !== ''
+      ? localBefore.trialExpiresAt
+      : cached && cached.trialExpiresAtMs > 0
+        ? cached.trialExpiresAtMs
+        : cached && cached.trialExpiresAt != null
+          ? cached.trialExpiresAt
+          : profile && profile.trialExpiresAt != null
+            ? profile.trialExpiresAt
+            : 0;
+
+  return {
+    isSubscriber: isSubscriber,
+    planId: planId,
+    enrolledCourseIds: enrolledCourseIds,
+    allowedSimulators: allowedSimulators,
+    trialExpiresAt: trialExpiresAt,
+  };
+}
+
+function isAdminSimulatorBypass(localUser) {
+  if (localUser && String(localUser.role || '').toLowerCase() === 'admin') return true;
+  if (localUser && localUser.isAdmin === true) return true;
+  if (window.IFAAuth && typeof window.IFAAuth.isAdminUser === 'function') {
+    if (window.IFAAuth.isAdminUser(localUser)) return true;
+    if (typeof window.IFAAuth.getAuthState === 'function') {
+      var state = window.IFAAuth.getAuthState();
+      if (window.IFAAuth.isAdminUser(state && state.profile)) return true;
+    }
+  }
+  return false;
+}
+
 function tryKickOutExpiredTrial(simulatorId, localUser) {
   if (!window.PlatformSimulators) return false;
   if (
@@ -125,27 +210,59 @@ async function evaluateAccess(user) {
     return;
   }
 
+  var localBefore =
+    window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function'
+      ? window.IFAAuth.getLocalAuthUser()
+      : null;
+  if (isAdminSimulatorBypass(localBefore)) {
+    setGateVisible(false);
+    if (
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.armTrialExpiryWatch === 'function'
+    ) {
+      window.PlatformSimulators.armTrialExpiryWatch();
+    }
+    return;
+  }
+
   try {
     await syncUserProfile(user);
 
     var profile = await fetchUserProfile(user.uid);
+    var mergedEntitlements = mergeProfileEntitlementsWithLocal(localBefore, profile, user.uid);
     if (profile && window.IFAAuth && typeof window.IFAAuth.setLocalAuthUser === 'function') {
       window.IFAAuth.setLocalAuthUser(
         {
-          isSubscriber: profile.isSubscriber === true,
-          planId: profile.planId != null ? String(profile.planId) : '',
-          enrolledCourseIds: Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [],
-          allowedSimulators: Array.isArray(profile.allowedSimulators) ? profile.allowedSimulators.slice() : [],
+          name: (localBefore && localBefore.name) || user.displayName || '',
+          email: user.email || (localBefore && localBefore.email) || '',
+          photoURL: user.photoURL || (localBefore && localBefore.photoURL) || '',
+          isSubscriber: mergedEntitlements.isSubscriber,
+          planId: mergedEntitlements.planId,
+          enrolledCourseIds: mergedEntitlements.enrolledCourseIds,
+          allowedSimulators: mergedEntitlements.allowedSimulators,
+          trialExpiresAt: mergedEntitlements.trialExpiresAt,
+          role:
+            localBefore && String(localBefore.role || '').toLowerCase() === 'admin'
+              ? localBefore.role
+              : localBefore && localBefore.role
+                ? localBefore.role
+                : profile && profile.role
+                  ? profile.role
+                  : '',
+          isAdmin:
+            isAdminSimulatorBypass(localBefore) ||
+            !!(profile && String(profile.role || '').toLowerCase() === 'admin'),
+          isInstructor: !!(localBefore && localBefore.isInstructor),
         },
         profile
       );
     } else if (profile && window.IFAAuth && typeof window.IFAAuth.applyEntitlements === 'function') {
       window.IFAAuth.applyEntitlements(
         {
-          isSubscriber: profile.isSubscriber === true,
-          planId: profile.planId != null ? String(profile.planId) : '',
-          enrolledCourseIds: Array.isArray(profile.enrolledCourseIds) ? profile.enrolledCourseIds.slice() : [],
-          allowedSimulators: [],
+          isSubscriber: mergedEntitlements.isSubscriber,
+          planId: mergedEntitlements.planId,
+          enrolledCourseIds: mergedEntitlements.enrolledCourseIds,
+          allowedSimulators: mergedEntitlements.allowedSimulators,
         },
         user.email
       );
@@ -200,7 +317,19 @@ async function evaluateAccess(user) {
     var catchUser =
       window.IFAAuth && typeof window.IFAAuth.getLocalAuthUser === 'function'
         ? window.IFAAuth.getLocalAuthUser()
-        : null;
+        : localBefore;
+    if (isAdminSimulatorBypass(catchUser)) {
+      setGateVisible(false);
+      return;
+    }
+    if (
+      window.PlatformSimulators &&
+      typeof window.PlatformSimulators.viewerCanAccess === 'function' &&
+      window.PlatformSimulators.viewerCanAccess(simulatorId)
+    ) {
+      setGateVisible(false);
+      return;
+    }
     if (tryKickOutExpiredTrial(simulatorId, catchUser)) {
       return;
     }
