@@ -2546,7 +2546,7 @@
       currentCabinetCtx = cabinetNode || findServingCabinet(closureNode);
 
       var mainPathLabel = mainPack
-        ? formatMainCableTrailPath(mainPack.trail)
+        ? formatMainCableTrailPath(mainPack.trail, mainPack.cableId)
         : ((currentCabinetCtx ? getCabinetLabel(currentCabinetCtx) : 'FDT') + ' M-CABLE');
       var subPathLabel = formatSubCableTrailPath(pack.trail);
 
@@ -2598,7 +2598,7 @@
       pack.mainPointer = mainPtr;
       currentCabinetCtx = cabinetNode;
 
-      var mainPathLabel = formatMainCableTrailPath(trail);
+      var mainPathLabel = formatMainCableTrailPath(trail, pack.cableId);
       interactivePathCtx = {
         source: 'interactive_trail_direct',
         main_path_label: mainPathLabel,
@@ -3499,15 +3499,20 @@
     };
   }
 
-  function formatMainCableTrailPath(trail) {
+  function formatMainCableTrailPath(trail, cableId) {
+    if (deps && deps.formatMainCableTrailLabelForDisplay) {
+      return deps.formatMainCableTrailLabelForDisplay(trail, cableId);
+    }
     if (!trail || !trail.cabinetLabel) return '';
     var cableDes = String(trail.cableName || '').trim();
     var head = cableDes
       ? (String(trail.cabinetLabel) + ' ' + cableDes + ' M-Cable')
       : (String(trail.cabinetLabel) + ' M-Cable');
     var parts = [head];
+    var resolveHop = deps && deps.resolveMainTrailHopDisplayLabel;
     (trail.closures || []).forEach(function (c) {
-      if (c && c.label) parts.push(String(c.label));
+      var lbl = resolveHop ? resolveHop(cableId, c) : (c && c.label);
+      if (lbl) parts.push(String(lbl));
     });
     if (!(trail.closures || []).length) {
       (trail.drops || []).forEach(function (d) {
@@ -3527,7 +3532,7 @@
         cableId: cable.id != null ? String(cable.id) : '',
         cableLabel: getCableLabel(cable),
         trail: trail,
-        pathLabel: formatMainCableTrailPath(trail),
+        pathLabel: formatMainCableTrailPath(trail, cable.id != null ? String(cable.id) : ''),
       });
     });
     return out;

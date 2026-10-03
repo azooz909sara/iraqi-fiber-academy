@@ -964,59 +964,81 @@
     return null;
   }
 
-  function chunkMatrixRowsForPdfExport(rows, boundaryKeys) {
-    if (!rows || !rows.length) return [];
-    var keys = boundaryKeys && boundaryKeys.length ? boundaryKeys : ['m_cable_id'];
-    var chunks = [];
-    var current = [];
-    var prevKey = null;
-    var i;
-    for (i = 0; i < rows.length; i++) {
-      var key = groupKeyForRow(rows[i], keys);
-      if (current.length && key !== prevKey) {
-        chunks.push(current);
-        current = [];
-      }
-      current.push(rows[i]);
-      prevKey = key;
-    }
-    if (current.length) chunks.push(current);
-    return chunks;
-  }
+  var PDF_PAGE_1_MAX_ROWS = 30;
+  var PDF_PAGE_N_MAX_ROWS = 32;
+  var PDF_CLOSURE_GROUP_BORDER_MM = 0.35;
 
-  function refinePdfChunkSizes(chunks, isRing) {
-    if (isRing || !chunks || !chunks.length) return chunks || [];
-    var maxRows = 30;
-    var refined = [];
-    var ci;
-    for (ci = 0; ci < chunks.length; ci++) {
-      var chunk = chunks[ci];
-      if (chunk.length <= maxRows) {
-        refined.push(chunk);
-        continue;
-      }
-      var subChunks = chunkMatrixRowsForPdfExport(
-        chunk,
-        ['m_cable_id', 'closure_id', 's_cable_id']
-      );
-      var si;
-      for (si = 0; si < subChunks.length; si++) {
-        if (subChunks[si].length <= maxRows) {
-          refined.push(subChunks[si]);
-        } else {
-          refined = refined.concat(chunkMatrixRowsForPdfExport(
-            subChunks[si],
-            ['m_cable_id', 'closure_id', 's_cable_id', 'fat_id']
-          ));
-        }
-      }
-    }
-    return refined;
-  }
-
-  function getMatrixPdfChunkBoundaryKeys(isRing) {
-    if (isRing) return ['ring_block_id'];
+  function getMatrixPdfClosureGroupFields(isRing) {
+    if (isRing) return ['ring_block_id', 'cabinet_id'];
     return ['m_cable_id', 'closure_id'];
+  }
+
+  function sliceMatrixRowsIntoClosureGroups(rows, groupFields) {
+    var groups = [];
+    if (!rows || !rows.length) return groups;
+    var fields = groupFields && groupFields.length ? groupFields : ['m_cable_id', 'closure_id'];
+    var i = 0;
+    while (i < rows.length) {
+      var baseKey = groupKeyForRow(rows[i], fields);
+      var span = 1;
+      while (i + span < rows.length &&
+        groupKeyForRow(rows[i + span], fields) === baseKey) {
+        span++;
+      }
+      groups.push(rows.slice(i, i + span));
+      i += span;
+    }
+    return groups;
+  }
+
+  /**
+   * PDF-only: split rowspan at fixed row budgets per page so autotable does not
+   * push whole closure groups to the next page (re-merges parents per segment).
+   */
+  function applyPdfSmartSpanBreakRows(rows, rowspanKeys, isRing) {
+    if (!rows || !rows.length) return [];
+    var page1Max = PDF_PAGE_1_MAX_ROWS;
+    var pageNMax = PDF_PAGE_N_MAX_ROWS;
+    var pageIndex = 0;
+    var pageRowCount = 0;
+    var out = [];
+    var groups = sliceMatrixRowsIntoClosureGroups(rows, getMatrixPdfClosureGroupFields(isRing));
+    var gi;
+
+    function pageMaxRows() {
+      return pageIndex === 0 ? page1Max : pageNMax;
+    }
+
+    function beginNewPdfPage() {
+      pageIndex += 1;
+      pageRowCount = 0;
+    }
+
+    for (gi = 0; gi < groups.length; gi++) {
+      var group = groups[gi];
+      var offset = 0;
+      while (offset < group.length) {
+        if (pageRowCount >= pageMaxRows()) beginNewPdfPage();
+        var spaceLeft = pageMaxRows() - pageRowCount;
+        if (spaceLeft <= 0) {
+          beginNewPdfPage();
+          spaceLeft = pageMaxRows();
+        }
+        var take = Math.min(spaceLeft, group.length - offset);
+        var segment = group.slice(offset, offset + take);
+        var annotatedSegment = applyRowspanMetadata(segment.slice(), rowspanKeys);
+        if (offset + take >= group.length) {
+          annotatedSegment[annotatedSegment.length - 1]._pdfClosureGroupEnd = true;
+        }
+        var si;
+        for (si = 0; si < annotatedSegment.length; si++) {
+          out.push(annotatedSegment[si]);
+        }
+        pageRowCount += take;
+        offset += take;
+      }
+    }
+    return out;
   }
 
   function buildAutoTableBodyWithRowspan(annotated, columns) {
@@ -1058,6 +1080,20 @@
     if (data.row.index % 2 === 1) {
       data.cell.styles.fillColor = [248, 250, 252];
     }
+    if (srcRow._pdfClosureGroupEnd) {
+      var lw = data.cell.styles.lineWidth;
+      if (lw == null || typeof lw === 'number') {
+        var base = typeof lw === 'number' ? lw : 0.1;
+        data.cell.styles.lineWidth = {
+          top: base,
+          right: base,
+          bottom: PDF_CLOSURE_GROUP_BORDER_MM,
+          left: base,
+        };
+      } else {
+        data.cell.styles.lineWidth = Object.assign({}, lw, { bottom: PDF_CLOSURE_GROUP_BORDER_MM });
+      }
+    }
   }
 
   function buildMatrixAutoTableOptions(columns, margin) {
@@ -1065,7 +1101,8 @@
       margin: margin,
       theme: 'grid',
       tableWidth: 'auto',
-      rowPageBreak: 'avoid',
+      pageBreak: 'auto',
+      rowPageBreak: 'auto',
       styles: {
         font: 'helvetica',
         fontSize: 7,
@@ -1148,11 +1185,6 @@
         : 'Fiber Design Matrix';
       var summary = getMatrixFilterSummary();
       var stampText = new Date().toLocaleString();
-      var boundaryKeys = getMatrixPdfChunkBoundaryKeys(isRing);
-      var chunks = refinePdfChunkSizes(
-        chunkMatrixRowsForPdfExport(rows, boundaryKeys),
-        isRing
-      );
       var headers = columns.map(function (col) { return col.label; });
       var margin = { top: 14, right: 8, bottom: 8, left: 8 };
       var tableBaseOptions = buildMatrixAutoTableOptions(columns, margin);
@@ -1180,7 +1212,7 @@
           '  |  Rows: ' + String((rows && rows.length) || 0));
       doc.text(meta, margin.left, 14.5, { maxWidth: pageW - margin.left - margin.right });
 
-      if (!chunks.length) {
+      if (!rows || !rows.length) {
         doc.setFontSize(9);
         doc.setTextColor(71, 85, 105);
         doc.text(
@@ -1197,27 +1229,18 @@
         return;
       }
 
-      var chunkIdx;
-      var tableStartY = 18;
-      for (chunkIdx = 0; chunkIdx < chunks.length; chunkIdx++) {
-        if (chunkIdx > 0) {
-          doc.addPage();
-          tableStartY = margin.top;
-        }
-        var chunkRows = chunks[chunkIdx];
-        var annotated = applyRowspanMetadata(chunkRows.slice(), rowspanKeys);
-        var body = buildAutoTableBodyWithRowspan(annotated, columns);
+      var annotated = applyPdfSmartSpanBreakRows(rows.slice(), rowspanKeys, isRing);
+      var body = buildAutoTableBodyWithRowspan(annotated, columns);
 
-        doc.autoTable(Object.assign({}, tableBaseOptions, {
-          head: [headers],
-          body: body,
-          startY: tableStartY,
-          showHead: 'everyPage',
-          didParseCell: function (data) {
-            applyMatrixPdfCellStyles(data, columns, annotated);
-          },
-        }));
-      }
+      doc.autoTable(Object.assign({}, tableBaseOptions, {
+        head: [headers],
+        body: body,
+        startY: 18,
+        showHead: 'everyPage',
+        didParseCell: function (data) {
+          applyMatrixPdfCellStyles(data, columns, annotated);
+        },
+      }));
 
       doc.save(buildMatrixPdfFilename(isRing));
     } catch (e) {

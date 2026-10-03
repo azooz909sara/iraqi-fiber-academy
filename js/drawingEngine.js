@@ -861,6 +861,7 @@
   var ACTIVE_PATH_SEP = ' --> ';
 
   function formatMainCableTrailLabel(trail) {
+    if (b()?.formatMainCableTrailLabelForDisplay) return b().formatMainCableTrailLabelForDisplay(trail, sim()?.penDraft?.continueFromCable?.id);
     if (!trail || !trail.cabinetLabel) return '';
     var cableDes = String(trail.cableName || '').trim();
     var head = cableDes

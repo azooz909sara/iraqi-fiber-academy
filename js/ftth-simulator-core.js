@@ -1564,6 +1564,65 @@
     return false;
   }
 
+  /** Handhole identity only (H5 / FH5) — no closure C suffix for pass-through main hops. */
+  function getHandholePassThroughDisplayLabel(node) {
+    if (!node) return '';
+    if (node.type === 'handhole' || node.type === 'fat_handhole') {
+      return node.autoName ? String(node.autoName) : '';
+    }
+    return '';
+  }
+
+  function mainCableTrailIncludesClosureNode(trail, nodeId) {
+    if (!trail || nodeId == null || nodeId === '') return false;
+    var nid = String(nodeId);
+    return (trail.closures || []).some(function (c) {
+      return c && String(c.id) === nid;
+    });
+  }
+
+  /** First saved main cable whose interactive trail terminates at this closure node. */
+  function findPrimaryMainCableOwnerForClosureNode(nodeId) {
+    if (nodeId == null || nodeId === '') return null;
+    var paths = Sim.fiberCablePaths || [];
+    var i;
+    for (i = 0; i < paths.length; i++) {
+      var cable = paths[i];
+      if (!cable || !cable.mainCableTrail || !cable.mainCableTrail.cabinetId) continue;
+      if (mainCableTrailIncludesClosureNode(cable.mainCableTrail, nodeId)) {
+        return cable.id != null ? String(cable.id) : null;
+      }
+    }
+    return null;
+  }
+
+  function isPassThroughMainTrailHop(cableId, closureHop) {
+    if (!closureHop || closureHop.id == null) return false;
+    var ownerId = findPrimaryMainCableOwnerForClosureNode(closureHop.id);
+    if (!ownerId) return false;
+    var cid = cableId != null && cableId !== '' ? String(cableId) : '';
+    if (!cid) return true;
+    return String(ownerId) !== cid;
+  }
+
+  function resolveMainTrailHopDisplayLabel(cableId, closureHop) {
+    if (!closureHop) return '';
+    if (isPassThroughMainTrailHop(cableId, closureHop)) {
+      var node = findNode(closureHop.id);
+      var handholeOnly = getHandholePassThroughDisplayLabel(node);
+      if (handholeOnly) return handholeOnly;
+      var stored = String(closureHop.label || '');
+      var head = stored.match(/^(H\d+|FH\d+)/i);
+      if (head) return head[1];
+      return stored.replace(/\s+C\d+\s*$/i, '').trim() || stored;
+    }
+    return closureHop.label ? String(closureHop.label) : '';
+  }
+
+  function formatMainCableTrailLabelForDisplay(trail, draftCableId) {
+    return formatInteractiveMainCablePathLabel(trail, draftCableId);
+  }
+
   function formatInteractiveSubCablePathLabel(subTrail) {
     if (!subTrail || !subTrail.closureLabel) return '';
     var subCableDes = String(subTrail.cableName || '').trim();
@@ -1577,7 +1636,7 @@
     return subParts.join(' --> ');
   }
 
-  function formatInteractiveMainCablePathLabel(trail) {
+  function formatInteractiveMainCablePathLabel(trail, cableId) {
     if (!trail || !trail.cabinetLabel) return '';
     var mainCableDes = String(trail.cableName || '').trim();
     var mainHead = mainCableDes
@@ -1585,7 +1644,8 @@
       : (String(trail.cabinetLabel) + ' M-Cable');
     var parts = [mainHead];
     (trail.closures || []).forEach(function (c) {
-      if (c && c.label) parts.push(String(c.label));
+      var hopLabel = resolveMainTrailHopDisplayLabel(cableId, c);
+      if (hopLabel) parts.push(hopLabel);
     });
     if (!(trail.closures || []).length) {
       (trail.drops || []).forEach(function (d) {
@@ -1621,7 +1681,11 @@
       if (Sim.mainCableTrailStatusMsg) {
         return stripActivePathPrefix(Sim.mainCableTrailStatusMsg);
       }
-      return formatInteractiveMainCablePathLabel(trail);
+      var pathDraft = Sim.penDraft;
+      var pathCableId = pathDraft && pathDraft.continueFromCable && pathDraft.continueFromCable.id
+        ? pathDraft.continueFromCable.id
+        : null;
+      return formatInteractiveMainCablePathLabel(trail, pathCableId);
     }
     var draft = Sim.penDraft;
     if (draft && draft.points && draft.points.length > 0) {
@@ -8709,6 +8773,8 @@
       syncBatchDuplicationHintForDrawingState: syncBatchDuplicationHintForDrawingState,
       syncStatusBarDuplicationDisplay: syncStatusBarDuplicationDisplay,
       getActivePathStatusLabel: getActivePathStatusLabel,
+      formatMainCableTrailLabelForDisplay: formatMainCableTrailLabelForDisplay,
+      resolveMainTrailHopDisplayLabel: resolveMainTrailHopDisplayLabel,
       resolveActiveToolboxCableLabel: resolveActiveToolboxCableLabel,
       syncPenDraftCableFromToolbox: syncPenDraftCableFromToolbox,
       formatCableLabel: formatCableLabel,
@@ -14550,6 +14616,8 @@
         getCableLinkDistance: function () {
           return ((Sim.layout && Sim.layout.cellSize) || 50) * 0.85;
         },
+        formatMainCableTrailLabelForDisplay: formatMainCableTrailLabelForDisplay,
+        resolveMainTrailHopDisplayLabel: resolveMainTrailHopDisplayLabel,
       });
       notifyFiberDesignTopologyChanged();
     }
