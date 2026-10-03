@@ -218,8 +218,12 @@
       margin: 0;
       position: relative;
     }
+    #canvas-zoom-inner.ftth-world-root {
+      transform-origin: 0 0 !important;
+    }
     #canvas-wrapper.is-wheel-zooming #canvas-zoom-inner,
-    #canvas-wrapper.is-wheel-zooming .workspace-container {
+    #canvas-wrapper.is-wheel-zooming .workspace-container,
+    #canvas-wrapper.is-wheel-zooming #canvas-zoom-inner.ftth-world-root {
       transition: none;
     }
     #canvas-wrapper.is-panning #canvas-zoom-inner,
@@ -412,7 +416,7 @@
       position: relative;
       width: 100%;
       height: 100%;
-      padding: 100px !important;
+      padding: 0 !important;
       box-sizing: border-box !important;
       overflow: hidden !important;
     }
@@ -746,7 +750,9 @@
 
       <div id="canvas-wrapper" class="map-viewport map-container flex-1 relative">
 
-        <div id="canvas-zoom-inner" class="workspace-container map-canvas-inner">
+        <div id="canvas-zoom-inner" class="workspace-container map-canvas-inner ftth-world-root">
+          <div id="ftth-world-grid" class="ftth-world-grid" aria-hidden="true"></div>
+          <div id="ftth-template-sheet" class="ftth-template-sheet">
           <div id="city-canvas" class="map-canvas relative" style="overflow: visible;">
             <div id="satellite-bg-layer" class="satellite-bg-layer" aria-hidden="true"></div>
             <canvas id="image-map-grid-overlay" class="image-map-grid-overlay" aria-hidden="true"></canvas>
@@ -756,6 +762,7 @@
             <div id="free-nodes-layer" class="free-nodes-layer" aria-hidden="true"></div>
             <svg id="global-drawing-layer" class="global-drawing-layer" aria-hidden="true"></svg>
           </div>
+          </div><!-- /ftth-template-sheet -->
         </div>
         <div id="pathway-panel-host" class="pathway-panel-host pathway-panel-host--retired" aria-hidden="true"></div>
       </div>

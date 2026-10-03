@@ -4847,6 +4847,62 @@ body.ftth-fake-fullscreen-active #toolbox.collapsed ~ #canvas-main ~ #sim-worksp
   position: relative;
 }
 
+#canvas-zoom-inner.ftth-world-root.workspace-container {
+  transform-origin: 0 0 !important;
+}
+
+/* ─── Open lab-style world (20000×20000) + template sheet ─── */
+#simulator-container {
+  --ftth-world-grid: rgba(56, 189, 248, 0.08);
+  --ftth-world-size: 20000px;
+}
+
+#canvas-zoom-inner.ftth-world-root {
+  width: var(--ftth-world-size, 20000px);
+  height: var(--ftth-world-size, 20000px);
+  overflow: visible;
+  background-color: #0a101c;
+  transform-origin: 0 0 !important;
+}
+
+#canvas-zoom-inner.ftth-world-root #city-canvas.map-canvas {
+  background: transparent !important;
+}
+
+.ftth-world-grid {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  background-color: #0a101c;
+  background-image:
+    linear-gradient(var(--ftth-world-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ftth-world-grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.ftth-template-sheet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  overflow: visible;
+}
+
+#city-grid.ftth-hide-cell-grid .grid-cell {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+#city-grid.ftth-hide-cell-grid .cell-label {
+  opacity: 0;
+  pointer-events: none;
+}
+
 #canvas-zoom-inner,
 #city-canvas,
 canvas {

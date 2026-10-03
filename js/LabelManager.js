@@ -358,41 +358,48 @@
     return cachedCanvasWrapper;
   }
 
-  function getMapViewportCenter(vs) {
-    /* Prefer accurate screen→world conversion from the simulator. */
-    var fromApi = api?.getViewportWorldCenter?.();
-    if (fromApi && isFinite(fromApi.x) && isFinite(fromApi.y)) {
-      return { x: fromApi.x, y: fromApi.y };
+  function getMapViewportBounds(vs) {
+    var bounds = api?.getMapViewportCanvasBounds?.();
+    if (bounds && isFinite(bounds.x0) && isFinite(bounds.x1)) {
+      return bounds;
     }
-    /*
-     * With transform = translate(pan) scale(z) and origin pinned so viewport
-     * center stays fixed: world-at-center = (vw/2 - panX, vh/2 - panY).
-     * Do NOT divide by zoom — that mis-anchors labels and culls them at high zoom.
-     */
     var wrap = getCanvasWrapper();
-    var w = wrap ? wrap.clientWidth : 0;
-    var h = wrap ? wrap.clientHeight : 0;
-    var panX = (vs && vs.panX) || 0;
-    var panY = (vs && vs.panY) || 0;
-    return { x: w / 2 - panX, y: h / 2 - panY };
-  }
-
-  function isPointInMapViewport(x, y, vs) {
-    var wrap = getCanvasWrapper();
-    if (!wrap) return true;
+    if (!wrap) return null;
     var w = wrap.clientWidth || 0;
     var h = wrap.clientHeight || 0;
-    var z = (vs && vs.zoom) || 1;
+    var z = (vs && vs.zoom != null ? vs.zoom : getZoomFactor());
     if (!isFinite(z) || z <= 0) z = 1;
     var panX = (vs && vs.panX) || 0;
     var panY = (vs && vs.panY) || 0;
     var pad = 96 / Math.max(z, 0.1);
-    /* Screen(W) = C + z*(W - C + pan) ⇒ visible half-extent in world = (viewport/2)/z */
-    var cx = w / 2 - panX;
-    var cy = h / 2 - panY;
-    var halfW = (w / 2) / z + pad;
-    var halfH = (h / 2) / z + pad;
-    return x >= cx - halfW && x <= cx + halfW && y >= cy - halfH && y <= cy + halfH;
+    return {
+      x0: (-panX) / z - pad,
+      y0: (-panY) / z - pad,
+      x1: (w - panX) / z + pad,
+      y1: (h - panY) / z + pad,
+    };
+  }
+
+  function getMapViewportCenter(vs) {
+    var fromApi = api?.getViewportWorldCenter?.();
+    if (fromApi && isFinite(fromApi.x) && isFinite(fromApi.y)) {
+      return { x: fromApi.x, y: fromApi.y };
+    }
+    var bounds = getMapViewportBounds(vs);
+    if (bounds) {
+      return {
+        x: (bounds.x0 + bounds.x1) / 2,
+        y: (bounds.y0 + bounds.y1) / 2,
+      };
+    }
+    return { x: 0, y: 0 };
+  }
+
+  function isPointInMapViewport(x, y, vs) {
+    if (!isFinite(x) || !isFinite(y)) return true;
+    var bounds = getMapViewportBounds(vs);
+    if (!bounds) return true;
+    return x >= bounds.x0 && x <= bounds.x1 && y >= bounds.y0 && y <= bounds.y1;
   }
 
   function buildFocusDeviceIndex(obstacles, entityEntries) {

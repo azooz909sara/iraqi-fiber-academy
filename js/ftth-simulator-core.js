@@ -36,6 +36,8 @@
     zoom: 1,
     panX: 0,
     panY: 0,
+    navigationMode: 'open',
+    templateOrigin: { x: 0, y: 0 },
     interactionMode: 'select',
     currentTool: 'select',
     isPanning: false,
@@ -4813,9 +4815,143 @@
       document.querySelector('.workspace-container');
   }
 
+  /** Label overlay host — template-local coords (same as placed nodes / SVG). */
+  function getLabelOverlayHost() {
+    return getDrawingCanvas() || getTemplateSheetElement() || getWorkspaceContainer();
+  }
+
+  /** Viewport bounds in template-local canvas px (for LabelManager on #city-canvas). */
+  function getLabelMapViewportCanvasBounds() {
+    var bounds = global.FTTHDrawingEngine?.getMapViewportCanvasBounds?.();
+    if (!bounds) return null;
+    var o = getTemplateSheetOrigin();
+    return {
+      x0: bounds.x0 - o.x,
+      y0: bounds.y0 - o.y,
+      x1: bounds.x1 - o.x,
+      y1: bounds.y1 - o.y,
+    };
+  }
+
   /** Visible map viewport between toolbox and evaluation panels (#canvas-wrapper). */
   function getMapViewportWrapper() {
     return document.getElementById('canvas-wrapper');
+  }
+
+  function isOpenWorkspaceNavigation() {
+    return (Sim.navigationMode || 'open') !== 'bounded';
+  }
+
+  function getOpenWorldPixelSize() {
+    return { width: FTTH_WORLD_SIZE, height: FTTH_WORLD_SIZE };
+  }
+
+  function getTemplateSheetElement() {
+    return document.getElementById('ftth-template-sheet');
+  }
+
+  function getTemplateSheetOrigin() {
+    var o = Sim.templateOrigin || { x: 0, y: 0 };
+    return { x: Number(o.x) || 0, y: Number(o.y) || 0 };
+  }
+
+  function computeCenteredTemplateOrigin(templateW, templateH) {
+    var w = templateW || 0;
+    var h = templateH || 0;
+    return {
+      x: (FTTH_WORLD_SIZE - w) / 2,
+      y: (FTTH_WORLD_SIZE - h) / 2,
+    };
+  }
+
+  /**
+   * Content-box viewport frame for zoom/pan math (padding-aware; matches clientWidth/Height).
+   */
+  function getMapZoomViewportFrame() {
+    var wrap = getMapViewportWrapper();
+    if (!wrap) {
+      return { left: 0, top: 0, width: 0, height: 0, centerX: 0, centerY: 0 };
+    }
+    var rect = wrap.getBoundingClientRect();
+    var padLeft = wrap.clientLeft || 0;
+    var padTop = wrap.clientTop || 0;
+    if (!padLeft && !padTop && typeof getComputedStyle === 'function') {
+      try {
+        var cs = getComputedStyle(wrap);
+        padLeft = parseFloat(cs.paddingLeft) || 0;
+        padTop = parseFloat(cs.paddingTop) || 0;
+      } catch (padErr) { /* use 0 */ }
+    }
+    var fw = wrap.clientWidth;
+    var fh = wrap.clientHeight;
+    return {
+      left: rect.left + padLeft,
+      top: rect.top + padTop,
+      width: fw,
+      height: fh,
+      centerX: fw / 2,
+      centerY: fh / 2,
+    };
+  }
+
+  function clientPointToMapZoomLocal(clientX, clientY) {
+    var frame = getMapZoomViewportFrame();
+    return {
+      x: (Number(clientX) || 0) - frame.left,
+      y: (Number(clientY) || 0) - frame.top,
+    };
+  }
+
+  function ensureFtthWorldDom() {
+    var world = getWorkspaceContainer();
+    if (!world) return;
+    var grid = document.getElementById('ftth-world-grid');
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.id = 'ftth-world-grid';
+      grid.className = 'ftth-world-grid';
+      grid.setAttribute('aria-hidden', 'true');
+      world.insertBefore(grid, world.firstChild);
+    }
+    var sheet = getTemplateSheetElement();
+    var canvas = document.getElementById('city-canvas');
+    if (!sheet && canvas) {
+      sheet = document.createElement('div');
+      sheet.id = 'ftth-template-sheet';
+      sheet.className = 'ftth-template-sheet';
+      world.insertBefore(sheet, canvas);
+      sheet.appendChild(canvas);
+    } else if (sheet && canvas && canvas.parentElement !== sheet) {
+      sheet.appendChild(canvas);
+    }
+    world.classList.add('ftth-world-root');
+  }
+
+  function syncOpenWorldShell() {
+    ensureFtthWorldDom();
+    var world = getWorkspaceContainer();
+    if (!world) return;
+    world.style.width = FTTH_WORLD_SIZE + 'px';
+    world.style.height = FTTH_WORLD_SIZE + 'px';
+    world.style.setProperty('--ftth-world-size', FTTH_WORLD_SIZE + 'px');
+
+    var map = getMapContentPixelSize();
+    var origin = computeCenteredTemplateOrigin(map.width, map.height);
+    Sim.templateOrigin = { x: origin.x, y: origin.y };
+
+    var sheet = getTemplateSheetElement();
+    if (sheet) {
+      sheet.style.left = origin.x + 'px';
+      sheet.style.top = origin.y + 'px';
+      sheet.style.width = map.width + 'px';
+      sheet.style.height = map.height + 'px';
+    }
+
+    var cityGrid = getWorkspaceGrid();
+    if (cityGrid) {
+      /* Training cities paint streets/zones on grid cells — only strip cell chrome for uploaded maps. */
+      cityGrid.classList.toggle('ftth-hide-cell-grid', Sim.activeCityId === 'uploaded_map');
+    }
   }
 
   /** Screen-space center of #canvas-wrapper (excludes toolbox / evaluation panels). */
@@ -4829,28 +4965,53 @@
     };
   }
 
-  /**
-   * QGIS-style rotation pivot: the map-local point currently at viewport center.
-   *
-   * CSS transform-origin mechanics with transform = translate(pan) scale(z) rotate(rot):
-   *   screen(origin) = origin + pan   (constant for any rotation angle)
-   *
-   * Setting screen(origin) = viewportCenter gives:
-   *   origin = viewportCenter - pan
-   *
-   * This keeps the current view center pinned on screen as rotation changes.
-   */
-  function getMapRotationPivotLocal(viewport, panX, panY, zoom) {
-    viewport = viewport || getMapViewportWrapper();
-    if (!viewport) return { x: 0, y: 0 };
-    var vw = viewport.clientWidth;
-    var vh = viewport.clientHeight;
-    var px = panX || 0;
-    var py = panY || 0;
+  function getMapRotationDeg() {
+    if (!Sim.settings || !Sim.settings.mapRotationEnabled) return 0;
+    return Number(Sim.mapRotation) || 0;
+  }
+
+  function getTemplateSheetCenterLocal() {
+    var map = getMapContentPixelSize();
+    return { x: (map.width || 0) / 2, y: (map.height || 0) / 2 };
+  }
+
+  function rotatePointAroundCenter(px, py, cx, cy, rotDeg) {
+    var deg = Number(rotDeg) || 0;
+    if (!deg) return { x: px, y: py };
+    var rad = deg * Math.PI / 180;
+    var cos = Math.cos(rad);
+    var sin = Math.sin(rad);
+    var dx = px - cx;
+    var dy = py - cy;
     return {
-      x: vw / 2 - px,
-      y: vh / 2 - py,
+      x: cx + dx * cos - dy * sin,
+      y: cy + dx * sin + dy * cos,
     };
+  }
+
+  /** Template-local map XY → #canvas-zoom-inner desk coordinates (sheet rotate @ 50% 50%). */
+  function templateLocalToDeskWorldXY(tx, ty) {
+    var o = getTemplateSheetOrigin();
+    var center = getTemplateSheetCenterLocal();
+    var rot = getMapRotationDeg();
+    var sheetPt = rotatePointAroundCenter(
+      Number(tx) || 0,
+      Number(ty) || 0,
+      center.x,
+      center.y,
+      rot
+    );
+    return { x: o.x + sheetPt.x, y: o.y + sheetPt.y };
+  }
+
+  /** Desk (#canvas-zoom-inner) coordinates → template-local map XY. */
+  function deskWorldToTemplateLocalXY(deskX, deskY) {
+    var o = getTemplateSheetOrigin();
+    var center = getTemplateSheetCenterLocal();
+    var rot = getMapRotationDeg();
+    var sheetX = (Number(deskX) || 0) - o.x;
+    var sheetY = (Number(deskY) || 0) - o.y;
+    return rotatePointAroundCenter(sheetX, sheetY, center.x, center.y, -rot);
   }
 
   /* ─── Virtual XY grid (no Lat/Lng) ─── */
@@ -4876,7 +5037,7 @@
   }
 
   function getDropCanvasViewport() {
-    return document.getElementById('canvas-wrapper') || getDrawingCanvas() || getWorkspaceGrid();
+    return getDrawingCanvas() || document.getElementById('canvas-wrapper') || getWorkspaceGrid();
   }
 
   /**
@@ -4884,29 +5045,29 @@
    * Uses map-container rect + inverse zoom; prefers SVG CTM when available.
    */
   function mapContainerPointerToWorldXY(clientX, clientY) {
-    var mapContainer = getDropCanvasViewport();
-    if (!mapContainer) return { x: 0, y: 0 };
-    var rect = mapContainer.getBoundingClientRect();
-    var localX = clientX - rect.left;
-    var localY = clientY - rect.top;
-
-    var canvas = getDrawingCanvas();
-    if (canvas) {
-      var canvasRect = canvas.getBoundingClientRect();
-      if (canvasRect.width > 0.5 && canvasRect.height > 0.5) {
-        var map = getMapContentPixelSize();
-        return {
-          x: ((clientX - canvasRect.left) / canvasRect.width) * map.width,
-          y: ((clientY - canvasRect.top) / canvasRect.height) * map.height,
-        };
+    var rotDeg = getMapRotationDeg();
+    if (!rotDeg) {
+      var canvas = getDrawingCanvas();
+      if (canvas) {
+        var canvasRect = canvas.getBoundingClientRect();
+        if (canvasRect.width > 0.5 && canvasRect.height > 0.5) {
+          var map = getMapContentPixelSize();
+          return {
+            x: ((clientX - canvasRect.left) / canvasRect.width) * map.width,
+            y: ((clientY - canvasRect.top) / canvasRect.height) * map.height,
+          };
+        }
       }
     }
-
+    var frame = getMapZoomViewportFrame();
+    var mx = (Number(clientX) || 0) - frame.left;
+    var my = (Number(clientY) || 0) - frame.top;
     var zoom = Math.max(getMapCoordZoom(), 0.1);
-    return {
-      x: localX / zoom,
-      y: localY / zoom,
-    };
+    var px = Sim.panX || 0;
+    var py = Sim.panY || 0;
+    var deskX = (mx - px) / zoom;
+    var deskY = (my - py) / zoom;
+    return deskWorldToTemplateLocalXY(deskX, deskY);
   }
 
   function clientPointToWorldXY(clientX, clientY) {
@@ -4944,15 +5105,12 @@
 
   function worldPointToScreenXY(wx, wy) {
     var zoom = Math.max(getMapCoordZoom(), 0.1);
-    var map = getMapContentPixelSize();
-    var ox = map.width / 2;
-    var oy = map.height / 2;
-    var wrap = document.getElementById('canvas-wrapper');
-    var scrollX = wrap ? wrap.scrollLeft : 0;
-    var scrollY = wrap ? wrap.scrollTop : 0;
+    var desk = templateLocalToDeskWorldXY(wx, wy);
+    var px = Sim.panX || 0;
+    var py = Sim.panY || 0;
     return {
-      x: ox + (Sim.panX || 0) + (wx - ox) * zoom - scrollX,
-      y: oy + (Sim.panY || 0) + (wy - oy) * zoom - scrollY,
+      x: px + desk.x * zoom,
+      y: py + desk.y * zoom,
     };
   }
 
@@ -5247,8 +5405,13 @@
   var TRENCH_CEMENT_BASE_WIDTH = 3.5;
   var TRENCH_CEMENT_WIDTH_PER_EXTRA_CABLE = 2;
   var UNIFIED_TRENCH_CEMENT_WIDTH = String(TRENCH_CEMENT_BASE_WIDTH);
-  var MAP_ZOOM_MIN = 0.97;
-  var MAP_ZOOM_MAX = 5;
+  var MAP_ZOOM_MIN = 0.2;
+  var MAP_ZOOM_MAX = 2.75;
+  /** Pan drag: 1:1 screen px (cursor lock) × optional product gain — never divide by zoom. */
+  var MAP_PAN_DRAG_GAIN = 1;
+  var MAP_ZOOM_STEP = 0.08;
+  var MAP_WHEEL_BURST_IDLE_MS = 180;
+  var FTTH_WORLD_SIZE = 20000;
   var PAN_CLAMP_BUFFER = 300;
   var MAP_LOAD_CENTER_DELAY_MS = 300;
   var mapViewportTransformRaf = 0;
@@ -5312,6 +5475,8 @@
       gridOverlay.style.width = w + 'px';
       gridOverlay.style.height = h + 'px';
     }
+
+    syncOpenWorldShell();
 
     var svg = getGlobalDrawingLayer();
     if (svg) {
@@ -8472,8 +8637,16 @@
       getMapPanClampLimits: getMapPanClampLimits,
       applyMapPanClamp: applyMapPanClamp,
       getMapViewportWrapper: getMapViewportWrapper,
+      getMapZoomViewportFrame: getMapZoomViewportFrame,
+      clientPointToMapZoomLocal: clientPointToMapZoomLocal,
+      isOpenWorkspaceNavigation: isOpenWorkspaceNavigation,
+      getOpenWorldPixelSize: getOpenWorldPixelSize,
+      getTemplateSheetOrigin: getTemplateSheetOrigin,
+      syncOpenWorldShell: syncOpenWorldShell,
+      zoomPreserveLocalPoint: zoomPreserveLocalPoint,
       getWorkspaceViewportScreenCenter: getWorkspaceViewportScreenCenter,
-      getMapRotationPivotLocal: getMapRotationPivotLocal,
+      templateLocalToDeskWorldXY: templateLocalToDeskWorldXY,
+      deskWorldToTemplateLocalXY: deskWorldToTemplateLocalXY,
       setZoom: setZoom,
       setMapRotation: setMapRotation,
       canVertexEdit: canVertexEdit,
@@ -9824,6 +9997,7 @@
     if (global.FTTHImageMapProject?.onCityRendered) {
       global.FTTHImageMapProject.onCityRendered();
     }
+    syncBaseMapLayerSizes();
   }
 
   function onWorkspaceGridDrop(e) {
@@ -12711,22 +12885,29 @@
   function applyMapContainerTransform(container, wrap, panX, panY, z, rot, rotationEnabled) {
     if (!container) return;
     var viewport = wrap || getMapViewportWrapper();
-    var pivot = getMapRotationPivotLocal(viewport, panX, panY, z);
-    container.style.transformOrigin = pivot.x + 'px ' + pivot.y + 'px';
-    if (rotationEnabled) {
-      container.style.transform =
-        'translate(' + panX + 'px,' + panY + 'px) scale(' + z + ') rotate(' + rot + 'deg)';
-      if (viewport) viewport.classList.add('map-rotation-active');
-    } else {
-      container.style.transform =
-        'translate(' + panX + 'px,' + panY + 'px) scale(' + z + ')';
-      if (viewport) viewport.classList.remove('map-rotation-active');
+    var px = panX || 0;
+    var py = panY || 0;
+    var scale = z || 1;
+    var rotDeg = rotationEnabled ? (Number(rot) || 0) : 0;
+
+    container.style.transformOrigin = '0 0';
+    container.style.transform =
+      'translate3d(' + px + 'px,' + py + 'px, 0) scale(' + scale + ')';
+
+    var sheet = getTemplateSheetElement();
+    if (sheet) {
+      sheet.style.transformOrigin = '50% 50%';
+      sheet.style.transform = Math.abs(rotDeg) > 0.001 ? ('rotate(' + rotDeg + 'deg)') : '';
+    }
+
+    if (viewport) {
+      viewport.classList.toggle('map-rotation-active', rotationEnabled && Math.abs(rotDeg) > 0.001);
     }
   }
 
   function flushMapViewportTransform(opts) {
     opts = opts || {};
-    if (!opts.skipPanClamp) applyMapPanClamp();
+    if (!opts.skipPanClamp && !isOpenWorkspaceNavigation()) applyMapPanClamp();
     var container = getWorkspaceContainer();
     var wrap = document.getElementById('canvas-wrapper');
     var lbl = document.getElementById('zoom-label');
@@ -12861,11 +13042,11 @@
     if (L && L.cols && L.rows && L.cellSize) {
       return { width: L.cols * L.cellSize, height: L.rows * L.cellSize };
     }
-    var container = getWorkspaceContainer();
-    if (container) {
-      var w = container.offsetWidth || 0;
-      var h = container.offsetHeight || 0;
-      if (w > 0 && h > 0) return { width: w, height: h };
+    var sheet = getTemplateSheetElement();
+    if (sheet) {
+      var sw = sheet.offsetWidth || parseFloat(sheet.style.width) || 0;
+      var sh = sheet.offsetHeight || parseFloat(sheet.style.height) || 0;
+      if (sw > 0 && sh > 0) return { width: sw, height: sh };
     }
     return { width: 2400, height: 1700 };
   }
@@ -12882,60 +13063,31 @@
   }
 
   function getViewportCenterScreenXY() {
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!wrap) return { x: 0, y: 0 };
-    return { x: wrap.clientWidth / 2, y: wrap.clientHeight / 2 };
+    var frame = getMapZoomViewportFrame();
+    return { x: frame.centerX, y: frame.centerY };
   }
 
-  /**
-   * Pixel-perfect zoom-to-cursor pan adjustment.
-   *
-   * With transform-origin O = C - pan (C = viewport center) and
-   * transform = translate(pan) scale(z) rotate(θ):
-   *   Screen(W) = C + z * R(θ) * (W - C + pan)
-   *
-   * World under mouse M before zoom:
-   *   W = C - pan + R(-θ) * (M - C) / z
-   *
-   * After zoom z', keep W under M:
-   *   pan' = pan + R(-θ) * (M - C) * (1/z' - 1/z)
-   */
-  function zoomPanAboutMouse(oldZoom, newZoom, panX, panY, mouseX, mouseY) {
-    var wrap = getMapViewportWrapper();
-    var vw = wrap ? wrap.clientWidth : 0;
-    var vh = wrap ? wrap.clientHeight : 0;
-    var oldZ = oldZoom || 1;
-    var newZ = newZoom || 1;
-    if (!oldZ) oldZ = 1;
-    if (!newZ) newZ = 1;
+  /** Lab-identical zoom-about-point (stage-local mx/my, transform-origin 0 0). */
+  function zoomPreserveLocalPoint(oldZoom, newZoom, panX, panY, localMx, localMy) {
+    var prev = oldZoom || 1;
+    var next = newZoom || 1;
+    if (!prev) prev = 1;
+    if (!next) next = 1;
+    var mx = localMx || 0;
+    var my = localMy || 0;
     var px = panX || 0;
     var py = panY || 0;
-    var mx = mouseX || 0;
-    var my = mouseY || 0;
-    var cx = vw ? vw / 2 : 0;
-    var cy = vh ? vh / 2 : 0;
-    var sx = mx - cx;
-    var sy = my - cy;
-    var scaleDelta = (1 / newZ) - (1 / oldZ);
-
-    var rotDeg = 0;
-    if (Sim.settings && Sim.settings.mapRotationEnabled) {
-      rotDeg = Number(Sim.mapRotation) || 0;
+    if (next === prev) {
+      return { panX: px, panY: py };
     }
-    if (rotDeg) {
-      var rad = -rotDeg * Math.PI / 180;
-      var cos = Math.cos(rad);
-      var sin = Math.sin(rad);
-      var rx = sx * cos - sy * sin;
-      var ry = sx * sin + sy * cos;
-      sx = rx;
-      sy = ry;
-    }
-
     return {
-      panX: px + sx * scaleDelta,
-      panY: py + sy * scaleDelta,
+      panX: mx - ((mx - px) * (next / prev)),
+      panY: my - ((my - py) * (next / prev)),
     };
+  }
+
+  function zoomPanAboutMouse(oldZoom, newZoom, panX, panY, mouseX, mouseY) {
+    return zoomPreserveLocalPoint(oldZoom, newZoom, panX, panY, mouseX, mouseY);
   }
 
   function centerMapInViewport() {
@@ -12966,15 +13118,20 @@
     }
     if (!contentW || !contentH) return false;
 
-    var scrollLeft = (contentW - viewportW) / 2;
-    var scrollTop = (contentH - viewportH) / 2;
-    mapWrapper.scrollLeft = Math.max(0, scrollLeft);
-    mapWrapper.scrollTop = Math.max(0, scrollTop);
+    mapWrapper.scrollLeft = 0;
+    mapWrapper.scrollTop = 0;
 
-    Sim.panX = 0;
-    Sim.panY = 0;
-    applyMapPanClamp();
-    applyMapTransform();
+    syncOpenWorldShell();
+    var map = getMapContentPixelSize();
+    var o = getTemplateSheetOrigin();
+    var tcx = o.x + map.width / 2;
+    var tcy = o.y + map.height / 2;
+    var frame = getMapZoomViewportFrame();
+    var z = Sim.zoom || 1;
+    Sim.panX = frame.centerX - tcx * z;
+    Sim.panY = frame.centerY - tcy * z;
+    if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
+    applyMapTransform({ skipPanClamp: isOpenWorkspaceNavigation() });
     return true;
   }
 
@@ -13020,6 +13177,11 @@
   }
 
   function getMapPanClampLimits() {
+    if (isOpenWorkspaceNavigation()) {
+      return {
+        minX: -Infinity, maxX: Infinity, minY: -Infinity, maxY: Infinity, buffer: 0,
+      };
+    }
     var wrap = document.getElementById('canvas-wrapper');
     var viewportW = wrap ? wrap.clientWidth : 0;
     var viewportH = wrap ? wrap.clientHeight : 0;
@@ -13071,6 +13233,7 @@
   }
 
   function applyMapPanClamp() {
+    if (isOpenWorkspaceNavigation()) return;
     var clamped = clampMapPan(Sim.panX || 0, Sim.panY || 0);
     Sim.panX = clamped.panX;
     Sim.panY = clamped.panY;
@@ -13080,29 +13243,12 @@
     }
   }
 
-  /**
-   * Convert screen-space drag delta → pan delta.
-   * With transform-origin = viewportCenter - pan and transform = translate(pan) scale(z) rotate(θ):
-   *   screenDelta = z * R(θ) * panDelta
-   * so:
-   *   panDelta = R(-θ) * (screenDelta / z)
-   */
+  /** Screen drag → pan (translate then scale @ origin 0 0): direct manipulation / cursor lock. */
   function scalePanDragDelta(dx, dy) {
-    var zoom = Sim.zoom || 1;
-    if (!zoom || zoom <= 0) zoom = 1;
-    var sx = (Number(dx) || 0) / zoom;
-    var sy = (Number(dy) || 0) / zoom;
-    var rotDeg = 0;
-    if (Sim.settings && Sim.settings.mapRotationEnabled) {
-      rotDeg = Number(Sim.mapRotation) || 0;
-    }
-    if (!rotDeg) return { dx: sx, dy: sy };
-    var rad = -rotDeg * Math.PI / 180;
-    var cos = Math.cos(rad);
-    var sin = Math.sin(rad);
+    var g = MAP_PAN_DRAG_GAIN;
     return {
-      dx: sx * cos - sy * sin,
-      dy: sx * sin + sy * cos,
+      dx: (Number(dx) || 0) * g,
+      dy: (Number(dy) || 0) * g,
     };
   }
 
@@ -13114,8 +13260,11 @@
     if (!dx && !dy) return false;
     Sim.panX += dx;
     Sim.panY += dy;
-    applyMapPanClamp();
-    applyMapTransform({ skipRedraw: !!opts.light });
+    if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
+    applyMapTransform({
+      skipRedraw: !!opts.light,
+      skipPanClamp: isOpenWorkspaceNavigation(),
+    });
     return true;
   }
 
@@ -13126,7 +13275,6 @@
     var newZoom = clampMapZoom(Math.round(val * 1000) / 1000);
     if (Math.abs(newZoom - oldZoom) < 1e-6) return;
 
-    var wrap = document.getElementById('canvas-wrapper');
     var mouseX;
     var mouseY;
     var hasCursorPivot = false;
@@ -13134,10 +13282,10 @@
       mouseX = pivotX;
       mouseY = pivotY;
       hasCursorPivot = true;
-    } else if (clientX != null && clientY != null && wrap) {
-      var rect = wrap.getBoundingClientRect();
-      mouseX = clientX - rect.left;
-      mouseY = clientY - rect.top;
+    } else if (clientX != null && clientY != null) {
+      var localPt = clientPointToMapZoomLocal(clientX, clientY);
+      mouseX = localPt.x;
+      mouseY = localPt.y;
       hasCursorPivot = true;
     } else {
       var center = getViewportCenterScreenXY();
@@ -13145,7 +13293,7 @@
       mouseY = center.y;
     }
 
-    var adj = zoomPanAboutMouse(
+    var adj = zoomPreserveLocalPoint(
       oldZoom,
       newZoom,
       Sim.panX || 0,
@@ -13156,9 +13304,9 @@
     Sim.panX = adj.panX;
     Sim.panY = adj.panY;
     Sim.zoom = newZoom;
-    /* Cursor-pivot zoom must keep the locked world point; clamp would shift it. */
-    if (!hasCursorPivot) applyMapPanClamp();
-    applyMapTransform({ skipRedraw: !!opts.light, skipPanClamp: hasCursorPivot });
+    var skipClamp = hasCursorPivot || isOpenWorkspaceNavigation();
+    if (!skipClamp) applyMapPanClamp();
+    applyMapTransform({ skipRedraw: !!opts.light, skipPanClamp: skipClamp });
     if (!opts.light) applyIconZoomCompensation();
   }
 
@@ -13480,7 +13628,11 @@
     Sim.panSession.panY = clamped.panY;
     Sim.panSession.x = e.clientX;
     Sim.panSession.y = e.clientY;
-    applyMapTransform();
+    var temporaryPan = !!Sim.panSession.temporary;
+    applyMapTransform({
+      skipRedraw: temporaryPan,
+      skipPanClamp: temporaryPan && isOpenWorkspaceNavigation(),
+    });
   }
 
   function tryHandModeMapSelect(e) {
@@ -13550,85 +13702,50 @@
     syncTemporaryPanCursor();
   }
 
-  function scheduleWheelZoomAnimation(targetZoom, pivotX, pivotY) {
+  function beginMapWheelZoomBurst() {
     if (!Sim.ui) Sim.ui = {};
-    var state = Sim.ui.wheelZoomState;
-    if (!state) {
-      state = Sim.ui.wheelZoomState = {
-        raf: 0,
-        targetZoom: Sim.zoom || 1,
-        pivotX: 0,
-        pivotY: 0,
-      };
-    }
-    state.targetZoom = clampMapZoom(targetZoom);
-    state.pivotX = pivotX;
-    state.pivotY = pivotY;
-    if (state.raf) return;
-
-    function tick() {
-      state.raf = 0;
-      var current = Sim.zoom || 1;
-      var target = clampMapZoom(state.targetZoom);
-      var delta = target - current;
-      if (Math.abs(delta) < 0.0005) {
-        if (Math.abs(delta) > 0) {
-          setZoom(target, state.pivotX, state.pivotY, null, null, { light: false });
-        } else {
-          applyIconZoomCompensation();
-        }
-        if (hasActiveDrawingStroke() || canPenDraw()) {
-          global.FTTHDrawingEngine?.flushPenDrawingVisuals?.();
-        }
-        return;
-      }
-      var eased = current + delta * 0.24;
-      setZoom(eased, state.pivotX, state.pivotY, null, null, { light: true });
+    var wrap = getMapViewportWrapper();
+    if (!wrap) return;
+    wrap.classList.add('is-wheel-zooming');
+    clearTimeout(Sim.ui.wheelZoomTimer);
+    Sim.ui.wheelZoomTimer = setTimeout(function () {
+      wrap.classList.remove('is-wheel-zooming');
+      applyIconZoomCompensation();
       if (hasActiveDrawingStroke() || canPenDraw()) {
-        global.FTTHDrawingEngine?.flushPenCursorVisuals?.();
+        global.FTTHDrawingEngine?.flushPenDrawingVisuals?.();
       }
-      state.raf = requestAnimationFrame(tick);
-    }
-
-    state.raf = requestAnimationFrame(tick);
+    }, MAP_WHEEL_BURST_IDLE_MS);
   }
 
-  /** Same animated zoom path as mouse-wheel (easing, multiplicative target, pivot). */
-  function applyAnimatedMapZoom(factor, pivotX, pivotY) {
-    if (!Sim.ui) Sim.ui = {};
-    var wrap = document.getElementById('canvas-wrapper');
-    if (wrap) {
-      wrap.classList.add('is-wheel-zooming');
-      clearTimeout(Sim.ui.wheelZoomTimer);
-      Sim.ui.wheelZoomTimer = setTimeout(function () {
-        wrap.classList.remove('is-wheel-zooming');
-        var st = Sim.ui.wheelZoomState;
-        if (st) {
-          if (st.raf) {
-            cancelAnimationFrame(st.raf);
-            st.raf = 0;
-          }
-          setZoom(st.targetZoom, st.pivotX, st.pivotY, null, null, { light: false });
-        }
-      }, 180);
+  function stepMapZoomAtPivot(localMx, localMy, direction) {
+    if (isMapNavigationLocked()) return;
+    var dir = direction > 0 ? 1 : direction < 0 ? -1 : 0;
+    if (!dir) return;
+    var oldZ = Sim.zoom || 1;
+    var newZ = clampMapZoom(Math.round((oldZ + dir * MAP_ZOOM_STEP) * 1000) / 1000);
+    if (Math.abs(newZ - oldZ) < 1e-6) return;
+    var adj = zoomPreserveLocalPoint(oldZ, newZ, Sim.panX || 0, Sim.panY || 0, localMx, localMy);
+    Sim.zoom = newZ;
+    Sim.panX = adj.panX;
+    Sim.panY = adj.panY;
+    beginMapWheelZoomBurst();
+    applyMapTransform({ skipRedraw: true, skipPanClamp: true });
+    if (hasActiveDrawingStroke() || canPenDraw()) {
+      global.FTTHDrawingEngine?.flushPenCursorVisuals?.();
     }
-    scheduleWheelZoomAnimation((Sim.zoom || 1) * factor, pivotX, pivotY);
   }
 
   /** Pivot for +/- buttons: last in-map pointer, else viewport center. */
   function getButtonZoomPivotLocal() {
-    var wrap = document.getElementById('canvas-wrapper');
-    if (!wrap) return { x: 0, y: 0 };
-    var rect = wrap.getBoundingClientRect();
+    var frame = getMapZoomViewportFrame();
     var client = Sim.ui && Sim.ui.lastCanvasClient;
     if (client && isFinite(client.clientX) && isFinite(client.clientY)) {
-      var lx = client.clientX - rect.left;
-      var ly = client.clientY - rect.top;
-      if (lx >= 0 && ly >= 0 && lx <= rect.width && ly <= rect.height) {
-        return { x: lx, y: ly };
+      var local = clientPointToMapZoomLocal(client.clientX, client.clientY);
+      if (local.x >= 0 && local.y >= 0 && local.x <= frame.width && local.y <= frame.height) {
+        return local;
       }
     }
-    return { x: rect.width / 2, y: rect.height / 2 };
+    return { x: frame.centerX, y: frame.centerY };
   }
 
   function bindWheelZoom() {
@@ -13649,21 +13766,9 @@
         return;
       }
       e.preventDefault();
-      var rect = wrap.getBoundingClientRect();
-      var pivotX = e.clientX - rect.left;
-      var pivotY = e.clientY - rect.top;
-      var delta = e.deltaY;
-      var factor;
-      if (e.ctrlKey || e.metaKey) {
-        factor = Math.exp(-delta * 0.004);
-      } else if (e.deltaMode === 1) {
-        factor = delta > 0 ? 0.96 : 1.04;
-      } else if (e.deltaMode === 2) {
-        factor = delta > 0 ? 0.94 : 1.06;
-      } else {
-        factor = Math.exp(-delta * 0.0012);
-      }
-      applyAnimatedMapZoom(factor, pivotX, pivotY);
+      var dir = e.deltaY > 0 ? -1 : 1;
+      var pivot = clientPointToMapZoomLocal(e.clientX, e.clientY);
+      stepMapZoomAtPivot(pivot.x, pivot.y, dir);
     }, { passive: false });
     Sim.ui.wheelZoomBound = true;
   }
@@ -14038,11 +14143,11 @@
     /* Same multiplicative notch + animation pipeline as mouse-wheel (deltaMode===1). */
     if (zi) zi.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
-      applyAnimatedMapZoom(1.04, pivot.x, pivot.y);
+      stepMapZoomAtPivot(pivot.x, pivot.y, 1);
     });
     if (zo) zo.addEventListener('click', function () {
       var pivot = getButtonZoomPivotLocal();
-      applyAnimatedMapZoom(0.96, pivot.x, pivot.y);
+      stepMapZoomAtPivot(pivot.x, pivot.y, -1);
     });
 
     var clr = document.getElementById('btn-clear');
@@ -14052,8 +14157,8 @@
 
     syncFullscreenButtonUi();
     window.addEventListener('resize', function () {
-      applyMapPanClamp();
-      scheduleMapViewportTransform();
+      if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
+      scheduleMapViewportTransform({ skipPanClamp: isOpenWorkspaceNavigation() });
       requestAnimationFrame(positionNodeActionHud);
     });
   }
@@ -14119,7 +14224,8 @@
     if (payload.zoom != null) Sim.zoom = clampMapZoom(payload.zoom);
     if (payload.panX != null) Sim.panX = payload.panX;
     if (payload.panY != null) Sim.panY = payload.panY;
-    applyMapPanClamp();
+    syncOpenWorldShell();
+    if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
     if (!Sim.ui) Sim.ui = {};
     Sim.ui.mapViewportInitialized = true;
     if (payload.mapRotation != null) Sim.mapRotation = payload.mapRotation;
@@ -14170,6 +14276,7 @@
       if (global.FTTHToolboxManager?.bindDom) global.FTTHToolboxManager.bindDom();
       ensureBottomPanelInWorkspace();
       renderToolbox();
+      ensureFtthWorldDom();
       renderVirtualCity();
       syncAllCablePathsToTrenches();
       renderGlobalDrawingLayer();
@@ -14232,7 +14339,8 @@
               isPole: node.type === 'pole_foundation' || !!(node.type === 'fat_handhole' && node.hasFatPole),
             };
           },
-          getOverlayHost: getWorkspaceContainer,
+          getOverlayHost: getLabelOverlayHost,
+          getMapViewportCanvasBounds: getLabelMapViewportCanvasBounds,
           getLabelColor: function () { return Sim.settings?.labelColor || '#ffffff'; },
           getLabelFontSize: function () { return Sim.settings?.labelFontSize || 11; },
           canPenDraw: canPenDraw,
@@ -14349,22 +14457,18 @@
   function panToCanvasPointForInventory(cx, cy) {
     if (!isFinite(cx) || !isFinite(cy)) return;
     var wrap = document.getElementById('canvas-wrapper');
-    var map = getMapContentPixelSize();
-    var zoom = Sim.zoom || 1;
-    var ox = map.width / 2;
-    var oy = map.height / 2;
-    Sim.panX = (ox - cx) * zoom;
-    Sim.panY = (oy - cy) * zoom;
-    applyMapPanClamp();
+    var o = getTemplateSheetOrigin();
+    var worldCx = o.x + cx;
+    var worldCy = o.y + cy;
+    var frame = getMapZoomViewportFrame();
+    Sim.panX = frame.centerX - worldCx;
+    Sim.panY = frame.centerY - worldCy;
+    if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
     if (wrap) {
-      var viewportW = wrap.clientWidth;
-      var viewportH = wrap.clientHeight;
-      var scrollLeft = ox + Sim.panX - viewportW / 2;
-      var scrollTop = oy + Sim.panY - viewportH / 2;
-      wrap.scrollLeft = Math.max(0, scrollLeft);
-      wrap.scrollTop = Math.max(0, scrollTop);
+      wrap.scrollLeft = 0;
+      wrap.scrollTop = 0;
     }
-    applyMapTransform();
+    applyMapTransform({ skipPanClamp: isOpenWorkspaceNavigation() });
   }
 
   function getExcavationRouteKindForLineId(lineId) {
