@@ -32,13 +32,33 @@
     return n;
   }
 
+  function resolveEnrolledStudentsCount(storedValue) {
+    if (global.AdminUsers && typeof global.AdminUsers.getRegisteredUserCount === 'function') {
+      if (typeof global.AdminUsers.isFirestoreLive === 'function' && global.AdminUsers.isFirestoreLive()) {
+        return clampInt(global.AdminUsers.getRegisteredUserCount(), storedValue, 0, 99999999);
+      }
+    }
+    if (
+      global.PlatformUserMetrics &&
+      typeof global.PlatformUserMetrics.getTotalUsers === 'function' &&
+      typeof global.PlatformUserMetrics.isReady === 'function' &&
+      global.PlatformUserMetrics.isReady()
+    ) {
+      return clampInt(global.PlatformUserMetrics.getTotalUsers(), storedValue, 0, 99999999);
+    }
+    return clampInt(storedValue, DEFAULTS.enrolledStudents, 0, 99999999);
+  }
+
   function normalizeStats(raw) {
     if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.normalizeStats === 'function') {
-      return global.PlatformStatsFirestore.normalizeStats(raw);
+      var fromFirestore = global.PlatformStatsFirestore.normalizeStats(raw);
+      fromFirestore.enrolledStudents = resolveEnrolledStudentsCount(fromFirestore.enrolledStudents);
+      return fromFirestore;
     }
     var src = raw && typeof raw === 'object' ? raw : {};
+    var storedEnrolled = clampInt(src.enrolledStudents, DEFAULTS.enrolledStudents, 0, 99999999);
     return {
-      enrolledStudents: clampInt(src.enrolledStudents, DEFAULTS.enrolledStudents, 0, 99999999),
+      enrolledStudents: resolveEnrolledStudentsCount(storedEnrolled),
       simulatedKilometers: clampInt(src.simulatedKilometers, DEFAULTS.simulatedKilometers, 0, 999999999),
       trainingProjects: clampInt(src.trainingProjects, DEFAULTS.trainingProjects, 0, 9999999),
       satisfactionRate: clampInt(src.satisfactionRate, DEFAULTS.satisfactionRate, 0, 100),
@@ -92,12 +112,19 @@
   }
 
   function saveStats(patch) {
-    var next = normalizeStats(Object.assign({}, getStats(), patch || {}));
+    var merged = Object.assign({}, getStats(), patch || {});
+    delete merged.enrolledStudents;
+    var next = normalizeStats(merged);
+    var toPersist = Object.assign({}, next);
+    delete toPersist.enrolledStudents;
     if (global.PlatformStatsFirestore && typeof global.PlatformStatsFirestore.saveStats === 'function') {
-      return global.PlatformStatsFirestore.saveStats(next);
+      return global.PlatformStatsFirestore.saveStats(toPersist).then(function (saved) {
+        saved.enrolledStudents = next.enrolledStudents;
+        return saved;
+      });
     }
     try {
-      localStorage.setItem(KEY, JSON.stringify(next));
+      localStorage.setItem(KEY, JSON.stringify(toPersist));
     } catch (err) {
       console.error('[PlatformStats] save failed', err);
     }
@@ -191,6 +218,14 @@
   });
 
   global.addEventListener('ifa:platform-stats-changed', function () {
+    loadPublicStats();
+  });
+
+  global.addEventListener('ifa:platform-user-metrics-changed', function () {
+    loadPublicStats();
+  });
+
+  global.addEventListener('ifa:admin-users-changed', function () {
     loadPublicStats();
   });
 

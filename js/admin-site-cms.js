@@ -1147,6 +1147,21 @@
   }
 
   /* ---------- Landing page statistics ---------- */
+  function resolveLiveEnrolledStudentsCount(stats) {
+    if (window.AdminUsers && typeof window.AdminUsers.getRegisteredUserCount === 'function') {
+      return window.AdminUsers.getRegisteredUserCount();
+    }
+    if (
+      window.PlatformUserMetrics &&
+      typeof window.PlatformUserMetrics.getTotalUsers === 'function' &&
+      window.PlatformUserMetrics.isReady &&
+      window.PlatformUserMetrics.isReady()
+    ) {
+      return window.PlatformUserMetrics.getTotalUsers();
+    }
+    return stats && stats.enrolledStudents != null ? stats.enrolledStudents : 0;
+  }
+
   function renderStatsEditor() {
     if (!window.PlatformStats) return;
     var stats = window.PlatformStats.getStats();
@@ -1154,7 +1169,7 @@
     var km = $('cmsStatSimulatedKm');
     var projects = $('cmsStatTrainingProjects');
     var satisfaction = $('cmsStatSatisfaction');
-    if (enrolled) enrolled.value = String(stats.enrolledStudents);
+    if (enrolled) enrolled.value = String(resolveLiveEnrolledStudentsCount(stats));
     if (km) km.value = String(stats.simulatedKilometers);
     if (projects) projects.value = String(stats.trainingProjects);
     if (satisfaction) satisfaction.value = String(stats.satisfactionRate);
@@ -1166,9 +1181,10 @@
     if (!host || !window.PlatformStats) return;
     var s = stats || window.PlatformStats.getStats();
     var fmt = window.PlatformStats.formatStatNumber;
+    var enrolledCount = resolveLiveEnrolledStudentsCount(s);
     host.innerHTML =
       '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
-      escapeHtml(fmt(s.enrolledStudents)) +
+      escapeHtml(fmt(enrolledCount)) +
       '</span><span class="cms-stats-preview__label">طالب مسجّل</span></div>' +
       '<div class="cms-stats-preview__item"><span class="cms-stats-preview__value">' +
       escapeHtml(fmt(s.simulatedKilometers)) +
@@ -1185,7 +1201,6 @@
     if (!window.PlatformStats) return;
     var status = $('cmsStatsSaveStatus');
     var payload = {
-      enrolledStudents: $('cmsStatEnrolledStudents') && $('cmsStatEnrolledStudents').value,
       simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
       trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
       satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
@@ -1195,8 +1210,8 @@
       renderStatsPreview(saved);
       if (status) {
         status.textContent =
-          'تم الحفظ في Firestore — طلاب: ' +
-          window.PlatformStats.formatStatNumber(saved.enrolledStudents) +
+          'تم الحفظ في Firestore — طلاب (تلقائي): ' +
+          window.PlatformStats.formatStatNumber(resolveLiveEnrolledStudentsCount(saved)) +
           ' · كم: ' +
           window.PlatformStats.formatStatNumber(saved.simulatedKilometers);
       }
@@ -1228,6 +1243,10 @@
     renderStatsEditor();
     document.addEventListener('ifa:platform-stats-changed', renderStatsEditor);
     window.addEventListener('ifa:platform-stats-changed', renderStatsEditor);
+    document.addEventListener('ifa:admin-users-changed', renderStatsEditor);
+    window.addEventListener('ifa:admin-users-changed', renderStatsEditor);
+    document.addEventListener('ifa:platform-user-metrics-changed', renderStatsEditor);
+    window.addEventListener('ifa:platform-user-metrics-changed', renderStatsEditor);
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       saveStatsFromForm();
@@ -1238,22 +1257,19 @@
         resetStatsToDefaults();
       });
     }
-    ['cmsStatEnrolledStudents', 'cmsStatSimulatedKm', 'cmsStatTrainingProjects', 'cmsStatSatisfaction'].forEach(
-      function (id) {
-        var el = $(id);
-        if (!el) return;
-        el.addEventListener('input', function () {
-          renderStatsPreview(
-            window.PlatformStats.normalizeStats({
-              enrolledStudents: $('cmsStatEnrolledStudents') && $('cmsStatEnrolledStudents').value,
-              simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
-              trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
-              satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
-            })
-          );
-        });
-      }
-    );
+    ['cmsStatSimulatedKm', 'cmsStatTrainingProjects', 'cmsStatSatisfaction'].forEach(function (id) {
+      var el = $(id);
+      if (!el) return;
+      el.addEventListener('input', function () {
+        renderStatsPreview(
+          window.PlatformStats.normalizeStats({
+            simulatedKilometers: $('cmsStatSimulatedKm') && $('cmsStatSimulatedKm').value,
+            trainingProjects: $('cmsStatTrainingProjects') && $('cmsStatTrainingProjects').value,
+            satisfactionRate: $('cmsStatSatisfaction') && $('cmsStatSatisfaction').value,
+          })
+        );
+      });
+    });
   }
 
   /* ---------- Hero content slider ---------- */

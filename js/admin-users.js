@@ -557,8 +557,13 @@
 
   ensureSeeded();
 
+  function getRegisteredUserCount() {
+    return getActiveUsers().length;
+  }
+
   global.AdminUsers = {
     getUsers: getActiveUsers,
+    getRegisteredUserCount: getRegisteredUserCount,
     getArchivedUsers: getArchivedUsers,
     findUser: findUser,
     findUserByEmail: findUserByEmail,

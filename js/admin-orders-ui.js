@@ -21,6 +21,23 @@ var cachedOrders = [];
 var pendingApproveOrderId = '';
 var pendingRejectOrderId = '';
 
+function updatePendingOrdersNavBadge() {
+  var badge = document.getElementById('adminOrdersPendingBadge');
+  if (!badge) return;
+  var pending = cachedOrders.filter(function (o) {
+    return String(o.status || 'pending') === 'pending';
+  }).length;
+  if (pending <= 0) {
+    badge.hidden = true;
+    badge.textContent = '';
+    badge.removeAttribute('title');
+    return;
+  }
+  badge.hidden = false;
+  badge.textContent = pending > 99 ? '99+' : String(pending);
+  badge.setAttribute('title', pending + ' طلب قيد المراجعة');
+}
+
 function escapeHtml(value) {
   return String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -647,6 +664,7 @@ function subscribeOrders() {
       cachedOrders = snap.docs.map(function (d) {
         return Object.assign({ id: d.id }, d.data());
       });
+      updatePendingOrdersNavBadge();
       renderOrdersTable();
     },
     function (err) {

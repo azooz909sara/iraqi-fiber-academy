@@ -218,6 +218,12 @@
       }
     });
 
+    document.addEventListener('ifa:admin-users-changed', function () {
+      if (typeof window.refreshAdminOverviewStats === 'function') {
+        window.refreshAdminOverviewStats();
+      }
+    });
+
     window.addEventListener('hashchange', function () {
       var hash = (window.location.hash || '#overview').replace(/^#/, '') || 'overview';
       showAdminView(hash);

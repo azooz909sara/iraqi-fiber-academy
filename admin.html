@@ -51,6 +51,7 @@
             <path d="M3 6h18M16 10a4 4 0 0 1-8 0"/>
           </svg>
           طلبات الشراء
+          <span class="admin-nav__badge" id="adminOrdersPendingBadge" hidden aria-label="طلبات قيد المراجعة"></span>
         </a>
         <a href="#plans" class="admin-nav__link" data-section="plans">
           <svg class="admin-nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -995,7 +996,8 @@
           <div class="cms-stats-grid">
             <label class="admin-field">
               <span class="admin-field__label">الطلاب المسجّلون (Enrolled Students)</span>
-              <input class="admin-field__input cms-stats-input" id="cmsStatEnrolledStudents" type="number" min="0" max="99999999" step="1" inputmode="numeric" lang="en" dir="ltr" required />
+              <input class="admin-field__input cms-stats-input" id="cmsStatEnrolledStudents" type="number" min="0" max="99999999" step="1" inputmode="numeric" lang="en" dir="ltr" readonly aria-readonly="true" />
+              <span class="admin-field__hint">يتم حسابه تلقائياً من إجمالي المستخدمين</span>
             </label>
             <label class="admin-field">
               <span class="admin-field__label">الكيلومترات المحاكاة (Simulated Kilometers)</span>
@@ -1476,6 +1478,7 @@
   <script type="module" src="js/platform-testimonials-firestore-sync.js?v=20260921"></script>
   <script src="js/platform-stats.js?v=20260921"></script>
   <script type="module" src="js/platform-stats-firestore-sync.js?v=20260921"></script>
+  <script type="module" src="js/firestore-user-metrics.js?v=20260921"></script>
   <script src="js/platform-footer.js?v=20260921"></script>
   <script type="module" src="js/platform-footer-firestore-sync.js?v=20260921"></script>
   <script src="js/platform-hero-slideshow.js?v=20260921"></script>

@@ -9,6 +9,7 @@ import {
   doc,
   onSnapshot,
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { publishRegisteredUserCount } from './firestore-user-metrics.js';
 
 var usersUnsubscribe = null;
 
@@ -32,6 +33,9 @@ function startUsersListener() {
       if (window.AdminUsers && typeof window.AdminUsers.ingestFirestoreUsers === 'function') {
         window.AdminUsers.ingestFirestoreUsers(rows);
       }
+      publishRegisteredUserCount(rows.length).catch(function (err) {
+        console.error('[AdminUsersFirestore] user metrics publish failed:', err);
+      });
       notifyUsersChanged();
     },
     function (err) {

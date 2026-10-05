@@ -135,6 +135,14 @@
     updateStatCountersFromChange();
   });
 
+  window.addEventListener('ifa:platform-user-metrics-changed', function () {
+    if (!statsHydrated) return;
+    if (window.PlatformStats && typeof window.PlatformStats.applyLandingStats === 'function') {
+      window.PlatformStats.applyLandingStats(document);
+    }
+    updateStatCountersFromChange();
+  });
+
   if (statsSection) {
     var statsObserver = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
