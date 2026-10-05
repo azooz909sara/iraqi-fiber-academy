@@ -345,19 +345,26 @@
   function isFreeTierCourse(course) {
     if (!course) return false;
 
-    var coursePrice = Number(course.price);
+    var parsePrice =
+      window.PlatformPlans && typeof window.PlatformPlans.parsePrice === 'function'
+        ? window.PlatformPlans.parsePrice
+        : Number;
+    var coursePrice = parsePrice(course.price);
+
     if (isFinite(coursePrice) && coursePrice > 0) return false;
 
     var requiredPlanId = String(course.requiredPlanId || '').trim();
-    if (
-      requiredPlanId &&
-      window.PlatformPlansPublic &&
-      typeof window.PlatformPlansPublic.findPlanById === 'function'
-    ) {
-      var linkedPlan = window.PlatformPlansPublic.findPlanById(requiredPlanId);
-      if (linkedPlan) {
-        var planPrice = Number(linkedPlan.price);
-        if (isFinite(planPrice) && planPrice > 0) return false;
+    if (requiredPlanId) {
+      if (window.PlatformPlansPublic && typeof window.PlatformPlansPublic.findPlanById === 'function') {
+        var linkedPlan = window.PlatformPlansPublic.findPlanById(requiredPlanId);
+        if (linkedPlan) {
+          var planPrice = parsePrice(linkedPlan.price);
+          if (isFinite(planPrice) && planPrice > 0) return false;
+        } else {
+          return false;
+        }
+      } else {
+        return false;
       }
     }
 
@@ -367,14 +374,17 @@
   function isCoursePreviewMode() {
     try {
       var params = new URLSearchParams(window.location.search);
-      if (params.get('preview') === '1') return true;
-      if (params.get('mode') === 'admin-preview') return true;
+      var isPreviewParam = params.get('preview') === '1' || params.get('mode') === 'admin-preview';
+
+      if (isPreviewParam) {
+        var user = typeof readAuthUser === 'function' ? readAuthUser() : null;
+        if (user && (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin')) {
+          return true;
+        }
+      }
     } catch (err) {
       /* ignore */
     }
-    var user = readAuthUser();
-    if (!user) return false;
-    if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
     return false;
   }
 
