@@ -14588,19 +14588,36 @@
 
   function panToCanvasPointForInventory(cx, cy) {
     if (!isFinite(cx) || !isFinite(cy)) return;
+
+    // Ensure world shell dimensions are accurate
+    if (typeof syncOpenWorldShell === 'function') syncOpenWorldShell();
+
     var wrap = document.getElementById('canvas-wrapper');
-    var o = getTemplateSheetOrigin();
-    var worldCx = o.x + cx;
-    var worldCy = o.y + cy;
-    var frame = getMapZoomViewportFrame();
-    Sim.panX = frame.centerX - worldCx;
-    Sim.panY = frame.centerY - worldCy;
-    if (!isOpenWorkspaceNavigation()) applyMapPanClamp();
+    var frame = typeof getMapZoomViewportFrame === 'function' ? getMapZoomViewportFrame() : { centerX: 0, centerY: 0 };
+    var zoom = (typeof getMapCoordZoom === 'function' ? getMapCoordZoom() : Sim.zoom) || 1;
+
+    // Convert local template coordinates (cx, cy) to true Open-World absolute coordinates
+    // This handles the new massive origin offsets and potential map rotation correctly!
+    var desk = typeof templateLocalToDeskWorldXY === 'function'
+               ? templateLocalToDeskWorldXY(cx, cy)
+               : { x: cx, y: cy };
+
+    // Calculate the precise PanX and PanY to center this point on the screen
+    Sim.panX = frame.centerX - (desk.x * zoom);
+    Sim.panY = frame.centerY - (desk.y * zoom);
+
+    if (typeof isOpenWorkspaceNavigation === 'function' && !isOpenWorkspaceNavigation() && typeof applyMapPanClamp === 'function') {
+      applyMapPanClamp();
+    }
+
     if (wrap) {
       wrap.scrollLeft = 0;
       wrap.scrollTop = 0;
     }
-    applyMapTransform({ skipPanClamp: isOpenWorkspaceNavigation() });
+
+    if (typeof applyMapTransform === 'function') {
+      applyMapTransform({ skipPanClamp: typeof isOpenWorkspaceNavigation === 'function' ? isOpenWorkspaceNavigation() : true });
+    }
   }
 
   function getExcavationRouteKindForLineId(lineId) {
