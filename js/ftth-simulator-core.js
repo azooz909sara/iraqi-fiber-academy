@@ -10927,20 +10927,6 @@
   }
 
   function onPlacedNodeClick(nodeId, e) {
-    if (Sim.ui && Sim.ui.clickToMoveActive) {
-      if (nodeId) {
-        if (typeof startMoveNode === 'function') {
-          startMoveNode(nodeId);
-        } else {
-          Sim.moveNodeId = nodeId;
-          selectNode(nodeId);
-          updateStatus('Node armed. Click destination cell.');
-        }
-      }
-      if (e) e.stopPropagation();
-      return;
-    }
-
     if (canPenDraw() && (e?.detail >= 2 || global.FTTHDrawingEngine?.isPenFinishingDblClick?.())) return;
 
     if (canPenDraw() && Sim.pen && Sim.pen.lineMode === 'cable') {
@@ -11057,8 +11043,7 @@
     var row = clickPt.row;
 
     if (Sim.moveNodeId) {
-      var moving = findNode(Sim.moveNodeId);
-      if (moving) relocateNode(moving, col, row);
+      Sim.moveNodeId = null;
       return;
     }
 
@@ -12146,17 +12131,9 @@
   function startMoveNode(nodeId) {
     var node = findNode(nodeId);
     if (!node) return;
-    if (!Sim.ui.clickToMoveActive && isHandholeNodePositionLocked(node)) {
-      updateStatus('Handhole position is locked during cable draw/edit', true);
-      return;
-    }
-    if (!Sim.ui.clickToMoveActive && node.locked) {
-      updateStatus('Node is locked — unlock first', true);
-      return;
-    }
-    Sim.moveNodeId = nodeId;
+    Sim.moveNodeId = null;
     selectNode(nodeId);
-    updateStatus('Move mode — click destination sidewalk cell');
+    updateStatus('Use Hand tool drag-and-drop to move — click-to-relocate is disabled');
   }
 
   function toggleNodeLock(nodeId) {
