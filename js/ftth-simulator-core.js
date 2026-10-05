@@ -137,6 +137,7 @@
       dragDropCleanupBound: false,
       toolboxDragPreviewBound: false,
       smartStatusBarBound: false,
+      clickToMoveActive: false,
       pathPickCycle: null,
       dragDropActive: false,
       lastDragOverCell: null,
@@ -5817,9 +5818,14 @@
     var toolbar = document.getElementById('action-toolbar');
     if (!toolbar) return;
     toolbar.querySelectorAll('.tool-selected').forEach(function (btn) {
+      // EXEMPT THE MOVE TOGGLE FROM BEING WIPED
+      if (btn.id === 'btn-toolbar-move-node') return;
       btn.classList.remove('tool-selected');
     });
-    element.classList.add('tool-selected');
+    // Only add the class to the clicked element if it's not the move node (move node handles itself)
+    if (element.id !== 'btn-toolbar-move-node') {
+      element.classList.add('tool-selected');
+    }
   }
 
   function ensureSimulatorContainerFocusable() {
@@ -6663,6 +6669,7 @@
 
   function applyCurrentModeEffects(mode) {
     syncPathEditFlagsForMode(mode);
+    var wasHand = Sim.interactionMode === 'hand';
     if (mode === WORKSPACE_MODES.PAN) {
       Sim.interactionMode = 'hand';
       Sim.currentTool = 'hand';
@@ -6671,6 +6678,9 @@
       Sim.currentTool = 'select';
     }
     applyInteractionModeClasses();
+    if (wasHand && Sim.interactionMode === 'select') {
+      renderAllNodes();
+    }
     if (global.FTTHDrawingEngine?.syncCanvasToolChrome) {
       global.FTTHDrawingEngine.syncCanvasToolChrome();
     }
@@ -7517,6 +7527,13 @@
     if (selectBtn) {
       selectBtn.classList.toggle('tool-selected', navExclusive && Sim.interactionMode !== 'hand');
     }
+
+    // SYNC THE MOVE TOGGLE STATE
+    var moveBtn = document.getElementById('btn-toolbar-move-node');
+    var isMoveOn = !!(Sim.ui && Sim.ui.clickToMoveActive);
+    if (moveBtn) {
+      moveBtn.classList.toggle('tool-selected', isMoveOn);
+    }
   }
 
   function ensureToolbarEditMode() {
@@ -7789,6 +7806,7 @@
     var deleteBtn = document.getElementById('btn-toolbar-delete');
     var cutBtn = document.getElementById('btn-toolbar-cut');
     var vertexBtn = document.getElementById('btn-toolbar-vertex');
+    var moveNodeBtn = document.getElementById('btn-toolbar-move-node');
 
     if (measureBtn) {
       measureBtn.addEventListener('click', function () {
@@ -7818,6 +7836,25 @@
     if (vertexBtn) {
       vertexBtn.addEventListener('click', function () {
         runToolbarVertex();
+      });
+    }
+    if (moveNodeBtn) {
+      document.getElementById('btn-toolbar-move-node').addEventListener('click', function () {
+        var isActive = !(Sim.ui && Sim.ui.clickToMoveActive);
+        Sim.ui.clickToMoveActive = isActive;
+        var canvasWrapper = document.getElementById('canvas-wrapper');
+        if (isActive) {
+          if (canvasWrapper) canvasWrapper.classList.add('click-to-move-active');
+          updateStatus('Move Mode ON', true);
+        } else {
+          if (canvasWrapper) canvasWrapper.classList.remove('click-to-move-active');
+          Sim.moveNodeId = null;
+          updateStatus('Move Mode OFF');
+        }
+        if (typeof syncGisToolbarActiveStates === 'function') {
+          syncGisToolbarActiveStates();
+        }
+        if (typeof renderAllNodes === 'function') renderAllNodes();
       });
     }
     syncGisToolbarActiveStates();
@@ -10068,7 +10105,7 @@
 
   function onWorkspaceGridDrop(e) {
     e.preventDefault();
-    if (Sim.interactionMode === 'hand') return;
+    if (Sim.interactionMode === 'hand' && !(Sim.ui && Sim.ui.clickToMoveActive)) return;
     if (e.target.closest('.placed-node')) {
       finishDragSession();
       return;
@@ -10188,12 +10225,23 @@
   function buildDragPreviewContent(type) {
     if (!type) return '';
     if (type === 'handhole' || type === 'fat_handhole' || type === 'fdt' || type === 'olt') {
-      return buildPlacedNodeContent({
+      var html = buildPlacedNodeContent({
         type: type,
         hasClosure: false,
         hasFatPole: false,
+        fatSystemName: 'FH',
         fatSplitter: null,
       });
+
+      if (type === 'fat_handhole') {
+        html = html.replace(/pointer-events:\s*auto/gi, 'pointer-events: none');
+        return '<div class="fat-ghost-safe" style="pointer-events: none !important;">' +
+          html +
+          '<style>.fat-ghost-safe, .fat-ghost-safe * { pointer-events: none !important; }</style>' +
+          '</div>';
+      }
+
+      return html;
     }
     var sz = iconSizeForStackLayer({ type: type });
     if (type === 'closure') {
@@ -10298,7 +10346,16 @@
       var glyphHtml = '';
       if (ctx.mode === 'move' && ctx.moveNodeId) {
         var moving = findNode(ctx.moveNodeId);
-        if (moving) glyphHtml = buildPlacedNodeContent(moving);
+        if (moving) {
+          glyphHtml = buildPlacedNodeContent(moving);
+          if (moving.type === 'fat_handhole') {
+            glyphHtml = glyphHtml.replace(/pointer-events:\s*auto/gi, 'pointer-events: none');
+            glyphHtml = '<div class="fat-ghost-safe" style="pointer-events: none !important;">' +
+              glyphHtml +
+              '<style>.fat-ghost-safe, .fat-ghost-safe * { pointer-events: none !important; }</style>' +
+              '</div>';
+          }
+        }
       } else {
         glyphHtml = buildDragPreviewContent(ctx.type);
       }
@@ -10398,7 +10455,7 @@
   }
 
   function updateDragDropCell(cell, e) {
-    if (!cell || Sim.interactionMode === 'hand') return;
+    if (!cell || (Sim.interactionMode === 'hand' && !(Sim.ui && Sim.ui.clickToMoveActive))) return;
     scheduleDragDropPreview(cell, e);
   }
 
@@ -10429,7 +10486,7 @@
   }
 
   function onVirtualCellDragOver(e) {
-    if (Sim.interactionMode === 'hand') return;
+    if (Sim.interactionMode === 'hand' && !(Sim.ui && Sim.ui.clickToMoveActive)) return;
     rememberDragPointer(e);
     e.preventDefault();
     updateDragDropCell(e.currentTarget, e);
@@ -10442,7 +10499,7 @@
   }
 
   function onWorkspaceGridDragOver(e) {
-    if (Sim.interactionMode === 'hand') return;
+    if (Sim.interactionMode === 'hand' && !(Sim.ui && Sim.ui.clickToMoveActive)) return;
     rememberDragPointer(e);
     e.preventDefault();
     var grid = getWorkspaceGrid();
@@ -10786,7 +10843,10 @@
     m.innerHTML = buildPlacedNodeContent(node);
     m.title = getNodeTitle(node);
 
-    if (!node.locked && !isHandholeNodePositionLocked(node) && Sim.interactionMode === 'select') {
+    var isMoveActive = Sim.ui && Sim.ui.clickToMoveActive;
+    var legacyDrag = !node.locked && (typeof isHandholeNodePositionLocked !== 'function' || !isHandholeNodePositionLocked(node)) && Sim.interactionMode === 'select';
+
+    if (isMoveActive || legacyDrag) {
       m.draggable = true;
       m.addEventListener('dragstart', function (e) {
         Sim.dragMoveNodeId = node.id;
@@ -10805,6 +10865,20 @@
       onPlacedNodeClick(node.id, e);
     });
     m.addEventListener('dblclick', function (e) {
+      if (Sim.interactionMode === 'hand' && typeof isHandholeTypeNode === 'function' && isHandholeTypeNode(node)) {
+        var cables = typeof getCablesThroughNode === 'function' ? getCablesThroughNode(node) : [];
+        if (cables.length === 0 && !node.locked) {
+          if (typeof setInteractionMode === 'function') setInteractionMode('select');
+          else if (typeof enableSelectMode === 'function') enableSelectMode();
+
+          if (typeof startMoveNode === 'function') {
+            startMoveNode(node.id);
+            updateStatus('Empty Handhole armed for move. Click destination cell.');
+            e.stopPropagation();
+            return;
+          }
+        }
+      }
       if (tryQuickNestOnHandholeDblClick(node, e)) return;
       if (!canPenDraw() || !Sim.penDraft) return;
       e.preventDefault();
@@ -10853,6 +10927,20 @@
   }
 
   function onPlacedNodeClick(nodeId, e) {
+    if (Sim.ui && Sim.ui.clickToMoveActive) {
+      if (nodeId) {
+        if (typeof startMoveNode === 'function') {
+          startMoveNode(nodeId);
+        } else {
+          Sim.moveNodeId = nodeId;
+          selectNode(nodeId);
+          updateStatus('Node armed. Click destination cell.');
+        }
+      }
+      if (e) e.stopPropagation();
+      return;
+    }
+
     if (canPenDraw() && (e?.detail >= 2 || global.FTTHDrawingEngine?.isPenFinishingDblClick?.())) return;
 
     if (canPenDraw() && Sim.pen && Sim.pen.lineMode === 'cable') {
@@ -10987,7 +11075,7 @@
 
   function onVirtualCellDrop(e) {
     e.preventDefault();
-    if (Sim.interactionMode === 'hand') return;
+    if (Sim.interactionMode === 'hand' && !(Sim.ui && Sim.ui.clickToMoveActive)) return;
     e.stopPropagation();
     var cell = e.currentTarget;
     if (Sim.nestDropHandled) {
@@ -12058,11 +12146,11 @@
   function startMoveNode(nodeId) {
     var node = findNode(nodeId);
     if (!node) return;
-    if (isHandholeNodePositionLocked(node)) {
+    if (!Sim.ui.clickToMoveActive && isHandholeNodePositionLocked(node)) {
       updateStatus('Handhole position is locked during cable draw/edit', true);
       return;
     }
-    if (node.locked) {
+    if (!Sim.ui.clickToMoveActive && node.locked) {
       updateStatus('Node is locked — unlock first', true);
       return;
     }
@@ -12114,7 +12202,7 @@
   }
 
   function relocateNode(node, col, row, dropPt) {
-    if (isHandholeNodePositionLocked(node)) {
+    if (!Sim.ui.clickToMoveActive && isHandholeNodePositionLocked(node)) {
       updateStatus('Handhole position is locked during cable draw/edit', true);
       return false;
     }
@@ -13862,7 +13950,8 @@
       if (btn.id === 'btn-zoom-in' || btn.id === 'btn-zoom-out') return;
       if (btn.id === 'btn-toolbar-copy' || btn.id === 'btn-toolbar-paste') return;
       if (btn.id === 'btn-toolbar-delete' || btn.id === 'btn-toolbar-cut' ||
-          btn.id === 'btn-toolbar-vertex' || btn.id === 'btn-toolbar-measure') return;
+          btn.id === 'btn-toolbar-vertex' || btn.id === 'btn-toolbar-measure' ||
+          btn.id === 'btn-toolbar-move-node') return;
       if (btn.id === 'btn-refresh-workspace' || btn.id === 'btn-sim-settings') return;
       if (btn.id === 'btn-toolbar-splicing' || btn.id === 'btn-toolbar-fiber-matrix') return;
       selectTool(btn);

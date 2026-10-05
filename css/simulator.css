@@ -10342,3 +10342,40 @@ body.fd-matrix-col-resizing * {
     height: 100% !important;
   }
 }
+
+.main-action-bar .action-toolbar__btn.action-toolbar__btn--active {
+  background-color: #353535;
+  border-color: rgba(148, 163, 184, 0.42);
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.24), 0 0 10px rgba(255, 255, 255, 0.07);
+}
+
+/* Override all other tools when click-to-move is active — see MOVE TOOL + HAND TOOL block at end of file */
+
+/* ==========================================================================
+   MOVE TOOL (↔️) + HAND TOOL (🖐️) COEXISTENCE OVERRIDES
+   Makes the entire node bounding box solid for easy grabbing, defeating Hand mode hollowness.
+   ========================================================================== */
+
+/* 1. For nodes in the workspace items layer */
+#canvas-wrapper.click-to-move-active.map-mode-hand .workspace-items-layer .placed-node,
+#canvas-wrapper.click-to-move-active .workspace-items-layer .placed-node {
+    pointer-events: auto !important;
+    cursor: grab !important;
+    z-index: 9999 !important;
+}
+
+/* Force all inner elements (glyphs, icons) to pass clicks to the solid outer shell */
+#canvas-wrapper.click-to-move-active.map-mode-hand .workspace-items-layer .placed-node *,
+#canvas-wrapper.click-to-move-active .workspace-items-layer .placed-node * {
+    pointer-events: none !important;
+}
+
+/* 2. Fallback for nodes that might still be mounted under #city-grid */
+#canvas-wrapper.click-to-move-active #city-grid.map-mode-hand-active .placed-node {
+    pointer-events: auto !important;
+    cursor: grab !important;
+}
+
+#canvas-wrapper.click-to-move-active #city-grid.map-mode-hand-active .placed-node * {
+    pointer-events: none !important;
+}
