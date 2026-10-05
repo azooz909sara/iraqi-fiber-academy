@@ -344,18 +344,24 @@
 
   function isFreeTierCourse(course) {
     if (!course) return false;
-    var price = Number(course.price);
-    if (isFinite(price) && price <= 0) return true;
-    var level = String(course.accessLevel || '').toLowerCase();
-    return level === 'free';
-  }
 
-  function userHasActiveTrial(user) {
-    if (!user) return false;
-    if (window.IFAAuth && typeof window.IFAAuth.hasActiveTrial === 'function' && window.IFAAuth.hasActiveTrial(user)) {
-      return true;
+    var coursePrice = Number(course.price);
+    if (isFinite(coursePrice) && coursePrice > 0) return false;
+
+    var requiredPlanId = String(course.requiredPlanId || '').trim();
+    if (
+      requiredPlanId &&
+      window.PlatformPlansPublic &&
+      typeof window.PlatformPlansPublic.findPlanById === 'function'
+    ) {
+      var linkedPlan = window.PlatformPlansPublic.findPlanById(requiredPlanId);
+      if (linkedPlan) {
+        var planPrice = Number(linkedPlan.price);
+        if (isFinite(planPrice) && planPrice > 0) return false;
+      }
     }
-    return Number(user.trialExpiresAt) > Date.now();
+
+    return true;
   }
 
   function isCoursePreviewMode() {
@@ -389,7 +395,7 @@
     var user = readAuthUser();
     if (!user) return false;
     if (user.isAdmin || user.isInstructor || String(user.role || '').toLowerCase() === 'admin') return true;
-    if (userHasActiveTrial(user) && isFreeTierCourse(course)) return true;
+    if (isFreeTierCourse(course)) return true;
 
     if (!course) return false;
 
@@ -401,7 +407,19 @@
     if (enrolled.indexOf(String(course.id)) !== -1) return true;
 
     var requiredPlanId = String(course.requiredPlanId || '').trim();
-    if (requiredPlanId && String(user.planId || '') === requiredPlanId) return true;
+    if (requiredPlanId) {
+      if (
+        window.PlatformPlansPublic &&
+        typeof window.PlatformPlansPublic.userHasPlanAccess === 'function'
+      ) {
+        var linkedPlan = window.PlatformPlansPublic.findPlanById(requiredPlanId);
+        if (linkedPlan && window.PlatformPlansPublic.userHasPlanAccess(linkedPlan, user)) {
+          return true;
+        }
+      } else if (String(user.planId || '') === requiredPlanId) {
+        return true;
+      }
+    }
 
     return false;
   }
